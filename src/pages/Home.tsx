@@ -96,7 +96,7 @@ const Home = () => {
                   <feature.icon className="h-6 w-6 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-lg mb-2">{feature.title}</h3>
+                  <h3 className="font-semibold text-lg mb-2 text-foreground">{feature.title}</h3>
                   <p className="text-muted-foreground text-sm">{feature.description}</p>
                 </div>
               </div>
@@ -112,26 +112,26 @@ const Home = () => {
         </h3>
         <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
           <Card className="card-glass p-6">
-            <h4 className="font-semibold text-lg mb-3">Lodges & Restaurants</h4>
+            <h4 className="font-semibold text-lg mb-3 text-foreground">Lodges & Restaurants</h4>
             <p className="text-muted-foreground text-sm">
               Poolside bookings, VIP table reservations, conference hall scheduling, 
               birthday parties, and group braais.
             </p>
           </Card>
           <Card className="card-glass p-6">
-            <h4 className="font-semibold text-lg mb-3">Schools & Training Centers</h4>
+            <h4 className="font-semibold text-lg mb-3 text-foreground">Schools & Training Centers</h4>
             <p className="text-muted-foreground text-sm">
               Tour bookings, fee inquiries, enrollment questions, and parent callbacks.
             </p>
           </Card>
           <Card className="card-glass p-6">
-            <h4 className="font-semibold text-lg mb-3">Financial Services</h4>
+            <h4 className="font-semibold text-lg mb-3 text-foreground">Financial Services</h4>
             <p className="text-muted-foreground text-sm">
               Loan consultation scheduling, account inquiries, and appointment management.
             </p>
           </Card>
           <Card className="card-glass p-6">
-            <h4 className="font-semibold text-lg mb-3">Multi-Branch Businesses</h4>
+            <h4 className="font-semibold text-lg mb-3 text-foreground">Multi-Branch Businesses</h4>
             <p className="text-muted-foreground text-sm">
               Unified AI receptionist across multiple locations with branch-specific routing.
             </p>

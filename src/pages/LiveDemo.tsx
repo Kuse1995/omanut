@@ -41,7 +41,7 @@ const LiveDemo = () => {
           <CardContent className="pt-6">
             <div className="text-center space-y-6">
               <div className="space-y-2">
-                <h3 className="text-lg font-semibold">Voice Interface</h3>
+                <h3 className="text-lg font-semibold text-foreground">Voice Interface</h3>
                 <p className="text-sm text-muted-foreground">
                   Click the microphone to start speaking
                 </p>
@@ -56,7 +56,7 @@ const LiveDemo = () => {
 
         <Card className="bg-card">
           <CardContent className="pt-6">
-            <h3 className="text-lg font-semibold mb-4">Event Log</h3>
+            <h3 className="text-lg font-semibold mb-4 text-foreground">Event Log</h3>
             <ScrollArea className="h-[300px]">
               <div className="space-y-2 pr-4">
                 {events.length === 0 ? (
