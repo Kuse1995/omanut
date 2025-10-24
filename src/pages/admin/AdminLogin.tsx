@@ -2,11 +2,10 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Shield, Mail } from "lucide-react";
+import { Loader2, Shield } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo.jpg";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -19,7 +18,6 @@ const AdminLogin = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
-  const [emailSent, setEmailSent] = useState(false);
 
   useEffect(() => {
     // Check if already has valid access token
@@ -54,35 +52,36 @@ const AdminLogin = () => {
     setLoading(true);
 
     try {
-      // Generate a unique access token
+      // Generate access token and grant immediate access
       const accessToken = crypto.randomUUID();
       const expiryDate = new Date();
-      expiryDate.setMinutes(expiryDate.getMinutes() + 15); // 15 minutes expiry
+      expiryDate.setHours(expiryDate.getHours() + 24); // 24 hour access
 
-      // Store token temporarily (in production, store in database)
-      sessionStorage.setItem(`pending_token_${accessToken}`, JSON.stringify({
-        email,
-        expiry: expiryDate.toISOString()
-      }));
+      // Grant immediate access
+      localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+      localStorage.setItem(TOKEN_EXPIRY_KEY, expiryDate.toISOString());
 
-      // Send access link email
-      const { error } = await supabase.functions.invoke('send-admin-access-link', {
+      // Send notification email in background (don't wait for it)
+      supabase.functions.invoke('send-admin-login-notification', {
         body: {
           email,
-          accessToken
+          timestamp: new Date().toISOString(),
+          ipAddress: 'Direct Access'
         }
-      });
+      }).catch(err => console.log('Email notification failed:', err));
 
-      if (error) throw error;
-
-      setEmailSent(true);
       toast({
-        title: "Access Link Sent!",
-        description: "Check your email for the admin portal access link.",
+        title: "Welcome, Admin!",
+        description: "Access granted. Redirecting to dashboard...",
       });
+
+      // Redirect to dashboard
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+      }, 500);
     } catch (error: any) {
       toast({
-        title: "Failed to send access link",
+        title: "Access failed",
         description: error.message,
         variant: "destructive",
       });
@@ -106,49 +105,29 @@ const AdminLogin = () => {
           <p className="text-sm text-muted-foreground">Admin Portal</p>
         </div>
 
-        {!emailSent ? (
-          <form onSubmit={handleRequestAccess} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Admin Email</Label>
-          <input
-            id="email"
-            type="email"
-            placeholder="Abkanyanta@gmail.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-          />
-              <p className="text-xs text-muted-foreground">Enter your authorized email to receive an access link</p>
-            </div>
-            <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
-                <>
-                  <Mail className="h-4 w-4 mr-2" />
-                  Send Access Link
-                </>
-              )}
-            </Button>
-          </form>
-        ) : (
-          <div className="text-center space-y-4">
-            <div className="p-4 rounded-full bg-primary/10 inline-block">
-              <Mail className="h-8 w-8 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-semibold mb-2 text-foreground">Check Your Email</h3>
-              <p className="text-sm text-muted-foreground">
-                We've sent an access link to <strong className="text-foreground">{email}</strong>
-              </p>
-              <p className="text-xs text-muted-foreground mt-2">
-                The link expires in 15 minutes
-              </p>
-            </div>
-            <Button variant="outline" onClick={() => setEmailSent(false)} className="w-full">
-              Send Another Link
-            </Button>
+        <form onSubmit={handleRequestAccess} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Admin Email</Label>
+            <input
+              id="email"
+              type="email"
+              placeholder="Abkanyanta@gmail.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            />
+            <p className="text-xs text-muted-foreground">Only authorized admin email can access this portal</p>
           </div>
-        )}
+          <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+              <>
+                <Shield className="h-4 w-4 mr-2" />
+                Access Admin Portal
+              </>
+            )}
+          </Button>
+        </form>
 
         <div className="mt-6 text-center">
           <Button variant="link" onClick={() => navigate('/')}>
