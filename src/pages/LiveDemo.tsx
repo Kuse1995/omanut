@@ -13,6 +13,7 @@ const LiveDemo = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [events, setEvents] = useState<string[]>([]);
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAccess();
@@ -42,6 +43,17 @@ const LiveDemo = () => {
       if (!isAdmin && !isClient) {
         navigate('/');
         return;
+      }
+
+      // Get user's company_id
+      const { data: userData } = await supabase
+        .from('users')
+        .select('company_id')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userData?.company_id) {
+        setCompanyId(userData.company_id);
       }
 
       setIsLoading(false);
@@ -139,6 +151,7 @@ const LiveDemo = () => {
         onSpeakingChange={setIsSpeaking}
         onStatusChange={setStatus}
         onMessage={handleMessage}
+        companyId={companyId}
       />
     </div>
   );

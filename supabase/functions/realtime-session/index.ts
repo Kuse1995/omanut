@@ -23,11 +23,18 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Get company data (use first for demo, or get from auth token in production)
+    // Get company_id from request body
+    const { company_id } = await req.json();
+    
+    if (!company_id) {
+      throw new Error('company_id is required');
+    }
+
+    // Get company data for the specific company
     const { data: company } = await supabase
       .from('companies')
       .select('*, metadata')
-      .limit(1)
+      .eq('id', company_id)
       .single();
 
     // Check credit balance FIRST

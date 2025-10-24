@@ -8,12 +8,14 @@ interface VoiceInterfaceProps {
   onSpeakingChange: (speaking: boolean) => void;
   onStatusChange: (status: string) => void;
   onMessage: (message: any) => void;
+  companyId: string | null;
 }
 
 const VoiceInterface: React.FC<VoiceInterfaceProps> = ({ 
   onSpeakingChange, 
   onStatusChange,
-  onMessage 
+  onMessage,
+  companyId
 }) => {
   const { toast } = useToast();
   const [isConnected, setIsConnected] = useState(false);
@@ -31,7 +33,10 @@ const VoiceInterface: React.FC<VoiceInterfaceProps> = ({
 
   const startConversation = async () => {
     try {
-      chatRef.current = new RealtimeChat(handleMessage, onStatusChange);
+      if (!companyId) {
+        throw new Error('Company not found');
+      }
+      chatRef.current = new RealtimeChat(handleMessage, onStatusChange, companyId);
       await chatRef.current.init();
       setIsConnected(true);
       

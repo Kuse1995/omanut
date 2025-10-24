@@ -88,7 +88,8 @@ export class RealtimeChat {
 
   constructor(
     private onMessage: (message: any) => void,
-    private onStatusChange: (status: string) => void
+    private onStatusChange: (status: string) => void,
+    private companyId: string
   ) {
     this.audioEl = document.createElement("audio");
     this.audioEl.autoplay = true;
@@ -98,19 +99,12 @@ export class RealtimeChat {
     try {
       this.onStatusChange("Connecting…");
 
-      // Get first company for web demo (in production, use logged-in user's company)
-      const { data: company } = await supabase
-        .from('companies')
-        .select('*')
-        .limit(1)
-        .single();
-
       // Create conversation record with company_id
       const { data: convData, error: convError } = await supabase
         .from('conversations')
         .insert({ 
           status: 'active',
-          company_id: company?.id
+          company_id: this.companyId
         })
         .select()
         .single();
@@ -119,18 +113,21 @@ export class RealtimeChat {
       this.conversationId = convData.id;
       
       // Deduct credits for demo start
-      if (company?.id && this.conversationId) {
+      if (this.conversationId) {
         await supabase.rpc('deduct_credits', {
-          p_company_id: company.id,
+          p_company_id: this.companyId,
           p_amount: 5,
           p_reason: 'demo_start',
           p_conversation_id: this.conversationId
         });
       }
 
-      // Get ephemeral token from edge function
+      // Get ephemeral token from edge function with company_id
       const { data: tokenData, error: tokenError } = await supabase.functions.invoke(
-        "realtime-session"
+        "realtime-session",
+        {
+          body: { company_id: this.companyId }
+        }
       );
 
       if (tokenError) throw tokenError;
@@ -248,11 +245,11 @@ export class RealtimeChat {
 
   private async configureSession() {
     try {
-      // Fetch company config (use first company for web demo)
+      // Fetch company config
       const { data: company } = await supabase
         .from('companies')
         .select('*')
-        .limit(1)
+        .eq('id', this.companyId)
         .single();
 
       if (!company) return;
