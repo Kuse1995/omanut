@@ -22,7 +22,9 @@ const Settings = () => {
     branches: '',
     seating_areas: '',
     currency_prefix: 'K',
-    twilio_number: ''
+    twilio_number: '',
+    whatsapp_number: '',
+    whatsapp_voice_enabled: false
   });
 
   useEffect(() => {
@@ -68,7 +70,9 @@ const Settings = () => {
           branches: config.branches,
           seating_areas: config.seating_areas,
           currency_prefix: config.currency_prefix,
-          twilio_number: config.twilio_number
+          twilio_number: config.twilio_number,
+          whatsapp_number: config.whatsapp_number,
+          whatsapp_voice_enabled: config.whatsapp_voice_enabled
         })
         .eq('id', config.id);
 
@@ -201,7 +205,7 @@ const Settings = () => {
             </div>
 
             <div>
-              <Label htmlFor="twilio_number">Twilio Phone Number</Label>
+              <Label htmlFor="twilio_number">Phone Number (PSTN)</Label>
               <Input
                 id="twilio_number"
                 value={config.twilio_number || ''}
@@ -210,11 +214,39 @@ const Settings = () => {
                 disabled={loading}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Forward your local number to this Twilio number
+                For regular phone calls
               </p>
             </div>
 
-            <Button 
+            <div>
+              <Label htmlFor="whatsapp_number">WhatsApp Number</Label>
+              <Input
+                id="whatsapp_number"
+                value={config.whatsapp_number || ''}
+                onChange={(e) => setConfig({ ...config, whatsapp_number: e.target.value })}
+                placeholder="whatsapp:+1234567890"
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Your customers can WhatsApp us and our AI will answer automatically
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="whatsapp_voice_enabled"
+                checked={config.whatsapp_voice_enabled || false}
+                onChange={(e) => setConfig({ ...config, whatsapp_voice_enabled: e.target.checked })}
+                disabled={loading}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
+                Enable WhatsApp voice calls
+              </Label>
+            </div>
+
+            <Button
               onClick={handleSave} 
               disabled={saving || loading} 
               className="w-full bg-primary hover:bg-primary/90"

@@ -69,6 +69,8 @@ export type Database = {
           twilio_number: string | null
           updated_at: string | null
           voice_style: string | null
+          whatsapp_number: string | null
+          whatsapp_voice_enabled: boolean | null
         }
         Insert: {
           branches?: string | null
@@ -85,6 +87,8 @@ export type Database = {
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null
+          whatsapp_number?: string | null
+          whatsapp_voice_enabled?: boolean | null
         }
         Update: {
           branches?: string | null
@@ -101,6 +105,8 @@ export type Database = {
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null
+          whatsapp_number?: string | null
+          whatsapp_voice_enabled?: boolean | null
         }
         Relationships: []
       }

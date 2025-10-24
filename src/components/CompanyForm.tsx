@@ -30,6 +30,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     seating_areas: "poolside,outdoor,inside,VIP",
     currency_prefix: "K",
     twilio_number: "",
+    whatsapp_number: "",
+    whatsapp_voice_enabled: false,
     credit_balance: 1000,
     admin_email: "",
     admin_password: "",
@@ -61,6 +63,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           seating_areas: data.seating_areas || "poolside,outdoor,inside,VIP",
           currency_prefix: data.currency_prefix || "K",
           twilio_number: data.twilio_number || "",
+          whatsapp_number: data.whatsapp_number || "",
+          whatsapp_voice_enabled: data.whatsapp_voice_enabled || false,
           credit_balance: data.credit_balance || 1000,
           admin_email: "",
           admin_password: "",
@@ -95,6 +99,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             currency_prefix: formData.currency_prefix,
             seating_areas: formData.seating_areas,
             twilio_number: formData.twilio_number,
+            whatsapp_number: formData.whatsapp_number,
+            whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
           })
           .eq('id', companyId);
 
@@ -139,6 +145,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             currency_prefix: formData.currency_prefix,
             seating_areas: formData.seating_areas,
             twilio_number: formData.twilio_number,
+            whatsapp_number: formData.whatsapp_number,
+            whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             credit_balance: formData.credit_balance,
           })
           .select()
@@ -242,13 +250,25 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="twilio_number">Twilio Number</Label>
+              <Label htmlFor="twilio_number">Phone Number (PSTN)</Label>
               <Input
                 id="twilio_number"
                 value={formData.twilio_number}
                 onChange={(e) => setFormData({ ...formData, twilio_number: e.target.value })}
                 placeholder="+1234567890"
               />
+              <p className="text-xs text-muted-foreground">For regular phone calls</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="whatsapp_number">WhatsApp Number</Label>
+              <Input
+                id="whatsapp_number"
+                value={formData.whatsapp_number}
+                onChange={(e) => setFormData({ ...formData, whatsapp_number: e.target.value })}
+                placeholder="whatsapp:+1234567890"
+              />
+              <p className="text-xs text-muted-foreground">For WhatsApp messages and calls</p>
             </div>
 
             <div className="space-y-2">
@@ -278,13 +298,29 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               />
             </div>
 
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2">
               <Label htmlFor="seating_areas">Seating Areas (comma-separated)</Label>
               <Input
                 id="seating_areas"
                 value={formData.seating_areas}
                 onChange={(e) => setFormData({ ...formData, seating_areas: e.target.value })}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="whatsapp_voice_enabled">WhatsApp Voice Calls</Label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="whatsapp_voice_enabled"
+                  checked={formData.whatsapp_voice_enabled}
+                  onChange={(e) => setFormData({ ...formData, whatsapp_voice_enabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
+                  Enable voice calls via WhatsApp
+                </Label>
+              </div>
             </div>
           </div>
 

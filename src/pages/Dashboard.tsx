@@ -11,6 +11,8 @@ const Dashboard = () => {
   const [stats, setStats] = useState({
     creditBalance: 0,
     todayCalls: 0,
+    todayWhatsAppMessages: 0,
+    todayWhatsAppCalls: 0,
     activeConversations: 0,
     totalReservations: 0
   });
@@ -58,6 +60,21 @@ const Dashboard = () => {
         .eq('company_id', companyData?.id)
         .gte('started_at', today);
 
+      // Get today's credit usage for WhatsApp
+      const { data: whatsappMessages } = await supabase
+        .from('credit_usage')
+        .select('*', { count: 'exact' })
+        .eq('company_id', companyData?.id)
+        .eq('reason', 'whatsapp_message')
+        .gte('created_at', today);
+
+      const { data: whatsappCalls } = await supabase
+        .from('credit_usage')
+        .select('*', { count: 'exact' })
+        .eq('company_id', companyData?.id)
+        .eq('reason', 'whatsapp_call_start')
+        .gte('created_at', today);
+
       // Get active conversations
       const { count: activeCount } = await supabase
         .from('conversations')
@@ -74,6 +91,8 @@ const Dashboard = () => {
       setStats({
         creditBalance: companyData?.credit_balance || 0,
         todayCalls: todayCount || 0,
+        todayWhatsAppMessages: whatsappMessages?.length || 0,
+        todayWhatsAppCalls: whatsappCalls?.length || 0,
         activeConversations: activeCount || 0,
         totalReservations: reservationCount || 0
       });
@@ -93,10 +112,24 @@ const Dashboard = () => {
       className: 'text-primary'
     },
     {
-      title: "Today's Calls",
+      title: "Today's Phone Calls",
       value: stats.todayCalls,
       icon: Phone,
-      description: 'Calls received today',
+      description: 'PSTN calls received',
+      className: 'text-accent'
+    },
+    {
+      title: "WhatsApp Messages",
+      value: stats.todayWhatsAppMessages,
+      icon: MessageSquare,
+      description: 'Messages handled today',
+      className: 'text-primary'
+    },
+    {
+      title: "WhatsApp Calls",
+      value: stats.todayWhatsAppCalls,
+      icon: Phone,
+      description: 'WhatsApp calls today',
       className: 'text-accent'
     },
     {
@@ -129,7 +162,7 @@ const Dashboard = () => {
           )}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {statCards.map((stat) => (
             <Card key={stat.title} className="card-glass">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -197,8 +230,14 @@ const Dashboard = () => {
                 <span className="text-primary font-medium">● Active</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-foreground">Twilio Integration</span>
+                <span className="text-foreground">Phone Integration</span>
                 <span className="text-primary font-medium">● Connected</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-foreground">WhatsApp Integration</span>
+                <span className={company?.whatsapp_number ? "text-primary font-medium" : "text-muted-foreground"}>
+                  {company?.whatsapp_number ? "● Active" : "○ Not configured"}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-foreground">Database</span>
