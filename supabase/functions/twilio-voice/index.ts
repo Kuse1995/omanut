@@ -56,20 +56,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
+    let company: any = null;
+
     twilioSocket.onopen = async () => {
       console.log('Twilio WebSocket connected');
-      
-      // Create conversation record
-      const { data: convData, error: convError } = await supabase
-        .from('conversations')
-        .insert({ status: 'active' })
-        .select()
-        .single();
-
-      if (!convError && convData) {
-        conversationId = convData.id;
-        console.log('Created conversation:', conversationId);
-      }
     };
 
     twilioSocket.onmessage = async (event) => {
@@ -79,7 +69,52 @@ serve(async (req) => {
 
         if (message.event === 'start') {
           currentCallSid = message.start?.callSid;
-          console.log('Call started:', currentCallSid);
+          const twilioNumber = message.start?.customParameters?.To;
+          console.log('Call started:', currentCallSid, 'To:', twilioNumber);
+          
+          // Fetch company by Twilio number
+          const { data: companyData } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('twilio_number', twilioNumber)
+            .single();
+          
+          if (!companyData) {
+            console.log('No company found for number, using first company');
+            const { data: fallback } = await supabase
+              .from('companies')
+              .select('*')
+              .limit(1)
+              .single();
+            company = fallback;
+          } else {
+            company = companyData;
+          }
+          
+          // Create conversation with company_id
+          const { data: convData, error: convError } = await supabase
+            .from('conversations')
+            .insert({ 
+              status: 'active',
+              company_id: company?.id
+            })
+            .select()
+            .single();
+
+          if (!convError && convData) {
+            conversationId = convData.id;
+            console.log('Created conversation:', conversationId);
+            
+            // Deduct credits for call start
+            if (company?.id) {
+              await supabase.rpc('deduct_credits', {
+                p_company_id: company.id,
+                p_amount: 5,
+                p_reason: 'call_start',
+                p_conversation_id: conversationId
+              });
+            }
+          }
 
           // Connect to OpenAI Realtime
           const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
@@ -104,14 +139,12 @@ serve(async (req) => {
             console.log('OpenAI event:', aiMessage.type);
 
             if (aiMessage.type === 'session.created') {
-              // Configure session
-              const { data: config } = await supabase
-                .from('agent_config')
-                .select('*')
-                .single();
+              // Configure session with dynamic company persona
+              const instructions = company
+                ? `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars. Always ask for the caller's phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your booking.' If network is noisy or it cuts, politely ask them to repeat instead of guessing. Be friendly, warm, and local — not American call center tone.`
+                : 'You are a helpful receptionist at a Zambian business. Always collect phone number first and use Kwacha for prices.';
 
-              if (config) {
-                const instructions = `You are a restaurant and lodge receptionist at ${config.restaurant_name} in Zambia. You speak friendly Zambian English and you understand accents from Lusaka, Copperbelt, and North-Western Province. You work in hospitality. You help callers book tables, poolside seating, conference hall space, birthday dinners, or group braais. You confirm date, time, number of guests, and phone number. Always ask for their phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your table.' Use ${config.currency_prefix} for prices. Say prices like '${config.currency_prefix}180', never in dollars. If network is noisy or it cuts, politely ask them to repeat instead of guessing. ${config.instructions}`;
+              if (company) {
 
                 openAISocket?.send(JSON.stringify({
                   type: 'session.update',
@@ -175,6 +208,7 @@ serve(async (req) => {
                   .from('reservations')
                   .insert({
                     conversation_id: conversationId,
+                    company_id: company?.id,
                     name: args.name,
                     phone: args.phone,
                     email: args.email || null,
@@ -193,12 +227,7 @@ serve(async (req) => {
                   console.log('Reservation created:', reservation.id);
 
                   // Send email if provided
-                  if (args.email) {
-                    const { data: config } = await supabase
-                      .from('agent_config')
-                      .select('restaurant_name')
-                      .single();
-
+                  if (args.email && company) {
                     await supabase.functions.invoke('send-reservation-confirmation', {
                       body: {
                         name: args.name,
@@ -206,7 +235,7 @@ serve(async (req) => {
                         date: args.date,
                         time: args.time,
                         guests: args.guests,
-                        restaurantName: config?.restaurant_name || 'Streamside Lodge'
+                        restaurantName: company.name
                       }
                     });
                   }

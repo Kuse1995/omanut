@@ -1,6 +1,7 @@
 import { LayoutDashboard, Phone, MessageSquare, Calendar, Settings, CreditCard } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import omanutLogo from '@/assets/omanut-logo.jpg';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -16,9 +17,12 @@ const Sidebar = () => {
 
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-gradient">Omanut Assistant</h1>
-        <p className="text-sm text-muted-foreground mt-1">AI Receptionist Platform</p>
+      <div className="p-6 flex items-center gap-3">
+        <img src={omanutLogo} alt="Omanut" className="w-12 h-12 object-contain" />
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Omanut</h1>
+          <p className="text-xs text-muted-foreground">AI Receptionist</p>
+        </div>
       </div>
       
       <nav className="flex-1 px-3 space-y-1">

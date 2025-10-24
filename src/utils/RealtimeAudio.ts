@@ -98,15 +98,35 @@ export class RealtimeChat {
     try {
       this.onStatusChange("Connecting…");
 
-      // Create conversation record
+      // Get first company for web demo (in production, use logged-in user's company)
+      const { data: company } = await supabase
+        .from('companies')
+        .select('*')
+        .limit(1)
+        .single();
+
+      // Create conversation record with company_id
       const { data: convData, error: convError } = await supabase
         .from('conversations')
-        .insert({ status: 'active' })
+        .insert({ 
+          status: 'active',
+          company_id: company?.id
+        })
         .select()
         .single();
 
       if (convError) throw convError;
       this.conversationId = convData.id;
+      
+      // Deduct credits for demo start
+      if (company?.id && this.conversationId) {
+        await supabase.rpc('deduct_credits', {
+          p_company_id: company.id,
+          p_amount: 5,
+          p_reason: 'demo_start',
+          p_conversation_id: this.conversationId
+        });
+      }
 
       // Get ephemeral token from edge function
       const { data: tokenData, error: tokenError } = await supabase.functions.invoke(
@@ -264,11 +284,22 @@ export class RealtimeChat {
     try {
       const args = JSON.parse(event.arguments);
       
-      // Insert reservation
+      // Get company from conversation
+      const { data: conversation } = await supabase
+        .from('conversations')
+        .select('company_id, companies(*)')
+        .eq('id', this.conversationId)
+        .single();
+      
+      const companyId = conversation?.company_id;
+      const companyName = conversation?.companies?.name || 'Your Business';
+      
+      // Insert reservation with company_id
       const { data: reservation, error: resError } = await supabase
         .from('reservations')
         .insert({
           conversation_id: this.conversationId,
+          company_id: companyId,
           name: args.name,
           phone: args.phone,
           email: args.email || null,
@@ -287,11 +318,6 @@ export class RealtimeChat {
 
       // Send confirmation email if email provided
       if (args.email) {
-        const { data: config } = await supabase
-          .from('agent_config')
-          .select('restaurant_name')
-          .single();
-
         await supabase.functions.invoke('send-reservation-confirmation', {
           body: {
             name: args.name,
@@ -299,7 +325,7 @@ export class RealtimeChat {
             date: args.date,
             time: args.time,
             guests: args.guests,
-            restaurantName: config?.restaurant_name || 'Streamside Lodge'
+            restaurantName: companyName
           }
         });
       }
