@@ -23,15 +23,16 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Fetch agent config
-    const { data: config } = await supabase
-      .from('agent_config')
+    // For web demo, use first company (in production, get from user session)
+    const { data: company } = await supabase
+      .from('companies')
       .select('*')
+      .limit(1)
       .single();
 
-    const instructions = config 
-      ? `You are a restaurant and lodge receptionist at ${config.restaurant_name} in Zambia. You speak friendly Zambian English and you understand accents from Lusaka, Copperbelt, and North-Western Province. You work in hospitality. You help callers book tables, poolside seating, conference hall space, birthday dinners, or group braais. You confirm date, time, number of guests, and phone number. Always ask for their phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your table.' Use ${config.currency_prefix} for prices. Say prices like '${config.currency_prefix}180', never in dollars. If network is noisy or it cuts, politely ask them to repeat instead of guessing. ${config.instructions}`
-      : 'You are a helpful receptionist at a Zambian lodge. Always collect phone number first and use Kwacha for prices.';
+    const instructions = company
+      ? `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars. Always ask for the caller's phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your booking.' If network is noisy or it cuts, politely ask them to repeat instead of guessing. Be friendly, warm, and local — not American call center tone.`
+      : 'You are a helpful receptionist at a Zambian business. Always collect phone number first and use Kwacha for prices.';
 
     // Request an ephemeral token from OpenAI
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {

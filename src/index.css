@@ -26,8 +26,8 @@ All colors MUST be HSL.
     --muted: 210 40% 15%;
     --muted-foreground: 215 20% 65%;
 
-    --accent: 84 81% 44%;
-    --accent-foreground: 210 40% 3%;
+    --accent: 166 76% 46%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
@@ -46,7 +46,27 @@ All colors MUST be HSL.
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 210 40% 12%;
     --sidebar-ring: 84 81% 44%;
+    
+    --gradient-primary: linear-gradient(90deg, hsl(84 81% 44%), hsl(166 76% 46%));
   }
+}
+
+.bg-app {
+  background: radial-gradient(circle at top center, #0a0a0a, #1a1a1a);
+}
+
+.card-glass {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  backdrop-filter: blur(6px);
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, hsl(84 81% 44%), hsl(166 76% 46%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 @keyframes pulse-glow {

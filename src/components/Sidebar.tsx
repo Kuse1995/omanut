@@ -1,4 +1,4 @@
-import { Home, MessageSquare, Calendar, Settings } from 'lucide-react';
+import { LayoutDashboard, Phone, MessageSquare, Calendar, Settings, CreditCard } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
@@ -6,17 +6,19 @@ const Sidebar = () => {
   const location = useLocation();
   
   const navigation = [
-    { name: 'Live Demo', href: '/', icon: Home },
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Live Demo', href: '/', icon: Phone },
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
     { name: 'Reservations', href: '/reservations', icon: Calendar },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Company Settings', href: '/settings', icon: Settings },
+    { name: 'Billing & Credits', href: '/billing', icon: CreditCard },
   ];
 
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-primary">AI Front Desk</h1>
-        <p className="text-sm text-muted-foreground mt-1">Zambian Lodge</p>
+        <h1 className="text-2xl font-bold text-gradient">Omanut Assistant</h1>
+        <p className="text-sm text-muted-foreground mt-1">AI Receptionist Platform</p>
       </div>
       
       <nav className="flex-1 px-3 space-y-1">
