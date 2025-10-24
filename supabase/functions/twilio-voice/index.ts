@@ -180,20 +180,26 @@ ${aiOverrides?.banned_topics || ''}
 
 Critical rules:
 
-1. Always ask for the caller's phone number FIRST and repeat it back in pairs, like '0977 12 34 56, correct?'.
+1. LISTEN CAREFULLY: Always capture the EXACT information the customer provides. Never use placeholder values or make assumptions.
 
-2. Before you create any reservation or appointment, ALWAYS repeat back all details and ask for confirmation:
-'Just to confirm: You are [NAME], phone number [PHONE], booking for [GUESTS] people on [DATE] at [TIME] in [AREA or BRANCH], correct?'
-Only call create_reservation after they clearly confirm yes.
+2. Always ask for the caller's phone number FIRST and repeat it back in pairs, like '0977 12 34 56, correct?'.
 
-3. If the line is noisy or unclear: say 'I'm sorry, the line is not clear. Can you please repeat that slowly for me?'
-If still unclear after 2 tries: say 'I'll ask a human to call you back to confirm. Thank you.' and DO NOT guess details.
+3. ASK FOR REQUIRED DETAILS: If the customer doesn't mention which branch, area, or other required details, ASK them specifically:
+   - "Which of our branches would you like to book at?"
+   - "Would you prefer poolside, outdoor, or our main dining area?"
 
-4. Never invent details. If unsure, ask.
+4. Before you create any reservation or appointment, ALWAYS repeat back ALL details and ask for confirmation:
+   'Just to confirm: You are [EXACT NAME GIVEN], phone number [EXACT PHONE GIVEN], booking for [EXACT NUMBER] guests on [DATE] at [TIME] at our [EXACT BRANCH] in the [EXACT AREA], correct?'
+   Only call create_reservation after they clearly confirm yes.
 
-5. Always speak in warm, respectful Zambian English (not American call center style).
+5. If the line is noisy or unclear: say 'I'm sorry, the line is not clear. Can you please repeat that slowly for me?'
+   If still unclear after 2 tries: say 'I'll ask a human to call you back to confirm. Thank you.' and DO NOT guess details.
 
-6. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
+6. NEVER invent, assume, or use default values. If unsure, ask.
+
+7. Always speak in warm, respectful Zambian English (not American call center style).
+
+8. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
               if (company) {
 
@@ -218,21 +224,21 @@ If still unclear after 2 tries: say 'I'll ask a human to call you back to confir
                       {
                         type: 'function',
                         name: 'create_reservation',
-                        description: 'Create a booking for a table / event / poolside area at the lodge in Zambia',
+                        description: 'Create a booking ONLY after confirming all details with the customer. Never assume or invent information.',
                         parameters: {
                           type: 'object',
                           properties: {
-                            name: { type: 'string', description: 'Customer first name' },
-                            phone: { type: 'string', description: 'Zambian phone number, include leading 0 e.g. 0977...' },
-                            date: { type: 'string', description: 'YYYY-MM-DD' },
-                            time: { type: 'string', description: 'HH:MM (24h local time)' },
-                            guests: { type: 'number', description: 'How many people' },
-                            occasion: { type: 'string', description: 'Birthday, meeting, romantic dinner, Independence celebration, etc.' },
-                            area_preference: { type: 'string', description: 'poolside, outdoor, VIP, conference hall, etc.' },
-                            branch: { type: 'string', description: 'Which branch (e.g. Main, Solwezi). Default Main if not said.' },
-                            email: { type: 'string', description: 'Customer email, ONLY if they volunteer it' }
+                            name: { type: 'string', description: 'Customer\'s actual full name as they provided it. Do not use placeholders.' },
+                            phone: { type: 'string', description: 'Customer\'s actual phone number exactly as spoken. Include country code or leading 0. Repeat back to confirm.' },
+                            date: { type: 'string', description: 'Exact date requested by customer in YYYY-MM-DD format' },
+                            time: { type: 'string', description: 'Exact time requested by customer in HH:MM 24-hour format' },
+                            guests: { type: 'number', description: 'Exact number of guests the customer specified' },
+                            occasion: { type: 'string', description: 'The specific occasion or reason for booking as stated by customer. Ask if not mentioned. Examples: birthday, anniversary, business meeting, family dinner, etc.' },
+                            area_preference: { type: 'string', description: 'REQUIRED: The specific area or seating preference the customer wants. Ask if not mentioned. Examples: poolside, outdoor terrace, VIP lounge, main dining, garden, etc.' },
+                            branch: { type: 'string', description: 'REQUIRED: Which specific branch or location the customer wants to book at. Ask if not mentioned. Examples: Main Branch, Solwezi, Lusaka North, etc.' },
+                            email: { type: 'string', description: 'Customer\'s email address ONLY if they volunteer it. Do not ask unless they want confirmation sent.' }
                           },
-                          required: ['name', 'phone', 'date', 'time', 'guests']
+                          required: ['name', 'phone', 'date', 'time', 'guests', 'area_preference', 'branch']
                         }
                       }
                     ],
