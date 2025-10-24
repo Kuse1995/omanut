@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/integrations/supabase/client';
 import { Search } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 
 const Reservations = () => {
   const [reservations, setReservations] = useState<any[]>([]);
@@ -65,6 +66,7 @@ const Reservations = () => {
 
   return (
     <div className="p-8 space-y-8">
+      <BackButton />
       <div>
         <h1 className="text-3xl font-bold mb-2">Reservations</h1>
         <p className="text-muted-foreground">Manage all bookings</p>

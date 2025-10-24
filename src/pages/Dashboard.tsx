@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { supabase } from '@/integrations/supabase/client';
 import { Phone, MessageSquare, Calendar, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import BackButton from '@/components/BackButton';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -117,6 +118,7 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-app p-8">
       <div className="max-w-7xl mx-auto">
+        <BackButton />
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gradient mb-2">{company?.name || 'Dashboard'}</h1>
           <p className="text-muted-foreground">Monitor your AI receptionist performance</p>

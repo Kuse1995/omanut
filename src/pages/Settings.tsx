@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import BackButton from '@/components/BackButton';
 
 const Settings = () => {
   const { toast } = useToast();
@@ -92,6 +93,7 @@ const Settings = () => {
   return (
     <div className="min-h-screen bg-app p-8">
       <div className="max-w-4xl mx-auto">
+        <BackButton />
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gradient mb-2">Company Settings</h1>
           <p className="text-muted-foreground">Configure your AI receptionist's persona and behavior</p>

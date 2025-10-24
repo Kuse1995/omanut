@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/integrations/supabase/client';
 import { Search } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 
 const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
@@ -64,6 +65,7 @@ const Conversations = () => {
 
   return (
     <div className="p-8 space-y-8">
+      <BackButton />
       <div>
         <h1 className="text-3xl font-bold mb-2">Conversations</h1>
         <p className="text-muted-foreground">All customer interactions</p>

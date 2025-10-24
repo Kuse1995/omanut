@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { CreditCard, TrendingDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import BackButton from '@/components/BackButton';
 
 interface CreditUsage {
   id: string;
@@ -64,6 +65,7 @@ const Billing = () => {
   return (
     <div className="min-h-screen bg-app p-8">
       <div className="max-w-5xl mx-auto">
+        <BackButton />
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-gradient mb-2">Billing & Credits</h1>
           <p className="text-muted-foreground">Manage your credit balance and view usage history</p>
