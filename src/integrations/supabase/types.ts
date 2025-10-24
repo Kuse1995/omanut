@@ -53,8 +53,54 @@ export type Database = {
         }
         Relationships: []
       }
+      companies: {
+        Row: {
+          branches: string | null
+          business_type: string | null
+          created_at: string | null
+          credit_balance: number | null
+          currency_prefix: string | null
+          hours: string | null
+          id: string
+          menu_or_offerings: string | null
+          name: string
+          seating_areas: string | null
+          twilio_number: string | null
+          voice_style: string | null
+        }
+        Insert: {
+          branches?: string | null
+          business_type?: string | null
+          created_at?: string | null
+          credit_balance?: number | null
+          currency_prefix?: string | null
+          hours?: string | null
+          id?: string
+          menu_or_offerings?: string | null
+          name: string
+          seating_areas?: string | null
+          twilio_number?: string | null
+          voice_style?: string | null
+        }
+        Update: {
+          branches?: string | null
+          business_type?: string | null
+          created_at?: string | null
+          credit_balance?: number | null
+          currency_prefix?: string | null
+          hours?: string | null
+          id?: string
+          menu_or_offerings?: string | null
+          name?: string
+          seating_areas?: string | null
+          twilio_number?: string | null
+          voice_style?: string | null
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
+          company_id: string | null
           created_at: string
           customer_name: string | null
           duration_seconds: number | null
@@ -65,6 +111,7 @@ export type Database = {
           status: string
         }
         Insert: {
+          company_id?: string | null
           created_at?: string
           customer_name?: string | null
           duration_seconds?: number | null
@@ -75,6 +122,7 @@ export type Database = {
           status?: string
         }
         Update: {
+          company_id?: string | null
           created_at?: string
           customer_name?: string | null
           duration_seconds?: number | null
@@ -84,7 +132,57 @@ export type Database = {
           started_at?: string
           status?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "conversations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_usage: {
+        Row: {
+          amount_used: number
+          company_id: string
+          conversation_id: string | null
+          created_at: string | null
+          id: string
+          reason: string | null
+        }
+        Insert: {
+          amount_used: number
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+        }
+        Update: {
+          amount_used?: number
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string | null
+          id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_usage_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_usage_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -114,6 +212,7 @@ export type Database = {
         Row: {
           area_preference: string | null
           branch: string | null
+          company_id: string | null
           conversation_id: string | null
           created_at: string
           date: string
@@ -129,6 +228,7 @@ export type Database = {
         Insert: {
           area_preference?: string | null
           branch?: string | null
+          company_id?: string | null
           conversation_id?: string | null
           created_at?: string
           date: string
@@ -144,6 +244,7 @@ export type Database = {
         Update: {
           area_preference?: string | null
           branch?: string | null
+          company_id?: string | null
           conversation_id?: string | null
           created_at?: string
           date?: string
@@ -156,14 +257,65 @@ export type Database = {
           status?: string
           time?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "reservations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      users: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          email: string
+          id: string
+          password_hash: string | null
+          role: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          email: string
+          id?: string
+          password_hash?: string | null
+          role?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          email?: string
+          id?: string
+          password_hash?: string | null
+          role?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "users_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      deduct_credits: {
+        Args: {
+          p_amount: number
+          p_company_id: string
+          p_conversation_id?: string
+          p_reason: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
