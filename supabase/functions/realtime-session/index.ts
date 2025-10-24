@@ -23,10 +23,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // For web demo, use first company (in production, get from user session)
+    // Get company data (use first for demo, or get from auth token in production)
     const { data: company } = await supabase
       .from('companies')
-      .select('*')
+      .select('*, metadata')
       .limit(1)
       .single();
 
@@ -47,7 +47,12 @@ serve(async (req) => {
       .eq('company_id', company.id)
       .single();
 
-    // Build comprehensive instructions
+    // Build comprehensive instructions with dynamic metadata
+    let dynamicInfo = '';
+    if (company.metadata && Object.keys(company.metadata).length > 0) {
+      dynamicInfo = `\n\nREAL-TIME INFORMATION (Use this current data when answering):\n${JSON.stringify(company.metadata, null, 2)}`;
+    }
+
     let instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
@@ -56,6 +61,7 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer calls, help politely, and create/record bookings or appointments.
+${dynamicInfo}
 
 ${aiOverrides?.system_instructions || ''}
 

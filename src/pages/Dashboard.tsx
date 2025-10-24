@@ -22,11 +22,28 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      // Get first company (in production, filter by user's company_id)
+      // Get current user's company
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        navigate('/login');
+        return;
+      }
+
+      // Get user's company_id
+      const { data: userData } = await supabase
+        .from('users')
+        .select('company_id')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!userData?.company_id) {
+        throw new Error('No company associated with this user');
+      }
+
       const { data: companyData } = await supabase
         .from('companies')
         .select('*')
-        .limit(1)
+        .eq('id', userData.company_id)
         .single();
 
       setCompany(companyData);

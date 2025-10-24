@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface CompanyFormProps {
   companyId?: string;
@@ -30,6 +31,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     currency_prefix: "K",
     twilio_number: "",
     credit_balance: 1000,
+    admin_email: "",
+    admin_password: "",
   });
 
   useEffect(() => {
@@ -59,6 +62,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           currency_prefix: data.currency_prefix || "K",
           twilio_number: data.twilio_number || "",
           credit_balance: data.credit_balance || 1000,
+          admin_email: "",
+          admin_password: "",
         });
       }
     } catch (error) {
@@ -80,7 +85,17 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
         // Update existing company
         const { error } = await supabase
           .from('companies')
-          .update(formData)
+          .update({
+            name: formData.name,
+            business_type: formData.business_type,
+            voice_style: formData.voice_style,
+            hours: formData.hours,
+            menu_or_offerings: formData.menu_or_offerings,
+            branches: formData.branches,
+            currency_prefix: formData.currency_prefix,
+            seating_areas: formData.seating_areas,
+            twilio_number: formData.twilio_number,
+          })
           .eq('id', companyId);
 
         if (error) throw error;
@@ -89,30 +104,83 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           title: "Success",
           description: "Company updated successfully",
         });
+        
+        if (onSuccess) onSuccess();
       } else {
-        // Create new company
-        const { error } = await supabase
-          .from('companies')
-          .insert([formData]);
+        // Create new company with admin user
+        if (!formData.admin_email || !formData.admin_password) {
+          throw new Error('Admin email and password are required for new companies');
+        }
 
-        if (error) throw error;
+        // Create auth user first
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.admin_email,
+          password: formData.admin_password,
+          options: {
+            data: {
+              company_name: formData.name,
+            }
+          }
+        });
+
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('Failed to create user');
+
+        // Create company
+        const { data: company, error: companyError } = await supabase
+          .from('companies')
+          .insert({
+            name: formData.name,
+            business_type: formData.business_type,
+            voice_style: formData.voice_style,
+            hours: formData.hours,
+            menu_or_offerings: formData.menu_or_offerings,
+            branches: formData.branches,
+            currency_prefix: formData.currency_prefix,
+            seating_areas: formData.seating_areas,
+            twilio_number: formData.twilio_number,
+            credit_balance: formData.credit_balance,
+          })
+          .select()
+          .single();
+
+        if (companyError) throw companyError;
+
+        // Link user to company
+        const { error: userError } = await supabase
+          .from('users')
+          .insert({
+            id: authData.user.id,
+            email: formData.admin_email,
+            company_id: company.id,
+            role: 'admin',
+          });
+
+        if (userError) throw userError;
+
+        // Give user company_admin role
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .insert({
+            user_id: authData.user.id,
+            role: 'user',
+          });
+
+        if (roleError) throw roleError;
 
         toast({
           title: "Success",
-          description: "Company created successfully",
+          description: `Company created successfully. Admin login: ${formData.admin_email}`,
         });
+        
+        if (onSuccess) onSuccess();
+        else navigate('/admin/companies');
       }
-
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        navigate('/admin/companies');
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving company:', error);
       toast({
         title: "Error",
-        description: "Failed to save company",
+        description: error.message,
         variant: "destructive",
       });
     } finally {
@@ -140,7 +208,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="name">Company Name *</Label>
               <Input
@@ -153,11 +221,24 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
             <div className="space-y-2">
               <Label htmlFor="business_type">Business Type</Label>
-              <Input
-                id="business_type"
+              <Select
                 value={formData.business_type}
-                onChange={(e) => setFormData({ ...formData, business_type: e.target.value })}
-              />
+                onValueChange={(value) => setFormData({ ...formData, business_type: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="restaurant">Restaurant</SelectItem>
+                  <SelectItem value="lodge">Lodge</SelectItem>
+                  <SelectItem value="hotel">Hotel</SelectItem>
+                  <SelectItem value="salon">Salon</SelectItem>
+                  <SelectItem value="school">School</SelectItem>
+                  <SelectItem value="library">Library</SelectItem>
+                  <SelectItem value="clinic">Clinic</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
@@ -167,16 +248,6 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 value={formData.twilio_number}
                 onChange={(e) => setFormData({ ...formData, twilio_number: e.target.value })}
                 placeholder="+1234567890"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="credit_balance">Initial Credit Balance</Label>
-              <Input
-                id="credit_balance"
-                type="number"
-                value={formData.credit_balance}
-                onChange={(e) => setFormData({ ...formData, credit_balance: parseInt(e.target.value) })}
               />
             </div>
 
@@ -207,7 +278,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="seating_areas">Seating Areas (comma-separated)</Label>
               <Input
                 id="seating_areas"
@@ -236,6 +307,49 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               rows={4}
             />
           </div>
+
+          {!companyId && (
+            <>
+              <div className="border-t pt-6">
+                <h3 className="text-lg font-semibold mb-4">Admin Account</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="admin_email">Admin Email *</Label>
+                    <Input
+                      id="admin_email"
+                      type="email"
+                      value={formData.admin_email}
+                      onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                      required={!companyId}
+                      placeholder="admin@company.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="admin_password">Admin Password *</Label>
+                    <Input
+                      id="admin_password"
+                      type="password"
+                      value={formData.admin_password}
+                      onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
+                      required={!companyId}
+                      placeholder="Secure password"
+                      minLength={6}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="credit_balance">Initial Credit Balance</Label>
+                <Input
+                  id="credit_balance"
+                  type="number"
+                  value={formData.credit_balance}
+                  onChange={(e) => setFormData({ ...formData, credit_balance: parseInt(e.target.value) || 1000 })}
+                />
+              </div>
+            </>
+          )}
 
           <div className="flex gap-4">
             <Button type="submit" disabled={loading}>
