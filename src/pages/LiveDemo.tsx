@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -14,34 +15,41 @@ const LiveDemo = () => {
   const [events, setEvents] = useState<string[]>([]);
 
   useEffect(() => {
-    const checkAdminAccess = () => {
-      try {
-        const token = localStorage.getItem('admin_access_token');
-        if (!token) {
-          console.log('No admin access token found');
-          navigate('/admin/login');
-          return;
-        }
-
-        const tokenData = JSON.parse(token);
-        const expiresAt = new Date(tokenData.expiresAt);
-        
-        if (expiresAt < new Date()) {
-          console.log('Admin access token expired');
-          localStorage.removeItem('admin_access_token');
-          navigate('/admin/login');
-          return;
-        }
-
-        setIsLoading(false);
-      } catch (error) {
-        console.error('Error checking admin access:', error);
-        navigate('/admin/login');
-      }
-    };
-
-    checkAdminAccess();
+    checkAccess();
   }, [navigate]);
+
+  const checkAccess = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        navigate('/login');
+        return;
+      }
+
+      // Check if user has admin role (admins can test)
+      const { data: isAdmin } = await supabase.rpc('has_role', {
+        _user_id: session.user.id,
+        _role: 'admin'
+      });
+
+      // Check if user has client role (clients can test their own AI)
+      const { data: isClient } = await supabase.rpc('has_role', {
+        _user_id: session.user.id,
+        _role: 'client'
+      });
+
+      if (!isAdmin && !isClient) {
+        navigate('/');
+        return;
+      }
+
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error checking access:', error);
+      navigate('/login');
+    }
+  };
 
   const handleMessage = (event: any) => {
     try {
