@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import Sidebar from "@/components/Sidebar";
-import { Edit, Phone } from "lucide-react";
+import { Edit, Phone, Plus } from "lucide-react";
 
 const Companies = () => {
   const navigate = useNavigate();
@@ -61,6 +61,10 @@ const Companies = () => {
               <h1 className="text-3xl font-bold text-gradient">Companies</h1>
               <p className="text-muted-foreground">Manage all client companies</p>
             </div>
+            <Button onClick={() => navigate('/admin/companies/new')}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Company
+            </Button>
           </div>
 
           <Card className="card-glass">
