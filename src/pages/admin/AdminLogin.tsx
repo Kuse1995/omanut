@@ -3,85 +3,90 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo.jpg";
 import ThemeToggle from "@/components/ThemeToggle";
 
-const AUTHORIZED_ADMIN_EMAIL = "Abkanyanta@gmail.com";
-const ACCESS_TOKEN_KEY = "admin_access_token";
-const TOKEN_EXPIRY_KEY = "admin_token_expiry";
-
 const AdminLogin = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
-    // Check if already has valid access token
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
-    
-    if (token && expiry) {
-      const expiryDate = new Date(expiry);
-      if (expiryDate > new Date()) {
-        navigate("/admin/dashboard");
-      } else {
-        // Token expired, clear it
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-        localStorage.removeItem(TOKEN_EXPIRY_KEY);
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        checkAdminRole(session.user.id);
       }
-    }
+    });
+
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const handleRequestAccess = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Validate admin email
-    if (email.toLowerCase() !== AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await checkAdminRole(session.user.id);
+    }
+  };
+
+  const checkAdminRole = async (userId: string) => {
+    const { data: isAdmin } = await supabase.rpc('has_role', {
+      _user_id: userId,
+      _role: 'admin'
+    });
+
+    if (isAdmin) {
+      navigate("/admin/dashboard");
+    } else {
+      // Not an admin, sign them out
+      await supabase.auth.signOut();
       toast({
         title: "Access Denied",
-        description: "This email is not authorized for admin access.",
+        description: "This portal is for administrators only.",
         variant: "destructive",
       });
-      return;
     }
-    
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
 
     try {
-      // Generate access token and grant immediate access
-      const accessToken = crypto.randomUUID();
-      const expiryDate = new Date();
-      expiryDate.setHours(expiryDate.getHours() + 24); // 24 hour access
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      // Grant immediate access
-      localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-      localStorage.setItem(TOKEN_EXPIRY_KEY, expiryDate.toISOString());
+      if (error) throw error;
 
-      // Send notification email in background (don't wait for it)
-      supabase.functions.invoke('send-admin-login-notification', {
-        body: {
-          email,
-          timestamp: new Date().toISOString(),
-          ipAddress: 'Direct Access'
-        }
-      }).catch(err => console.log('Email notification failed:', err));
+      // Verify admin role
+      const { data: isAdmin } = await supabase.rpc('has_role', {
+        _user_id: data.user.id,
+        _role: 'admin'
+      });
+
+      if (!isAdmin) {
+        await supabase.auth.signOut();
+        throw new Error("This portal is for administrators only. Please use the client login.");
+      }
 
       toast({
         title: "Welcome, Admin!",
         description: "Access granted. Redirecting to dashboard...",
       });
 
-      // Redirect to dashboard
-      setTimeout(() => {
-        navigate("/admin/dashboard");
-      }, 500);
+      navigate("/admin/dashboard");
     } catch (error: any) {
       toast({
-        title: "Access failed",
+        title: "Access Denied",
         description: error.message,
         variant: "destructive",
       });
@@ -105,19 +110,27 @@ const AdminLogin = () => {
           <p className="text-sm text-muted-foreground">Admin Portal</p>
         </div>
 
-        <form onSubmit={handleRequestAccess} className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Admin Email</Label>
-            <input
+            <Input
               id="email"
               type="email"
-              placeholder="Abkanyanta@gmail.com"
+              placeholder="admin@omanut.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
             />
-            <p className="text-xs text-muted-foreground">Only authorized admin email can access this portal</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </div>
           <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (

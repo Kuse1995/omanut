@@ -50,12 +50,34 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) throw error;
+
+      // Verify client role
+      const { data: isClient } = await supabase.rpc('has_role', {
+        _user_id: data.user.id,
+        _role: 'client'
+      });
+
+      if (!isClient) {
+        // Check if admin
+        const { data: isAdmin } = await supabase.rpc('has_role', {
+          _user_id: data.user.id,
+          _role: 'admin'
+        });
+        
+        await supabase.auth.signOut();
+        
+        if (isAdmin) {
+          throw new Error("Admin users must login at /admin/login");
+        } else {
+          throw new Error("Your account does not have access to this portal. Please contact your administrator.");
+        }
+      }
 
       toast({
         title: "Success",
@@ -63,7 +85,7 @@ const Login = () => {
       });
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: "Login Failed",
         description: error.message,
         variant: "destructive",
       });

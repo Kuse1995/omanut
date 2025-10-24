@@ -379,6 +379,10 @@ export type Database = {
         Args: { p_amount: number; p_company_id: string; p_reason: string }
         Returns: undefined
       }
+      admin_reset_password: {
+        Args: { new_password: string; target_user_id: string }
+        Returns: Json
+      }
       deduct_credits: {
         Args: {
           p_amount: number
@@ -397,7 +401,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "user"
+      app_role: "admin" | "user" | "client"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -525,7 +529,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "user"],
+      app_role: ["admin", "user", "client"],
     },
   },
 } as const

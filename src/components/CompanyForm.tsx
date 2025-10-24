@@ -158,12 +158,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         if (userError) throw userError;
 
-        // Give user company_admin role
+        // Give user client role
         const { error: roleError } = await supabase
           .from('user_roles')
           .insert({
             user_id: authData.user.id,
-            role: 'user',
+            role: 'client',
           });
 
         if (roleError) throw roleError;

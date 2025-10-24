@@ -6,11 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import Sidebar from "@/components/Sidebar";
-import { Edit, Phone, Plus } from "lucide-react";
+import { Edit, Phone, Plus, Mail, User } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+interface CompanyWithUser {
+  company: any;
+  users: any[];
+}
 
 const Companies = () => {
   const navigate = useNavigate();
-  const [companies, setCompanies] = useState<any[]>([]);
+  const { toast } = useToast();
+  const [companies, setCompanies] = useState<CompanyWithUser[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,15 +44,40 @@ const Companies = () => {
 
   const loadCompanies = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: companiesData, error: companiesError } = await supabase
         .from('companies')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setCompanies(data || []);
+      if (companiesError) throw companiesError;
+
+      // Fetch users for each company
+      const companiesWithUsers = await Promise.all(
+        (companiesData || []).map(async (company) => {
+          const { data: users, error: usersError } = await supabase
+            .from('users')
+            .select('id, email, role')
+            .eq('company_id', company.id);
+
+          if (usersError) {
+            console.error(`Error loading users for company ${company.id}:`, usersError);
+          }
+
+          return {
+            company,
+            users: users || []
+          };
+        })
+      );
+
+      setCompanies(companiesWithUsers);
     } catch (error) {
       console.error('Error loading companies:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load companies",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -73,6 +105,7 @@ const Companies = () => {
                 <TableRow>
                   <TableHead>Company Name</TableHead>
                   <TableHead>Business Type</TableHead>
+                  <TableHead>Login Credentials</TableHead>
                   <TableHead>Twilio Number</TableHead>
                   <TableHead>Credits</TableHead>
                   <TableHead>Status</TableHead>
@@ -82,19 +115,36 @@ const Companies = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={7} className="text-center">Loading...</TableCell>
                   </TableRow>
                 ) : companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
                       No companies found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  companies.map((company) => (
+                  companies.map(({ company, users }) => (
                     <TableRow key={company.id}>
                       <TableCell className="font-medium">{company.name}</TableCell>
-                      <TableCell>{company.business_type}</TableCell>
+                      <TableCell className="capitalize">{company.business_type}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {users.length > 0 ? (
+                            users.map((user) => (
+                              <div key={user.id} className="flex items-center gap-2 text-sm">
+                                <Mail className="h-3 w-3 text-muted-foreground" />
+                                <span className="font-mono text-xs">{user.email}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-muted-foreground text-sm flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              No users
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         {company.twilio_number ? (
                           <div className="flex items-center gap-1">
