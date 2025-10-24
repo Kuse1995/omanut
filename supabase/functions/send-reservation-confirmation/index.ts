@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { Resend } from "npm:resend@2.0.0";
 
-const resend = new Resend(Deno.env.get('RESEND_API_KEY'));
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,35 +31,49 @@ const handler = async (req: Request): Promise<Response> => {
       day: 'numeric'
     });
 
-    const emailResponse = await resend.emails.send({
-      from: 'hi@build-loop.ai',
-      to: [email],
-      subject: `Your Reservation at ${restaurantName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #84CC16;">Reservation Confirmed</h2>
-          <p>Dear ${name},</p>
-          <p>Your reservation at <strong>${restaurantName}</strong> has been confirmed!</p>
-          
-          <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
-            <p style="margin: 5px 0;"><strong>Time:</strong> ${time}</p>
-            <p style="margin: 5px 0;"><strong>Guests:</strong> ${guests} ${guests === 1 ? 'person' : 'people'}</p>
-          </div>
+    // Send email via Resend API
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'hi@build-loop.ai',
+        to: [email],
+        subject: `Your Reservation at ${restaurantName}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #84CC16;">Reservation Confirmed</h2>
+            <p>Dear ${name},</p>
+            <p>Your reservation at <strong>${restaurantName}</strong> has been confirmed!</p>
+            
+            <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 5px 0;"><strong>Date:</strong> ${formattedDate}</p>
+              <p style="margin: 5px 0;"><strong>Time:</strong> ${time}</p>
+              <p style="margin: 5px 0;"><strong>Guests:</strong> ${guests} ${guests === 1 ? 'person' : 'people'}</p>
+            </div>
 
-          <p>We're looking forward to welcoming you! If you need to make any changes or have special requests, please don't hesitate to call us.</p>
-          
-          <p style="color: #666; font-size: 14px; margin-top: 30px;">
-            Best regards,<br>
-            The ${restaurantName} Team
-          </p>
-        </div>
-      `,
+            <p>We're looking forward to welcoming you! If you need to make any changes or have special requests, please don't hesitate to call us.</p>
+            
+            <p style="color: #666; font-size: 14px; margin-top: 30px;">
+              Best regards,<br>
+              The ${restaurantName} Team
+            </p>
+          </div>
+        `,
+      }),
     });
 
-    console.log("Confirmation email sent:", emailResponse);
+    const result = await emailResponse.json();
+    
+    if (!emailResponse.ok) {
+      throw new Error(`Resend API error: ${JSON.stringify(result)}`);
+    }
 
-    return new Response(JSON.stringify(emailResponse), {
+    console.log("Confirmation email sent:", result);
+
+    return new Response(JSON.stringify(result), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
