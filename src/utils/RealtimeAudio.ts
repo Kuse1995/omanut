@@ -170,6 +170,36 @@ export class RealtimeChat {
           await this.handleReservation(event);
         } else if (event.type === 'error') {
           this.onStatusChange("Bad Network / Repeating Question");
+        } else if (event.type === 'conversation.item.input_audio_transcription.completed') {
+          // Log caller transcript
+          if (this.conversationId && event.transcript) {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('transcript')
+              .eq('id', this.conversationId)
+              .single();
+            
+            const updatedTranscript = (conv?.transcript || '') + `\nCaller: ${event.transcript}`;
+            await supabase
+              .from('conversations')
+              .update({ transcript: updatedTranscript })
+              .eq('id', this.conversationId);
+          }
+        } else if (event.type === 'response.audio_transcript.delta') {
+          // Log assistant transcript
+          if (this.conversationId && event.delta) {
+            const { data: conv } = await supabase
+              .from('conversations')
+              .select('transcript')
+              .eq('id', this.conversationId)
+              .single();
+            
+            const updatedTranscript = (conv?.transcript || '') + event.delta;
+            await supabase
+              .from('conversations')
+              .update({ transcript: updatedTranscript })
+              .eq('id', this.conversationId);
+          }
         }
       });
 
@@ -218,15 +248,50 @@ export class RealtimeChat {
 
   private async configureSession() {
     try {
-      // Fetch agent config
-      const { data: config } = await supabase
-        .from('agent_config')
+      // Fetch company config (use first company for web demo)
+      const { data: company } = await supabase
+        .from('companies')
         .select('*')
+        .limit(1)
         .single();
 
-      if (!config) return;
+      if (!company) return;
 
-      const instructions = `You are a restaurant and lodge receptionist at ${config.restaurant_name} in Zambia. You speak friendly Zambian English and you understand accents from Lusaka, Copperbelt, and North-Western Province. You work in hospitality. You help callers book tables, poolside seating, conference hall space, birthday dinners, or group braais. You confirm date, time, number of guests, and phone number. Always ask for their phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your table.' Use ${config.currency_prefix} for prices. Say prices like '${config.currency_prefix}180', never in dollars. If network is noisy or it cuts, politely ask them to repeat instead of guessing. If they ask for 'pool area' or 'outside by the braai' treat that as an area preference. ${config.instructions}`;
+      // Fetch AI overrides for this company
+      const { data: aiOverrides } = await supabase
+        .from('company_ai_overrides')
+        .select('*')
+        .eq('company_id', company.id)
+        .single();
+
+      // Check credit balance
+      if (company.credit_balance <= 0) {
+        this.onStatusChange("Insufficient Credits");
+        throw new Error("Insufficient credits to start demo");
+      }
+
+      let instructions = `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars.
+
+CRITICAL ACCURACY RULES:
+1. ALWAYS ask for the caller's phone number FIRST. Then repeat it back in pairs, e.g. "0977 12 34 56, correct?" Wait for confirmation.
+2. BEFORE calling create_reservation, you MUST confirm ALL details: "Just to confirm: You are [NAME], phone number [PHONE], booking for [GUESTS] people on [DATE] at [TIME] in [AREA/BRANCH], correct?" Only proceed after they say "yes".
+3. If the line is noisy or unclear, NEVER guess. Say: "I'm sorry, the line is not clear. Can you please repeat that slowly for me?" After 2 failed attempts, say: "I'll ask a human to call you back to confirm. Thank you." and end the booking attempt.
+4. NEVER invent details. If you don't know something, ask the caller.
+5. If they don't have email, say 'No problem, we can still keep your booking.'
+6. Be friendly, warm, and local — not American call center tone.`;
+      
+      // Append AI overrides if they exist
+      if (aiOverrides) {
+        if (aiOverrides.system_instructions) {
+          instructions += `\n\nADDITIONAL INSTRUCTIONS: ${aiOverrides.system_instructions}`;
+        }
+        if (aiOverrides.qa_style) {
+          instructions += `\n\nQA STYLE: ${aiOverrides.qa_style}`;
+        }
+        if (aiOverrides.banned_topics) {
+          instructions += `\n\nBANNED TOPICS: ${aiOverrides.banned_topics}`;
+        }
+      }
 
       const sessionUpdate = {
         type: "session.update",

@@ -105,6 +105,20 @@ serve(async (req) => {
             conversationId = convData.id;
             console.log('Created conversation:', conversationId);
             
+            // Check credit balance before allowing call
+            if (company && company.credit_balance <= 0) {
+              console.log('Insufficient credits for company:', company.id);
+              // Send low credit message and end call
+              twilioSocket.send(JSON.stringify({
+                event: 'media',
+                streamSid: message.start?.streamSid,
+                media: {
+                  payload: '' // Send empty to trigger end
+                }
+              }));
+              return;
+            }
+            
             // Deduct credits for call start
             if (company?.id) {
               await supabase.rpc('deduct_credits', {
@@ -139,10 +153,38 @@ serve(async (req) => {
             console.log('OpenAI event:', aiMessage.type);
 
             if (aiMessage.type === 'session.created') {
-              // Configure session with dynamic company persona
-              const instructions = company
-                ? `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars. Always ask for the caller's phone number first so we can call or WhatsApp them back. If they don't have email, say 'No problem, we can still keep your booking.' If network is noisy or it cuts, politely ask them to repeat instead of guessing. Be friendly, warm, and local — not American call center tone.`
+              // Fetch AI overrides for this company
+              const { data: aiOverrides } = await supabase
+                .from('company_ai_overrides')
+                .select('*')
+                .eq('company_id', company?.id)
+                .single();
+              
+              // Configure session with dynamic company persona + accuracy requirements
+              let instructions = company
+                ? `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars.
+
+CRITICAL ACCURACY RULES:
+1. ALWAYS ask for the caller's phone number FIRST. Then repeat it back in pairs, e.g. "0977 12 34 56, correct?" Wait for confirmation.
+2. BEFORE calling create_reservation, you MUST confirm ALL details: "Just to confirm: You are [NAME], phone number [PHONE], booking for [GUESTS] people on [DATE] at [TIME] in [AREA/BRANCH], correct?" Only proceed after they say "yes".
+3. If the line is noisy or unclear, NEVER guess. Say: "I'm sorry, the line is not clear. Can you please repeat that slowly for me?" After 2 failed attempts, say: "I'll ask a human to call you back to confirm. Thank you." and end the booking attempt.
+4. NEVER invent details. If you don't know something, ask the caller.
+5. If they don't have email, say 'No problem, we can still keep your booking.'
+6. Be friendly, warm, and local — not American call center tone.`
                 : 'You are a helpful receptionist at a Zambian business. Always collect phone number first and use Kwacha for prices.';
+              
+              // Append AI overrides if they exist
+              if (aiOverrides) {
+                if (aiOverrides.system_instructions) {
+                  instructions += `\n\nADDITIONAL INSTRUCTIONS: ${aiOverrides.system_instructions}`;
+                }
+                if (aiOverrides.qa_style) {
+                  instructions += `\n\nQA STYLE: ${aiOverrides.qa_style}`;
+                }
+                if (aiOverrides.banned_topics) {
+                  instructions += `\n\nBANNED TOPICS: ${aiOverrides.banned_topics}`;
+                }
+              }
 
               if (company) {
 
@@ -199,6 +241,36 @@ serve(async (req) => {
                   payload: aiMessage.delta
                 }
               }));
+            } else if (aiMessage.type === 'conversation.item.input_audio_transcription.completed') {
+              // Log caller transcript
+              if (conversationId && aiMessage.transcript) {
+                const { data: conv } = await supabase
+                  .from('conversations')
+                  .select('transcript')
+                  .eq('id', conversationId)
+                  .single();
+                
+                const updatedTranscript = (conv?.transcript || '') + `\nCaller: ${aiMessage.transcript}`;
+                await supabase
+                  .from('conversations')
+                  .update({ transcript: updatedTranscript })
+                  .eq('id', conversationId);
+              }
+            } else if (aiMessage.type === 'response.audio_transcript.delta') {
+              // Log assistant transcript
+              if (conversationId && aiMessage.delta) {
+                const { data: conv } = await supabase
+                  .from('conversations')
+                  .select('transcript')
+                  .eq('id', conversationId)
+                  .single();
+                
+                const updatedTranscript = (conv?.transcript || '') + aiMessage.delta;
+                await supabase
+                  .from('conversations')
+                  .update({ transcript: updatedTranscript })
+                  .eq('id', conversationId);
+              }
             } else if (aiMessage.type === 'response.function_call_arguments.done') {
               // Handle reservation
               try {

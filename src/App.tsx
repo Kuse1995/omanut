@@ -3,13 +3,17 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Sidebar from "./components/Sidebar";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import LiveDemo from "./pages/LiveDemo";
 import Conversations from "./pages/Conversations";
 import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
+import AdminLogin from "./pages/admin/AdminLogin";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import Companies from "./pages/admin/Companies";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,20 +24,20 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <div className="flex min-h-screen w-full bg-app">
-          <Sidebar />
-          <main className="flex-1">
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<LiveDemo />} />
-              <Route path="/conversations" element={<Conversations />} />
-              <Route path="/reservations" element={<Reservations />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/billing" element={<Billing />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </main>
-        </div>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/live-demo" element={<LiveDemo />} />
+          <Route path="/conversations" element={<Conversations />} />
+          <Route path="/reservations" element={<Reservations />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/billing" element={<Billing />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route path="/admin/companies" element={<Companies />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
