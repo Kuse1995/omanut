@@ -8,6 +8,9 @@ import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo.jpg";
+import ThemeToggle from "@/components/ThemeToggle";
+
+const AUTHORIZED_ADMIN_EMAIL = "Abkanyanta@gmail.com";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -34,6 +37,17 @@ const AdminLogin = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate admin email first
+    if (email.toLowerCase() !== AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
+      toast({
+        title: "Access Denied",
+        description: "This email is not authorized for admin access.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setLoading(true);
 
     try {
@@ -55,9 +69,18 @@ const AdminLogin = () => {
         throw new Error("Access denied. Admin privileges required.");
       }
 
+      // Send login confirmation email
+      await supabase.functions.invoke('send-admin-login-notification', {
+        body: {
+          email: email,
+          timestamp: new Date().toISOString(),
+          ipAddress: 'Client IP' // Browser can't access real IP
+        }
+      });
+
       toast({
         title: "Welcome, Admin!",
-        description: "Successfully logged in to admin portal.",
+        description: "Login confirmation email sent. Successfully logged in to admin portal.",
       });
       navigate("/admin/dashboard");
     } catch (error: any) {
@@ -73,6 +96,9 @@ const AdminLogin = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-destructive/5 p-6">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <Card className="card-glass w-full max-w-md p-8">
         <div className="flex flex-col items-center mb-8">
           <div className="p-4 rounded-full bg-gradient-primary mb-4">
@@ -89,11 +115,12 @@ const AdminLogin = () => {
             <Input
               id="email"
               type="email"
-              placeholder="admin@omanut.com"
+              placeholder="Abkanyanta@gmail.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
+            <p className="text-xs text-muted-foreground">Only authorized admin emails can access this portal</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>

@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo.jpg";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -131,6 +132,9 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-6">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <Card className="card-glass w-full max-w-md p-8">
         <div className="flex flex-col items-center mb-8">
           <img src={omanutLogo} alt="Omanut" className="h-16 w-16 rounded-lg object-cover mb-4" />
