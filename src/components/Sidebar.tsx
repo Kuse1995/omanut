@@ -2,6 +2,7 @@ import { LayoutDashboard, Phone, MessageSquare, Calendar, Settings, CreditCard }
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import omanutLogo from '@/assets/omanut-logo.jpg';
+import ThemeToggle from './ThemeToggle';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -45,6 +46,10 @@ const Sidebar = () => {
           );
         })}
       </nav>
+      
+      <div className="p-3 border-t border-sidebar-border">
+        <ThemeToggle />
+      </div>
     </aside>
   );
 };

@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Phone, Clock, Calendar, Shield, Zap, Globe } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import omanutLogo from "@/assets/omanut-logo.jpg";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const Home = () => {
   const navigate = useNavigate();
@@ -52,7 +53,8 @@ const Home = () => {
               <p className="text-xs text-muted-foreground">Powered by Omanut Technologies</p>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
             <Button variant="ghost" onClick={() => navigate('/login')}>
               Sign In
             </Button>
