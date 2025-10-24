@@ -63,9 +63,11 @@ export type Database = {
           hours: string | null
           id: string
           menu_or_offerings: string | null
+          metadata: Json | null
           name: string
           seating_areas: string | null
           twilio_number: string | null
+          updated_at: string | null
           voice_style: string | null
         }
         Insert: {
@@ -77,9 +79,11 @@ export type Database = {
           hours?: string | null
           id?: string
           menu_or_offerings?: string | null
+          metadata?: Json | null
           name: string
           seating_areas?: string | null
           twilio_number?: string | null
+          updated_at?: string | null
           voice_style?: string | null
         }
         Update: {
@@ -91,9 +95,11 @@ export type Database = {
           hours?: string | null
           id?: string
           menu_or_offerings?: string | null
+          metadata?: Json | null
           name?: string
           seating_areas?: string | null
           twilio_number?: string | null
+          updated_at?: string | null
           voice_style?: string | null
         }
         Relationships: []
