@@ -110,14 +110,15 @@ const AdminLogin = () => {
           <form onSubmit={handleRequestAccess} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Admin Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Abkanyanta@gmail.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+          <input
+            id="email"
+            type="email"
+            placeholder="Abkanyanta@gmail.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+          />
               <p className="text-xs text-muted-foreground">Enter your authorized email to receive an access link</p>
             </div>
             <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
@@ -135,9 +136,9 @@ const AdminLogin = () => {
               <Mail className="h-8 w-8 text-primary" />
             </div>
             <div>
-              <h3 className="font-semibold mb-2">Check Your Email</h3>
+              <h3 className="font-semibold mb-2 text-foreground">Check Your Email</h3>
               <p className="text-sm text-muted-foreground">
-                We've sent an access link to <strong>{email}</strong>
+                We've sent an access link to <strong className="text-foreground">{email}</strong>
               </p>
               <p className="text-xs text-muted-foreground mt-2">
                 The link expires in 15 minutes

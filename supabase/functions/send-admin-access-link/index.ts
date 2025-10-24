@@ -59,9 +59,9 @@ const handler = async (req: Request): Promise<Response> => {
         Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: "Omanut Admin <onboarding@resend.dev>",
+        from: "onboarding@resend.dev",
         to: [email],
-        subject: "Admin Portal Access Link",
+        subject: "Admin Portal Access Link - Omanut",
         html: emailHtml,
       }),
     });
