@@ -17,12 +17,12 @@ const Home = () => {
     {
       icon: Calendar,
       title: "Smart Booking Management",
-      description: "Poolside, VIP, conference halls — your AI handles reservations with local Zambian warmth."
+      description: "Poolside, VIP, conference halls — your AI handles reservations with warmth and professionalism."
     },
     {
       icon: Clock,
       title: "Instant Response",
-      description: "No hold music, no voicemail. Real-time conversations in natural Zambian English."
+      description: "No hold music, no voicemail. Real-time conversations in natural, friendly language."
     },
     {
       icon: Shield,
@@ -69,10 +69,10 @@ const Home = () => {
       <section className="container mx-auto px-6 py-20 text-center">
         <div className="max-w-4xl mx-auto space-y-6">
           <h2 className="text-5xl md:text-6xl font-bold text-gradient leading-tight">
-            Your AI Receptionist for Zambia
+            Your AI Voice Assistant
           </h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            We answer calls in natural Zambian English, take bookings, collect WhatsApp numbers, 
+            We answer calls naturally, take bookings, collect contact details, 
             and keep your schedule full — even while you sleep.
           </p>
           <div className="flex gap-4 justify-center pt-6">
@@ -146,7 +146,7 @@ const Home = () => {
             Ready to Transform Your Business?
           </h3>
           <p className="text-muted-foreground mb-8 text-lg">
-            Join Zambian businesses already using Omanut Assistant to never miss a call.
+            Join businesses already using Omanut Assistant to never miss a call.
           </p>
           <div className="flex gap-4 justify-center">
             <Button size="lg" onClick={() => navigate('/login')} className="bg-gradient-primary">
@@ -162,7 +162,7 @@ const Home = () => {
       {/* Footer */}
       <footer className="border-t border-border/40 py-8">
         <div className="container mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>© 2025 Omanut Technologies. Transforming Zambian businesses with AI.</p>
+          <p>© 2025 Omanut Technologies. Transforming businesses with AI.</p>
         </div>
       </footer>
     </div>

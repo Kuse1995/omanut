@@ -26,7 +26,7 @@ const LiveDemo = () => {
   return (
     <div className="p-8 space-y-8">
       <div>
-        <h1 className="text-3xl font-bold mb-2">AI Front Desk (Zambia Demo)</h1>
+        <h1 className="text-3xl font-bold mb-2">AI Voice Assistant Demo</h1>
         <p className="text-muted-foreground">Test the voice agent right here</p>
       </div>
 

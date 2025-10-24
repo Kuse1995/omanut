@@ -12,6 +12,7 @@ import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
 import AdminLogin from "./pages/admin/AdminLogin";
+import AdminVerify from "./pages/admin/AdminVerify";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import Companies from "./pages/admin/Companies";
 import NotFound from "./pages/NotFound";
@@ -28,7 +29,8 @@ const App = () => (
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/verify" element={<AdminVerify />} />
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/companies" element={<Companies />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/live-demo" element={<LiveDemo />} />

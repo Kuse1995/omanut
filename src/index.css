@@ -114,7 +114,14 @@ All colors MUST be HSL.
 }
 
 .text-gradient {
-  background: linear-gradient(90deg, hsl(84 81% 44%), hsl(166 76% 46%));
+  background: linear-gradient(90deg, hsl(173 77% 35%), hsl(10 40% 45%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.light .text-gradient {
+  background: linear-gradient(90deg, hsl(173 77% 25%), hsl(10 50% 40%));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

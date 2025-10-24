@@ -271,7 +271,7 @@ export class RealtimeChat {
       }
 
       // Build comprehensive instructions
-      let instructions = `You are the receptionist for ${company.name} in Zambia.
+      let instructions = `You are the receptionist for ${company.name}.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
 Business hours: ${company.hours}.
@@ -301,9 +301,9 @@ If still unclear after 2 tries: say 'I'll ask a human to call you back to confir
 
 4. Never invent details. If unsure, ask.
 
-5. Always speak in warm, respectful Zambian English (not American call center style).
+5. Always speak in warm, respectful language (not robotic call center style).
 
-6. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
+6. Use natural phrasing and prices using ${company.currency_prefix}.`;
 
       const sessionUpdate = {
         type: "session.update",
@@ -326,12 +326,12 @@ If still unclear after 2 tries: say 'I'll ask a human to call you back to confir
             {
               type: "function",
               name: "create_reservation",
-              description: "Create a booking for a table / event / poolside area at the lodge in Zambia",
+              description: "Create a booking for a table / event / poolside area at the venue",
               parameters: {
                 type: "object",
                 properties: {
                   name: { type: "string", description: "Customer first name" },
-                  phone: { type: "string", description: "Zambian phone number, include leading 0 e.g. 0977..." },
+                  phone: { type: "string", description: "Phone number with country code or leading 0" },
                   date: { type: "string", description: "YYYY-MM-DD" },
                   time: { type: "string", description: "HH:MM (24h local time)" },
                   guests: { type: "number", description: "How many people" },

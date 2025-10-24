@@ -15,7 +15,7 @@ const Settings = () => {
     id: '',
     name: '',
     business_type: 'restaurant',
-    voice_style: 'Warm, polite Zambian receptionist.',
+    voice_style: 'Warm, polite receptionist.',
     hours: '',
     menu_or_offerings: '',
     branches: '',
@@ -136,7 +136,7 @@ const Settings = () => {
                 disabled={loading}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                e.g., "Warm, polite Zambian receptionist" or "Professional and concise"
+                e.g., "Warm, polite receptionist" or "Professional and concise"
               </p>
             </div>
 
