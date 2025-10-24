@@ -9,7 +9,7 @@ const Sidebar = () => {
   
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-    { name: 'Live Demo', href: '/', icon: Phone },
+    { name: 'Live Demo', href: '/live-demo', icon: Phone },
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
     { name: 'Reservations', href: '/reservations', icon: Calendar },
     { name: 'Company Settings', href: '/settings', icon: Settings },

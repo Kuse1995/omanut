@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -6,13 +7,49 @@ import VoiceInterface from '@/components/VoiceInterface';
 import AudioVisualizer from '@/components/AudioVisualizer';
 
 const LiveDemo = () => {
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [status, setStatus] = useState('Ready');
   const [events, setEvents] = useState<string[]>([]);
 
+  useEffect(() => {
+    const checkAdminAccess = () => {
+      try {
+        const token = localStorage.getItem('admin_access_token');
+        if (!token) {
+          console.log('No admin access token found');
+          navigate('/admin/login');
+          return;
+        }
+
+        const tokenData = JSON.parse(token);
+        const expiresAt = new Date(tokenData.expiresAt);
+        
+        if (expiresAt < new Date()) {
+          console.log('Admin access token expired');
+          localStorage.removeItem('admin_access_token');
+          navigate('/admin/login');
+          return;
+        }
+
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error checking admin access:', error);
+        navigate('/admin/login');
+      }
+    };
+
+    checkAdminAccess();
+  }, [navigate]);
+
   const handleMessage = (event: any) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setEvents(prev => [`[${timestamp}] ${event.type}`, ...prev].slice(0, 50));
+    try {
+      const timestamp = new Date().toLocaleTimeString();
+      setEvents(prev => [`[${timestamp}] ${event.type}`, ...prev].slice(0, 50));
+    } catch (error) {
+      console.error('Error handling message:', error);
+    }
   };
 
   const getStatusVariant = () => {
@@ -22,6 +59,17 @@ const LiveDemo = () => {
     if (status.includes('Bad Network')) return 'destructive';
     return 'secondary';
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
+          <p className="text-muted-foreground">Verifying access...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 space-y-8">
