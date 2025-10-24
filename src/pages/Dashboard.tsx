@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
 import { Phone, MessageSquare, Calendar, TrendingUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     creditBalance: 0,
     todayCalls: 0,
@@ -131,18 +134,36 @@ const Dashboard = () => {
               <CardDescription>Common tasks and shortcuts</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              <a href="/" className="block p-3 rounded-md hover:bg-muted/50 transition-colors">
-                <div className="font-medium text-foreground">Test Voice Agent</div>
-                <div className="text-sm text-muted-foreground">Try the live demo</div>
-              </a>
-              <a href="/settings" className="block p-3 rounded-md hover:bg-muted/50 transition-colors">
-                <div className="font-medium text-foreground">Update Settings</div>
-                <div className="text-sm text-muted-foreground">Configure your AI persona</div>
-              </a>
-              <a href="/billing" className="block p-3 rounded-md hover:bg-muted/50 transition-colors">
-                <div className="font-medium text-foreground">Add Credits</div>
-                <div className="text-sm text-muted-foreground">Top up your balance</div>
-              </a>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/live-demo')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">Test Voice Agent</div>
+                  <div className="text-sm text-muted-foreground">Try the live demo</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/settings')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">Update Settings</div>
+                  <div className="text-sm text-muted-foreground">Configure your AI persona</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/billing')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">Add Credits</div>
+                  <div className="text-sm text-muted-foreground">Top up your balance</div>
+                </div>
+              </Button>
             </CardContent>
           </Card>
 

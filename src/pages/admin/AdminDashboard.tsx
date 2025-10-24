@@ -22,19 +22,21 @@ const AdminDashboard = () => {
   }, []);
 
   const checkAdminAccess = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    // Check for direct access token (no Supabase auth needed)
+    const token = localStorage.getItem('admin_access_token');
+    const expiry = localStorage.getItem('admin_token_expiry');
+    
+    if (!token || !expiry) {
       navigate('/admin/login');
       return;
     }
 
-    const { data: isAdmin } = await supabase.rpc('has_role', {
-      _user_id: session.user.id,
-      _role: 'admin'
-    });
-
-    if (!isAdmin) {
-      navigate('/');
+    const expiryDate = new Date(expiry);
+    if (expiryDate < new Date()) {
+      // Token expired
+      localStorage.removeItem('admin_access_token');
+      localStorage.removeItem('admin_token_expiry');
+      navigate('/admin/login');
     }
   };
 
