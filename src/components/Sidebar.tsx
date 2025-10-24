@@ -18,10 +18,10 @@ const Sidebar = () => {
   return (
     <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col">
       <div className="p-6 flex items-center gap-3">
-        <img src={omanutLogo} alt="Omanut" className="w-12 h-12 object-contain" />
+        <img src={omanutLogo} alt="Omanut Assistant" className="w-12 h-12 object-contain" />
         <div>
-          <h1 className="text-xl font-bold text-foreground">Omanut</h1>
-          <p className="text-xs text-muted-foreground">AI Receptionist</p>
+          <h1 className="text-xl font-bold text-foreground">Omanut Assistant</h1>
+          <p className="text-xs text-muted-foreground">Powered by Omanut Technologies</p>
         </div>
       </div>
       

@@ -10,6 +10,7 @@ const Dashboard = () => {
     activeConversations: 0,
     totalReservations: 0
   });
+  const [company, setCompany] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,11 +20,13 @@ const Dashboard = () => {
   const fetchStats = async () => {
     try {
       // Get first company (in production, filter by user's company_id)
-      const { data: company } = await supabase
+      const { data: companyData } = await supabase
         .from('companies')
         .select('*')
         .limit(1)
         .single();
+
+      setCompany(companyData);
 
       const today = new Date().toISOString().split('T')[0];
 
@@ -31,24 +34,24 @@ const Dashboard = () => {
       const { count: todayCount } = await supabase
         .from('conversations')
         .select('*', { count: 'exact', head: true })
-        .eq('company_id', company?.id)
+        .eq('company_id', companyData?.id)
         .gte('started_at', today);
 
       // Get active conversations
       const { count: activeCount } = await supabase
         .from('conversations')
         .select('*', { count: 'exact', head: true })
-        .eq('company_id', company?.id)
+        .eq('company_id', companyData?.id)
         .eq('status', 'active');
 
       // Get total reservations
       const { count: reservationCount } = await supabase
         .from('reservations')
         .select('*', { count: 'exact', head: true })
-        .eq('company_id', company?.id);
+        .eq('company_id', companyData?.id);
 
       setStats({
-        creditBalance: company?.credit_balance || 0,
+        creditBalance: companyData?.credit_balance || 0,
         todayCalls: todayCount || 0,
         activeConversations: activeCount || 0,
         totalReservations: reservationCount || 0
@@ -95,8 +98,13 @@ const Dashboard = () => {
     <div className="min-h-screen bg-app p-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gradient mb-2">Dashboard</h1>
+          <h1 className="text-4xl font-bold text-gradient mb-2">{company?.name || 'Dashboard'}</h1>
           <p className="text-muted-foreground">Monitor your AI receptionist performance</p>
+          {company?.credit_balance < 50 && (
+            <div className="mt-4 p-4 bg-destructive/10 border border-destructive rounded-lg text-destructive">
+              ⚠️ Your receptionist may pause soon. Please top up credits. Current balance: {company.credit_balance}
+            </div>
+          )}
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

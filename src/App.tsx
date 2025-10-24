@@ -27,15 +27,15 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/companies" element={<Companies />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/live-demo" element={<LiveDemo />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/reservations" element={<Reservations />} />
-          <Route path="/settings" element={<Settings />} />
           <Route path="/billing" element={<Billing />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/dashboard" element={<AdminDashboard />} />
-          <Route path="/admin/companies" element={<Companies />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

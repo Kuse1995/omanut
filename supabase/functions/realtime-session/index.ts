@@ -30,37 +30,57 @@ serve(async (req) => {
       .limit(1)
       .single();
 
+    // Check credit balance FIRST
+    if (company.credit_balance <= 0) {
+      return new Response(JSON.stringify({ 
+        error: 'Service paused. Please top up credits.' 
+      }), {
+        status: 402,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Fetch AI overrides for this company
     const { data: aiOverrides } = await supabase
       .from('company_ai_overrides')
       .select('*')
-      .eq('company_id', company?.id)
+      .eq('company_id', company.id)
       .single();
 
-    let instructions = company
-      ? `You are the receptionist for ${company.name} in Zambia. Business type: ${company.business_type}. ${company.voice_style} Hours: ${company.hours}. Offerings: ${company.menu_or_offerings}. Branches: ${company.branches}. Seating areas: ${company.seating_areas}. Use ${company.currency_prefix} for prices. Say prices like '${company.currency_prefix}180', never in dollars.
+    // Build comprehensive instructions
+    let instructions = `You are the receptionist for ${company.name} in Zambia.
+Business type: ${company.business_type}.
+Voice style: ${company.voice_style}.
+Business hours: ${company.hours}.
+Locations / branches: ${company.branches}.
+Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
+Currency: always use ${company.currency_prefix} (Kwacha).
+Your job is to answer calls, help politely, and create/record bookings or appointments.
 
-CRITICAL ACCURACY RULES:
-1. ALWAYS ask for the caller's phone number FIRST. Then repeat it back in pairs, e.g. "0977 12 34 56, correct?" Wait for confirmation.
-2. BEFORE calling create_reservation, you MUST confirm ALL details: "Just to confirm: You are [NAME], phone number [PHONE], booking for [GUESTS] people on [DATE] at [TIME] in [AREA/BRANCH], correct?" Only proceed after they say "yes".
-3. If the line is noisy or unclear, NEVER guess. Say: "I'm sorry, the line is not clear. Can you please repeat that slowly for me?" After 2 failed attempts, say: "I'll ask a human to call you back to confirm. Thank you." and end the booking attempt.
-4. NEVER invent details. If you don't know something, ask the caller.
-5. If they don't have email, say 'No problem, we can still keep your booking.'
-6. Be friendly, warm, and local — not American call center tone.`
-      : 'You are a helpful receptionist at a Zambian business. Always collect phone number first and use Kwacha for prices.';
-    
-    // Append AI overrides if they exist
-    if (aiOverrides) {
-      if (aiOverrides.system_instructions) {
-        instructions += `\n\nADDITIONAL INSTRUCTIONS: ${aiOverrides.system_instructions}`;
-      }
-      if (aiOverrides.qa_style) {
-        instructions += `\n\nQA STYLE: ${aiOverrides.qa_style}`;
-      }
-      if (aiOverrides.banned_topics) {
-        instructions += `\n\nBANNED TOPICS: ${aiOverrides.banned_topics}`;
-      }
-    }
+${aiOverrides?.system_instructions || ''}
+
+Answer style:
+${aiOverrides?.qa_style || ''}
+
+Do NOT talk about:
+${aiOverrides?.banned_topics || ''}
+
+Critical rules:
+
+1. Always ask for the caller's phone number FIRST and repeat it back in pairs, like '0977 12 34 56, correct?'.
+
+2. Before you create any reservation or appointment, ALWAYS repeat back all details and ask for confirmation:
+'Just to confirm: You are [NAME], phone number [PHONE], booking for [GUESTS] people on [DATE] at [TIME] in [AREA or BRANCH], correct?'
+Only call create_reservation after they clearly confirm yes.
+
+3. If the line is noisy or unclear: say 'I'm sorry, the line is not clear. Can you please repeat that slowly for me?'
+If still unclear after 2 tries: say 'I'll ask a human to call you back to confirm. Thank you.' and DO NOT guess details.
+
+4. Never invent details. If unsure, ask.
+
+5. Always speak in warm, respectful Zambian English (not American call center style).
+
+6. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
     // Request an ephemeral token from OpenAI
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
