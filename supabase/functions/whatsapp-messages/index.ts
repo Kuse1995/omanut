@@ -182,49 +182,51 @@ Critical rules:
         tools: [
           {
             type: "function",
-            name: "create_reservation",
-            description: "Create a booking ONLY after confirming all details with the customer. Never assume or invent information.",
-            parameters: {
-              type: "object",
-              properties: {
-                name: { 
-                  type: "string", 
-                  description: "Customer's actual full name as they provided it. Do not use placeholders." 
+            function: {
+              name: "create_reservation",
+              description: "Create a booking ONLY after confirming all details with the customer. Never assume or invent information.",
+              parameters: {
+                type: "object",
+                properties: {
+                  name: { 
+                    type: "string", 
+                    description: "Customer's actual full name as they provided it. Do not use placeholders." 
+                  },
+                  phone: { 
+                    type: "string", 
+                    description: "Customer's actual phone number exactly as spoken. Include country code or leading 0. Repeat back to confirm." 
+                  },
+                  date: { 
+                    type: "string", 
+                    description: "Exact date requested by customer in YYYY-MM-DD format" 
+                  },
+                  time: { 
+                    type: "string", 
+                    description: "Exact time requested by customer in HH:MM 24-hour format" 
+                  },
+                  guests: { 
+                    type: "number", 
+                    description: "Exact number of guests the customer specified" 
+                  },
+                  occasion: { 
+                    type: "string", 
+                    description: "The specific occasion or reason for booking as stated by customer. Ask if not mentioned." 
+                  },
+                  area_preference: { 
+                    type: "string", 
+                    description: "REQUIRED: The specific area or seating preference the customer wants. Ask if not mentioned." 
+                  },
+                  branch: { 
+                    type: "string", 
+                    description: "REQUIRED: Which specific branch or location the customer wants to book at. Ask if not mentioned." 
+                  },
+                  email: { 
+                    type: "string", 
+                    description: "Customer's email address ONLY if they volunteer it." 
+                  }
                 },
-                phone: { 
-                  type: "string", 
-                  description: "Customer's actual phone number exactly as spoken. Include country code or leading 0. Repeat back to confirm." 
-                },
-                date: { 
-                  type: "string", 
-                  description: "Exact date requested by customer in YYYY-MM-DD format" 
-                },
-                time: { 
-                  type: "string", 
-                  description: "Exact time requested by customer in HH:MM 24-hour format" 
-                },
-                guests: { 
-                  type: "number", 
-                  description: "Exact number of guests the customer specified" 
-                },
-                occasion: { 
-                  type: "string", 
-                  description: "The specific occasion or reason for booking as stated by customer. Ask if not mentioned." 
-                },
-                area_preference: { 
-                  type: "string", 
-                  description: "REQUIRED: The specific area or seating preference the customer wants. Ask if not mentioned." 
-                },
-                branch: { 
-                  type: "string", 
-                  description: "REQUIRED: Which specific branch or location the customer wants to book at. Ask if not mentioned." 
-                },
-                email: { 
-                  type: "string", 
-                  description: "Customer's email address ONLY if they volunteer it." 
-                }
-              },
-              required: ["name", "phone", "date", "time", "guests", "area_preference", "branch"]
+                required: ["name", "phone", "date", "time", "guests", "area_preference", "branch"]
+              }
             }
           }
         ],
