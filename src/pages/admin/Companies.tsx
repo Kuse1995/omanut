@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import Sidebar from "@/components/Sidebar";
-import { Edit, Phone, Plus, Mail, User } from "lucide-react";
+import { Edit, Phone, Plus, Mail, User, Trash2, MessageSquare } from "lucide-react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
 interface CompanyWithUser {
@@ -83,6 +84,31 @@ const Companies = () => {
     }
   };
 
+  const handleDeleteCompany = async (companyId: string, companyName: string) => {
+    try {
+      const { data, error } = await supabase.rpc('delete_company', {
+        p_company_id: companyId
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `${companyName} and all related data deleted successfully`,
+      });
+
+      // Reload companies list
+      loadCompanies();
+    } catch (error: any) {
+      console.error('Error deleting company:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete company",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex min-h-screen w-full bg-app">
       <Sidebar />
@@ -91,7 +117,9 @@ const Companies = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gradient">Companies</h1>
-              <p className="text-muted-foreground">Manage all client companies</p>
+              <p className="text-muted-foreground">
+                Managing {companies.length} {companies.length === 1 ? 'company' : 'companies'} • Each company has its own isolated data and settings
+              </p>
             </div>
             <Button onClick={() => navigate('/admin/companies/new')}>
               <Plus className="h-4 w-4 mr-2" />
@@ -106,7 +134,8 @@ const Companies = () => {
                   <TableHead>Company Name</TableHead>
                   <TableHead>Business Type</TableHead>
                   <TableHead>Login Credentials</TableHead>
-                  <TableHead>Twilio Number</TableHead>
+                  <TableHead>Voice Number</TableHead>
+                  <TableHead>WhatsApp</TableHead>
                   <TableHead>Credits</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
@@ -115,12 +144,12 @@ const Companies = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center">Loading...</TableCell>
+                    <TableCell colSpan={8} className="text-center">Loading...</TableCell>
                   </TableRow>
                 ) : companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground">
-                      No companies found
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                      No companies found. Create your first company to get started.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -147,12 +176,25 @@ const Companies = () => {
                       </TableCell>
                       <TableCell>
                         {company.twilio_number ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 text-sm">
                             <Phone className="h-3 w-3" />
-                            {company.twilio_number}
+                            <span>{company.twilio_number}</span>
                           </div>
                         ) : (
-                          <span className="text-muted-foreground">Not set</span>
+                          <span className="text-muted-foreground text-sm">Not set</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {company.whatsapp_number ? (
+                          <div className="flex items-center gap-1 text-sm">
+                            <MessageSquare className="h-3 w-3 text-green-500" />
+                            <span>{company.whatsapp_number}</span>
+                            {company.whatsapp_voice_enabled && (
+                              <Badge variant="secondary" className="ml-1 text-xs">Voice</Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">Not set</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -166,13 +208,46 @@ const Companies = () => {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => navigate(`/admin/company/${company.id}`)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => navigate(`/admin/company/${company.id}`)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete {company.name}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete the company and ALL related data including:
+                                  <ul className="list-disc list-inside mt-2 space-y-1">
+                                    <li>{users.length} user account{users.length !== 1 ? 's' : ''}</li>
+                                    <li>All conversations and transcripts</li>
+                                    <li>All reservations</li>
+                                    <li>All credit usage history</li>
+                                  </ul>
+                                  <p className="mt-2 font-semibold text-destructive">This action cannot be undone.</p>
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleDeleteCompany(company.id, company.name)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete Company
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))

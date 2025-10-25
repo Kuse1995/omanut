@@ -36,11 +36,20 @@ serve(async (req) => {
       .from('companies')
       .select('*, metadata')
       .eq('whatsapp_number', To)
-      .single();
+      .maybeSingle();
 
-    if (companyError || !company) {
+    if (companyError) {
+      console.error('Database error looking up company:', companyError);
+      return new Response(sendWhatsAppMessage(To, From, "Our service is temporarily unavailable. Please try again later."), {
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+      });
+    }
+
+    if (!company) {
       console.error('Company not found for WhatsApp number:', To);
-      return new Response('Company not configured', { status: 404, headers: corsHeaders });
+      return new Response(sendWhatsAppMessage(To, From, "This WhatsApp number is not configured. Please contact support."), {
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+      });
     }
 
     // Check credit balance
