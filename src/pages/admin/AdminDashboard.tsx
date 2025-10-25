@@ -18,26 +18,30 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     checkAdminAccess();
-    loadStats();
   }, []);
 
   const checkAdminAccess = async () => {
-    // Check for direct access token (no Supabase auth needed)
-    const token = localStorage.getItem('admin_access_token');
-    const expiry = localStorage.getItem('admin_token_expiry');
+    const { data: { session } } = await supabase.auth.getSession();
     
-    if (!token || !expiry) {
+    if (!session) {
       navigate('/admin/login');
       return;
     }
 
-    const expiryDate = new Date(expiry);
-    if (expiryDate < new Date()) {
-      // Token expired
-      localStorage.removeItem('admin_access_token');
-      localStorage.removeItem('admin_token_expiry');
+    // Verify admin role
+    const { data: isAdmin } = await supabase.rpc('has_role', {
+      _user_id: session.user.id,
+      _role: 'admin'
+    });
+
+    if (!isAdmin) {
+      await supabase.auth.signOut();
       navigate('/admin/login');
+      return;
     }
+
+    // User is authenticated and has admin role, load stats
+    loadStats();
   };
 
   const loadStats = async () => {
