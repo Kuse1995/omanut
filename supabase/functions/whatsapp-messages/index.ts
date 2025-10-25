@@ -64,6 +64,9 @@ serve(async (req) => {
       });
     }
 
+    // Extract phone number from WhatsApp format (remove "whatsapp:" prefix)
+    const customerPhone = From.replace('whatsapp:', '');
+    
     // Find or create active conversation
     let { data: conversation, error: convError } = await supabase
       .from('conversations')
@@ -82,7 +85,7 @@ serve(async (req) => {
           company_id: company.id,
           phone: From,
           status: 'active',
-          transcript: ''
+          transcript: `CUSTOMER PHONE: ${customerPhone}\n`
         })
         .select()
         .single();
@@ -123,6 +126,9 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer messages, help politely, and create/record bookings or appointments.
+
+IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.
+
 ${dynamicInfo}
 
 ${aiOverrides?.system_instructions || ''}
@@ -135,29 +141,32 @@ ${aiOverrides?.banned_topics || ''}
 
 Critical rules:
 
-1. LISTEN CAREFULLY: Always capture the EXACT information the customer provides. Never use placeholder values or make assumptions.
+1. CUSTOMER PHONE: ${customerPhone} - You ALREADY HAVE this. Never ask for it again.
 
-2. Always ask for the caller's phone number FIRST and repeat it back in pairs, like '0977 12 34 56, correct?'.
+2. When taking a booking, you only need to ask for:
+   - Their NAME (ask once: "May I have your name please?")
+   - DATE and TIME of booking
+   - NUMBER OF GUESTS
+   - WHICH BRANCH (if multiple locations)
+   - SEATING PREFERENCE (if applicable)
+   
+3. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
 
-3. ASK FOR REQUIRED DETAILS: If the customer doesn't mention which branch, area, or other required details, ASK them specifically:
-   - "Which of our branches would you like to book at?"
-   - "Would you prefer poolside, outdoor, or our main dining area?"
+4. Before creating a reservation, confirm ALL details ONCE:
+   "Perfect! Let me confirm: [NAME], ${customerPhone}, [GUESTS] guests on [DATE] at [TIME] at our [BRANCH], [AREA]. Is that correct?"
+   Only call create_reservation after they confirm.
 
-4. Before you create any reservation or appointment, ALWAYS repeat back ALL details and ask for confirmation:
-   'Just to confirm: You are [EXACT NAME GIVEN], phone number [EXACT PHONE GIVEN], booking for [EXACT NUMBER] guests on [DATE] at [TIME] at our [EXACT BRANCH] in the [EXACT AREA], correct?'
-   Only proceed to book after they clearly confirm yes.
+5. Track what information you already have. Look at the conversation history to see what they've told you.
 
-5. If information is unclear, ask them to clarify. Do NOT guess details.
+6. Be concise and natural. Don't sound like a robot repeating questions.
 
-6. NEVER invent, assume, or use default values. If unsure, ask.
-
-7. Always speak in warm, respectful Zambian English (not American call center style).
+7. Always speak in warm, respectful Zambian English.
 
 8. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
-    // Build conversation history (last 10 exchanges)
+    // Build conversation history - keep full context to avoid repetition
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
-    const recentHistory = transcriptLines.slice(-20).join('\n');
+    const recentHistory = transcriptLines.join('\n');
 
     const messages = [
       { role: 'system', content: instructions }
@@ -250,6 +259,9 @@ Critical rules:
         if (toolCall.function.name === 'create_reservation') {
           const args = JSON.parse(toolCall.function.arguments);
           
+          // Use WhatsApp phone number if not provided in args
+          const reservationPhone = args.phone || customerPhone;
+          
           // Insert reservation
           const { error: resError } = await supabase
             .from('reservations')
@@ -257,7 +269,7 @@ Critical rules:
               company_id: company.id,
               conversation_id: conversation.id,
               name: args.name,
-              phone: args.phone,
+              phone: reservationPhone,
               email: args.email || null,
               date: args.date,
               time: args.time,
@@ -272,8 +284,34 @@ Critical rules:
             console.error('Error creating reservation:', resError);
             assistantReply += "\n\nI encountered an error saving your reservation. Please contact us directly.";
           } else {
+            // Update conversation with customer name
+            await supabase
+              .from('conversations')
+              .update({ customer_name: args.name })
+              .eq('id', conversation.id);
+              
             assistantReply += "\n\nYour reservation has been confirmed! We look forward to serving you.";
           }
+        }
+      }
+    }
+
+    // Extract customer name if they introduce themselves
+    let customerName = conversation.customer_name;
+    if (!customerName && Body) {
+      const namePatterns = [
+        /(?:my name is|i am|i'm|this is)\s+([a-z]+(?:\s+[a-z]+)?)/i,
+        /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$/
+      ];
+      for (const pattern of namePatterns) {
+        const match = Body.match(pattern);
+        if (match && match[1] && match[1].length > 2) {
+          customerName = match[1];
+          await supabase
+            .from('conversations')
+            .update({ customer_name: customerName })
+            .eq('id', conversation.id);
+          break;
         }
       }
     }

@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import Sidebar from "@/components/Sidebar";
 import { Edit, Phone, Plus, Mail, User, Trash2, MessageSquare } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -109,6 +110,31 @@ const Companies = () => {
     }
   };
 
+  const handleToggleWhatsAppVoice = async (companyId: string, currentValue: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({ whatsapp_voice_enabled: !currentValue })
+        .eq('id', companyId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `WhatsApp voice ${!currentValue ? 'enabled' : 'disabled'} successfully`,
+      });
+
+      loadCompanies();
+    } catch (error: any) {
+      console.error('Error toggling WhatsApp voice:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to toggle WhatsApp voice",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="flex min-h-screen w-full bg-app">
       <Sidebar />
@@ -136,6 +162,7 @@ const Companies = () => {
                   <TableHead>Login Credentials</TableHead>
                   <TableHead>Voice Number</TableHead>
                   <TableHead>WhatsApp</TableHead>
+                  <TableHead>WhatsApp Voice AI</TableHead>
                   <TableHead>Credits</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
@@ -143,12 +170,12 @@ const Companies = () => {
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center">Loading...</TableCell>
+                <TableRow>
+                    <TableCell colSpan={9} className="text-center">Loading...</TableCell>
                   </TableRow>
                 ) : companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">"
                       No companies found. Create your first company to get started.
                     </TableCell>
                   </TableRow>
@@ -189,13 +216,27 @@ const Companies = () => {
                           <div className="flex items-center gap-1 text-sm">
                             <MessageSquare className="h-3 w-3 text-green-500" />
                             <span>{company.whatsapp_number}</span>
-                            {company.whatsapp_voice_enabled && (
-                              <Badge variant="secondary" className="ml-1 text-xs">Voice</Badge>
-                            )}
                           </div>
                         ) : (
                           <span className="text-muted-foreground text-sm">Not set</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Switch
+                            checked={company.whatsapp_voice_enabled || false}
+                            onCheckedChange={() => handleToggleWhatsAppVoice(company.id, company.whatsapp_voice_enabled)}
+                            disabled={!company.whatsapp_number}
+                          />
+                          {company.whatsapp_voice_enabled ? (
+                            <Badge variant="default" className="text-xs">
+                              <Phone className="h-3 w-3 mr-1" />
+                              Active
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Off</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={company.credit_balance > 50 ? "default" : "destructive"}>
