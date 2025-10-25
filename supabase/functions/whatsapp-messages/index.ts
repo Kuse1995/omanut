@@ -112,6 +112,25 @@ serve(async (req) => {
       .eq('company_id', company.id)
       .single();
 
+    // Get company documents for knowledge base
+    const { data: documents } = await supabase
+      .from('company_documents')
+      .select('filename, parsed_content')
+      .eq('company_id', company.id)
+      .not('parsed_content', 'is', null);
+
+    // Build knowledge base from documents
+    let knowledgeBase = '';
+    if (documents && documents.length > 0) {
+      knowledgeBase = '\n\n📚 COMPANY KNOWLEDGE BASE (Use this to answer customer questions):\n';
+      documents.forEach(doc => {
+        if (doc.parsed_content) {
+          knowledgeBase += `\n--- ${doc.filename} ---\n${doc.parsed_content}\n`;
+        }
+      });
+      knowledgeBase += '\nWhen customers ask questions, check this knowledge base FIRST for accurate information.\n';
+    }
+
     // Build comprehensive instructions
     let dynamicInfo = '';
     if (company.metadata && Object.keys(company.metadata).length > 0) {
@@ -126,7 +145,7 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer messages, help politely, and create/record bookings or appointments.
-
+${knowledgeBase}
 IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.
 
 ${dynamicInfo}
@@ -143,26 +162,28 @@ Critical rules:
 
 1. CUSTOMER PHONE: ${customerPhone} - You ALREADY HAVE this. Never ask for it again.
 
-2. When taking a booking, you only need to ask for:
+2. When answering questions, ALWAYS check the Company Knowledge Base first for accurate information.
+
+3. When taking a booking, you only need to ask for:
    - Their NAME (ask once: "May I have your name please?")
    - DATE and TIME of booking
    - NUMBER OF GUESTS
    - WHICH BRANCH (if multiple locations)
    - SEATING PREFERENCE (if applicable)
    
-3. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
+4. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
 
-4. Before creating a reservation, confirm ALL details ONCE:
+5. Before creating a reservation, confirm ALL details ONCE:
    "Perfect! Let me confirm: [NAME], ${customerPhone}, [GUESTS] guests on [DATE] at [TIME] at our [BRANCH], [AREA]. Is that correct?"
    Only call create_reservation after they confirm.
 
-5. Track what information you already have. Look at the conversation history to see what they've told you.
+6. Track what information you already have. Look at the conversation history to see what they've told you.
 
-6. Be concise and natural. Don't sound like a robot repeating questions.
+7. Be concise and natural. Don't sound like a robot repeating questions.
 
-7. Always speak in warm, respectful Zambian English.
+8. Always speak in warm, respectful Zambian English.
 
-8. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
+9. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
     // Build conversation history - keep full context to avoid repetition
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());

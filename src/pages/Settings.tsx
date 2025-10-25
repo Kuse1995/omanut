@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import BackButton from '@/components/BackButton';
+import { CompanyDocuments } from '@/components/CompanyDocuments';
 
 const Settings = () => {
   const { toast } = useToast();
@@ -255,6 +256,12 @@ const Settings = () => {
             </Button>
           </CardContent>
         </Card>
+
+        {config.id && (
+          <div className="mt-6">
+            <CompanyDocuments companyId={config.id} />
+          </div>
+        )}
       </div>
     </div>
   );
