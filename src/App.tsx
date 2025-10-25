@@ -31,7 +31,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/login" element={<RequestAccess />} />
           <Route path="/admin/request-access" element={<RequestAccess />} />
           <Route path="/admin/verify" element={<AdminVerify />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />

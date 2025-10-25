@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 const RequestAccess = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("abkanyanta@gmail.com");
+  const email = "abkanyanta@gmail.com";
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -19,12 +19,10 @@ const RequestAccess = () => {
     setLoading(true);
 
     try {
-      const redirectUrl = `${window.location.origin}/admin/dashboard`;
-      
       const { error } = await supabase.auth.signInWithOtp({
         email: email,
         options: {
-          emailRedirectTo: redirectUrl,
+          emailRedirectTo: `${window.location.origin}/admin/dashboard`,
         },
       });
 
@@ -32,14 +30,14 @@ const RequestAccess = () => {
 
       setSent(true);
       toast({
-        title: "Magic link sent!",
-        description: "Check your email for the login link",
+        title: "Log in link sent!",
+        description: "Check your email for the log in link",
       });
     } catch (error) {
-      console.error("Error sending magic link:", error);
+      console.error("Error sending log in link:", error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to send magic link",
+        description: error instanceof Error ? error.message : "Failed to send log in link",
         variant: "destructive",
       });
     } finally {
@@ -54,7 +52,7 @@ const RequestAccess = () => {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate('/admin/login')}
+            onClick={() => navigate('/')}
             className="absolute top-4 left-4"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -65,12 +63,12 @@ const RequestAccess = () => {
             </div>
           </div>
           <CardTitle className="text-center text-gradient">
-            Request Admin Access
+            Admin Access
           </CardTitle>
           <CardDescription className="text-center">
             {sent
-              ? "Check your email for the magic link"
-              : "Enter your admin email to receive a login link"}
+              ? "Check your email for the log in link"
+              : "Request a secure log in link"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -79,10 +77,8 @@ const RequestAccess = () => {
               <div className="space-y-2">
                 <Input
                   type="email"
-                  placeholder="admin@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
+                  disabled
                   className="bg-background/50"
                 />
               </div>
@@ -91,14 +87,14 @@ const RequestAccess = () => {
                 disabled={loading}
                 className="w-full bg-gradient-to-r from-primary to-accent"
               >
-                {loading ? "Sending..." : "Send Magic Link"}
+                {loading ? "Sending..." : "Send Log In Link"}
               </Button>
             </form>
           ) : (
             <div className="space-y-4 text-center">
               <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20">
                 <p className="text-sm text-muted-foreground">
-                  A magic link has been sent to <strong>{email}</strong>
+                  A log in link has been sent to <strong>{email}</strong>
                 </p>
                 <p className="text-xs text-muted-foreground mt-2">
                   Click the link in your email to access the admin dashboard
@@ -109,7 +105,7 @@ const RequestAccess = () => {
                 onClick={() => setSent(false)}
                 className="w-full"
               >
-                Send Another Link
+                Resend Log In Link
               </Button>
             </div>
           )}
