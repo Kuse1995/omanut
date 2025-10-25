@@ -142,7 +142,17 @@ const AdminLogin = () => {
           </Button>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-4 text-center">
+          <Button 
+            variant="ghost" 
+            onClick={() => navigate('/admin/request-access')}
+            className="text-sm"
+          >
+            Don't have a password? Request magic link
+          </Button>
+        </div>
+
+        <div className="mt-2 text-center">
           <Button variant="link" onClick={() => navigate('/')}>
             ← Back to Home
           </Button>
