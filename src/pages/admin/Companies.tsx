@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import Sidebar from "@/components/Sidebar";
-import { Edit, Phone, Plus, Mail, User, Trash2, MessageSquare } from "lucide-react";
+import CompanyForm from "@/components/CompanyForm";
+import { CompanyDocuments } from "@/components/CompanyDocuments";
+import { Settings, Phone, Plus, Mail, User, Trash2, MessageSquare } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,6 +24,8 @@ const Companies = () => {
   const { toast } = useToast();
   const [companies, setCompanies] = useState<CompanyWithUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAdminAccess();
@@ -135,6 +140,17 @@ const Companies = () => {
     }
   };
 
+  const handleOpenSettings = (companyId: string) => {
+    setSelectedCompanyId(companyId);
+    setSettingsOpen(true);
+  };
+
+  const handleCloseSettings = () => {
+    setSettingsOpen(false);
+    setSelectedCompanyId(null);
+    loadCompanies();
+  };
+
   return (
     <div className="flex min-h-screen w-full bg-app">
       <Sidebar />
@@ -165,9 +181,9 @@ const Companies = () => {
                   <TableHead>WhatsApp Voice AI</TableHead>
                   <TableHead>Credits</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
               <TableBody>
                 {loading ? (
                 <TableRow>
@@ -249,13 +265,13 @@ const Companies = () => {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center justify-end gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => navigate(`/admin/company/${company.id}`)}
+                            onClick={() => handleOpenSettings(company.id)}
                           >
-                            <Edit className="h-4 w-4" />
+                            <Settings className="h-4 w-4" />
                           </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
@@ -298,6 +314,28 @@ const Companies = () => {
           </Card>
         </div>
       </main>
+
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Company Settings</SheetTitle>
+          </SheetHeader>
+          <div className="mt-6 space-y-6">
+            {selectedCompanyId && (
+              <>
+                <CompanyForm 
+                  companyId={selectedCompanyId}
+                  onSuccess={handleCloseSettings}
+                  onCancel={handleCloseSettings}
+                />
+                <div className="border-t pt-6">
+                  <CompanyDocuments companyId={selectedCompanyId} />
+                </div>
+              </>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };
