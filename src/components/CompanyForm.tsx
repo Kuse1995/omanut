@@ -16,6 +16,106 @@ interface CompanyFormProps {
   onCancel?: () => void;
 }
 
+// Industry-specific configurations
+const industryConfig = {
+  restaurant: {
+    voice_style: "Warm, polite receptionist. Friendly and helpful with menu recommendations.",
+    hours: "Mon-Sun 10:00 – 23:00",
+    menu_or_offerings: "Grilled fish, steaks, pasta, salads, desserts",
+    seating_areas: "outdoor,indoor,bar,VIP",
+    areas_label: "Seating Areas",
+    offerings_label: "Menu",
+  },
+  lodge: {
+    voice_style: "Warm, professional lodge receptionist. Welcoming and knowledgeable about amenities.",
+    hours: "24/7 Front Desk",
+    menu_or_offerings: "Accommodation, restaurant, safari tours, spa services",
+    seating_areas: "poolside,garden,restaurant,lounge",
+    areas_label: "Dining Areas",
+    offerings_label: "Services & Amenities",
+  },
+  hotel: {
+    voice_style: "Professional, courteous hotel receptionist. Efficient and helpful.",
+    hours: "24/7 Front Desk",
+    menu_or_offerings: "Room service, restaurant, conference facilities, gym, spa",
+    seating_areas: "restaurant,bar,poolside,lounge",
+    areas_label: "Dining Areas",
+    offerings_label: "Hotel Services",
+  },
+  salon: {
+    voice_style: "Friendly, professional salon receptionist. Knowledgeable about beauty services.",
+    hours: "Mon-Sat 09:00 – 19:00",
+    menu_or_offerings: "Haircuts, coloring, styling, manicures, pedicures, facials",
+    seating_areas: "waiting area,VIP room",
+    areas_label: "Service Areas",
+    offerings_label: "Services",
+  },
+  spa: {
+    voice_style: "Calm, soothing spa receptionist. Promotes relaxation and wellness.",
+    hours: "Mon-Sun 09:00 – 21:00",
+    menu_or_offerings: "Massages, facials, body treatments, aromatherapy, sauna",
+    seating_areas: "relaxation lounge,VIP suite,outdoor area",
+    areas_label: "Treatment Areas",
+    offerings_label: "Treatments & Services",
+  },
+  gym: {
+    voice_style: "Energetic, motivating gym receptionist. Encouraging and supportive.",
+    hours: "Mon-Sun 05:00 – 22:00",
+    menu_or_offerings: "Personal training, group classes, cardio equipment, weights",
+    seating_areas: "main floor,studio,outdoor area",
+    areas_label: "Training Areas",
+    offerings_label: "Services & Facilities",
+  },
+  clinic: {
+    voice_style: "Professional, empathetic clinic receptionist. Calm and reassuring.",
+    hours: "Mon-Fri 08:00 – 17:00, Sat 09:00 – 13:00",
+    menu_or_offerings: "General consultation, specialist appointments, laboratory services",
+    seating_areas: "general,priority,pediatrics",
+    areas_label: "Waiting Areas",
+    offerings_label: "Medical Services",
+  },
+  school: {
+    voice_style: "Friendly, organized school receptionist. Helpful with inquiries and directions.",
+    hours: "Mon-Fri 07:30 – 16:00",
+    menu_or_offerings: "Primary education, secondary education, extracurricular activities",
+    seating_areas: "reception,visitors area",
+    areas_label: "Reception Areas",
+    offerings_label: "Programs & Services",
+  },
+  library: {
+    voice_style: "Quiet, helpful library receptionist. Knowledgeable about resources.",
+    hours: "Mon-Sat 08:00 – 20:00",
+    menu_or_offerings: "Book lending, study rooms, computer access, research assistance",
+    seating_areas: "reading room,study area,children section",
+    areas_label: "Library Sections",
+    offerings_label: "Services",
+  },
+  barbershop: {
+    voice_style: "Friendly, casual barbershop receptionist. Easy-going and welcoming.",
+    hours: "Mon-Sat 09:00 – 19:00",
+    menu_or_offerings: "Haircuts, shaves, beard trimming, hair treatments",
+    seating_areas: "waiting area,VIP chair",
+    areas_label: "Service Areas",
+    offerings_label: "Services",
+  },
+  cafe: {
+    voice_style: "Warm, friendly cafe receptionist. Knowledgeable about menu items.",
+    hours: "Mon-Sun 07:00 – 19:00",
+    menu_or_offerings: "Coffee, tea, pastries, sandwiches, light meals",
+    seating_areas: "indoor,outdoor,counter",
+    areas_label: "Seating Areas",
+    offerings_label: "Menu",
+  },
+  other: {
+    voice_style: "Professional, courteous receptionist. Helpful and informative.",
+    hours: "Mon-Fri 09:00 – 17:00",
+    menu_or_offerings: "Services and offerings",
+    seating_areas: "main area,waiting area",
+    areas_label: "Areas",
+    offerings_label: "Services",
+  },
+};
+
 const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -23,11 +123,11 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [formData, setFormData] = useState({
     name: "",
     business_type: "restaurant",
-    voice_style: "Warm, polite Zambian receptionist.",
-    hours: "Mon-Sun 10:00 – 23:00",
-    menu_or_offerings: "Default menu / services list",
+    voice_style: industryConfig.restaurant.voice_style,
+    hours: industryConfig.restaurant.hours,
+    menu_or_offerings: industryConfig.restaurant.menu_or_offerings,
     branches: "Main",
-    seating_areas: "poolside,outdoor,inside,VIP",
+    seating_areas: industryConfig.restaurant.seating_areas,
     currency_prefix: "K",
     twilio_number: "",
     whatsapp_number: "",
@@ -36,6 +136,21 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     admin_email: "",
     admin_password: "",
   });
+
+  // Update form fields when business type changes
+  const handleBusinessTypeChange = (value: string) => {
+    const config = industryConfig[value as keyof typeof industryConfig] || industryConfig.other;
+    setFormData({
+      ...formData,
+      business_type: value,
+      voice_style: config.voice_style,
+      hours: config.hours,
+      menu_or_offerings: config.menu_or_offerings,
+      seating_areas: config.seating_areas,
+    });
+  };
+
+  const currentIndustryConfig = industryConfig[formData.business_type as keyof typeof industryConfig] || industryConfig.other;
 
   useEffect(() => {
     if (companyId) {
@@ -231,19 +346,23 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               <Label htmlFor="business_type">Business Type</Label>
               <Select
                 value={formData.business_type}
-                onValueChange={(value) => setFormData({ ...formData, business_type: value })}
+                onValueChange={handleBusinessTypeChange}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="restaurant">Restaurant</SelectItem>
+                  <SelectItem value="cafe">Cafe</SelectItem>
                   <SelectItem value="lodge">Lodge</SelectItem>
                   <SelectItem value="hotel">Hotel</SelectItem>
                   <SelectItem value="salon">Salon</SelectItem>
+                  <SelectItem value="spa">Spa</SelectItem>
+                  <SelectItem value="barbershop">Barbershop</SelectItem>
+                  <SelectItem value="gym">Gym/Fitness Center</SelectItem>
+                  <SelectItem value="clinic">Clinic/Medical Center</SelectItem>
                   <SelectItem value="school">School</SelectItem>
                   <SelectItem value="library">Library</SelectItem>
-                  <SelectItem value="clinic">Clinic</SelectItem>
                   <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
@@ -299,11 +418,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="seating_areas">Seating Areas (comma-separated)</Label>
+              <Label htmlFor="seating_areas">{currentIndustryConfig.areas_label} (comma-separated)</Label>
               <Input
                 id="seating_areas"
                 value={formData.seating_areas}
                 onChange={(e) => setFormData({ ...formData, seating_areas: e.target.value })}
+                placeholder={currentIndustryConfig.seating_areas}
               />
             </div>
 
@@ -335,12 +455,13 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="menu_or_offerings">Menu / Services</Label>
+            <Label htmlFor="menu_or_offerings">{currentIndustryConfig.offerings_label}</Label>
             <Textarea
               id="menu_or_offerings"
               value={formData.menu_or_offerings}
               onChange={(e) => setFormData({ ...formData, menu_or_offerings: e.target.value })}
               rows={4}
+              placeholder={currentIndustryConfig.menu_or_offerings}
             />
           </div>
 
