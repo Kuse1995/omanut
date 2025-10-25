@@ -160,14 +160,16 @@ const ClientInsights = () => {
   };
 
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
       <BackButton />
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Client Insights & Action Items</h1>
-          <p className="text-muted-foreground">Important information and follow-ups from customer interactions</p>
+          <h1 className="text-4xl font-bold mb-2">
+            <span className="text-gradient">Client Insights & Action Items</span>
+          </h1>
+          <p className="text-lg text-muted-foreground">Important information and follow-ups from customer interactions</p>
         </div>
-        <Button onClick={analyzeRecentConversations} disabled={analyzing}>
+        <Button onClick={analyzeRecentConversations} disabled={analyzing} className="bg-gradient-primary hover-glow">
           {analyzing ? "Analyzing..." : "Analyze Recent Conversations"}
         </Button>
       </div>

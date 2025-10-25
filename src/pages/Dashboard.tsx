@@ -149,15 +149,17 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-app p-8">
+    <div className="min-h-screen bg-app p-8 animate-fade-in">
       <div className="max-w-7xl mx-auto">
         <BackButton />
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gradient mb-2">{company?.name || 'Dashboard'}</h1>
-          <p className="text-muted-foreground">Monitor your AI receptionist performance</p>
+          <h1 className="text-5xl font-bold mb-3">
+            <span className="text-gradient">{company?.name || 'Dashboard'}</span>
+          </h1>
+          <p className="text-lg text-muted-foreground">Monitor your AI receptionist performance</p>
           {company?.credit_balance < 50 && (
-            <div className="mt-4 p-4 bg-destructive/10 border border-destructive rounded-lg text-destructive">
-              ⚠️ Your receptionist may pause soon. Please top up credits. Current balance: {company.credit_balance}
+            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-xl text-foreground">
+              ⚠️ <span className="font-medium">Low Credit Warning:</span> Your receptionist may pause soon. Current balance: <span className="font-bold">{company.credit_balance} credits</span>
             </div>
           )}
         </div>

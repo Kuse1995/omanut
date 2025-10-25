@@ -1,151 +1,221 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Omanut Assistant Design System
+   Premium dark-mode-first brand with perfect contrast
+   All colors MUST be HSL */
 
 @layer base {
   :root {
-    --background: 210 40% 3%;
-    --foreground: 0 0% 98%;
-
-    --card: 210 40% 6%;
-    --card-foreground: 0 0% 98%;
-
-    --popover: 210 40% 6%;
-    --popover-foreground: 0 0% 98%;
-
-    --primary: 173 77% 19%;
-    --primary-foreground: 0 0% 98%;
-
-    --secondary: 210 40% 15%;
-    --secondary-foreground: 0 0% 98%;
-
-    --muted: 210 40% 15%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 10 30% 35%;
-    --accent-foreground: 0 0% 98%;
-
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-
-    --border: 210 40% 12%;
-    --input: 210 40% 12%;
-    --ring: 173 77% 19%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 210 40% 6%;
-    --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 173 77% 19%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 210 40% 12%;
-    --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 210 40% 12%;
-    --sidebar-ring: 173 77% 19%;
+    /* Light Mode (Future Toggle Support) */
+    --bg-main: 0 0% 100%;
+    --bg-card: 0 0% 100%;
+    --bg-card-border: 0 0% 90%;
     
-    --gradient-primary: linear-gradient(90deg, hsl(173 77% 19%), hsl(10 30% 35%));
-  }
-
-  .light {
+    --text-primary: 0 0% 12%;
+    --text-secondary: 0 0% 40%;
+    --text-disabled: 0 0% 62%;
+    
+    /* Omanut Brand Accents */
+    --accent-lime: 82 81% 45%;      /* #84CC16 */
+    --accent-teal: 173 80% 40%;     /* #14B8A6 */
+    --accent-gold: 45 45% 55%;      /* #C7A755 */
+    --accent-silver: 0 0% 66%;      /* #A8A8A8 */
+    
     --background: 0 0% 100%;
-    --foreground: 210 40% 10%;
-
-    --card: 0 0% 98%;
-    --card-foreground: 210 40% 10%;
-
+    --foreground: 0 0% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 210 40% 10%;
-
-    --primary: 173 77% 25%;
-    --primary-foreground: 0 0% 98%;
-
-    --secondary: 210 40% 92%;
-    --secondary-foreground: 210 40% 10%;
-
-    --muted: 210 40% 92%;
-    --muted-foreground: 215 20% 40%;
-
-    --accent: 10 40% 50%;
-    --accent-foreground: 0 0% 98%;
-
+    --popover-foreground: 0 0% 12%;
+    --primary: 82 81% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 12%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 173 80% 40%;
+    --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-
-    --border: 210 40% 88%;
-    --input: 210 40% 88%;
-    --ring: 173 77% 25%;
-
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 210 40% 10%;
-    --sidebar-primary: 173 77% 25%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 210 40% 92%;
-    --sidebar-accent-foreground: 210 40% 10%;
-    --sidebar-border: 210 40% 88%;
-    --sidebar-ring: 173 77% 25%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 82 81% 45%;
+    --radius: 1rem;
     
-    --gradient-primary: linear-gradient(90deg, hsl(173 77% 30%), hsl(10 40% 50%));
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 0 0% 12%;
+    --sidebar-primary: 82 81% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 12%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 82 81% 45%;
   }
-}
 
-.bg-app {
-  background: radial-gradient(circle at top center, #0a0a0a, #1a1a1a);
-}
-
-.light .bg-app {
-  background: radial-gradient(circle at top center, #f5f5f5, #ffffff);
-}
-
-.card-glass {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 1rem;
-  backdrop-filter: blur(6px);
-}
-
-.light .card-glass {
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(6px);
-}
-
-.text-gradient {
-  background: linear-gradient(90deg, hsl(173 77% 35%), hsl(10 40% 45%));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.light .text-gradient {
-  background: linear-gradient(90deg, hsl(173 77% 25%), hsl(10 50% 40%));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-@keyframes pulse-glow {
-  0%, 100% { 
-    box-shadow: 0 0 20px rgba(132, 204, 22, 0.5);
+  .dark {
+    /* Dark Mode - Omanut Assistant Default */
+    --bg-main: 0 0% 4%;             /* Jet Black #0B0B0B */
+    --bg-card: 0 0% 11%;            /* Rich Graphite #1C1C1C */
+    --bg-card-border: 0 0% 20%;
+    
+    --text-primary: 0 0% 92%;       /* High contrast white */
+    --text-secondary: 0 0% 64%;     /* Readable gray */
+    --text-disabled: 0 0% 38%;      /* Subtle gray */
+    
+    /* Omanut Brand Accents */
+    --accent-lime: 82 81% 45%;      /* Lime #84CC16 */
+    --accent-teal: 173 80% 40%;     /* Teal #14B8A6 */
+    --accent-gold: 45 45% 55%;      /* Soft Gold #C7A755 */
+    --accent-silver: 0 0% 66%;      /* Warm Silver #A8A8A8 */
+    
+    --background: 0 0% 4%;
+    --foreground: 0 0% 92%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 92%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 92%;
+    --primary: 82 81% 45%;
+    --primary-foreground: 0 0% 4%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 92%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 64%;
+    --accent: 173 80% 40%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 82 81% 45%;
+    
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 80%;
+    --sidebar-primary: 82 81% 45%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 92%;
+    --sidebar-border: 0 0% 20%;
+    --sidebar-ring: 82 81% 45%;
   }
-  50% { 
-    box-shadow: 0 0 40px rgba(132, 204, 22, 0.8);
-  }
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
 }
 
 @layer base {
   * {
     @apply border-border;
   }
-
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+}
+
+@layer components {
+  /* Glass Card Effect - Midnight Tech Lounge */
+  .card-glass {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 1rem;
+    backdrop-filter: blur(8px);
+  }
+  
+  .light .card-glass {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(8px);
+  }
+  
+  /* Gradient Text - Lime to Teal */
+  .text-gradient {
+    background: linear-gradient(90deg, hsl(var(--accent-lime)), hsl(var(--accent-teal)));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: hueShift 10s linear infinite;
+  }
+  
+  @keyframes hueShift {
+    from { filter: hue-rotate(0deg); }
+    to { filter: hue-rotate(360deg); }
+  }
+  
+  /* Gradient Background */
+  .bg-gradient-primary {
+    background: linear-gradient(90deg, hsl(var(--accent-lime)), hsl(var(--accent-teal)));
+  }
+  
+  /* Hero Glow Effect */
+  .hero-glow {
+    background: radial-gradient(circle at center, hsl(var(--accent-teal) / 0.18), transparent 70%);
+    filter: blur(80px);
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    pointer-events: none;
+  }
+  
+  /* Hover Glow for Buttons */
+  .hover-glow {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .hover-glow:hover {
+    box-shadow: 0 0 16px hsl(var(--accent-lime) / 0.5);
+    transform: translateY(-1px);
+  }
+  
+  /* App Background - Subtle Gradient */
+  .bg-app {
+    background: radial-gradient(circle at top center, hsl(0 0% 6%), hsl(0 0% 4%));
+  }
+  
+  .light .bg-app {
+    background: radial-gradient(circle at top center, hsl(0 0% 98%), hsl(0 0% 100%));
+  }
+  
+  /* Hover Scale Animation */
+  .hover-scale {
+    transition: transform 0.2s ease-out;
+  }
+  .hover-scale:hover {
+    transform: scale(1.05);
+  }
+  
+  /* Story Link Underline Animation */
+  .story-link {
+    position: relative;
+    display: inline-block;
+  }
+  .story-link::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    bottom: 0;
+    left: 0;
+    background: hsl(var(--primary));
+    transform: scaleX(0);
+    transform-origin: bottom right;
+    transition: transform 0.3s ease-out;
+  }
+  .story-link:hover::after {
+    transform: scaleX(1);
+    transform-origin: bottom left;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { 
+    box-shadow: 0 0 20px hsl(var(--accent-lime) / 0.5);
+  }
+  50% { 
+    box-shadow: 0 0 40px hsl(var(--accent-lime) / 0.8);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
 }

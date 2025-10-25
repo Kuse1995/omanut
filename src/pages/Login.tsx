@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, ArrowLeft } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo.jpg";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -21,7 +21,6 @@ const Login = () => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        // Check user role and redirect accordingly
         const { data: isAdmin } = await supabase.rpc('has_role', {
           _user_id: session.user.id,
           _role: 'admin'
@@ -57,14 +56,12 @@ const Login = () => {
 
       if (error) throw error;
 
-      // Verify client role
       const { data: isClient } = await supabase.rpc('has_role', {
         _user_id: data.user.id,
         _role: 'client'
       });
 
       if (!isClient) {
-        // Check if admin
         const { data: isAdmin } = await supabase.rpc('has_role', {
           _user_id: data.user.id,
           _role: 'admin'
@@ -95,54 +92,84 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-6">
-      <div className="absolute top-4 right-4">
+    <div className="min-h-screen flex items-center justify-center bg-app p-6 relative overflow-hidden">
+      {/* Hero Glow */}
+      <div className="hero-glow absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+      
+      {/* Theme Toggle */}
+      <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
       </div>
-      <Card className="card-glass w-full max-w-md">
-        <CardHeader>
+      
+      {/* Back Button */}
+      <Button 
+        variant="ghost" 
+        onClick={() => navigate('/')}
+        className="absolute top-4 left-4 z-10"
+      >
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        Back to Home
+      </Button>
+      
+      <Card className="card-glass w-full max-w-md relative animate-scale-in">
+        <CardHeader className="space-y-4 pb-8">
           <div className="flex flex-col items-center">
-            <img src={omanutLogo} alt="Omanut" className="h-16 w-16 rounded-lg object-cover mb-4" />
-            <CardTitle className="text-2xl text-gradient">Omanut Assistant</CardTitle>
+            <img 
+              src={omanutLogo} 
+              alt="Omanut" 
+              className="h-20 w-20 rounded-2xl object-cover mb-6 ring-2 ring-primary/20" 
+            />
+            <CardTitle className="text-3xl font-bold tracking-tight text-center">
+              <span className="text-gradient">Omanut</span>
+              <span className="text-foreground"> Assistant</span>
+            </CardTitle>
             <p className="text-sm text-muted-foreground mt-2">Client Portal</p>
           </div>
         </CardHeader>
+        
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="text-foreground">Email</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder="you@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
+            
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-foreground">Password</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
-            <Button type="submit" className="w-full bg-gradient-primary" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}
+            
+            <Button 
+              type="submit" 
+              className="w-full bg-gradient-primary hover-glow h-11 text-base font-medium" 
+              disabled={loading}
+            >
+              {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
             </Button>
           </form>
           
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            Don't have an account? Contact your administrator.
-          </div>
-          
-          <div className="mt-4 text-center">
-            <Button variant="link" onClick={() => navigate('/')}>
-              ← Back to Home
-            </Button>
+          <div className="mt-8 pt-6 border-t border-border/40 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Don't have an account?
+            </p>
+            <p className="text-sm text-foreground font-medium">
+              Contact your administrator for access
+            </p>
           </div>
         </CardContent>
       </Card>
