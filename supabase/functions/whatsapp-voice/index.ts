@@ -131,6 +131,12 @@ serve(async (req) => {
         dynamicInfo = `\n\nREAL-TIME INFORMATION (Use this current data when answering):\n${JSON.stringify(company.metadata, null, 2)}`;
       }
 
+      // Add quick reference info if available
+      let quickRefInfo = '';
+      if (company.quick_reference_info && company.quick_reference_info.trim()) {
+        quickRefInfo = `\n\nKNOWLEDGE BASE (Important information about our business):\n${company.quick_reference_info}`;
+      }
+
       const instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
@@ -140,6 +146,7 @@ Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer calls, help politely, and create/record bookings or appointments.
 ${dynamicInfo}
+${quickRefInfo}
 
 ${aiOverrides?.system_instructions || ''}
 

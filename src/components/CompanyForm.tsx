@@ -135,6 +135,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     credit_balance: 1000,
     admin_email: "",
     admin_password: "",
+    quick_reference_info: "",
   });
 
   // Update form fields when business type changes
@@ -183,6 +184,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           credit_balance: data.credit_balance || 1000,
           admin_email: "",
           admin_password: "",
+          quick_reference_info: data.quick_reference_info || "",
         });
       }
     } catch (error) {
@@ -216,6 +218,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             twilio_number: formData.twilio_number,
             whatsapp_number: formData.whatsapp_number,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
+            quick_reference_info: formData.quick_reference_info,
           })
           .eq('id', companyId);
 
@@ -263,6 +266,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             whatsapp_number: formData.whatsapp_number,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             credit_balance: formData.credit_balance,
+            quick_reference_info: formData.quick_reference_info,
           })
           .select()
           .single();
@@ -463,6 +467,20 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               rows={4}
               placeholder={currentIndustryConfig.menu_or_offerings}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="quick_reference_info">Quick Reference Information</Label>
+            <Textarea
+              id="quick_reference_info"
+              value={formData.quick_reference_info}
+              onChange={(e) => setFormData({ ...formData, quick_reference_info: e.target.value })}
+              rows={6}
+              placeholder="Paste any information the AI should know about your business - pricing, policies, FAQs, special offers, etc. This will be used by the AI to answer client questions."
+            />
+            <p className="text-xs text-muted-foreground">
+              Add frequently requested information here for quick AI access. Use document uploads for large complex files.
+            </p>
           </div>
 
           {!companyId && (

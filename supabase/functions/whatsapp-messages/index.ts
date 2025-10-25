@@ -137,6 +137,12 @@ serve(async (req) => {
       dynamicInfo = `\n\nREAL-TIME INFORMATION (Use this current data when answering):\n${JSON.stringify(company.metadata, null, 2)}`;
     }
 
+    // Add quick reference info if available
+    let quickRefInfo = '';
+    if (company.quick_reference_info && company.quick_reference_info.trim()) {
+      quickRefInfo = `\n\nQUICK REFERENCE INFO:\n${company.quick_reference_info}\n`;
+    }
+
     const instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
@@ -145,6 +151,7 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer messages, help politely, and create/record bookings or appointments.
+${quickRefInfo}
 ${knowledgeBase}
 IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.
 

@@ -65,6 +65,7 @@ export type Database = {
           menu_or_offerings: string | null
           metadata: Json | null
           name: string
+          quick_reference_info: string | null
           seating_areas: string | null
           twilio_number: string | null
           updated_at: string | null
@@ -83,6 +84,7 @@ export type Database = {
           menu_or_offerings?: string | null
           metadata?: Json | null
           name: string
+          quick_reference_info?: string | null
           seating_areas?: string | null
           twilio_number?: string | null
           updated_at?: string | null
@@ -101,6 +103,7 @@ export type Database = {
           menu_or_offerings?: string | null
           metadata?: Json | null
           name?: string
+          quick_reference_info?: string | null
           seating_areas?: string | null
           twilio_number?: string | null
           updated_at?: string | null
