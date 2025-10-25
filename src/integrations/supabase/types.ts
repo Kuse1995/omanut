@@ -14,6 +14,72 @@ export type Database = {
   }
   public: {
     Tables: {
+      action_items: {
+        Row: {
+          action_type: string
+          company_id: string
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          customer_name: string | null
+          customer_phone: string | null
+          description: string
+          due_date: string | null
+          id: string
+          notes: string | null
+          priority: string | null
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          action_type: string
+          company_id: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          description: string
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          priority?: string | null
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          action_type?: string
+          company_id?: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          description?: string
+          due_date?: string | null
+          id?: string
+          notes?: string | null
+          priority?: string | null
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "action_items_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "action_items_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_config: {
         Row: {
           branches: string
@@ -52,6 +118,60 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      client_information: {
+        Row: {
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          customer_name: string | null
+          customer_phone: string | null
+          id: string
+          importance: string | null
+          info_type: string
+          information: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          importance?: string | null
+          info_type: string
+          information: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          id?: string
+          importance?: string | null
+          info_type?: string
+          information?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_information_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_information_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       companies: {
         Row: {

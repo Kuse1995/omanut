@@ -11,6 +11,7 @@ import Conversations from "./pages/Conversations";
 import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
+import ClientInsights from "./pages/ClientInsights";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminVerify from "./pages/admin/AdminVerify";
 import RequestAccess from "./pages/admin/RequestAccess";
@@ -41,6 +42,7 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/live-demo" element={<LiveDemo />} />
           <Route path="/conversations" element={<Conversations />} />
+          <Route path="/client-insights" element={<ClientInsights />} />
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />

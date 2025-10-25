@@ -35,9 +35,22 @@ const Conversations = () => {
   }, []);
 
   const fetchConversations = async () => {
+    // Get current user's company
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: userData } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (!userData?.company_id) return;
+
     const { data, error } = await supabase
       .from('conversations')
       .select('*')
+      .eq('company_id', userData.company_id)
       .order('started_at', { ascending: false });
 
     if (error) {

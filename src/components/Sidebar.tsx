@@ -1,4 +1,4 @@
-import { LayoutDashboard, Phone, MessageSquare, Calendar, Settings, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Phone, MessageSquare, Calendar, Settings, CreditCard, Info } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import omanutLogo from '@/assets/omanut-logo.jpg';
@@ -11,6 +11,7 @@ const Sidebar = () => {
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Live Demo', href: '/live-demo', icon: Phone },
     { name: 'Conversations', href: '/conversations', icon: MessageSquare },
+    { name: 'Client Insights', href: '/client-insights', icon: Info },
     { name: 'Reservations', href: '/reservations', icon: Calendar },
     { name: 'Company Settings', href: '/settings', icon: Settings },
     { name: 'Billing & Credits', href: '/billing', icon: CreditCard },
