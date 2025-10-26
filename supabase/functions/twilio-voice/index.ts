@@ -371,6 +371,16 @@ Critical rules:
                 ended_at: new Date().toISOString()
               })
               .eq('id', conversationId);
+
+            // Automatically analyze conversation for insights
+            try {
+              await supabase.functions.invoke('analyze-conversation', {
+                body: { conversation_id: conversationId }
+              });
+              console.log('Conversation analysis triggered');
+            } catch (error) {
+              console.error('Error triggering conversation analysis:', error);
+            }
           }
 
           openAISocket?.close();

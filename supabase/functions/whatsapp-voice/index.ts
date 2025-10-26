@@ -318,7 +318,7 @@ Critical rules:
         } else if (msg.event === 'stop') {
           console.log('WhatsApp call ended');
           
-          // Update conversation
+          // Update conversation and trigger analysis
           supabase
             .from('conversations')
             .update({
@@ -326,7 +326,17 @@ Critical rules:
               ended_at: new Date().toISOString()
             })
             .eq('id', conversationId)
-            .then();
+            .then(async () => {
+              // Automatically analyze conversation for insights
+              try {
+                await supabase.functions.invoke('analyze-conversation', {
+                  body: { conversation_id: conversationId }
+                });
+                console.log('Conversation analysis triggered');
+              } catch (error) {
+                console.error('Error triggering conversation analysis:', error);
+              }
+            });
 
           openAiWs?.close();
         }

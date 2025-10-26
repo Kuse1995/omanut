@@ -3,14 +3,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search } from 'lucide-react';
+import { Search, Eye } from 'lucide-react';
 import BackButton from '@/components/BackButton';
+import ConversationDetailsDialog from '@/components/ConversationDetailsDialog';
 
 const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [stats, setStats] = useState({ total: 0, active: 0, avgDuration: 0 });
+  const [selectedConversation, setSelectedConversation] = useState<any>(null);
+  const [conversationDetails, setConversationDetails] = useState<{clientInfo: any[], actionItems: any[]}>({
+    clientInfo: [],
+    actionItems: []
+  });
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchConversations();
@@ -76,6 +84,33 @@ const Conversations = () => {
     conv.phone?.includes(search)
   );
 
+  const viewConversationDetails = async (conversation: any) => {
+    setSelectedConversation(conversation);
+    
+    // Fetch related client info and action items
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const [clientInfoResult, actionItemsResult] = await Promise.all([
+      supabase
+        .from('client_information')
+        .select('*')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('action_items')
+        .select('*')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: false })
+    ]);
+
+    setConversationDetails({
+      clientInfo: clientInfoResult.data || [],
+      actionItems: actionItemsResult.data || []
+    });
+    setDetailsDialogOpen(true);
+  };
+
   return (
     <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
       <BackButton />
@@ -134,12 +169,14 @@ const Conversations = () => {
                 <TableHead>Date</TableHead>
                 <TableHead>Duration</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Transcript</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredConversations.map((conv) => (
                 <TableRow key={conv.id}>
-                  <TableCell>{conv.customer_name || 'Unknown'}</TableCell>
+                  <TableCell className="font-medium">{conv.customer_name || 'Unknown'}</TableCell>
                   <TableCell>{conv.phone || 'N/A'}</TableCell>
                   <TableCell>
                     {new Date(conv.started_at).toLocaleString()}
@@ -152,12 +189,40 @@ const Conversations = () => {
                       {conv.status}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    {conv.transcript ? (
+                      <Badge variant="outline" className="bg-accent-teal/10 text-accent-teal border-accent-teal/20">
+                        Available
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="opacity-50">None</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => viewConversationDetails(conv)}
+                      className="hover-glow"
+                    >
+                      <Eye className="h-4 w-4 mr-2" />
+                      View Details
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <ConversationDetailsDialog
+        open={detailsDialogOpen}
+        onOpenChange={setDetailsDialogOpen}
+        conversation={selectedConversation}
+        clientInfo={conversationDetails.clientInfo}
+        actionItems={conversationDetails.actionItems}
+      />
     </div>
   );
 };
