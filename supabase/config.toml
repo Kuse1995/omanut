@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.analyze-conversation]
 verify_jwt = false
+
+[functions.create-company]
+verify_jwt = true

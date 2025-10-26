@@ -231,69 +231,47 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
         
         if (onSuccess) onSuccess();
       } else {
-        // Create new company with admin user
+        // Create new company with admin user via edge function
         if (!formData.admin_email || !formData.admin_password) {
           throw new Error('Admin email and password are required for new companies');
         }
 
-        // Create auth user first
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: formData.admin_email,
-          password: formData.admin_password,
-          options: {
-            data: {
-              company_name: formData.name,
-            }
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) throw new Error('Not authenticated');
+
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-company`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: formData.name,
+              business_type: formData.business_type,
+              voice_style: formData.voice_style,
+              hours: formData.hours,
+              menu_or_offerings: formData.menu_or_offerings,
+              branches: formData.branches,
+              currency_prefix: formData.currency_prefix,
+              seating_areas: formData.seating_areas,
+              twilio_number: formData.twilio_number,
+              whatsapp_number: formData.whatsapp_number,
+              whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
+              credit_balance: formData.credit_balance,
+              quick_reference_info: formData.quick_reference_info,
+              admin_email: formData.admin_email,
+              admin_password: formData.admin_password,
+            }),
           }
-        });
+        );
 
-        if (authError) throw authError;
-        if (!authData.user) throw new Error('Failed to create user');
-
-        // Create company
-        const { data: company, error: companyError } = await supabase
-          .from('companies')
-          .insert({
-            name: formData.name,
-            business_type: formData.business_type,
-            voice_style: formData.voice_style,
-            hours: formData.hours,
-            menu_or_offerings: formData.menu_or_offerings,
-            branches: formData.branches,
-            currency_prefix: formData.currency_prefix,
-            seating_areas: formData.seating_areas,
-            twilio_number: formData.twilio_number,
-            whatsapp_number: formData.whatsapp_number,
-            whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
-            credit_balance: formData.credit_balance,
-            quick_reference_info: formData.quick_reference_info,
-          })
-          .select()
-          .single();
-
-        if (companyError) throw companyError;
-
-        // Link user to company
-        const { error: userError } = await supabase
-          .from('users')
-          .insert({
-            id: authData.user.id,
-            email: formData.admin_email,
-            company_id: company.id,
-            role: 'admin',
-          });
-
-        if (userError) throw userError;
-
-        // Give user client role
-        const { error: roleError } = await supabase
-          .from('user_roles')
-          .insert({
-            user_id: authData.user.id,
-            role: 'client',
-          });
-
-        if (roleError) throw roleError;
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to create company');
+        }
 
         toast({
           title: "Success",

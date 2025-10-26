@@ -1,0 +1,151 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    );
+
+    // Verify the requesting user is an admin
+    const authHeader = req.headers.get('Authorization')!;
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    
+    if (userError || !user) {
+      throw new Error('Unauthorized');
+    }
+
+    // Check if user has admin role
+    const { data: isAdmin } = await supabaseAdmin
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('role', 'admin')
+      .single();
+
+    if (!isAdmin) {
+      throw new Error('Unauthorized: Admin access required');
+    }
+
+    // Parse request body
+    const {
+      name,
+      business_type,
+      voice_style,
+      hours,
+      menu_or_offerings,
+      branches,
+      currency_prefix,
+      seating_areas,
+      twilio_number,
+      whatsapp_number,
+      whatsapp_voice_enabled,
+      credit_balance,
+      quick_reference_info,
+      admin_email,
+      admin_password,
+    } = await req.json();
+
+    // Validate required fields
+    if (!name || !admin_email || !admin_password) {
+      throw new Error('Missing required fields: name, admin_email, admin_password');
+    }
+
+    // Create auth user using admin client
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: admin_email,
+      password: admin_password,
+      email_confirm: true,
+      user_metadata: {
+        company_name: name,
+      }
+    });
+
+    if (authError) throw authError;
+    if (!authData.user) throw new Error('Failed to create user');
+
+    // Create company
+    const { data: company, error: companyError } = await supabaseAdmin
+      .from('companies')
+      .insert({
+        name,
+        business_type,
+        voice_style,
+        hours,
+        menu_or_offerings,
+        branches,
+        currency_prefix,
+        seating_areas,
+        twilio_number,
+        whatsapp_number,
+        whatsapp_voice_enabled,
+        credit_balance,
+        quick_reference_info,
+      })
+      .select()
+      .single();
+
+    if (companyError) throw companyError;
+
+    // Link user to company
+    const { error: userError2 } = await supabaseAdmin
+      .from('users')
+      .insert({
+        id: authData.user.id,
+        email: admin_email,
+        company_id: company.id,
+        role: 'admin',
+      });
+
+    if (userError2) throw userError2;
+
+    // Give user client role for RLS
+    const { error: roleError } = await supabaseAdmin
+      .from('user_roles')
+      .insert({
+        user_id: authData.user.id,
+        role: 'client',
+      });
+
+    if (roleError) throw roleError;
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        company_id: company.id,
+        message: 'Company created successfully'
+      }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200 
+      }
+    );
+
+  } catch (error: any) {
+    console.error('Error creating company:', error);
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400 
+      }
+    );
+  }
+});
