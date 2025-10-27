@@ -29,12 +29,6 @@ const Settings = () => {
     whatsapp_voice_enabled: false
   });
 
-  const [aiInstructions, setAiInstructions] = useState({
-    system_instructions: '',
-    qa_style: '',
-    banned_topics: ''
-  });
-
   useEffect(() => {
     fetchConfig();
   }, []);
@@ -51,21 +45,6 @@ const Settings = () => {
 
       if (data) {
         setConfig(data);
-        
-        // Fetch AI overrides
-        const { data: aiData } = await supabase
-          .from('company_ai_overrides')
-          .select('*')
-          .eq('company_id', data.id)
-          .single();
-        
-        if (aiData) {
-          setAiInstructions({
-            system_instructions: aiData.system_instructions || '',
-            qa_style: aiData.qa_style || '',
-            banned_topics: aiData.banned_topics || ''
-          });
-        }
       }
     } catch (error) {
       console.error('Error fetching config:', error);
@@ -100,18 +79,6 @@ const Settings = () => {
         .eq('id', config.id);
 
       if (error) throw error;
-
-      // Upsert AI instructions
-      const { error: aiError } = await supabase
-        .from('company_ai_overrides')
-        .upsert({
-          company_id: config.id,
-          system_instructions: aiInstructions.system_instructions,
-          qa_style: aiInstructions.qa_style,
-          banned_topics: aiInstructions.banned_topics
-        });
-
-      if (aiError) throw aiError;
 
       toast({
         title: 'Success',
@@ -284,67 +251,6 @@ const Settings = () => {
               </Label>
             </div>
 
-          </CardContent>
-        </Card>
-
-        <Card className="card-glass mt-6">
-          <CardHeader>
-            <CardTitle className="text-foreground">AI Instructions & Behavior</CardTitle>
-            <CardDescription>Customize how your AI assistant responds and behaves</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="system_instructions">Custom System Instructions</Label>
-              <Textarea
-                id="system_instructions"
-                value={aiInstructions.system_instructions}
-                onChange={(e) => setAiInstructions({ ...aiInstructions, system_instructions: e.target.value })}
-                placeholder="Add specific instructions for the AI (e.g., 'Always mention our special promotions', 'Use friendly, casual language', etc.)"
-                className="min-h-[120px]"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                These instructions will guide how the AI responds. Be specific about tone, topics to emphasize, and how to handle common questions.
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="qa_style">Question & Answer Style</Label>
-              <Textarea
-                id="qa_style"
-                value={aiInstructions.qa_style}
-                onChange={(e) => setAiInstructions({ ...aiInstructions, qa_style: e.target.value })}
-                placeholder="Define how the AI should answer questions (e.g., 'Keep answers under 2 sentences', 'Always ask clarifying questions', 'Provide detailed explanations')"
-                className="min-h-[100px]"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                This helps the AI understand synonyms and variations. Example: "Tuition, fees, cost, price all mean the same thing - answer with our pricing information"
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="banned_topics">Topics to Avoid</Label>
-              <Textarea
-                id="banned_topics"
-                value={aiInstructions.banned_topics}
-                onChange={(e) => setAiInstructions({ ...aiInstructions, banned_topics: e.target.value })}
-                placeholder="List topics the AI should not discuss (e.g., 'Do not discuss competitor pricing', 'Avoid political topics', etc.)"
-                className="min-h-[80px]"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Specify what topics the AI should politely decline to answer or redirect.
-              </p>
-            </div>
-
-            <Button
-              onClick={handleSave} 
-              disabled={saving || loading} 
-              className="w-full bg-primary hover:bg-primary/90"
-            >
-              {saving ? 'Saving...' : 'Save All Settings'}
-            </Button>
           </CardContent>
         </Card>
 

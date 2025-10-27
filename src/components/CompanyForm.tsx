@@ -138,6 +138,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     quick_reference_info: "",
   });
 
+  const [aiInstructions, setAiInstructions] = useState({
+    system_instructions: "",
+    qa_style: "",
+    banned_topics: ""
+  });
+
   // Update form fields when business type changes
   const handleBusinessTypeChange = (value: string) => {
     const config = industryConfig[value as keyof typeof industryConfig] || industryConfig.other;
@@ -186,6 +192,21 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           admin_password: "",
           quick_reference_info: data.quick_reference_info || "",
         });
+
+        // Fetch AI overrides
+        const { data: aiData } = await supabase
+          .from('company_ai_overrides')
+          .select('*')
+          .eq('company_id', data.id)
+          .single();
+        
+        if (aiData) {
+          setAiInstructions({
+            system_instructions: aiData.system_instructions || "",
+            qa_style: aiData.qa_style || "",
+            banned_topics: aiData.banned_topics || ""
+          });
+        }
       }
     } catch (error) {
       console.error('Error loading company:', error);
@@ -223,6 +244,18 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           .eq('id', companyId);
 
         if (error) throw error;
+
+        // Upsert AI instructions
+        const { error: aiError } = await supabase
+          .from('company_ai_overrides')
+          .upsert({
+            company_id: companyId,
+            system_instructions: aiInstructions.system_instructions,
+            qa_style: aiInstructions.qa_style,
+            banned_topics: aiInstructions.banned_topics
+          });
+
+        if (aiError) throw aiError;
 
         toast({
           title: "Success",
@@ -263,6 +296,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               quick_reference_info: formData.quick_reference_info,
               admin_email: formData.admin_email,
               admin_password: formData.admin_password,
+              system_instructions: aiInstructions.system_instructions,
+              qa_style: aiInstructions.qa_style,
+              banned_topics: aiInstructions.banned_topics,
             }),
           }
         );
@@ -459,6 +495,57 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             <p className="text-xs text-muted-foreground">
               Add frequently requested information here for quick AI access. Use document uploads for large complex files.
             </p>
+          </div>
+
+          <div className="border-t pt-6">
+            <h3 className="text-lg font-semibold mb-4 text-foreground">AI Instructions & Behavior</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Customize how the AI assistant responds and behaves for this company
+            </p>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="system_instructions">Custom System Instructions</Label>
+                <Textarea
+                  id="system_instructions"
+                  value={aiInstructions.system_instructions}
+                  onChange={(e) => setAiInstructions({ ...aiInstructions, system_instructions: e.target.value })}
+                  placeholder="Add specific instructions for the AI (e.g., 'Always mention our special promotions', 'Use friendly, casual language', etc.)"
+                  className="min-h-[120px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  These instructions will guide how the AI responds. Be specific about tone, topics to emphasize, and how to handle common questions.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="qa_style">Question & Answer Style</Label>
+                <Textarea
+                  id="qa_style"
+                  value={aiInstructions.qa_style}
+                  onChange={(e) => setAiInstructions({ ...aiInstructions, qa_style: e.target.value })}
+                  placeholder="Define how the AI should answer questions (e.g., 'Keep answers under 2 sentences', 'Always ask clarifying questions', 'Provide detailed explanations')"
+                  className="min-h-[100px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  This helps the AI understand synonyms and variations. Example: "Tuition, fees, cost, price all mean the same thing - answer with our pricing information"
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="banned_topics">Topics to Avoid</Label>
+                <Textarea
+                  id="banned_topics"
+                  value={aiInstructions.banned_topics}
+                  onChange={(e) => setAiInstructions({ ...aiInstructions, banned_topics: e.target.value })}
+                  placeholder="List topics the AI should not discuss (e.g., 'Do not discuss competitor pricing', 'Avoid political topics', etc.)"
+                  className="min-h-[80px]"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Specify what topics the AI should politely decline to answer or redirect.
+                </p>
+              </div>
+            </div>
           </div>
 
           {!companyId && (

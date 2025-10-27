@@ -61,6 +61,9 @@ serve(async (req) => {
       quick_reference_info,
       admin_email,
       admin_password,
+      system_instructions,
+      qa_style,
+      banned_topics,
     } = await req.json();
 
     // Validate required fields
@@ -125,6 +128,20 @@ serve(async (req) => {
       });
 
     if (roleError) throw roleError;
+
+    // Create AI overrides if provided
+    if (system_instructions || qa_style || banned_topics) {
+      const { error: aiError } = await supabaseAdmin
+        .from('company_ai_overrides')
+        .insert({
+          company_id: company.id,
+          system_instructions: system_instructions || '',
+          qa_style: qa_style || '',
+          banned_topics: banned_topics || '',
+        });
+
+      if (aiError) throw aiError;
+    }
 
     return new Response(
       JSON.stringify({ 
