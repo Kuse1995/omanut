@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Search, Eye } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import ConversationDetailsDialog from '@/components/ConversationDetailsDialog';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
@@ -113,7 +114,10 @@ const Conversations = () => {
 
   return (
     <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
-      <BackButton />
+      <div className="flex items-center justify-between mb-6">
+        <BackButton />
+        <ThemeToggle />
+      </div>
       <div>
         <h1 className="text-4xl font-bold mb-2">
           <span className="text-gradient">Conversations</span>

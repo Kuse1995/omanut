@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Phone, MessageSquare, Calendar, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import BackButton from '@/components/BackButton';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -151,7 +152,10 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-app p-8 animate-fade-in">
       <div className="max-w-7xl mx-auto">
-        <BackButton />
+        <div className="flex items-center justify-between mb-6">
+          <BackButton />
+          <ThemeToggle />
+        </div>
         <div className="mb-8">
           <h1 className="text-5xl font-bold mb-3">
             <span className="text-gradient">{company?.name || 'Dashboard'}</span>

@@ -10,6 +10,7 @@ import AudioVisualizer from '@/components/AudioVisualizer';
 import BackButton from '@/components/BackButton';
 import ChatDemo from '@/components/ChatDemo';
 import WhatsAppCallDemo from '@/components/WhatsAppCallDemo';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const LiveDemo = () => {
   const navigate = useNavigate();
@@ -109,7 +110,10 @@ const LiveDemo = () => {
 
   return (
     <div className="p-8 space-y-8">
-      <BackButton />
+      <div className="flex items-center justify-between mb-6">
+        <BackButton />
+        <ThemeToggle />
+      </div>
       <div>
         <h1 className="text-3xl font-bold mb-2">AI Assistant Demo</h1>
         <p className="text-muted-foreground">Test all channels: Voice, Chat, and WhatsApp</p>

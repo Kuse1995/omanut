@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const ACCESS_TOKEN_KEY = "admin_access_token";
 const TOKEN_EXPIRY_KEY = "admin_token_expiry";
@@ -80,6 +81,9 @@ const AdminVerify = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-destructive/5 p-6">
+      <div className="absolute top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       <Card className="card-glass w-full max-w-md p-8">
         <div className="flex flex-col items-center text-center space-y-4">
           {verifying ? (

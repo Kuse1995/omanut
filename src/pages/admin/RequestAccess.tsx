@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { Mail, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const RequestAccess = () => {
   const { toast } = useToast();
@@ -47,6 +48,9 @@ const RequestAccess = () => {
 
   return (
     <div className="min-h-screen bg-app flex items-center justify-center p-4">
+      <div className="absolute top-4 right-4 z-10">
+        <ThemeToggle />
+      </div>
       <Card className="card-glass w-full max-w-md">
         <CardHeader>
           <Button
