@@ -60,7 +60,7 @@ export const ConversationsPanel = () => {
       .select('id, customer_name, phone, started_at')
       .eq('company_id', selectedCompany.id)
       .order('started_at', { ascending: false })
-      .limit(20);
+      .limit(50);
 
     if (convError) {
       console.error('Error fetching conversations:', convError);

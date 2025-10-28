@@ -1,6 +1,9 @@
-import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConversationsPanel } from './ConversationsPanel';
+import { ClientInsightsPanel } from './ClientInsightsPanel';
+import { ReservationsPanel } from './ReservationsPanel';
+import { CompanySettingsPanel } from './CompanySettingsPanel';
+import { BillingPanel } from './BillingPanel';
 import { MessageSquare, Info, Calendar, Settings, CreditCard } from 'lucide-react';
 
 export const CompanyTabs = () => {
@@ -48,28 +51,20 @@ export const CompanyTabs = () => {
         <ConversationsPanel />
       </TabsContent>
 
-      <TabsContent value="insights" className="flex-1 m-0 p-6">
-        <div className="flex items-center justify-center h-full">
-          <p className="text-white/60">Client Insights coming soon</p>
-        </div>
+      <TabsContent value="insights" className="flex-1 m-0">
+        <ClientInsightsPanel />
       </TabsContent>
 
-      <TabsContent value="reservations" className="flex-1 m-0 p-6">
-        <div className="flex items-center justify-center h-full">
-          <p className="text-white/60">Reservations coming soon</p>
-        </div>
+      <TabsContent value="reservations" className="flex-1 m-0">
+        <ReservationsPanel />
       </TabsContent>
 
-      <TabsContent value="settings" className="flex-1 m-0 p-6">
-        <div className="flex items-center justify-center h-full">
-          <p className="text-white/60">Company Settings coming soon</p>
-        </div>
+      <TabsContent value="settings" className="flex-1 m-0">
+        <CompanySettingsPanel />
       </TabsContent>
 
-      <TabsContent value="billing" className="flex-1 m-0 p-6">
-        <div className="flex items-center justify-center h-full">
-          <p className="text-white/60">Billing & Credits coming soon</p>
-        </div>
+      <TabsContent value="billing" className="flex-1 m-0">
+        <BillingPanel />
       </TabsContent>
     </Tabs>
   );
