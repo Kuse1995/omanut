@@ -351,6 +351,8 @@ Critical rules:
       assistantReply = "Thank you for your message. How can I help you today?";
       console.log('Warning: Empty AI response, using fallback message');
     }
+    
+    console.log('Final assistant reply to send:', assistantReply);
 
     // Insert user message into messages table
     await supabase
