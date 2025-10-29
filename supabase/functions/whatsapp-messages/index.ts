@@ -281,6 +281,8 @@ Critical rules:
     let assistantReply = aiData.choices[0].message.content || '';
     const toolCalls = aiData.choices[0].message.tool_calls;
 
+    console.log('AI response:', { assistantReply, toolCalls });
+
     // Handle tool calls (reservation creation)
     if (toolCalls && toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
@@ -344,12 +346,38 @@ Critical rules:
       }
     }
 
-    // Update conversation transcript
+    // Ensure we always have a response
+    if (!assistantReply || assistantReply.trim() === '') {
+      assistantReply = "Thank you for your message. How can I help you today?";
+      console.log('Warning: Empty AI response, using fallback message');
+    }
+
+    // Insert user message into messages table
+    await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversation.id,
+        role: 'user',
+        content: Body
+      });
+
+    // Insert assistant message into messages table
+    await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversation.id,
+        role: 'assistant',
+        content: assistantReply
+      });
+
+    // Update conversation transcript (keep for backward compatibility)
     const updatedTranscript = `${conversation.transcript}\nCustomer: ${Body}\nAssistant: ${assistantReply}\n`;
     await supabase
       .from('conversations')
       .update({ transcript: updatedTranscript })
       .eq('id', conversation.id);
+
+    console.log('Sending WhatsApp response:', assistantReply);
 
     // Send response via Twilio WhatsApp API
     const twilioResponse = await sendWhatsAppMessage(To, From, assistantReply);

@@ -3,12 +3,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { Database } from '@/integrations/supabase/types';
 import { useCompany } from '@/context/CompanyContext';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Building2, Phone, MessageSquare } from 'lucide-react';
+import { Building2, Phone, MessageSquare, Plus } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import CompanyForm from '@/components/CompanyForm';
 
 type Company = Database['public']['Tables']['companies']['Row'];
 
 export const CompanySidebar = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const { selectedCompany, setSelectedCompany } = useCompany();
 
   useEffect(() => {
@@ -32,10 +36,34 @@ export const CompanySidebar = () => {
     }
   };
 
+  const handleCreateSuccess = () => {
+    setCreateDialogOpen(false);
+    fetchCompanies();
+  };
+
   return (
     <aside className="w-[280px] bg-[#1A1A1A] border-r border-white/10 flex flex-col">
       <div className="p-6 border-b border-white/10">
-        <h2 className="text-lg font-semibold text-white">Companies</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-white">Companies</h2>
+        </div>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="w-full bg-[#84CC16] hover:bg-[#84CC16]/90 text-black">
+              <Plus className="w-4 h-4 mr-2" />
+              Create Company
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-[#1A1A1A] text-white border-white/10">
+            <DialogHeader>
+              <DialogTitle className="text-2xl text-white">Create New Company</DialogTitle>
+            </DialogHeader>
+            <CompanyForm 
+              onSuccess={handleCreateSuccess}
+              onCancel={() => setCreateDialogOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
       </div>
       
       <ScrollArea className="flex-1">

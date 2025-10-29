@@ -259,6 +259,16 @@ Critical rules:
             } else if (aiMessage.type === 'conversation.item.input_audio_transcription.completed') {
               // Log caller transcript
               if (conversationId && aiMessage.transcript) {
+                // Insert into messages table
+                await supabase
+                  .from('messages')
+                  .insert({
+                    conversation_id: conversationId,
+                    role: 'user',
+                    content: aiMessage.transcript
+                  });
+
+                // Update transcript field (for backward compatibility)
                 const { data: conv } = await supabase
                   .from('conversations')
                   .select('transcript')
@@ -272,8 +282,11 @@ Critical rules:
                   .eq('id', conversationId);
               }
             } else if (aiMessage.type === 'response.audio_transcript.delta') {
-              // Log assistant transcript
+              // Log assistant transcript (accumulate deltas)
               if (conversationId && aiMessage.delta) {
+                audioBuffer += aiMessage.delta;
+                
+                // Update transcript field (for backward compatibility)
                 const { data: conv } = await supabase
                   .from('conversations')
                   .select('transcript')
@@ -285,6 +298,18 @@ Critical rules:
                   .from('conversations')
                   .update({ transcript: updatedTranscript })
                   .eq('id', conversationId);
+              }
+            } else if (aiMessage.type === 'response.done') {
+              // When response is complete, insert the accumulated audio transcript
+              if (conversationId && audioBuffer.trim()) {
+                await supabase
+                  .from('messages')
+                  .insert({
+                    conversation_id: conversationId,
+                    role: 'assistant',
+                    content: audioBuffer.trim()
+                  });
+                audioBuffer = ''; // Reset buffer
               }
             } else if (aiMessage.type === 'response.function_call_arguments.done') {
               // Handle reservation
