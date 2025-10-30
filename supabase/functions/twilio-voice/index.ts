@@ -160,6 +160,11 @@ serve(async (req) => {
             .eq('company_id', company?.id)
             .single();
           
+          // Get current date for AI context
+          const today = new Date();
+          const currentDate = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+          const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
+          
           // Build comprehensive instructions
           let instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
@@ -169,6 +174,13 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer calls, help politely, and create/record bookings or appointments.
+
+CRITICAL DATE INFORMATION:
+- Today's date is: ${currentDate} (${dayOfWeek})
+- When customers say "today", "tomorrow", or "next week", calculate the correct date based on ${currentDate}
+- ALWAYS use dates in YYYY-MM-DD format
+- If a customer says "tomorrow", add 1 day to ${currentDate}
+- If a customer mentions "next Monday", calculate from ${currentDate}
 
 ${aiOverrides?.system_instructions || ''}
 

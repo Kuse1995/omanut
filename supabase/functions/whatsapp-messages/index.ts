@@ -143,6 +143,11 @@ serve(async (req) => {
       quickRefInfo = `\n\nQUICK REFERENCE INFO:\n${company.quick_reference_info}\n`;
     }
 
+    // Get current date for AI context
+    const today = new Date();
+    const currentDate = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
+    
     const instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
@@ -151,6 +156,14 @@ Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer messages, help politely, and create/record bookings or appointments.
+
+CRITICAL DATE INFORMATION:
+- Today's date is: ${currentDate} (${dayOfWeek})
+- When customers say "today", "tomorrow", or "next week", calculate the correct date based on ${currentDate}
+- ALWAYS use dates in YYYY-MM-DD format
+- If a customer says "tomorrow", add 1 day to ${currentDate}
+- If a customer mentions "next Monday", calculate from ${currentDate}
+
 ${quickRefInfo}
 ${knowledgeBase}
 IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.

@@ -1,38 +1,39 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Eye } from 'lucide-react';
+import { Search } from 'lucide-react';
 import BackButton from '@/components/BackButton';
-import ConversationDetailsDialog from '@/components/ConversationDetailsDialog';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [stats, setStats] = useState({ total: 0, active: 0, avgDuration: 0 });
-  const [selectedConversation, setSelectedConversation] = useState<any>(null);
-  const [conversationDetails, setConversationDetails] = useState<{clientInfo: any[], actionItems: any[]}>({
-    clientInfo: [],
-    actionItems: []
-  });
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchConversations();
 
-    // Subscribe to realtime updates
+    // Subscribe to realtime updates for both conversations and messages
     const channel = supabase
-      .channel('conversations-changes')
+      .channel('conversations-messages-changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'conversations'
+        },
+        () => fetchConversations()
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages'
         },
         () => fetchConversations()
       )
@@ -56,23 +57,47 @@ const Conversations = () => {
 
     if (!userData?.company_id) return;
 
-    const { data, error } = await supabase
+    const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('*')
+      .select('id, customer_name, phone, started_at, status, duration_seconds')
       .eq('company_id', userData.company_id)
-      .order('started_at', { ascending: false });
+      .order('started_at', { ascending: false })
+      .limit(50);
 
-    if (error) {
-      console.error('Error fetching conversations:', error);
+    if (convError) {
+      console.error('Error fetching conversations:', convError);
       return;
     }
 
-    setConversations(data || []);
+    if (!convData || convData.length === 0) {
+      setConversations([]);
+      return;
+    }
+
+    const conversationIds = convData.map(c => c.id);
+    
+    const { data: msgData, error: msgError } = await supabase
+      .from('messages')
+      .select('*')
+      .in('conversation_id', conversationIds)
+      .order('created_at', { ascending: true });
+
+    if (msgError) {
+      console.error('Error fetching messages:', msgError);
+      return;
+    }
+
+    const conversationsWithMessages = convData.map(conv => ({
+      ...conv,
+      messages: msgData?.filter(msg => msg.conversation_id === conv.id) || []
+    }));
+
+    setConversations(conversationsWithMessages);
 
     // Calculate stats
-    const total = data?.length || 0;
-    const active = data?.filter(c => c.status === 'active').length || 0;
-    const completed = data?.filter(c => c.duration_seconds) || [];
+    const total = convData?.length || 0;
+    const active = convData?.filter(c => c.status === 'active').length || 0;
+    const completed = convData?.filter(c => c.duration_seconds) || [];
     const avgDuration = completed.length > 0
       ? Math.round(completed.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) / completed.length)
       : 0;
@@ -80,36 +105,46 @@ const Conversations = () => {
     setStats({ total, active, avgDuration });
   };
 
-  const filteredConversations = conversations.filter(conv =>
-    conv.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-    conv.phone?.includes(search)
+  // Group conversations by phone number
+  const groupedConversations = Object.values(
+    conversations.reduce((acc: Record<string, any>, conv) => {
+      const phone = conv.phone || 'Unknown';
+      if (!acc[phone]) {
+        acc[phone] = {
+          phone,
+          customer_name: conv.customer_name,
+          conversations: [],
+          totalMessages: 0,
+          lastMessageAt: conv.started_at
+        };
+      }
+      acc[phone].conversations.push(conv);
+      acc[phone].totalMessages += conv.messages.length;
+      if (new Date(conv.started_at) > new Date(acc[phone].lastMessageAt)) {
+        acc[phone].lastMessageAt = conv.started_at;
+      }
+      if (conv.customer_name) {
+        acc[phone].customer_name = conv.customer_name;
+      }
+      return acc;
+    }, {})
+  ).sort((a: any, b: any) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+
+  const filteredConversations = groupedConversations.filter((group: any) =>
+    group.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+    group.phone?.includes(search)
   );
 
-  const viewConversationDetails = async (conversation: any) => {
-    setSelectedConversation(conversation);
-    
-    // Fetch related client info and action items
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-
-    const [clientInfoResult, actionItemsResult] = await Promise.all([
-      supabase
-        .from('client_information')
-        .select('*')
-        .eq('conversation_id', conversation.id)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('action_items')
-        .select('*')
-        .eq('conversation_id', conversation.id)
-        .order('created_at', { ascending: false })
-    ]);
-
-    setConversationDetails({
-      clientInfo: clientInfoResult.data || [],
-      actionItems: actionItemsResult.data || []
+  const togglePhone = (phone: string) => {
+    setExpandedPhones(prev => {
+      const next = new Set(prev);
+      if (next.has(phone)) {
+        next.delete(phone);
+      } else {
+        next.add(phone);
+      }
+      return next;
     });
-    setDetailsDialogOpen(true);
   };
 
   return (
@@ -152,81 +187,92 @@ const Conversations = () => {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name or phone..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Transcript</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredConversations.map((conv) => (
-                <TableRow key={conv.id}>
-                  <TableCell className="font-medium">{conv.customer_name || 'Unknown'}</TableCell>
-                  <TableCell>{conv.phone || 'N/A'}</TableCell>
-                  <TableCell>
-                    {new Date(conv.started_at).toLocaleString()}
-                  </TableCell>
-                  <TableCell>
-                    {conv.duration_seconds ? `${conv.duration_seconds}s` : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={conv.status === 'active' ? 'default' : 'secondary'}>
-                      {conv.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {conv.transcript ? (
-                      <Badge variant="outline" className="bg-accent-teal/10 text-accent-teal border-accent-teal/20">
-                        Available
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="opacity-50">None</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => viewConversationDetails(conv)}
-                      className="hover-glow"
-                    >
-                      <Eye className="h-4 w-4 mr-2" />
-                      View Details
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+        <Input
+          placeholder="Search by name or phone..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-10 mb-4"
+        />
+      </div>
 
-      <ConversationDetailsDialog
-        open={detailsDialogOpen}
-        onOpenChange={setDetailsDialogOpen}
-        conversation={selectedConversation}
-        clientInfo={conversationDetails.clientInfo}
-        actionItems={conversationDetails.actionItems}
-      />
+      <div className="space-y-4">
+        {filteredConversations.length === 0 ? (
+          <Card>
+            <CardContent className="flex items-center justify-center h-64">
+              <p className="text-muted-foreground">No conversations yet</p>
+            </CardContent>
+          </Card>
+        ) : (
+          filteredConversations.map((group: any) => (
+            <Card key={group.phone} className="overflow-hidden">
+              <button
+                onClick={() => togglePhone(group.phone)}
+                className="w-full p-4 flex items-center justify-between hover:bg-muted/50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`transition-transform ${expandedPhones.has(group.phone) ? 'rotate-90' : ''}`}>
+                    <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-foreground">
+                      {group.customer_name || 'Unknown'}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">{group.phone}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <Badge variant="outline">
+                    {group.totalMessages} messages
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(group.lastMessageAt).toLocaleDateString()}
+                  </span>
+                </div>
+              </button>
+              
+              {expandedPhones.has(group.phone) && (
+                <div className="border-t">
+                  {group.conversations.map((conversation: any) => (
+                    <div key={conversation.id} className="p-4 space-y-3 border-b last:border-b-0 bg-muted/20">
+                      <div className="text-xs text-center text-muted-foreground mb-3">
+                        {new Date(conversation.started_at).toLocaleString()}
+                      </div>
+                      {conversation.messages.map((message: any) => {
+                        const isInbound = message.role === 'user';
+                        return (
+                          <div
+                            key={message.id}
+                            className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
+                          >
+                            <div
+                              className={`max-w-[75%] rounded-lg px-3 py-2 ${
+                                isInbound 
+                                  ? 'bg-muted text-foreground rounded-tl-none' 
+                                  : 'bg-primary text-primary-foreground rounded-tr-none'
+                              }`}
+                            >
+                              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1">
+                                <span className="text-[10px] opacity-70">
+                                  {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 };

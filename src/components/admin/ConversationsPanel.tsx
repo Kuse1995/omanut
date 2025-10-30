@@ -198,30 +198,36 @@ export const ConversationsPanel = () => {
               <CollapsibleContent>
                 <div className="border-t border-white/10">
                   {group.conversations.map((conversation) => (
-                    <div key={conversation.id} className="p-4 space-y-2 border-b border-white/10 last:border-b-0">
-                      <div className="text-xs text-white/40 mb-2">
-                        Session: {format(new Date(conversation.started_at), 'MMM d, HH:mm')}
+                    <div key={conversation.id} className="p-4 space-y-3 border-b border-white/10 last:border-b-0 bg-[#0D1117]">
+                      <div className="text-xs text-center text-white/30 mb-3">
+                        {format(new Date(conversation.started_at), 'MMMM d, yyyy • HH:mm')}
                       </div>
-                      {conversation.messages.map((message) => {
+                      {conversation.messages.map((message, idx) => {
                         const isInbound = message.role === 'user';
                         return (
                           <div
                             key={message.id}
-                            className={`p-3 rounded-lg ${
-                              isInbound 
-                                ? 'bg-[#2A2A2A] text-white' 
-                                : 'bg-[#84CC16]/10 border border-[#84CC16]/20 text-white'
-                            }`}
+                            className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
                           >
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <span className="text-xs font-medium text-white/60">
-                                {isInbound ? 'Customer' : 'AI Assistant'}
-                              </span>
-                              <span className="text-xs text-white/40">
-                                {format(new Date(message.created_at), 'HH:mm')}
-                              </span>
+                            <div
+                              className={`max-w-[75%] rounded-lg px-3 py-2 ${
+                                isInbound 
+                                  ? 'bg-[#2A2A2A] text-white rounded-tl-none' 
+                                  : 'bg-[#005C4B] text-white rounded-tr-none'
+                              }`}
+                            >
+                              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                              <div className="flex items-center justify-end gap-1 mt-1">
+                                <span className="text-[10px] text-white/50">
+                                  {format(new Date(message.created_at), 'HH:mm')}
+                                </span>
+                                {!isInbound && (
+                                  <svg className="w-4 h-4 text-blue-400" viewBox="0 0 16 15" fill="none">
+                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
+                                  </svg>
+                                )}
+                              </div>
                             </div>
-                            <p className="text-sm">{message.content}</p>
                           </div>
                         );
                       })}
