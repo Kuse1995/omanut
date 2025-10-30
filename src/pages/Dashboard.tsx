@@ -195,6 +195,36 @@ const Dashboard = () => {
               <Button 
                 variant="ghost" 
                 className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/conversations')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">View Conversations</div>
+                  <div className="text-sm text-muted-foreground">See all customer chats</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/reservations')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">View Reservations</div>
+                  <div className="text-sm text-muted-foreground">See all bookings</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/client-insights')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">Client Insights</div>
+                  <div className="text-sm text-muted-foreground">View customer information</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
                 onClick={() => navigate('/live-demo')}
               >
                 <div className="text-left">
