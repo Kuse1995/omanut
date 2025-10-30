@@ -40,15 +40,23 @@ serve(async (req) => {
 
     if (companyError) {
       console.error('Database error looking up company:', companyError);
-      return new Response(sendWhatsAppMessage(To, From, "Our service is temporarily unavailable. Please try again later."), {
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Our service is temporarily unavailable. Please try again later.]]></Message>
+</Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
       });
     }
 
     if (!company) {
       console.error('Company not found for WhatsApp number:', To);
-      return new Response(sendWhatsAppMessage(To, From, "This WhatsApp number is not configured. Please contact support."), {
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[This WhatsApp number is not configured. Please contact support.]]></Message>
+</Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
       });
     }
 
@@ -56,11 +64,12 @@ serve(async (req) => {
     if (company.credit_balance <= 0) {
       const offlineMessage = "Our assistant is currently offline. A human will message you shortly.";
       
-      // Send response via Twilio WhatsApp API
-      const twilioResponse = await sendWhatsAppMessage(To, From, offlineMessage);
-      
-      return new Response(twilioResponse, {
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${offlineMessage}]]></Message>
+</Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
       });
     }
 
@@ -394,28 +403,26 @@ Critical rules:
 
     console.log('Sending WhatsApp response:', assistantReply);
 
-    // Send response via Twilio WhatsApp API
-    const twilioResponse = await sendWhatsAppMessage(To, From, assistantReply);
+    // Return TwiML response for Twilio to send the message
+    const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${assistantReply}]]></Message>
+</Response>`;
 
-    return new Response(twilioResponse, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/xml' },
+    return new Response(twimlResponse, {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
     });
 
   } catch (error) {
-    console.error("Error:", error);
-    return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    console.error("Error in WhatsApp handler:", error);
+    // Return TwiML error response so user gets a message
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Sorry, I encountered an error. Please try again or contact us directly.]]></Message>
+</Response>`, {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
     });
   }
 });
-
-function sendWhatsAppMessage(from: string, to: string, body: string): string {
-  // Return TwiML for WhatsApp response
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>${body}</Message>
-</Response>`;
-}
