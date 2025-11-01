@@ -2,16 +2,21 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search } from 'lucide-react';
+import { Search, Send, UserCog, Bot } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const Conversations = () => {
+  const { toast } = useToast();
   const [conversations, setConversations] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [stats, setStats] = useState({ total: 0, active: 0, avgDuration: 0 });
   const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set());
+  const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
+  const [sendingMessage, setSendingMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConversations();
@@ -59,7 +64,7 @@ const Conversations = () => {
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, status, duration_seconds')
+      .select('id, customer_name, phone, started_at, status, duration_seconds, human_takeover')
       .eq('company_id', userData.company_id)
       .order('started_at', { ascending: false })
       .limit(50);
@@ -145,6 +150,67 @@ const Conversations = () => {
       }
       return next;
     });
+  };
+
+  const handleTakeover = async (conversationId: string, currentState: boolean) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { error } = await supabase
+      .from('conversations')
+      .update({
+        human_takeover: !currentState,
+        takeover_by: !currentState ? session.user.id : null,
+        takeover_at: !currentState ? new Date().toISOString() : null
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to toggle takeover mode',
+        variant: 'destructive'
+      });
+    } else {
+      toast({
+        title: currentState ? 'AI Mode Enabled' : 'Human Takeover Enabled',
+        description: currentState 
+          ? 'AI will now respond to messages' 
+          : 'You can now respond directly to the customer'
+      });
+      fetchConversations();
+    }
+  };
+
+  const sendMessage = async (conversationId: string) => {
+    const message = messageInputs[conversationId]?.trim();
+    if (!message) return;
+
+    setSendingMessage(conversationId);
+
+    try {
+      const { error } = await supabase.functions.invoke('send-whatsapp-message', {
+        body: { conversationId, message }
+      });
+
+      if (error) throw error;
+
+      setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
+      toast({
+        title: 'Message sent',
+        description: 'Your message has been sent to the customer'
+      });
+      fetchConversations();
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to send message',
+        variant: 'destructive'
+      });
+    } finally {
+      setSendingMessage(null);
+    }
   };
 
   return (
@@ -238,9 +304,30 @@ const Conversations = () => {
                 <div className="border-t">
                   {group.conversations.map((conversation: any) => (
                     <div key={conversation.id} className="p-4 space-y-3 border-b last:border-b-0 bg-muted/20">
-                      <div className="text-xs text-center text-muted-foreground mb-3">
-                        {new Date(conversation.started_at).toLocaleString()}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(conversation.started_at).toLocaleString()}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={conversation.human_takeover ? "default" : "outline"}
+                          onClick={() => handleTakeover(conversation.id, conversation.human_takeover)}
+                          className="gap-2"
+                        >
+                          {conversation.human_takeover ? (
+                            <>
+                              <Bot className="w-4 h-4" />
+                              Return to AI
+                            </>
+                          ) : (
+                            <>
+                              <UserCog className="w-4 h-4" />
+                              Take Over
+                            </>
+                          )}
+                        </Button>
                       </div>
+                      
                       {conversation.messages.map((message: any) => {
                         const isInbound = message.role === 'user';
                         return (
@@ -265,6 +352,33 @@ const Conversations = () => {
                           </div>
                         );
                       })}
+
+                      {conversation.human_takeover && (
+                        <div className="flex gap-2 pt-2">
+                          <Input
+                            placeholder="Type your message..."
+                            value={messageInputs[conversation.id] || ''}
+                            onChange={(e) => setMessageInputs(prev => ({
+                              ...prev,
+                              [conversation.id]: e.target.value
+                            }))}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                sendMessage(conversation.id);
+                              }
+                            }}
+                            disabled={sendingMessage === conversation.id}
+                          />
+                          <Button
+                            size="icon"
+                            onClick={() => sendMessage(conversation.id)}
+                            disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id}
+                          >
+                            <Send className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

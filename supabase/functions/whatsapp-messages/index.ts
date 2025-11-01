@@ -86,6 +86,27 @@ serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
+    
+    // Check if conversation is in human takeover mode
+    if (conversation && conversation.human_takeover) {
+      console.log('Conversation is in human takeover mode, storing message only');
+      
+      // Insert user message
+      await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversation.id,
+          role: 'user',
+          content: Body
+        });
+      
+      // Don't respond, human will handle it
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      });
+    }
 
     if (convError || !conversation) {
       const { data: newConv, error: createError } = await supabase

@@ -322,11 +322,14 @@ export type Database = {
           customer_name: string | null
           duration_seconds: number | null
           ended_at: string | null
+          human_takeover: boolean | null
           id: string
           phone: string | null
           quality_flag: string | null
           started_at: string
           status: string
+          takeover_at: string | null
+          takeover_by: string | null
           transcript: string | null
         }
         Insert: {
@@ -335,11 +338,14 @@ export type Database = {
           customer_name?: string | null
           duration_seconds?: number | null
           ended_at?: string | null
+          human_takeover?: boolean | null
           id?: string
           phone?: string | null
           quality_flag?: string | null
           started_at?: string
           status?: string
+          takeover_at?: string | null
+          takeover_by?: string | null
           transcript?: string | null
         }
         Update: {
@@ -348,11 +354,14 @@ export type Database = {
           customer_name?: string | null
           duration_seconds?: number | null
           ended_at?: string | null
+          human_takeover?: boolean | null
           id?: string
           phone?: string | null
           quality_flag?: string | null
           started_at?: string
           status?: string
+          takeover_at?: string | null
+          takeover_by?: string | null
           transcript?: string | null
         }
         Relationships: [

@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.create-company]
 verify_jwt = true
+
+[functions.send-whatsapp-message]
+verify_jwt = true
