@@ -110,42 +110,48 @@ const Dashboard = () => {
       value: stats.creditBalance,
       icon: TrendingUp,
       description: 'Available credits',
-      className: 'text-primary'
+      className: 'text-primary',
+      onClick: () => navigate('/billing')
     },
     {
       title: "Today's Phone Calls",
       value: stats.todayCalls,
       icon: Phone,
       description: 'PSTN calls received',
-      className: 'text-accent'
+      className: 'text-accent',
+      onClick: () => navigate('/conversations')
     },
     {
       title: "WhatsApp Messages",
       value: stats.todayWhatsAppMessages,
       icon: MessageSquare,
       description: 'Messages handled today',
-      className: 'text-primary'
+      className: 'text-primary',
+      onClick: () => navigate('/conversations')
     },
     {
       title: "WhatsApp Calls",
       value: stats.todayWhatsAppCalls,
       icon: Phone,
       description: 'WhatsApp calls today',
-      className: 'text-accent'
+      className: 'text-accent',
+      onClick: () => navigate('/conversations')
     },
     {
       title: 'Active Conversations',
       value: stats.activeConversations,
       icon: MessageSquare,
       description: 'Currently ongoing',
-      className: 'text-primary'
+      className: 'text-primary',
+      onClick: () => navigate('/conversations')
     },
     {
       title: 'Total Reservations',
       value: stats.totalReservations,
       icon: Calendar,
       description: 'All-time bookings',
-      className: 'text-accent'
+      className: 'text-accent',
+      onClick: () => navigate('/reservations')
     }
   ];
 
@@ -170,7 +176,11 @@ const Dashboard = () => {
 
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {statCards.map((stat) => (
-            <Card key={stat.title} className="card-glass">
+            <Card 
+              key={stat.title} 
+              className="card-glass cursor-pointer transition-all hover:scale-105 hover:shadow-lg"
+              onClick={stat.onClick}
+            >
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-foreground">
                   {stat.title}
