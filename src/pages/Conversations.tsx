@@ -353,8 +353,9 @@ const Conversations = () => {
               {expandedPhones.has(group.phone) && (
                 <div className="border-t">
                   {group.conversations.map((conversation: any) => (
-                    <div key={conversation.id} className="p-4 space-y-3 border-b last:border-b-0 bg-muted/20">
-                      <div className="flex items-center justify-between mb-3">
+                    <div key={conversation.id} className="flex flex-col h-[600px] border-b last:border-b-0 bg-muted/20">
+                      {/* Header */}
+                      <div className="flex items-center justify-between p-4 border-b bg-background/50">
                         <div className="text-xs text-muted-foreground">
                           {new Date(conversation.started_at).toLocaleString()}
                         </div>
@@ -378,33 +379,37 @@ const Conversations = () => {
                         </Button>
                       </div>
                       
-                      {conversation.messages.map((message: any) => {
-                        const isInbound = message.role === 'user';
-                        return (
-                          <div
-                            key={message.id}
-                            className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
-                          >
+                      {/* Messages Area */}
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                        {conversation.messages.map((message: any) => {
+                          const isInbound = message.role === 'user';
+                          return (
                             <div
-                              className={`max-w-[75%] rounded-lg px-3 py-2 ${
-                                isInbound 
-                                  ? 'bg-muted text-foreground rounded-tl-none' 
-                                  : 'bg-primary text-primary-foreground rounded-tr-none'
-                              }`}
+                              key={message.id}
+                              className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
                             >
-                              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                              <div className="flex items-center justify-end gap-1 mt-1">
-                                <span className="text-[10px] opacity-70">
-                                  {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
+                              <div
+                                className={`max-w-[75%] rounded-lg px-3 py-2 ${
+                                  isInbound 
+                                    ? 'bg-muted text-foreground rounded-tl-none' 
+                                    : 'bg-primary text-primary-foreground rounded-tr-none'
+                                }`}
+                              >
+                                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                                <div className="flex items-center justify-end gap-1 mt-1">
+                                  <span className="text-[10px] opacity-70">
+                                    {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
 
+                      {/* Input Area - Always visible when takeover is active */}
                       {conversation.human_takeover && (
-                        <div className="space-y-2 pt-2">
+                        <div className="border-t bg-background/50 p-4 space-y-2">
                           <div className="flex gap-2">
                             <Input
                               placeholder="Type your message or describe an image to generate..."
@@ -420,6 +425,7 @@ const Conversations = () => {
                                 }
                               }}
                               disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
+                              className="flex-1"
                             />
                             <Button
                               size="icon"
