@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Send, UserCog, Bot } from 'lucide-react';
+import { Search, Send, UserCog, Bot, Sparkles } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -17,6 +17,7 @@ const Conversations = () => {
   const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set());
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
+  const [generatingImage, setGeneratingImage] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConversations();
@@ -213,6 +214,55 @@ const Conversations = () => {
     }
   };
 
+  const generateAndSendImage = async (conversationId: string) => {
+    const prompt = messageInputs[conversationId]?.trim();
+    if (!prompt) {
+      toast({
+        title: 'Prompt required',
+        description: 'Please enter a description for the image you want to generate',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setGeneratingImage(conversationId);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-business-image', {
+        body: { prompt, conversationId }
+      });
+
+      if (error) throw error;
+
+      if (data?.image_url) {
+        // Send the image as a message
+        const imageMessage = `Here's the image you requested:\n${data.image_url}`;
+        
+        const { error: sendError } = await supabase.functions.invoke('send-whatsapp-message', {
+          body: { conversationId, message: imageMessage }
+        });
+
+        if (sendError) throw sendError;
+
+        setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
+        toast({
+          title: 'Image generated and sent',
+          description: 'The AI-generated image has been sent to the customer'
+        });
+        fetchConversations();
+      }
+    } catch (error: any) {
+      console.error('Error generating image:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to generate image. Make sure image generation is enabled in Settings.',
+        variant: 'destructive'
+      });
+    } finally {
+      setGeneratingImage(null);
+    }
+  };
+
   return (
     <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
       <div className="flex items-center justify-between mb-6">
@@ -354,29 +404,47 @@ const Conversations = () => {
                       })}
 
                       {conversation.human_takeover && (
-                        <div className="flex gap-2 pt-2">
-                          <Input
-                            placeholder="Type your message..."
-                            value={messageInputs[conversation.id] || ''}
-                            onChange={(e) => setMessageInputs(prev => ({
-                              ...prev,
-                              [conversation.id]: e.target.value
-                            }))}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                sendMessage(conversation.id);
-                              }
-                            }}
-                            disabled={sendingMessage === conversation.id}
-                          />
-                          <Button
-                            size="icon"
-                            onClick={() => sendMessage(conversation.id)}
-                            disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id}
-                          >
-                            <Send className="w-4 h-4" />
-                          </Button>
+                        <div className="space-y-2 pt-2">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Type your message or describe an image to generate..."
+                              value={messageInputs[conversation.id] || ''}
+                              onChange={(e) => setMessageInputs(prev => ({
+                                ...prev,
+                                [conversation.id]: e.target.value
+                              }))}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  sendMessage(conversation.id);
+                                }
+                              }}
+                              disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
+                            />
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              onClick={() => generateAndSendImage(conversation.id)}
+                              disabled={!messageInputs[conversation.id]?.trim() || generatingImage === conversation.id || sendingMessage === conversation.id}
+                              title="Generate and send AI image"
+                            >
+                              {generatingImage === conversation.id ? (
+                                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <Sparkles className="w-4 h-4" />
+                              )}
+                            </Button>
+                            <Button
+                              size="icon"
+                              onClick={() => sendMessage(conversation.id)}
+                              disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id || generatingImage === conversation.id}
+                            >
+                              <Send className="w-4 h-4" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground px-1">
+                            Type a message or describe an image (e.g., "Show me a modern bob haircut") and click <Sparkles className="w-3 h-3 inline" /> to generate
+                          </p>
                         </div>
                       )}
                     </div>

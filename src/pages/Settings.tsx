@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import BackButton from '@/components/BackButton';
 import { CompanyDocuments } from '@/components/CompanyDocuments';
+import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const Settings = () => {
@@ -255,8 +256,9 @@ const Settings = () => {
         </Card>
 
         {config.id && (
-          <div className="mt-6">
+          <div className="mt-6 space-y-6">
             <CompanyDocuments companyId={config.id} />
+            <ImageGenerationSettings companyId={config.id} />
           </div>
         )}
       </div>

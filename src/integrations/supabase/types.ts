@@ -416,6 +416,89 @@ export type Database = {
           },
         ]
       }
+      generated_images: {
+        Row: {
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          image_url: string
+          prompt: string
+        }
+        Insert: {
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          image_url: string
+          prompt: string
+        }
+        Update: {
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string
+          prompt?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generated_images_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generated_images_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      image_generation_settings: {
+        Row: {
+          business_context: string | null
+          company_id: string
+          created_at: string
+          enabled: boolean
+          id: string
+          sample_prompts: string[] | null
+          style_description: string | null
+          updated_at: string
+        }
+        Insert: {
+          business_context?: string | null
+          company_id: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          sample_prompts?: string[] | null
+          style_description?: string | null
+          updated_at?: string
+        }
+        Update: {
+          business_context?: string | null
+          company_id?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          sample_prompts?: string[] | null
+          style_description?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "image_generation_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string

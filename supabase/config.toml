@@ -23,3 +23,6 @@ verify_jwt = true
 
 [functions.send-whatsapp-message]
 verify_jwt = true
+
+[functions.generate-business-image]
+verify_jwt = true
