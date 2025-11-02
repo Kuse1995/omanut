@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -14,7 +13,6 @@ const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [stats, setStats] = useState({ total: 0, active: 0, avgDuration: 0 });
-  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set());
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
@@ -111,47 +109,10 @@ const Conversations = () => {
     setStats({ total, active, avgDuration });
   };
 
-  // Group conversations by phone number
-  const groupedConversations = Object.values(
-    conversations.reduce((acc: Record<string, any>, conv) => {
-      const phone = conv.phone || 'Unknown';
-      if (!acc[phone]) {
-        acc[phone] = {
-          phone,
-          customer_name: conv.customer_name,
-          conversations: [],
-          totalMessages: 0,
-          lastMessageAt: conv.started_at
-        };
-      }
-      acc[phone].conversations.push(conv);
-      acc[phone].totalMessages += conv.messages.length;
-      if (new Date(conv.started_at) > new Date(acc[phone].lastMessageAt)) {
-        acc[phone].lastMessageAt = conv.started_at;
-      }
-      if (conv.customer_name) {
-        acc[phone].customer_name = conv.customer_name;
-      }
-      return acc;
-    }, {})
-  ).sort((a: any, b: any) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-
-  const filteredConversations = groupedConversations.filter((group: any) =>
-    group.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-    group.phone?.includes(search)
-  );
-
-  const togglePhone = (phone: string) => {
-    setExpandedPhones(prev => {
-      const next = new Set(prev);
-      if (next.has(phone)) {
-        next.delete(phone);
-      } else {
-        next.add(phone);
-      }
-      return next;
-    });
-  };
+  const filteredConversations = conversations.filter((conv: any) =>
+    conv.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+    conv.phone?.includes(search)
+  ).sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
 
   const handleTakeover = async (conversationId: string, currentState: boolean) => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -303,164 +264,150 @@ const Conversations = () => {
         </Card>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+      <div className="relative mb-6">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search by name or phone..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-10 mb-4"
+          className="pl-10"
         />
       </div>
 
-      <div className="space-y-4">
-        {filteredConversations.length === 0 ? (
-          <Card>
-            <CardContent className="flex items-center justify-center h-64">
-              <p className="text-muted-foreground">No conversations yet</p>
-            </CardContent>
-          </Card>
-        ) : (
-          filteredConversations.map((group: any) => (
-            <Card key={group.phone} className="overflow-hidden">
-              <button
-                onClick={() => togglePhone(group.phone)}
-                className="w-full p-4 flex items-center justify-between hover:bg-muted/50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`transition-transform ${expandedPhones.has(group.phone) ? 'rotate-90' : ''}`}>
-                    <svg className="w-5 h-5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
-                  <div className="text-left">
-                    <h3 className="font-semibold text-foreground">
-                      {group.customer_name || 'Unknown'}
-                    </h3>
-                    <p className="text-sm text-muted-foreground">{group.phone}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <Badge variant="outline">
-                    {group.totalMessages} messages
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(group.lastMessageAt).toLocaleDateString()}
-                  </span>
-                </div>
-              </button>
-              
-              {expandedPhones.has(group.phone) && (
-                <div className="border-t">
-                  {group.conversations.map((conversation: any) => (
-                    <div key={conversation.id} className="flex flex-col h-[600px] border-b last:border-b-0 bg-muted/20">
-                      {/* Header */}
-                      <div className="flex items-center justify-between p-4 border-b bg-background/50">
-                        <div className="text-xs text-muted-foreground">
-                          {new Date(conversation.started_at).toLocaleString()}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant={conversation.human_takeover ? "default" : "outline"}
-                          onClick={() => handleTakeover(conversation.id, conversation.human_takeover)}
-                          className="gap-2"
-                        >
-                          {conversation.human_takeover ? (
-                            <>
-                              <Bot className="w-4 h-4" />
-                              Return to AI
-                            </>
-                          ) : (
-                            <>
-                              <UserCog className="w-4 h-4" />
-                              Take Over
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                      
-                      {/* Messages Area */}
-                      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                        {conversation.messages.map((message: any) => {
-                          const isInbound = message.role === 'user';
-                          return (
-                            <div
-                              key={message.id}
-                              className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
-                            >
-                              <div
-                                className={`max-w-[75%] rounded-lg px-3 py-2 ${
-                                  isInbound 
-                                    ? 'bg-muted text-foreground rounded-tl-none' 
-                                    : 'bg-primary text-primary-foreground rounded-tr-none'
-                                }`}
-                              >
-                                <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                                <div className="flex items-center justify-end gap-1 mt-1">
-                                  <span className="text-[10px] opacity-70">
-                                    {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Input Area - Always visible when takeover is active */}
-                      {conversation.human_takeover && (
-                        <div className="border-t bg-background/50 p-4 space-y-2">
-                          <div className="flex gap-2">
-                            <Input
-                              placeholder="Type your message or describe an image to generate..."
-                              value={messageInputs[conversation.id] || ''}
-                              onChange={(e) => setMessageInputs(prev => ({
-                                ...prev,
-                                [conversation.id]: e.target.value
-                              }))}
-                              onKeyPress={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                  e.preventDefault();
-                                  sendMessage(conversation.id);
-                                }
-                              }}
-                              disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
-                              className="flex-1"
-                            />
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              onClick={() => generateAndSendImage(conversation.id)}
-                              disabled={!messageInputs[conversation.id]?.trim() || generatingImage === conversation.id || sendingMessage === conversation.id}
-                              title="Generate and send AI image"
-                            >
-                              {generatingImage === conversation.id ? (
-                                <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                              ) : (
-                                <Sparkles className="w-4 h-4" />
-                              )}
-                            </Button>
-                            <Button
-                              size="icon"
-                              onClick={() => sendMessage(conversation.id)}
-                              disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id || generatingImage === conversation.id}
-                            >
-                              <Send className="w-4 h-4" />
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground px-1">
-                            Type a message or describe an image (e.g., "Show me a modern bob haircut") and click <Sparkles className="w-3 h-3 inline" /> to generate
-                          </p>
-                        </div>
-                      )}
+      {filteredConversations.length === 0 ? (
+        <Card className="card-glass">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <p className="text-muted-foreground">No conversations found</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {filteredConversations.map((conversation: any) => (
+            <Card key={conversation.id} className="card-glass flex flex-col h-[700px]">
+              {/* Header */}
+              <CardHeader className="border-b pb-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <span className="text-sm font-semibold text-primary">
+                        {conversation.customer_name?.[0]?.toUpperCase() || '?'}
+                      </span>
                     </div>
-                  ))}
+                    <div>
+                      <h3 className="font-semibold text-base">
+                        {conversation.customer_name || 'Unknown Customer'}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">{conversation.phone}</p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={conversation.human_takeover ? "default" : "outline"}
+                    onClick={() => handleTakeover(conversation.id, conversation.human_takeover)}
+                    className="gap-2"
+                  >
+                    {conversation.human_takeover ? (
+                      <>
+                        <Bot className="w-4 h-4" />
+                        AI Mode
+                      </>
+                    ) : (
+                      <>
+                        <UserCog className="w-4 h-4" />
+                        Take Over
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <div className="text-xs text-muted-foreground mt-2">
+                  Started {new Date(conversation.started_at).toLocaleString()}
+                </div>
+              </CardHeader>
+              
+              {/* Messages Area */}
+              <CardContent className="flex-1 overflow-y-auto p-4 space-y-3">
+                {conversation.messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    No messages yet
+                  </div>
+                ) : (
+                  conversation.messages.map((message: any) => {
+                    const isInbound = message.role === 'user';
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${isInbound ? 'justify-start' : 'justify-end'}`}
+                      >
+                        <div
+                          className={`max-w-[75%] rounded-lg px-3 py-2 ${
+                            isInbound 
+                              ? 'bg-muted text-foreground rounded-tl-none' 
+                              : 'bg-primary text-primary-foreground rounded-tr-none'
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                          <div className="flex items-center justify-end gap-1 mt-1">
+                            <span className="text-[10px] opacity-70">
+                              {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </CardContent>
+
+              {/* Input Area - Always visible when takeover is active */}
+              {conversation.human_takeover && (
+                <div className="border-t bg-background/50 p-4 space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Type your message or describe an image to generate..."
+                      value={messageInputs[conversation.id] || ''}
+                      onChange={(e) => setMessageInputs(prev => ({
+                        ...prev,
+                        [conversation.id]: e.target.value
+                      }))}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage(conversation.id);
+                        }
+                      }}
+                      disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
+                      className="flex-1"
+                    />
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => generateAndSendImage(conversation.id)}
+                      disabled={!messageInputs[conversation.id]?.trim() || generatingImage === conversation.id || sendingMessage === conversation.id}
+                      title="Generate and send AI image"
+                    >
+                      {generatingImage === conversation.id ? (
+                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Sparkles className="w-4 h-4" />
+                      )}
+                    </Button>
+                    <Button
+                      size="icon"
+                      onClick={() => sendMessage(conversation.id)}
+                      disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id || generatingImage === conversation.id}
+                    >
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground px-1">
+                    Type a message or describe an image (e.g., "Show me a modern bob haircut") and click <Sparkles className="w-3 h-3 inline" /> to generate
+                  </p>
                 </div>
               )}
             </Card>
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
