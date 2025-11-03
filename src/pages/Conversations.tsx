@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Send, UserCog, Bot, Sparkles } from 'lucide-react';
+import { Search, Send, UserCog, Bot, Sparkles, Paperclip, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -16,6 +16,8 @@ const Conversations = () => {
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<Record<string, File | null>>({});
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
     fetchConversations();
@@ -160,18 +162,46 @@ const Conversations = () => {
 
   const sendMessage = async (conversationId: string) => {
     const message = messageInputs[conversationId]?.trim();
-    if (!message) return;
+    const attachedFile = attachedFiles[conversationId];
+    
+    if (!message && !attachedFile) return;
 
     setSendingMessage(conversationId);
 
     try {
+      let mediaUrl = null;
+
+      // Upload file if attached
+      if (attachedFile) {
+        const fileExt = attachedFile.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `chat-media/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('company-documents')
+          .upload(filePath, attachedFile, {
+            contentType: attachedFile.type,
+            upsert: false
+          });
+
+        if (uploadError) throw uploadError;
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('company-documents')
+          .getPublicUrl(filePath);
+
+        mediaUrl = publicUrl;
+      }
+
       const { error } = await supabase.functions.invoke('send-whatsapp-message', {
-        body: { conversationId, message }
+        body: { conversationId, message: message || 'Sent an attachment', mediaUrl }
       });
 
       if (error) throw error;
 
       setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
+      setAttachedFiles(prev => ({ ...prev, [conversationId]: null }));
       toast({
         title: 'Message sent',
         description: 'Your message has been sent to the customer'
@@ -375,7 +405,42 @@ const Conversations = () => {
               {/* Input Area - Always visible when takeover is active */}
               {conversation.human_takeover && (
                 <div className="border-t bg-background/50 p-4 space-y-2">
+                  {attachedFiles[conversation.id] && (
+                    <div className="flex items-center gap-2 p-2 bg-muted rounded-lg">
+                      <Paperclip className="w-4 h-4" />
+                      <span className="text-sm flex-1 truncate">{attachedFiles[conversation.id]?.name}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={() => setAttachedFiles(prev => ({ ...prev, [conversation.id]: null }))}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  )}
                   <div className="flex gap-2">
+                    <input
+                      type="file"
+                      ref={(el) => fileInputRefs.current[conversation.id] = el}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setAttachedFiles(prev => ({ ...prev, [conversation.id]: file }));
+                        }
+                      }}
+                      accept="image/*,video/*,application/pdf"
+                      className="hidden"
+                    />
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => fileInputRefs.current[conversation.id]?.click()}
+                      disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
+                      title="Attach media"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </Button>
                     <Input
                       placeholder="Type your message or describe an image to generate..."
                       value={messageInputs[conversation.id] || ''}
@@ -408,13 +473,13 @@ const Conversations = () => {
                     <Button
                       size="icon"
                       onClick={() => sendMessage(conversation.id)}
-                      disabled={!messageInputs[conversation.id]?.trim() || sendingMessage === conversation.id || generatingImage === conversation.id}
+                      disabled={(!messageInputs[conversation.id]?.trim() && !attachedFiles[conversation.id]) || sendingMessage === conversation.id || generatingImage === conversation.id}
                     >
                       <Send className="w-4 h-4" />
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground px-1">
-                    Type a message or describe an image (e.g., "Show me a modern bob haircut") and click <Sparkles className="w-3 h-3 inline" /> to generate
+                    Type a message, attach media, or describe an image and click <Sparkles className="w-3 h-3 inline" /> to generate
                   </p>
                 </div>
               )}

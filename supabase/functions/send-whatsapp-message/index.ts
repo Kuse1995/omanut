@@ -17,11 +17,11 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { conversationId, message } = await req.json();
+    const { conversationId, message, mediaUrl } = await req.json();
 
-    if (!conversationId || !message) {
+    if (!conversationId || (!message && !mediaUrl)) {
       return new Response(
-        JSON.stringify({ error: 'conversationId and message are required' }),
+        JSON.stringify({ error: 'conversationId and either message or mediaUrl are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -98,9 +98,18 @@ serve(async (req) => {
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
       
       const formData = new URLSearchParams();
-      formData.append('From', `whatsapp:${conversation.companies.whatsapp_number}`);
+      // Ensure whatsapp: prefix is not duplicated
+      const fromNumber = conversation.companies.whatsapp_number.startsWith('whatsapp:') 
+        ? conversation.companies.whatsapp_number 
+        : `whatsapp:${conversation.companies.whatsapp_number}`;
+      formData.append('From', fromNumber);
       formData.append('To', conversation.phone);
       formData.append('Body', message);
+      
+      // Add media URL if provided
+      if (mediaUrl) {
+        formData.append('MediaUrl', mediaUrl);
+      }
 
       try {
         const twilioResponse = await fetch(twilioUrl, {
