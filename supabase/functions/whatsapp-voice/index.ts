@@ -267,7 +267,7 @@ Critical rules:
             const args = JSON.parse(data.arguments);
             
             // Create reservation
-            await supabase
+            const { error: resError } = await supabase
               .from('reservations')
               .insert({
                 company_id: company.id,
@@ -284,7 +284,30 @@ Critical rules:
                 status: 'confirmed'
               });
 
-            console.log('Reservation created via WhatsApp call:', args);
+            if (!resError) {
+              console.log('Reservation created via WhatsApp call:', args);
+              
+              // Send confirmation email if email provided
+              if (args.email) {
+                try {
+                  await supabase.functions.invoke('send-reservation-confirmation', {
+                    body: {
+                      name: args.name,
+                      email: args.email,
+                      date: args.date,
+                      time: args.time,
+                      guests: args.guests,
+                      restaurantName: company.name
+                    }
+                  });
+                  console.log('Confirmation email sent to:', args.email);
+                } catch (emailError) {
+                  console.error('Failed to send confirmation email:', emailError);
+                }
+              }
+            } else {
+              console.error('Error creating reservation:', resError);
+            }
           } else if (data.type === 'input_audio_buffer.speech_started') {
             // Clear any ongoing audio playback
             socket.send(JSON.stringify({

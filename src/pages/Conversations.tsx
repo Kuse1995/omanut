@@ -116,7 +116,14 @@ const Conversations = () => {
 
   const handleTakeover = async (conversationId: string, currentState: boolean) => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      toast({
+        title: 'Not authenticated',
+        description: 'Please log in to use takeover mode',
+        variant: 'destructive'
+      });
+      return;
+    }
 
     const { error } = await supabase
       .from('conversations')
@@ -128,9 +135,10 @@ const Conversations = () => {
       .eq('id', conversationId);
 
     if (error) {
+      console.error('Takeover error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to toggle takeover mode',
+        description: `Failed to toggle takeover mode: ${error.message}`,
         variant: 'destructive'
       });
     } else {
@@ -140,7 +148,13 @@ const Conversations = () => {
           ? 'AI will now respond to messages' 
           : 'You can now respond directly to the customer'
       });
-      fetchConversations();
+      
+      // Immediately update local state
+      setConversations(prev => prev.map(conv => 
+        conv.id === conversationId 
+          ? { ...conv, human_takeover: !currentState, takeover_by: !currentState ? session.user.id : null }
+          : conv
+      ));
     }
   };
 

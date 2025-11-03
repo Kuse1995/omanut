@@ -364,6 +364,25 @@ Critical rules:
               .eq('id', conversation.id);
               
             assistantReply += "\n\nYour reservation has been confirmed! We look forward to serving you.";
+            
+            // Send confirmation email if email provided
+            if (args.email) {
+              try {
+                await supabase.functions.invoke('send-reservation-confirmation', {
+                  body: {
+                    name: args.name,
+                    email: args.email,
+                    date: args.date,
+                    time: args.time,
+                    guests: args.guests,
+                    restaurantName: company.name
+                  }
+                });
+                console.log('Confirmation email sent to:', args.email);
+              } catch (emailError) {
+                console.error('Failed to send confirmation email:', emailError);
+              }
+            }
           }
         }
       }
