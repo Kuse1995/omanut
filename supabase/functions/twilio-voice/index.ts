@@ -378,6 +378,32 @@ Critical rules:
                       }
                     });
                   }
+                  
+                  // Send company notification about new reservation
+                  if (company) {
+                    try {
+                      await supabase.functions.invoke('send-company-notification', {
+                        body: {
+                          company_id: company.id,
+                          notification_type: 'reservation',
+                          data: {
+                            name: args.name,
+                            phone: args.phone,
+                            email: args.email || null,
+                            date: args.date,
+                            time: args.time,
+                            guests: args.guests,
+                            branch: args.branch,
+                            area_preference: args.area_preference,
+                            occasion: args.occasion
+                          }
+                        }
+                      });
+                      console.log('Company notification sent for reservation');
+                    } catch (notifError) {
+                      console.error('Failed to send company notification:', notifError);
+                    }
+                  }
                 }
               } catch (err) {
                 console.error('Error creating reservation:', err);

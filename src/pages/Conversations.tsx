@@ -173,18 +173,24 @@ const Conversations = () => {
 
       // Upload file if attached
       if (attachedFile) {
+        console.log('Uploading file:', attachedFile.name, attachedFile.type);
         const fileExt = attachedFile.name.split('.').pop();
         const fileName = `${Date.now()}.${fileExt}`;
         const filePath = `chat-media/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
           .from('company-documents')
           .upload(filePath, attachedFile, {
             contentType: attachedFile.type,
             upsert: false
           });
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('Upload error:', uploadError);
+          throw uploadError;
+        }
+
+        console.log('Upload successful:', uploadData);
 
         // Get public URL
         const { data: { publicUrl } } = supabase.storage
@@ -192,13 +198,21 @@ const Conversations = () => {
           .getPublicUrl(filePath);
 
         mediaUrl = publicUrl;
+        console.log('Media URL:', mediaUrl);
       }
 
-      const { error } = await supabase.functions.invoke('send-whatsapp-message', {
+      console.log('Sending message with payload:', { conversationId, message: message || 'Sent an attachment', mediaUrl });
+      
+      const { data, error } = await supabase.functions.invoke('send-whatsapp-message', {
         body: { conversationId, message: message || 'Sent an attachment', mediaUrl }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Function invocation error:', error);
+        throw error;
+      }
+
+      console.log('Message sent successfully:', data);
 
       setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
       setAttachedFiles(prev => ({ ...prev, [conversationId]: null }));
@@ -207,11 +221,11 @@ const Conversations = () => {
         description: 'Your message has been sent to the customer'
       });
       fetchConversations();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
       toast({
         title: 'Error',
-        description: 'Failed to send message',
+        description: error?.message || 'Failed to send message',
         variant: 'destructive'
       });
     } finally {
