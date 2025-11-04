@@ -79,7 +79,7 @@ serve(async (req) => {
       .insert({
         conversation_id: conversationId,
         role: 'assistant',
-        content: message
+        content: message || (mediaUrl ? 'Sent an attachment' : '')
       });
 
     if (msgError) {
@@ -104,10 +104,13 @@ serve(async (req) => {
         : `whatsapp:${conversation.companies.whatsapp_number}`;
       formData.append('From', fromNumber);
       formData.append('To', conversation.phone);
-      formData.append('Body', message);
+      
+      // Twilio requires Body field even with media
+      formData.append('Body', message || '');
       
       // Add media URL if provided
       if (mediaUrl) {
+        console.log('Adding MediaUrl to Twilio request:', mediaUrl);
         formData.append('MediaUrl', mediaUrl);
       }
 
