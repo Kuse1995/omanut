@@ -131,6 +131,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     currency_prefix: "K",
     twilio_number: "",
     whatsapp_number: "",
+    boss_phone: "",
     whatsapp_voice_enabled: false,
     credit_balance: 1000,
     admin_email: "",
@@ -186,6 +187,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           currency_prefix: data.currency_prefix || "K",
           twilio_number: data.twilio_number || "",
           whatsapp_number: data.whatsapp_number || "",
+          boss_phone: data.boss_phone || "",
           whatsapp_voice_enabled: data.whatsapp_voice_enabled || false,
           credit_balance: data.credit_balance || 1000,
           admin_email: "",
@@ -238,6 +240,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             seating_areas: formData.seating_areas,
             twilio_number: formData.twilio_number,
             whatsapp_number: formData.whatsapp_number,
+            boss_phone: formData.boss_phone,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             quick_reference_info: formData.quick_reference_info,
           })
@@ -291,6 +294,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               seating_areas: formData.seating_areas,
               twilio_number: formData.twilio_number,
               whatsapp_number: formData.whatsapp_number,
+              boss_phone: formData.boss_phone,
               whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
               credit_balance: formData.credit_balance,
               quick_reference_info: formData.quick_reference_info,
@@ -406,6 +410,17 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 placeholder="whatsapp:+1234567890"
               />
               <p className="text-xs text-muted-foreground">For WhatsApp messages and calls</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="boss_phone">Boss WhatsApp Number</Label>
+              <Input
+                id="boss_phone"
+                value={formData.boss_phone}
+                onChange={(e) => setFormData({ ...formData, boss_phone: e.target.value })}
+                placeholder="whatsapp:+1234567890"
+              />
+              <p className="text-xs text-muted-foreground">AI will send reports & respond to queries from this number</p>
             </div>
 
             <div className="space-y-2">

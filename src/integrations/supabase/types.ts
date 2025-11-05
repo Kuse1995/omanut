@@ -119,6 +119,41 @@ export type Database = {
         }
         Relationships: []
       }
+      boss_conversations: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          message_content: string
+          message_from: string
+          response: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          message_content: string
+          message_from: string
+          response?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          message_content?: string
+          message_from?: string
+          response?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "boss_conversations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_information: {
         Row: {
           company_id: string
@@ -175,6 +210,7 @@ export type Database = {
       }
       companies: {
         Row: {
+          boss_phone: string | null
           branches: string | null
           business_type: string | null
           created_at: string | null
@@ -194,6 +230,7 @@ export type Database = {
           whatsapp_voice_enabled: boolean | null
         }
         Insert: {
+          boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
           created_at?: string | null
@@ -213,6 +250,7 @@ export type Database = {
           whatsapp_voice_enabled?: boolean | null
         }
         Update: {
+          boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
           created_at?: string | null

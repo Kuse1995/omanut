@@ -1,5 +1,11 @@
 project_id = "dzheddvoiauevcayifev"
 
+[functions.boss-chat]
+verify_jwt = false
+
+[functions.send-boss-notification]
+verify_jwt = false
+
 [functions.twilio-voice]
 verify_jwt = false
 

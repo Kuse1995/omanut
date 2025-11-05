@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
 
@@ -14,6 +15,7 @@ interface ReservationEmailRequest {
   time: string;
   guests: number;
   restaurantName: string;
+  reservationId?: string;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -22,7 +24,7 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { name, email, date, time, guests, restaurantName }: ReservationEmailRequest = await req.json();
+    const { name, email, date, time, guests, restaurantName, reservationId }: ReservationEmailRequest = await req.json();
 
     const formattedDate = new Date(date).toLocaleDateString('en-GB', {
       weekday: 'long',
@@ -72,6 +74,38 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     console.log("Confirmation email sent:", result);
+
+    // Notify boss if reservation ID is provided
+    if (reservationId) {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      );
+
+      const { data: reservation } = await supabase
+        .from('reservations')
+        .select('*, companies(id, boss_phone)')
+        .eq('id', reservationId)
+        .single();
+
+      if (reservation?.companies?.boss_phone) {
+        supabase.functions.invoke('send-boss-notification', {
+          body: {
+            companyId: reservation.companies.id,
+            notificationType: 'new_reservation',
+            data: {
+              name: reservation.name,
+              phone: reservation.phone,
+              guests: reservation.guests,
+              date: reservation.date,
+              time: reservation.time,
+              area_preference: reservation.area_preference,
+              occasion: reservation.occasion
+            }
+          }
+        }).catch(err => console.error('Boss notification failed:', err));
+      }
+    }
 
     return new Response(JSON.stringify(result), {
       status: 200,
