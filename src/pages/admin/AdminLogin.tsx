@@ -22,7 +22,10 @@ const AdminLogin = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
-        checkAdminRole(session.user.id);
+        // Defer async calls to prevent deadlock
+        setTimeout(() => {
+          checkAdminRole(session.user.id);
+        }, 0);
       }
     });
 

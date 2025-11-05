@@ -31,13 +31,16 @@ const Login = () => {
     
     checkSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
-        const { data: isAdmin } = await supabase.rpc('has_role', {
-          _user_id: session.user.id,
-          _role: 'admin'
-        });
-        navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
+        // Defer async calls to prevent deadlock
+        setTimeout(async () => {
+          const { data: isAdmin } = await supabase.rpc('has_role', {
+            _user_id: session.user.id,
+            _role: 'admin'
+          });
+          navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
+        }, 0);
       }
     });
 
