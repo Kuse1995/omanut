@@ -61,7 +61,17 @@ serve(async (req) => {
     }
 
     // Check if this message is from the boss
-    if (company.boss_phone && From === company.boss_phone) {
+    // Normalize phone numbers for comparison (remove whatsapp: prefix and handle various formats)
+    const normalizePhone = (phone: string) => {
+      return phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '');
+    };
+    
+    const fromPhone = normalizePhone(From);
+    const bossPhone = company.boss_phone ? normalizePhone(company.boss_phone) : '';
+    
+    console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
+    
+    if (company.boss_phone && fromPhone === bossPhone) {
       console.log('Message from boss detected, routing to boss chat');
       
       // Fetch company data for boss context

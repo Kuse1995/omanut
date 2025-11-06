@@ -248,7 +248,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         if (error) throw error;
 
-        // Upsert AI instructions
+        // Upsert AI instructions - specify conflict target
         const { error: aiError } = await supabase
           .from('company_ai_overrides')
           .upsert({
@@ -256,6 +256,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             system_instructions: aiInstructions.system_instructions,
             qa_style: aiInstructions.qa_style,
             banned_topics: aiInstructions.banned_topics
+          }, { 
+            onConflict: 'company_id',
+            ignoreDuplicates: false 
           });
 
         if (aiError) throw aiError;
