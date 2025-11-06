@@ -60,6 +60,127 @@ serve(async (req) => {
       });
     }
 
+    // Check if this message is from the boss
+    if (company.boss_phone && From === company.boss_phone) {
+      console.log('Message from boss detected, routing to boss chat');
+      
+      // Fetch company data for boss context
+      const { data: aiOverrides } = await supabase
+        .from('company_ai_overrides')
+        .select('*')
+        .eq('company_id', company.id)
+        .single();
+
+      const { data: documents } = await supabase
+        .from('company_documents')
+        .select('filename, parsed_content')
+        .eq('company_id', company.id)
+        .not('parsed_content', 'is', null);
+
+      const { data: recentConvs } = await supabase
+        .from('conversations')
+        .select('id, customer_name, phone, started_at, ended_at, status, quality_flag')
+        .eq('company_id', company.id)
+        .order('started_at', { ascending: false })
+        .limit(10);
+
+      const { data: recentReservations } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const { data: actionItems } = await supabase
+        .from('action_items')
+        .select('*')
+        .eq('company_id', company.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const { data: clientInfo } = await supabase
+        .from('client_information')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      // Build knowledge base
+      const knowledgeBase = documents
+        ?.map((doc: any) => doc.parsed_content)
+        .filter(Boolean)
+        .join('\n\n') || '';
+
+      const systemPrompt = `You are an AI assistant reporting to the boss of ${company.name}.
+The boss can ask you questions about customer interactions, reservations, and business insights.
+
+Business Context:
+- Type: ${company.business_type}
+- Hours: ${company.hours}
+- Offerings: ${company.menu_or_offerings}
+
+${aiOverrides?.system_instructions ? `Special Instructions: ${aiOverrides.system_instructions}` : ''}
+
+${knowledgeBase ? `Knowledge Base:\n${knowledgeBase}` : ''}
+
+Recent Conversation Stats (last 10):
+${recentConvs?.map((c: any) => `- ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}, Quality: ${c.quality_flag || 'N/A'}`).join('\n') || 'No recent conversations'}
+
+Recent Reservations:
+${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests} guests on ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
+
+Pending Action Items:
+${actionItems?.map((a: any) => `- ${a.action_type}: ${a.description} (${a.priority} priority)`).join('\n') || 'No pending actions'}
+
+Client Insights:
+${clientInfo?.map((i: any) => `- ${i.customer_name || 'Unknown'}: ${i.info_type} - ${i.information}`).join('\n') || 'No client insights'}
+
+Respond professionally and provide actionable insights when asked.`;
+
+      // Call OpenAI for boss response
+      const bossResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: Body }
+          ],
+          max_tokens: 500
+        }),
+      });
+
+      const bossData = await bossResponse.json();
+      const aiResponse = bossData.choices[0].message.content;
+
+      console.log('AI response for boss:', aiResponse);
+
+      // Log boss conversation
+      await supabase
+        .from('boss_conversations')
+        .insert({
+          company_id: company.id,
+          message_from: 'boss',
+          message_content: Body,
+          response: aiResponse
+        });
+
+      // Return TwiML response
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message>${aiResponse}</Message>
+</Response>`;
+
+      return new Response(twiml, {
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+      });
+    }
+
     // Check credit balance
     if (company.credit_balance <= 0) {
       const offlineMessage = "Our assistant is currently offline. A human will message you shortly.";
