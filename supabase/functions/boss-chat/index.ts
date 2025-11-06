@@ -18,14 +18,21 @@ serve(async (req) => {
     );
 
     const { From, Body, ProfileName } = await req.formData().then(data => ({
-      From: data.get('From'),
-      Body: data.get('Body'),
+      From: data.get('From') as string,
+      Body: data.get('Body') as string,
       ProfileName: data.get('ProfileName')
     }));
 
-    console.log('Boss message received:', { From, Body, ProfileName });
+    console.log('Management message received:', { From, Body, ProfileName });
 
-    // Find company by boss phone
+    // Normalize phone numbers for comparison
+    const normalizePhone = (phone: string) => {
+      return phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '');
+    };
+    
+    const fromPhone = normalizePhone(From || '');
+
+    // Find company by management phone
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .select('*, company_ai_overrides(*), company_documents(*)')
@@ -33,13 +40,13 @@ serve(async (req) => {
       .single();
 
     if (companyError || !company) {
-      console.error('Boss phone not found:', From);
+      console.error('Management phone not found:', From);
       return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
         headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
       });
     }
 
-    console.log('Boss company found:', company.name);
+    console.log('Management company found:', company.name);
 
     // Get recent conversation stats
     const { data: recentConvs } = await supabase
@@ -55,7 +62,18 @@ serve(async (req) => {
       .select('*')
       .eq('company_id', company.id)
       .order('created_at', { ascending: false })
-      .limit(5);
+      .limit(10);
+
+    // Specifically get demo bookings
+    const { data: demoBookings } = await supabase
+      .from('reservations')
+      .select('*')
+      .eq('company_id', company.id)
+      .ilike('occasion', '%demo%')
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    console.log('Demo bookings found:', demoBookings?.length || 0, demoBookings);
 
     // Get action items
     const { data: actionItems } = await supabase
@@ -82,8 +100,8 @@ serve(async (req) => {
 
     const aiOverrides = company.company_ai_overrides?.[0];
 
-    const systemPrompt = `You are an AI assistant reporting to the boss of ${company.name}.
-The boss can ask you questions about customer interactions, reservations, and business insights.
+    const systemPrompt = `You are an AI assistant reporting to the management team of ${company.name}.
+Management can ask you questions about customer interactions, reservations, and business insights.
 
 Business Context:
 - Type: ${company.business_type}
@@ -97,8 +115,11 @@ ${knowledgeBase ? `Knowledge Base:\n${knowledgeBase}` : ''}
 Recent Conversation Stats (last 10):
 ${recentConvs?.map((c: any) => `- ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}, Quality: ${c.quality_flag || 'N/A'}`).join('\n') || 'No recent conversations'}
 
-Recent Reservations:
-${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests} guests on ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
+Demo Bookings (${demoBookings?.length || 0} total):
+${demoBookings?.map((r: any) => `- ${r.name} (${r.phone}): ${r.occasion || 'Demo'} scheduled for ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No demo bookings yet'}
+
+Recent Reservations (last 10):
+${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests || 'N/A'} guests on ${r.date} at ${r.time}${r.occasion ? ` (${r.occasion})` : ''}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
 
 Pending Action Items:
 ${actionItems?.map((a: any) => `- ${a.action_type}: ${a.description} (${a.priority} priority)`).join('\n') || 'No pending actions'}
@@ -129,14 +150,14 @@ Respond professionally and provide actionable insights when asked.`;
     const data = await response.json();
     const aiResponse = data.choices[0].message.content;
 
-    console.log('AI response for boss:', aiResponse);
+    console.log('AI response for management:', aiResponse);
 
-    // Log boss conversation
+    // Log management conversation
     await supabase
       .from('boss_conversations')
       .insert({
         company_id: company.id,
-        message_from: 'boss',
+        message_from: 'management',
         message_content: Body,
         response: aiResponse
       });
@@ -152,7 +173,7 @@ Respond professionally and provide actionable insights when asked.`;
     });
 
   } catch (error) {
-    console.error("Error in boss-chat:", error);
+    console.error("Error in management-chat:", error);
     return new Response(
       '<?xml version="1.0" encoding="UTF-8"?><Response><Message>Error processing your request.</Message></Response>',
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'text/xml' } }

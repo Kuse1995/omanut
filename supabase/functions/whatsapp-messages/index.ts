@@ -72,9 +72,9 @@ serve(async (req) => {
     console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
     
     if (company.boss_phone && fromPhone === bossPhone) {
-      console.log('Message from boss detected, routing to boss chat');
+      console.log('Message from management detected, routing to management chat');
       
-      // Fetch company data for boss context
+      // Fetch company data for management context
       const { data: aiOverrides } = await supabase
         .from('company_ai_overrides')
         .select('*')
@@ -99,7 +99,18 @@ serve(async (req) => {
         .select('*')
         .eq('company_id', company.id)
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(10);
+
+      // Get demo bookings specifically
+      const { data: demoBookings } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('company_id', company.id)
+        .ilike('occasion', '%demo%')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      console.log('Demo bookings found for management:', demoBookings?.length || 0, demoBookings);
 
       const { data: actionItems } = await supabase
         .from('action_items')
@@ -122,8 +133,8 @@ serve(async (req) => {
         .filter(Boolean)
         .join('\n\n') || '';
 
-      const systemPrompt = `You are an AI assistant reporting to the boss of ${company.name}.
-The boss can ask you questions about customer interactions, reservations, and business insights.
+      const systemPrompt = `You are an AI assistant reporting to the management team of ${company.name}.
+Management can ask you questions about customer interactions, reservations, and business insights.
 
 Business Context:
 - Type: ${company.business_type}
@@ -137,8 +148,11 @@ ${knowledgeBase ? `Knowledge Base:\n${knowledgeBase}` : ''}
 Recent Conversation Stats (last 10):
 ${recentConvs?.map((c: any) => `- ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}, Quality: ${c.quality_flag || 'N/A'}`).join('\n') || 'No recent conversations'}
 
-Recent Reservations:
-${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests} guests on ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
+Demo Bookings (${demoBookings?.length || 0} total):
+${demoBookings?.map((r: any) => `- ${r.name} (${r.phone}): ${r.occasion || 'Demo'} scheduled for ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No demo bookings yet'}
+
+Recent Reservations (last 10):
+${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests || 'N/A'} guests on ${r.date} at ${r.time}${r.occasion ? ` (${r.occasion})` : ''}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
 
 Pending Action Items:
 ${actionItems?.map((a: any) => `- ${a.action_type}: ${a.description} (${a.priority} priority)`).join('\n') || 'No pending actions'}
@@ -148,8 +162,8 @@ ${clientInfo?.map((i: any) => `- ${i.customer_name || 'Unknown'}: ${i.info_type}
 
 Respond professionally and provide actionable insights when asked.`;
 
-      // Call OpenAI for boss response
-      const bossResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      // Call OpenAI for management response
+      const managementResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${OPENAI_API_KEY}`,
@@ -165,12 +179,12 @@ Respond professionally and provide actionable insights when asked.`;
         }),
       });
 
-      const bossData = await bossResponse.json();
-      const aiResponse = bossData.choices[0].message.content;
+      const managementData = await managementResponse.json();
+      const aiResponse = managementData.choices[0].message.content;
 
-      console.log('AI response for boss:', aiResponse);
+      console.log('AI response for management:', aiResponse);
 
-      // Log boss conversation
+      // Log management conversation
       await supabase
         .from('boss_conversations')
         .insert({

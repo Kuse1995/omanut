@@ -16,6 +16,7 @@ interface ReservationEmailRequest {
   guests: number;
   restaurantName: string;
   reservationId?: string;
+  phone?: string;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -24,7 +25,7 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { name, email, date, time, guests, restaurantName, reservationId }: ReservationEmailRequest = await req.json();
+    const { name, email, date, time, guests, restaurantName, reservationId, phone }: ReservationEmailRequest = await req.json();
 
     const formattedDate = new Date(date).toLocaleDateString('en-GB', {
       weekday: 'long',
@@ -75,16 +76,23 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log("Confirmation email sent:", result);
 
-    // Notify boss if reservation ID is provided
+    // Notify management if reservation ID is provided
     if (reservationId) {
       const supabase = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
       );
-
+      
       const { data: reservation } = await supabase
         .from('reservations')
-        .select('*, companies(id, boss_phone)')
+        .select(`
+          *,
+          companies (
+            id,
+            name,
+            boss_phone
+          )
+        `)
         .eq('id', reservationId)
         .single();
 
@@ -92,18 +100,16 @@ const handler = async (req: Request): Promise<Response> => {
         supabase.functions.invoke('send-boss-notification', {
           body: {
             companyId: reservation.companies.id,
-            notificationType: 'new_reservation',
-            data: {
-              name: reservation.name,
-              phone: reservation.phone,
-              guests: reservation.guests,
-              date: reservation.date,
-              time: reservation.time,
-              area_preference: reservation.area_preference,
-              occasion: reservation.occasion
+            notificationType: 'reservation_confirmed',
+            details: {
+              customerName: name,
+              date,
+              time,
+              guests,
+              phone: phone || reservation.phone
             }
           }
-        }).catch(err => console.error('Boss notification failed:', err));
+        }).catch((err: Error) => console.error('Management notification failed:', err));
       }
     }
 

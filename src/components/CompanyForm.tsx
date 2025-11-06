@@ -416,7 +416,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="boss_phone">Boss WhatsApp Number</Label>
+              <Label htmlFor="boss_phone">Management WhatsApp Number</Label>
               <Input
                 id="boss_phone"
                 value={formData.boss_phone}

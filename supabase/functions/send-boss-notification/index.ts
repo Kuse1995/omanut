@@ -91,7 +91,7 @@ serve(async (req) => {
         const errorText = await twilioResponse.text();
         console.error('Twilio error:', errorText);
       } else {
-        console.log('Boss notification sent successfully');
+        console.log('Management notification sent successfully');
       }
     }
 
@@ -111,7 +111,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("Error in send-boss-notification:", error);
+    console.error("Error in send-management-notification:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
