@@ -396,7 +396,8 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '1. NEVER include media URLs in your text response\n';
       mediaContext += '2. ALWAYS call send_media() tool to send images/videos directly\n';
       mediaContext += '3. In your text, simply acknowledge: "Let me send that to you now!" then call send_media()\n';
-      mediaContext += '4. The media will be sent automatically as an attachment via WhatsApp\n';
+      mediaContext += '4. The media will be sent automatically as attachments via WhatsApp\n';
+      mediaContext += '5. For galleries/collections ("show me all", "send pictures of", "all your photos"), send multiple media by including multiple URLs\n';
       mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
     }
 
@@ -617,24 +618,27 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "CRITICAL: Use this tool whenever customer requests images or videos. Send the actual media file directly to WhatsApp (NOT a link in text). Match their intent to the appropriate media category. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories. NEVER include media URLs in your text response - always call this function instead.",
+              description: "CRITICAL: Use this tool whenever customer requests images or videos. Send the actual media files directly to WhatsApp (NOT links in text). For single requests, send one media. For galleries/collections ('show me all your menus', 'all interior photos'), send multiple media URLs. Match their intent to the appropriate media category. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories. NEVER include media URLs in your text response - always call this function instead.",
               parameters: {
                 type: "object",
                 properties: {
-                  media_url: {
-                    type: "string",
-                    description: "The complete URL of the most relevant media file from the library"
+                  media_urls: {
+                    type: "array",
+                    items: {
+                      type: "string"
+                    },
+                    description: "Array of complete URLs of relevant media files from the library. Use single URL for individual requests, multiple URLs for galleries/collections."
                   },
                   caption: {
                     type: "string",
-                    description: "A friendly, contextual caption explaining what the media shows (will be sent with the media attachment)"
+                    description: "A friendly, contextual caption explaining what the media shows (will be sent with the first media attachment)"
                   },
                   category: {
                     type: "string",
                     description: "Category of media being sent (menu, interior, exterior, logo, products, promotional, staff, events, facilities, other) - for tracking purposes"
                   }
                 },
-                required: ["media_url", "category"]
+                required: ["media_urls", "category"]
               }
             }
           },
@@ -767,40 +771,80 @@ Critical rules:
           if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             try {
               const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-              
-              const formData = new URLSearchParams();
               const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
                 ? company.whatsapp_number 
                 : `whatsapp:${company.whatsapp_number}`;
-              formData.append('From', fromNumber);
-              formData.append('To', From);
-              formData.append('Body', args.caption || '');
-              formData.append('MediaUrl', args.media_url);
-
-              const twilioResponse = await fetch(twilioUrl, {
-                method: 'POST',
-                headers: {
-                  'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: formData.toString(),
-              });
-
-              if (!twilioResponse.ok) {
-                const errorText = await twilioResponse.text();
-                console.error('Twilio API error sending media:', twilioResponse.status, errorText);
-                assistantReply = "I tried to send you the media but encountered an error. Please let me know if you'd like me to try again.";
+              
+              // Support both single media_url (legacy) and multiple media_urls (new)
+              const mediaUrls = args.media_urls || (args.media_url ? [args.media_url] : []);
+              
+              if (mediaUrls.length === 0) {
+                console.error('No media URLs provided');
+                assistantReply = "I couldn't find the media to send.";
               } else {
-                console.log('Media sent successfully via Twilio');
-                assistantReply = ""; // Clear text response since media was sent
+                let successCount = 0;
+                let failCount = 0;
+                
+                // Send each media file as a separate message
+                for (let i = 0; i < mediaUrls.length; i++) {
+                  const mediaUrl = mediaUrls[i];
+                  const formData = new URLSearchParams();
+                  formData.append('From', fromNumber);
+                  formData.append('To', From);
+                  
+                  // Add caption only to the first message
+                  if (i === 0 && args.caption) {
+                    formData.append('Body', args.caption);
+                  } else if (mediaUrls.length > 1) {
+                    formData.append('Body', `${i + 1}/${mediaUrls.length}`);
+                  } else {
+                    formData.append('Body', 'Here you go!');
+                  }
+                  
+                  formData.append('MediaUrl', mediaUrl);
+
+                  const twilioResponse = await fetch(twilioUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData.toString(),
+                  });
+
+                  if (twilioResponse.ok) {
+                    successCount++;
+                    console.log(`Media ${i + 1}/${mediaUrls.length} sent successfully`);
+                  } else {
+                    failCount++;
+                    const errorText = await twilioResponse.text();
+                    console.error(`Twilio API error sending media ${i + 1}:`, twilioResponse.status, errorText);
+                  }
+                  
+                  // Small delay between messages to avoid rate limiting
+                  if (i < mediaUrls.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                  }
+                }
+                
                 // Log the media send in messages table
                 await supabase
                   .from('messages')
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent ${args.category} media: ${args.media_url}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${mediaUrls.length} ${args.category} media file${mediaUrls.length > 1 ? 's' : ''}]${args.caption ? ' - ' + args.caption : ''}`
                   });
+                
+                // Set appropriate response based on results
+                if (successCount === mediaUrls.length) {
+                  assistantReply = ""; // Clear text response since all media was sent
+                  console.log(`All ${mediaUrls.length} media files sent successfully`);
+                } else if (successCount > 0) {
+                  assistantReply = `I sent ${successCount} out of ${mediaUrls.length} media files. Some failed to send.`;
+                } else {
+                  assistantReply = "I tried to send you the media but encountered errors. Please let me know if you'd like me to try again.";
+                }
               }
             } catch (twilioError) {
               console.error('Error sending media via Twilio:', twilioError);
