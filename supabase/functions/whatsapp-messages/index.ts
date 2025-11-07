@@ -392,6 +392,11 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '- Staff/team requests → Use STAFF category\n';
       mediaContext += '- Event photos → Use EVENTS category\n';
       mediaContext += '- Amenities (pool, gym, etc.) → Use FACILITIES category\n';
+      mediaContext += '\n⚠️ CRITICAL: When customer requests media:\n';
+      mediaContext += '1. NEVER include media URLs in your text response\n';
+      mediaContext += '2. ALWAYS call send_media() tool to send images/videos directly\n';
+      mediaContext += '3. In your text, simply acknowledge: "Let me send that to you now!" then call send_media()\n';
+      mediaContext += '4. The media will be sent automatically as an attachment via WhatsApp\n';
       mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
     }
 
@@ -612,7 +617,7 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "Send the most relevant image or video based on customer's request. Match their intent to the appropriate media category and content. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories.",
+              description: "CRITICAL: Use this tool whenever customer requests images or videos. Send the actual media file directly to WhatsApp (NOT a link in text). Match their intent to the appropriate media category. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories. NEVER include media URLs in your text response - always call this function instead.",
               parameters: {
                 type: "object",
                 properties: {
@@ -622,7 +627,7 @@ Critical rules:
                   },
                   caption: {
                     type: "string",
-                    description: "A friendly, contextual caption explaining what the media shows"
+                    description: "A friendly, contextual caption explaining what the media shows (will be sent with the media attachment)"
                   },
                   category: {
                     type: "string",
@@ -784,22 +789,26 @@ Critical rules:
               if (!twilioResponse.ok) {
                 const errorText = await twilioResponse.text();
                 console.error('Twilio API error sending media:', twilioResponse.status, errorText);
-                assistantReply += "\n\nI tried to send you the media but encountered an error. Please let me know if you'd like me to try again.";
+                assistantReply = "I tried to send you the media but encountered an error. Please let me know if you'd like me to try again.";
               } else {
                 console.log('Media sent successfully via Twilio');
+                assistantReply = ""; // Clear text response since media was sent
                 // Log the media send in messages table
                 await supabase
                   .from('messages')
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent media: ${args.media_url}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${args.category} media: ${args.media_url}]${args.caption ? ' - ' + args.caption : ''}`
                   });
               }
             } catch (twilioError) {
               console.error('Error sending media via Twilio:', twilioError);
-              assistantReply += "\n\nI tried to send you the media but encountered an error.";
+              assistantReply = "I tried to send you the media but encountered an error.";
             }
+          } else {
+            console.error('Twilio credentials not configured for media sending');
+            assistantReply = "I'm unable to send media at the moment. Please contact us directly.";
           }
         } else if (toolCall.function.name === 'create_reservation') {
           const args = JSON.parse(toolCall.function.arguments);
