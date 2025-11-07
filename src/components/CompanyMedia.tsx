@@ -48,6 +48,9 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<MediaCategory>('other');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiSuggested, setAiSuggested] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -115,7 +118,64 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     });
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const analyzeMediaWithAI = async (file: File) => {
+    setAnalyzing(true);
+    try {
+      // Convert file to base64 data URL
+      const reader = new FileReader();
+      const imageDataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Get company data for context
+      const { data: company } = await supabase
+        .from('companies')
+        .select('business_type')
+        .eq('id', companyId)
+        .single();
+
+      // Call AI analysis edge function
+      const { data, error } = await supabase.functions.invoke('analyze-media', {
+        body: {
+          imageDataUrl,
+          fileName: file.name,
+          fileType: file.type,
+          businessType: company?.business_type || 'business'
+        }
+      });
+
+      if (error) throw error;
+
+      if (data && !data.error) {
+        setSelectedCategory(data.category as MediaCategory);
+        setDescription(data.description);
+        setTags(Array.isArray(data.tags) ? data.tags.join(', ') : data.tags);
+        setAiSuggested(true);
+        
+        toast({
+          title: "AI Suggestions Ready",
+          description: "Review and edit the suggestions before uploading",
+        });
+      } else if (data?.fallback) {
+        setSelectedCategory(data.fallback.category as MediaCategory);
+        setDescription(data.fallback.description);
+        setTags(data.fallback.tags.join(', '));
+      }
+    } catch (error: any) {
+      console.error('AI analysis error:', error);
+      toast({
+        title: "AI Analysis Failed",
+        description: "You can still upload and add details manually",
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -126,6 +186,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         description: "Maximum file size is 50MB",
         variant: "destructive",
       });
+      event.target.value = '';
       return;
     }
 
@@ -138,8 +199,32 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         description: "Only images and videos are allowed",
         variant: "destructive",
       });
+      event.target.value = '';
       return;
     }
+
+    // Store the file for later upload
+    setSelectedFile(file);
+
+    // Analyze with AI for images (videos would need thumbnail first)
+    if (isImage) {
+      await analyzeMediaWithAI(file);
+    }
+  };
+
+  const handleFileUpload = async () => {
+    const file = selectedFile;
+    if (!file) {
+      toast({
+        title: "No file selected",
+        description: "Please select a file first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
 
     setUploading(true);
 
@@ -231,6 +316,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       setDescription("");
       setTags("");
       setSelectedCategory('other');
+      setAiSuggested(false);
+      setSelectedFile(null);
       loadMedia();
     } catch (error: any) {
       toast({
@@ -240,7 +327,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       });
     } finally {
       setUploading(false);
-      event.target.value = '';
     }
   };
 
@@ -295,13 +381,49 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-4">
+          {analyzing && (
+            <div className="flex items-center gap-2 p-4 bg-primary/10 rounded-lg">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">AI is analyzing your media...</span>
+            </div>
+          )}
+          
+          {aiSuggested && (
+            <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <span className="text-sm text-green-700 dark:text-green-300">
+                ✨ AI suggestions applied - review and edit as needed
+              </span>
+            </div>
+          )}
+
           <div className="space-y-2">
-            <Label htmlFor="category">Media Category</Label>
+            <Label htmlFor="file-select">
+              1. Select Image or Video
+              <span className="ml-2 text-xs text-muted-foreground">(AI will analyze it)</span>
+            </Label>
+            <Input
+              id="file-select"
+              type="file"
+              accept="image/*,video/*"
+              onChange={handleFileSelect}
+              disabled={analyzing || uploading}
+            />
+            <p className="text-sm text-muted-foreground">
+              Maximum file size: 50MB
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="category">
+              2. Media Category
+              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+            </Label>
             <select
               id="category"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value as MediaCategory)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={analyzing}
             >
               {MEDIA_CATEGORIES.map(cat => (
                 <option key={cat.value} value={cat.value}>
@@ -312,41 +434,54 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="description">Description (optional)</Label>
+            <Label htmlFor="description">
+              3. Description (optional)
+              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+            </Label>
             <Textarea
               id="description"
               placeholder="Describe what this media shows..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              disabled={analyzing}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="tags">Tags (comma-separated, optional)</Label>
+            <Label htmlFor="tags">
+              4. Tags (comma-separated, optional)
+              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+            </Label>
             <Input
               id="tags"
               placeholder="menu, food, interior, pool..."
               value={tags}
               onChange={(e) => setTags(e.target.value)}
+              disabled={analyzing}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="file">Upload Image or Video</Label>
-            <Input
-              id="file"
-              type="file"
-              accept="image/*,video/*"
-              onChange={handleFileUpload}
-              disabled={uploading}
-            />
-            <p className="text-sm text-muted-foreground">
-              Maximum file size: 50MB
+          
+          <Button
+            onClick={handleFileUpload}
+            disabled={analyzing || uploading || !selectedFile}
+            className="w-full"
+          >
+            {uploading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Upload className="mr-2 h-4 w-4" />
+                5. Upload Media
+              </>
+            )}
+          </Button>
+          
+          {!analyzing && !aiSuggested && (
+            <p className="text-xs text-muted-foreground text-center">
+              Select a file to get AI-powered suggestions
             </p>
-          </div>
-          {uploading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Uploading...
-            </div>
           )}
         </div>
 
