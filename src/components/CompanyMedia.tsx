@@ -54,6 +54,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [aiSuggested, setAiSuggested] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [compressing, setCompressing] = useState(false);
+  const [compressionProgress, setCompressionProgress] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -156,6 +158,97 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     });
   };
 
+  const compressVideo = (file: File): Promise<File> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        reject(new Error('Canvas context not available'));
+        return;
+      }
+
+      video.onloadedmetadata = () => {
+        // Reduce resolution if video is large
+        const maxDimension = 1280;
+        const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
+        
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        
+        const chunks: BlobPart[] = [];
+        const stream = canvas.captureStream(30); // 30 fps
+        
+        // Use lower bitrate for compression
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'video/webm;codecs=vp9',
+          videoBitsPerSecond: 1000000 // 1 Mbps
+        });
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const compressedFile = new File(
+            [blob], 
+            file.name.replace(/\.[^/.]+$/, '.webm'),
+            { type: 'video/webm' }
+          );
+          resolve(compressedFile);
+        };
+        
+        mediaRecorder.onerror = (e) => {
+          reject(new Error('MediaRecorder error: ' + e));
+        };
+        
+        let currentTime = 0;
+        const duration = video.duration;
+        
+        const drawFrame = () => {
+          if (currentTime >= duration) {
+            mediaRecorder.stop();
+            return;
+          }
+          
+          video.currentTime = currentTime;
+          currentTime += 1/30; // Advance by frame duration
+          
+          const progress = Math.min(95, (currentTime / duration) * 100);
+          setCompressionProgress(Math.round(progress));
+        };
+        
+        video.onseeked = () => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          if (mediaRecorder.state === 'inactive') {
+            mediaRecorder.start();
+          }
+          
+          drawFrame();
+        };
+        
+        video.onerror = () => {
+          reject(new Error('Video loading error'));
+        };
+        
+        // Start the process
+        video.currentTime = 0;
+      };
+      
+      video.src = URL.createObjectURL(file);
+      video.load();
+    });
+  };
+
   const analyzeMediaWithAI = async (file: File) => {
     setAnalyzing(true);
     try {
@@ -241,12 +334,47 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       return;
     }
 
-    // Store the file for later upload
-    setSelectedFile(file);
+    // Check if video needs compression (over 50MB)
+    if (isVideo && file.size > 50 * 1024 * 1024) {
+      try {
+        setCompressing(true);
+        setCompressionProgress(0);
+        
+        toast({
+          title: "Compressing video",
+          description: "Large video detected. Compressing to optimize upload...",
+        });
+        
+        const compressedFile = await compressVideo(file);
+        setCompressionProgress(100);
+        
+        const savedSize = ((1 - compressedFile.size / file.size) * 100).toFixed(0);
+        toast({
+          title: "Compression complete",
+          description: `Video compressed successfully. Saved ${savedSize}% of space!`,
+        });
+        
+        setSelectedFile(compressedFile);
+      } catch (error: any) {
+        console.error('Compression error:', error);
+        toast({
+          title: "Compression failed",
+          description: "Uploading original video instead",
+          variant: "destructive",
+        });
+        setSelectedFile(file);
+      } finally {
+        setCompressing(false);
+        setCompressionProgress(0);
+      }
+    } else {
+      // Store the file for later upload
+      setSelectedFile(file);
 
-    // Analyze with AI for images (videos would need thumbnail first)
-    if (isImage) {
-      await analyzeMediaWithAI(file);
+      // Analyze with AI for images
+      if (isImage) {
+        await analyzeMediaWithAI(file);
+      }
     }
   };
 
@@ -428,6 +556,22 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-4">
+          {compressing && (
+            <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm font-medium">Compressing video...</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Progress value={compressionProgress} className="h-2 flex-1" />
+                <span className="text-sm font-medium min-w-[3ch] text-right">{compressionProgress}%</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                This may take a minute. Optimizing for faster upload and storage efficiency.
+              </p>
+            </div>
+          )}
+          
           {analyzing && (
             <div className="flex items-center gap-2 p-4 bg-primary/10 rounded-lg">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -453,10 +597,10 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               type="file"
               accept="image/*,video/*"
               onChange={handleFileSelect}
-              disabled={analyzing || uploading}
+              disabled={analyzing || uploading || compressing}
             />
             <p className="text-sm text-muted-foreground">
-              Maximum file size: 150MB
+              Maximum file size: 150MB • Videos over 50MB will be compressed automatically
             </p>
           </div>
 
@@ -519,7 +663,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           
           <Button
             onClick={handleFileUpload}
-            disabled={analyzing || uploading || !selectedFile}
+            disabled={analyzing || uploading || compressing || !selectedFile}
             className="w-full"
           >
             {uploading ? (
