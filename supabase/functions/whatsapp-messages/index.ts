@@ -697,6 +697,9 @@ Critical rules:
 
     console.log('AI response:', { assistantReply, toolCalls });
 
+    // Track successful tool executions for contextual response generation
+    const toolExecutionContext: string[] = [];
+
     // Handle tool calls (reservation creation, media sending, and payment requests)
     if (toolCalls && toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
@@ -838,7 +841,8 @@ Critical rules:
                 
                 // Set appropriate response based on results
                 if (successCount === mediaUrls.length) {
-                  // Keep AI's original contextual response - don't clear it
+                  // Track successful media send for contextual response
+                  toolExecutionContext.push(`sent ${mediaUrls.length} ${args.category} media file${mediaUrls.length > 1 ? 's' : ''}`);
                   console.log(`All ${mediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
                   assistantReply = `I sent ${successCount} out of ${mediaUrls.length} media files. Some failed to send.`;
@@ -934,6 +938,44 @@ Critical rules:
             }
           }
         }
+      }
+    }
+
+    // Phase 2: Generate contextual message if AI didn't provide one but tools were executed
+    if ((!assistantReply || assistantReply.trim() === '') && toolExecutionContext.length > 0) {
+      console.log('Generating contextual response for tool executions:', toolExecutionContext);
+      
+      try {
+        const contextPrompt = `You just ${toolExecutionContext.join(' and ')} to the customer. Generate a brief, friendly confirmation message (1-2 sentences max) in your natural voice that acknowledges what you sent. Keep it conversational and warm.`;
+        
+        const contextResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: instructions },
+              { role: 'user', content: contextPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 150
+          }),
+        });
+
+        if (contextResponse.ok) {
+          const contextData = await contextResponse.json();
+          const contextualReply = contextData.choices[0].message.content || '';
+          if (contextualReply.trim()) {
+            assistantReply = contextualReply;
+            console.log('Generated contextual response:', assistantReply);
+          }
+        }
+      } catch (contextError) {
+        console.error('Error generating contextual response:', contextError);
+        // Fall through to the existing fallback
       }
     }
 
