@@ -365,6 +365,7 @@ export type Database = {
           id: string
           media_type: string
           tags: string[] | null
+          thumbnail_url: string | null
           updated_at: string
           uploaded_by: string | null
         }
@@ -379,6 +380,7 @@ export type Database = {
           id?: string
           media_type: string
           tags?: string[] | null
+          thumbnail_url?: string | null
           updated_at?: string
           uploaded_by?: string | null
         }
@@ -393,6 +395,7 @@ export type Database = {
           id?: string
           media_type?: string
           tags?: string[] | null
+          thumbnail_url?: string | null
           updated_at?: string
           uploaded_by?: string | null
         }

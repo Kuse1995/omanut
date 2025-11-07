@@ -22,6 +22,7 @@ interface Media {
   description: string | null;
   tags: string[];
   created_at: string;
+  thumbnail_url: string | null;
 }
 
 export default function CompanyMedia({ companyId }: CompanyMediaProps) {
@@ -55,6 +56,46 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const generateVideoThumbnail = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      
+      video.onloadedmetadata = () => {
+        video.currentTime = 1; // Capture frame at 1 second
+      };
+      
+      video.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas context'));
+          return;
+        }
+        
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to create thumbnail'));
+          }
+        }, 'image/jpeg', 0.8);
+      };
+      
+      video.onerror = () => {
+        reject(new Error('Failed to load video'));
+      };
+      
+      video.src = URL.createObjectURL(file);
+    });
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,6 +154,34 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       
       console.log('File uploaded successfully:', uploadData);
 
+      let thumbnailUrl = null;
+      
+      // Generate and upload thumbnail for videos
+      if (isVideo) {
+        try {
+          console.log('Generating video thumbnail...');
+          const thumbnailBlob = await generateVideoThumbnail(file);
+          const thumbnailFileName = `${companyId}/${Date.now()}_thumb.jpg`;
+          
+          const { error: thumbUploadError } = await supabase.storage
+            .from('company-media')
+            .upload(thumbnailFileName, thumbnailBlob);
+
+          if (thumbUploadError) {
+            console.error('Thumbnail upload error:', thumbUploadError);
+          } else {
+            const { data: thumbData } = supabase.storage
+              .from('company-media')
+              .getPublicUrl(thumbnailFileName);
+            thumbnailUrl = thumbData.publicUrl;
+            console.log('Thumbnail uploaded successfully');
+          }
+        } catch (thumbError) {
+          console.error('Failed to generate thumbnail:', thumbError);
+          // Continue without thumbnail
+        }
+      }
+
       console.log('Inserting into database...');
       const { error: dbError } = await supabase
         .from('company_media')
@@ -125,7 +194,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           media_type: isImage ? 'image' : 'video',
           description: description || null,
           tags: tags ? tags.split(',').map(t => t.trim()) : [],
-          uploaded_by: user.id
+          uploaded_by: user.id,
+          thumbnail_url: thumbnailUrl
         });
 
       if (dbError) {
@@ -265,6 +335,17 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                       alt={item.file_name}
                       className="w-full h-40 object-cover"
                     />
+                  ) : item.thumbnail_url ? (
+                    <div className="relative w-full h-40">
+                      <img
+                        src={item.thumbnail_url}
+                        alt={item.file_name}
+                        className="w-full h-40 object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Video className="h-8 w-8 text-white" />
+                      </div>
+                    </div>
                   ) : (
                     <div className="w-full h-40 bg-muted flex items-center justify-center">
                       <Video className="h-12 w-12 text-muted-foreground" />
