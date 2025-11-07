@@ -142,7 +142,7 @@ const Settings = () => {
                 id="name"
                 value={config.name}
                 onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                placeholder="e.g., Streamside Lodge"
+                placeholder="e.g., Your Business Name"
                 disabled={loading}
               />
             </div>

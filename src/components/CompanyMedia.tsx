@@ -24,6 +24,8 @@ interface Media {
   created_at: string;
   thumbnail_url: string | null;
   category: string;
+  signed_url?: string;
+  signed_thumb_url?: string;
 }
 
 type MediaCategory = 'products' | 'interior' | 'exterior' | 'logo' | 'promotional' | 'staff' | 'events' | 'facilities' | 'other';
@@ -65,7 +67,42 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setMedia(data || []);
+      
+      // Generate signed URLs for all media
+      const mediaWithUrls = await Promise.all(
+        (data || []).map(async (item) => {
+          try {
+            const { data: signedData } = await supabase.storage
+              .from('company-media')
+              .createSignedUrl(item.file_path, 3600); // 1 hour expiry
+            
+            let signedThumbUrl = undefined;
+            if (item.thumbnail_url && item.media_type === 'video') {
+              // Extract path from thumbnail URL if it's a full URL
+              const thumbPath = item.thumbnail_url.includes('company-media/') 
+                ? item.thumbnail_url.split('company-media/')[1] 
+                : item.file_path.replace(/\.[^/.]+$/, '_thumb.jpg');
+              
+              const { data: thumbData } = await supabase.storage
+                .from('company-media')
+                .createSignedUrl(thumbPath, 3600);
+              
+              signedThumbUrl = thumbData?.signedUrl;
+            }
+            
+            return {
+              ...item,
+              signed_url: signedData?.signedUrl,
+              signed_thumb_url: signedThumbUrl
+            };
+          } catch (urlError) {
+            console.error('Error generating signed URL:', urlError);
+            return item;
+          }
+        })
+      );
+      
+      setMedia(mediaWithUrls);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -359,10 +396,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     }
   };
 
-  const getPublicUrl = (path: string) => {
-    const { data } = supabase.storage.from('company-media').getPublicUrl(path);
-    return data.publicUrl;
-  };
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -513,14 +546,14 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                 <div key={item.id} className="relative group border rounded-lg overflow-hidden">
                   {item.media_type === 'image' ? (
                     <img
-                      src={getPublicUrl(item.file_path)}
+                      src={item.signed_url || ''}
                       alt={item.file_name}
                       className="w-full h-40 object-cover"
                     />
-                  ) : item.thumbnail_url ? (
+                  ) : item.signed_thumb_url ? (
                     <div className="relative w-full h-40">
                       <img
-                        src={item.thumbnail_url}
+                        src={item.signed_thumb_url}
                         alt={item.file_name}
                         className="w-full h-40 object-cover"
                       />

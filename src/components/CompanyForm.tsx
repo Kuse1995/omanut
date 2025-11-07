@@ -30,76 +30,76 @@ const industryConfig: Record<string, {
   confirmation_template: string;
 }> = {
   restaurant: {
-    voice_style: "Warm, polite receptionist. Friendly and helpful with menu recommendations.",
+    voice_style: "Warm, polite receptionist. Friendly and helpful with recommendations.",
     hours: "Mon-Sun 10:00 – 23:00",
     services: "Grilled fish, steaks, pasta, salads, desserts",
     branches: "Main",
     service_locations: "outdoor,indoor,bar,VIP",
     currency_prefix: "K",
-    locations_label: "Seating Areas",
-    services_label: "Menu Items",
-    locations_prompt: "Which area would you prefer - poolside, outdoor terrace, or indoor dining?",
-    confirmation_template: "booking for {guests} guests on {date} at {time} in the {location} area"
+    locations_label: "Service Areas",
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area would you prefer?",
+    confirmation_template: "booking for {guests} on {date} at {time} in the {location} area"
   },
   clinic: {
-    voice_style: "Professional, empathetic clinic receptionist. Calm and reassuring.",
+    voice_style: "Professional, empathetic receptionist. Calm and reassuring.",
     hours: "Mon-Fri 08:00 – 17:00, Sat 09:00 – 13:00",
     services: "General consultation, specialist appointments, laboratory services, X-rays",
     branches: "Main",
     service_locations: "general,priority,pediatrics,specialist wing",
     currency_prefix: "K",
-    locations_label: "Consultation Areas",
-    services_label: "Medical Services",
-    locations_prompt: "Which department do you need - general consultation, pediatrics, or specialist?",
-    confirmation_template: "appointment on {date} at {time} in the {location} department"
+    locations_label: "Service Areas",
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area do you need?",
+    confirmation_template: "appointment on {date} at {time} in the {location} area"
   },
   gym: {
-    voice_style: "Energetic, motivating gym receptionist. Encouraging and supportive.",
+    voice_style: "Energetic, motivating receptionist. Encouraging and supportive.",
     hours: "Mon-Sun 05:00 – 22:00",
     services: "Personal training, group classes, cardio equipment, weights, yoga",
     branches: "Main",
     service_locations: "main floor,studio,outdoor area,spin room",
     currency_prefix: "K",
-    locations_label: "Training Zones",
-    services_label: "Facilities & Classes",
-    locations_prompt: "Which area would you like to use - main gym floor, yoga studio, or outdoor training area?",
-    confirmation_template: "session on {date} at {time} in the {location}"
+    locations_label: "Service Areas",
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area would you like to use?",
+    confirmation_template: "session on {date} at {time} in the {location} area"
   },
   salon: {
-    voice_style: "Friendly, professional salon receptionist. Knowledgeable about beauty services.",
+    voice_style: "Friendly, professional receptionist. Knowledgeable and helpful.",
     hours: "Mon-Sat 09:00 – 19:00",
     services: "Haircuts, coloring, styling, manicures, pedicures, facials",
     branches: "Main",
     service_locations: "main salon,VIP room,spa area",
     currency_prefix: "K",
     locations_label: "Service Areas",
-    services_label: "Beauty Services",
-    locations_prompt: "Would you prefer the main salon area or our private VIP room?",
-    confirmation_template: "appointment for {service} on {date} at {time}"
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area would you prefer?",
+    confirmation_template: "appointment on {date} at {time} in the {location} area"
   },
   hotel: {
-    voice_style: "Warm, professional hotel receptionist. Helpful and accommodating.",
+    voice_style: "Warm, professional receptionist. Helpful and accommodating.",
     hours: "24/7",
     services: "Room booking, restaurant, spa, pool, gym, conference rooms",
     branches: "Main",
     service_locations: "poolside,restaurant,spa,conference,rooms",
     currency_prefix: "K",
-    locations_label: "Facilities",
-    services_label: "Hotel Services",
-    locations_prompt: "Which facility would you like to book - restaurant, spa, or conference room?",
-    confirmation_template: "reservation on {date} at {time} at our {location}"
+    locations_label: "Service Areas",
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area would you like to book?",
+    confirmation_template: "reservation on {date} at {time} at our {location} area"
   },
   spa: {
-    voice_style: "Calm, soothing spa receptionist. Creates relaxing atmosphere.",
+    voice_style: "Calm, soothing receptionist. Creates relaxing atmosphere.",
     hours: "Mon-Sun 09:00 – 20:00",
     services: "Massages, facials, body treatments, manicures, pedicures",
     branches: "Main",
     service_locations: "treatment rooms,relaxation lounge,sauna,VIP suite",
     currency_prefix: "K",
-    locations_label: "Treatment Areas",
-    services_label: "Spa Services",
-    locations_prompt: "Would you like a regular treatment room or our VIP suite?",
-    confirmation_template: "appointment for {service} on {date} at {time}"
+    locations_label: "Service Areas",
+    services_label: "Services & Offerings",
+    locations_prompt: "Which area would you prefer?",
+    confirmation_template: "appointment on {date} at {time} in the {location} area"
   },
   other: {
     voice_style: "Professional, courteous receptionist. Helpful and informative.",
@@ -374,7 +374,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g., Streamside Lodge"
+                placeholder="e.g., Your Business Name"
                 required
               />
             </div>
