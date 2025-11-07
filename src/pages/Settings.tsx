@@ -37,10 +37,30 @@ const Settings = () => {
 
   const fetchConfig = async () => {
     try {
+      // First get the authenticated user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      if (!user) {
+        throw new Error('Not authenticated');
+      }
+
+      // Get the user's company_id from the users table
+      const { data: userData, error: userDataError } = await supabase
+        .from('users')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+
+      if (userDataError) throw userDataError;
+      if (!userData?.company_id) {
+        throw new Error('User has no associated company');
+      }
+
+      // Fetch the user's company
       const { data, error } = await supabase
         .from('companies')
         .select('*')
-        .limit(1)
+        .eq('id', userData.company_id)
         .single();
 
       if (error) throw error;
