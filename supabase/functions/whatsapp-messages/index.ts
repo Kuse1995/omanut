@@ -517,28 +517,30 @@ Critical rules:
 
 1. CUSTOMER PHONE: ${customerPhone} - You ALREADY HAVE this. Never ask for it again.
 
-2. When answering questions, ALWAYS check the Company Knowledge Base first for accurate information.
+2. MEDIA SENDING - CRITICAL: When customers ask for samples, portfolio, videos, photos, images, examples of your work, gallery, or say "show me", "send me", "share", "can I see", "what have you made" - you MUST call the send_media tool. NEVER just say you'll send something - actually call the tool! Look in the Media Library section above for available media URLs.
 
-3. When taking a booking, you only need to ask for:
+3. When answering questions, ALWAYS check the Company Knowledge Base first for accurate information.
+
+4. When taking a booking, you only need to ask for:
    - Their NAME (ask once: "May I have your name please?")
    - DATE and TIME of booking
    - NUMBER OF GUESTS
    - WHICH BRANCH (if multiple locations) - Example: "${businessPrompt.location_prompt}"
    - LOCATION PREFERENCE (if applicable)
    
-4. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
+5. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
 
-5. Before creating a reservation, confirm ALL details ONCE using this format:
+6. Before creating a reservation, confirm ALL details ONCE using this format:
    "Perfect! Let me confirm: [NAME], ${customerPhone}, ${businessPrompt.confirmation.replace('{guests}', '[GUESTS]').replace('{date}', '[DATE]').replace('{time}', '[TIME]').replace('{location}', '[LOCATION]')}. Is that correct?"
    Only call create_reservation after they confirm.
 
-6. Track what information you already have. Look at the conversation history to see what they've told you.
+7. Track what information you already have. Look at the conversation history to see what they've told you.
 
-7. Be concise and natural. Don't sound like a robot repeating questions.
+8. Be concise and natural. Don't sound like a robot repeating questions.
 
-8. Always speak in warm, respectful Zambian English.
+9. Always speak in warm, respectful Zambian English.
 
-9. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
+10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
     // Build conversation history - keep full context to avoid repetition
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
@@ -618,7 +620,7 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "CRITICAL: Use this tool whenever customer requests images or videos. Send the actual media files directly to WhatsApp (NOT links in text). For single requests, send one media. For galleries/collections ('show me all your menus', 'all interior photos'), send multiple media URLs. Match their intent to the appropriate media category. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories. NEVER include media URLs in your text response - always call this function instead.",
+              description: "MANDATORY USE: Call this tool immediately when customer uses ANY of these keywords or phrases: 'samples', 'portfolio', 'videos', 'photos', 'images', 'examples', 'what you made', 'what you've made', 'show me', 'send me', 'share', 'can I see', 'I would like to see', 'gallery', 'your work'. Send actual media files to WhatsApp (NOT text descriptions or promises). Match the media category: 'logo' for logos, 'products' for product samples, 'promotional' for marketing content, 'menu' for menus, 'interior/exterior' for venue photos. NEVER say 'let me send' or 'I'll share' - just call this tool directly.",
               parameters: {
                 type: "object",
                 properties: {
@@ -696,9 +698,11 @@ Critical rules:
     const toolCalls = aiData.choices[0].message.tool_calls;
 
     console.log('AI response:', { assistantReply, toolCalls });
+    console.log('AI response full message:', JSON.stringify(aiData.choices[0].message, null, 2));
 
     // Track successful tool executions for contextual response generation
     const toolExecutionContext: string[] = [];
+    let anyToolExecuted = false;
 
     // Handle tool calls (reservation creation, media sending, and payment requests)
     if (toolCalls && toolCalls.length > 0) {
@@ -735,6 +739,9 @@ Critical rules:
             
             if (paymentResponse.ok) {
               const paymentData = await paymentResponse.json();
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`created payment link for ${args.product_name}`);
               
               // Build payment message based on method
               let paymentMessage = `Great! To proceed with your *${args.product_name}* for ${company.currency_prefix}${args.amount}, `;
@@ -842,12 +849,14 @@ Critical rules:
                 // Set appropriate response based on results
                 if (successCount === mediaUrls.length) {
                   // Track successful media send for contextual response
+                  anyToolExecuted = true;
                   toolExecutionContext.push(`sent ${mediaUrls.length} ${args.category} media file${mediaUrls.length > 1 ? 's' : ''}`);
                   console.log(`All ${mediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
+                  anyToolExecuted = true;
                   assistantReply = `I sent ${successCount} out of ${mediaUrls.length} media files. Some failed to send.`;
                 } else {
-                  assistantReply = "I tried to send you the media but encountered errors. Please let me know if you'd like me to try again.";
+                  assistantReply = "I tried to send the media but encountered an issue. Let me try again or I can help you another way.";
                 }
               }
             } catch (twilioError) {
@@ -886,6 +895,9 @@ Critical rules:
             console.error('Error creating reservation:', resError);
             assistantReply += "\n\nI encountered an error saving your reservation. Please contact us directly.";
           } else {
+            anyToolExecuted = true;
+            toolExecutionContext.push(`created reservation for ${args.name}`);
+            
             // Update conversation with customer name
             await supabase
               .from('conversations')
@@ -942,7 +954,14 @@ Critical rules:
     }
 
     // Phase 2: Generate contextual message if AI didn't provide one but tools were executed
-    if ((!assistantReply || assistantReply.trim() === '') && toolExecutionContext.length > 0) {
+    console.log('Phase 2 check:', { 
+      assistantReply, 
+      anyToolExecuted, 
+      toolExecutionContext,
+      shouldGenerateContext: anyToolExecuted && (!assistantReply || assistantReply.trim() === '')
+    });
+    
+    if (anyToolExecuted && (!assistantReply || assistantReply.trim() === '')) {
       console.log('Generating contextual response for tool executions:', toolExecutionContext);
       
       try {
