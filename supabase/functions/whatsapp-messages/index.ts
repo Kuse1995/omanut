@@ -838,7 +838,7 @@ Critical rules:
                 
                 // Set appropriate response based on results
                 if (successCount === mediaUrls.length) {
-                  assistantReply = ""; // Clear text response since all media was sent
+                  // Keep AI's original contextual response - don't clear it
                   console.log(`All ${mediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
                   assistantReply = `I sent ${successCount} out of ${mediaUrls.length} media files. Some failed to send.`;
