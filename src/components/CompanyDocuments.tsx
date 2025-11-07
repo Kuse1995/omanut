@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Trash2, FileText, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ export const CompanyDocuments = ({ companyId }: CompanyDocumentsProps) => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   useEffect(() => {
     loadDocuments();
@@ -90,15 +92,28 @@ export const CompanyDocuments = ({ companyId }: CompanyDocumentsProps) => {
 
     try {
       setUploading(true);
+      setUploadProgress(0);
+      
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) return prev; // Stop at 90% until actual upload completes
+          return prev + 10;
+        });
+      }, 300);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
       // Upload to storage
       const filePath = `${user.id}/${Date.now()}-${file.name}`;
+      
       const { error: uploadError } = await supabase.storage
         .from('company-documents')
         .upload(filePath, file);
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       if (uploadError) throw uploadError;
 
@@ -141,6 +156,7 @@ export const CompanyDocuments = ({ companyId }: CompanyDocumentsProps) => {
       });
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -210,6 +226,15 @@ export const CompanyDocuments = ({ companyId }: CompanyDocumentsProps) => {
             />
             {uploading && <Loader2 className="h-5 w-5 animate-spin" />}
           </div>
+          {uploading && uploadProgress > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Uploading...</span>
+                <span className="font-medium">{uploadProgress}%</span>
+              </div>
+              <Progress value={uploadProgress} className="h-2" />
+            </div>
+          )}
         </div>
 
         {loading ? (

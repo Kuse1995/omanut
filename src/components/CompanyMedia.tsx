@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Upload, Trash2, Image as ImageIcon, Video } from "lucide-react";
 
@@ -52,6 +53,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [analyzing, setAnalyzing] = useState(false);
   const [aiSuggested, setAiSuggested] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -263,9 +265,18 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     const isVideo = file.type.startsWith('video/');
 
     setUploading(true);
+    setUploadProgress(0);
 
     try {
       console.log('Starting upload for company:', companyId);
+      
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) return prev; // Stop at 90% until actual upload completes
+          return prev + 10;
+        });
+      }, 300);
       
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -284,6 +295,9 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('company-media')
         .upload(fileName, file);
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       if (uploadError) {
         console.error('Upload error:', uploadError);
@@ -354,6 +368,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       setSelectedCategory('other');
       setAiSuggested(false);
       setSelectedFile(null);
+      setUploadProgress(0);
       loadMedia();
     } catch (error: any) {
       toast({
@@ -491,6 +506,16 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               disabled={analyzing}
             />
           </div>
+          
+          {uploading && uploadProgress > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Uploading...</span>
+                <span className="font-medium">{uploadProgress}%</span>
+              </div>
+              <Progress value={uploadProgress} className="h-2" />
+            </div>
+          )}
           
           <Button
             onClick={handleFileUpload}
