@@ -301,6 +301,14 @@ Respond professionally and provide actionable insights when asked.`;
       .eq('company_id', company.id)
       .order('created_at', { ascending: false });
 
+    // Get payment products for the company
+    const { data: products } = await supabase
+      .from('payment_products')
+      .select('*')
+      .eq('company_id', company.id)
+      .eq('is_active', true)
+      .order('price', { ascending: true });
+
     // Build knowledge base from documents
     let knowledgeBase = '';
     if (documents && documents.length > 0) {
@@ -366,6 +374,33 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
     }
 
+    // Build products/services catalog
+    let productsContext = '';
+    if (products && products.length > 0) {
+      productsContext = '\n\n💳 AVAILABLE SERVICES & PRICING:\n\n';
+      products.forEach((product: any) => {
+        productsContext += `${product.name} - ${product.currency}${product.price}\n`;
+        if (product.description) {
+          productsContext += `  ${product.description}\n`;
+        }
+        if (product.duration_minutes) {
+          productsContext += `  Duration: ${product.duration_minutes} minutes\n`;
+        }
+        productsContext += '\n';
+      });
+      
+      productsContext += `📋 PAYMENT FLOW:\n`;
+      productsContext += `When customer asks about pricing or wants to order:\n`;
+      productsContext += `1. Share the relevant product prices from the list above\n`;
+      productsContext += `2. If they want to order, collect: product choice, any special requirements\n`;
+      productsContext += `3. Ask their payment preference: "Would you like to pay via Mobile Money (MTN, Airtel, Zamtel) or International card?"\n`;
+      productsContext += `4. Once confirmed, call request_payment() with the product details and payment method\n`;
+      productsContext += `5. After payment link is sent, tell them: "I've sent you the payment link/instructions. Once payment is confirmed, our team will start working on your project immediately!"\n\n`;
+      productsContext += `Payment methods available:\n`;
+      productsContext += `✅ Mobile Money (MTN, Airtel, Zamtel) - For Zambian customers (instant USSD prompt)\n`;
+      productsContext += `✅ International Cards (via Selar) - For anyone worldwide\n\n`;
+    }
+
     // Build comprehensive instructions
     let dynamicInfo = '';
     if (company.metadata && Object.keys(company.metadata).length > 0) {
@@ -390,7 +425,7 @@ Business hours: ${company.hours}.
 Locations / branches: ${company.branches}.
 Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
 Currency: always use ${company.currency_prefix} (Kwacha).
-Your job is to answer messages, help politely, and create/record bookings or appointments.
+Your job is to answer messages, help politely, create/record bookings or appointments, and process service orders/payments.
 
 CRITICAL DATE INFORMATION:
 - Today's date is: ${currentDate} (${dayOfWeek})
@@ -402,6 +437,7 @@ CRITICAL DATE INFORMATION:
 ${quickRefInfo}
 ${knowledgeBase}
 ${mediaContext}
+${productsContext}
 IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.
 
 ${dynamicInfo}
@@ -539,6 +575,44 @@ Critical rules:
                 required: ["media_url", "category"]
               }
             }
+          },
+          {
+            type: "function",
+            function: {
+              name: "request_payment",
+              description: "Send a payment link when customer wants to pay for a service. Match their request to available products. Ask for payment method preference if not specified (mobile money or international card).",
+              parameters: {
+                type: "object",
+                properties: {
+                  product_id: {
+                    type: "string",
+                    description: "UUID of the product/service the customer wants"
+                  },
+                  product_name: {
+                    type: "string",
+                    description: "Name of the product for context"
+                  },
+                  amount: {
+                    type: "number",
+                    description: "Amount to be paid"
+                  },
+                  payment_method: {
+                    type: "string",
+                    enum: ["selar", "mtn", "airtel", "zamtel"],
+                    description: "Customer's preferred payment method. If customer is in Zambia, suggest mobile money. If international or unspecified, use selar."
+                  },
+                  customer_details: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      email: { type: "string" }
+                    },
+                    description: "Additional customer details if collected"
+                  }
+                },
+                required: ["product_id", "product_name", "amount", "payment_method"]
+              }
+            }
           }
         ],
         tool_choice: "auto"
@@ -557,10 +631,70 @@ Critical rules:
 
     console.log('AI response:', { assistantReply, toolCalls });
 
-    // Handle tool calls (reservation creation and media sending)
+    // Handle tool calls (reservation creation, media sending, and payment requests)
     if (toolCalls && toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
-        if (toolCall.function.name === 'send_media') {
+        if (toolCall.function.name === 'request_payment') {
+          const args = JSON.parse(toolCall.function.arguments);
+          console.log('AI requesting payment:', args);
+          
+          try {
+            // Call edge function to create payment link
+            const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+            const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+            
+            const paymentResponse = await fetch(
+              `${SUPABASE_URL}/functions/v1/create-payment-link`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  company_id: company.id,
+                  conversation_id: conversation.id,
+                  product_id: args.product_id,
+                  customer_phone: From,
+                  customer_name: conversation.customer_name || args.customer_details?.name,
+                  payment_method: args.payment_method,
+                  amount: args.amount,
+                  metadata: args.customer_details
+                })
+              }
+            );
+            
+            if (paymentResponse.ok) {
+              const paymentData = await paymentResponse.json();
+              
+              // Build payment message based on method
+              let paymentMessage = `Great! To proceed with your *${args.product_name}* for ${company.currency_prefix}${args.amount}, `;
+              
+              if (args.payment_method === 'selar') {
+                paymentMessage += `please complete payment using this link:\n\n${paymentData.payment_link}\n\n`;
+                paymentMessage += `✅ Accepts all major cards\n✅ Secure international payment\n`;
+              } else {
+                paymentMessage += `please complete payment via ${args.payment_method.toUpperCase()} Mobile Money:\n\n`;
+                paymentMessage += `📱 Dial: ${paymentData.ussd_code}\n`;
+                paymentMessage += `📝 Reference: ${paymentData.payment_reference}\n\n`;
+                paymentMessage += `You'll receive a prompt on your phone to authorize the payment.\n`;
+              }
+              
+              paymentMessage += `\nOnce payment is confirmed, I'll notify our team to start working on your project immediately! 🚀`;
+              
+              assistantReply = paymentMessage;
+              
+              console.log('Payment link generated successfully:', paymentData.transaction_id);
+            } else {
+              const errorText = await paymentResponse.text();
+              console.error('Failed to create payment link:', errorText);
+              assistantReply += "\n\nI encountered an error generating the payment link. Please try again or contact us directly.";
+            }
+          } catch (paymentError) {
+            console.error('Error processing payment request:', paymentError);
+            assistantReply += "\n\nI encountered an error processing your payment request. Please try again.";
+          }
+        } else if (toolCall.function.name === 'send_media') {
           const args = JSON.parse(toolCall.function.arguments);
           console.log('AI wants to send media:', args);
           

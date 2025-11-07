@@ -4,7 +4,8 @@ import { ClientInsightsPanel } from './ClientInsightsPanel';
 import { ReservationsPanel } from './ReservationsPanel';
 import { CompanySettingsPanel } from './CompanySettingsPanel';
 import { BillingPanel } from './BillingPanel';
-import { MessageSquare, Info, Calendar, Settings, CreditCard } from 'lucide-react';
+import { PaymentsPanel } from './PaymentsPanel';
+import { MessageSquare, Info, Calendar, Settings, CreditCard, DollarSign } from 'lucide-react';
 
 export const CompanyTabs = () => {
   return (
@@ -45,6 +46,13 @@ export const CompanyTabs = () => {
           <CreditCard className="w-4 h-4 mr-2" />
           Billing & Credits
         </TabsTrigger>
+        <TabsTrigger 
+          value="payments" 
+          className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#84CC16] data-[state=active]:bg-transparent px-6 py-4"
+        >
+          <DollarSign className="w-4 h-4 mr-2" />
+          Products & Payments
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="conversations" className="flex-1 m-0">
@@ -65,6 +73,10 @@ export const CompanyTabs = () => {
 
       <TabsContent value="billing" className="flex-1 m-0">
         <BillingPanel />
+      </TabsContent>
+
+      <TabsContent value="payments" className="flex-1 m-0">
+        <PaymentsPanel />
       </TabsContent>
     </Tabs>
   );

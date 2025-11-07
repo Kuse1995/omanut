@@ -35,3 +35,12 @@ verify_jwt = true
 
 [functions.analyze-media]
 verify_jwt = true
+
+[functions.create-payment-link]
+verify_jwt = false
+
+[functions.initiate-mobile-money]
+verify_jwt = false
+
+[functions.payment-webhook]
+verify_jwt = false
