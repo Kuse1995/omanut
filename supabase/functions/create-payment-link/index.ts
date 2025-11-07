@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,24 +12,28 @@ serve(async (req) => {
   }
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     const {
       company_id,
-      conversation_id,
       product_id,
-      customer_phone,
       customer_name,
+      customer_phone,
       customer_email,
-      payment_method,
       amount,
-      metadata
+      payment_method, // 'manual_mtn', 'manual_airtel', 'manual_zamtel'
+      conversation_id
     } = await req.json();
 
-    console.log('Creating payment link:', { company_id, product_id, payment_method, amount });
+    console.log('Creating manual payment transaction:', {
+      company_id,
+      product_id,
+      customer_phone,
+      payment_method,
+      amount
+    });
 
     // Fetch product details
     const { data: product, error: productError } = await supabase
@@ -38,118 +42,104 @@ serve(async (req) => {
       .eq('id', product_id)
       .single();
 
-    if (productError || !product) {
+    if (productError) {
+      console.error('Error fetching product:', productError);
       throw new Error('Product not found');
     }
 
-    // Fetch company details
+    // Fetch company details and payment numbers
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('*')
+      .select('name, payment_number_mtn, payment_number_airtel, payment_number_zamtel, payment_instructions')
       .eq('id', company_id)
       .single();
 
-    if (companyError || !company) {
+    if (companyError) {
+      console.error('Error fetching company:', companyError);
       throw new Error('Company not found');
     }
 
-    let paymentLink = '';
-    let paymentReference = '';
-    let ussdCode = '';
-    let moneyunifyTransactionId = '';
-
-    // Determine payment method and generate appropriate link
-    if (payment_method === 'selar' || !payment_method) {
-      // Use Selar link (international payments with webhook tracking)
-      if (product.selar_link) {
-        paymentLink = product.selar_link;
-      } else {
-        throw new Error('Selar link not configured for this product');
-      }
-      // Generate trackable reference for webhook matching
-      const companyShort = company_id.substring(0, 8);
-      const productShort = product_id.substring(0, 8);
-      paymentReference = `SELAR_${companyShort}_${productShort}_${Date.now()}`;
-    } else if (['mtn', 'airtel', 'zamtel'].includes(payment_method)) {
-      // Use MoneyUnify for mobile money
-      console.log('Initiating MoneyUnify payment for', payment_method);
-      
-      const moneyunifyResponse = await fetch(
-        `${Deno.env.get('SUPABASE_URL')}/functions/v1/initiate-mobile-money`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            amount: amount,
-            currency: product.currency,
-            mobile_number: customer_phone.replace('whatsapp:', ''),
-            provider: payment_method,
-            description: `Payment for ${product.name}`,
-            company_id: company_id
-          })
-        }
-      );
-
-      if (!moneyunifyResponse.ok) {
-        throw new Error('Failed to initiate mobile money payment');
-      }
-
-      const moneyunifyData = await moneyunifyResponse.json();
-      paymentReference = moneyunifyData.reference;
-      ussdCode = moneyunifyData.ussd_code || '';
-      moneyunifyTransactionId = moneyunifyData.transaction_id || '';
-      paymentLink = `Mobile Money: ${payment_method.toUpperCase()}`;
-    } else {
-      throw new Error('Invalid payment method');
+    // Determine designated number based on payment method
+    let designated_number = '';
+    let provider_name = '';
+    
+    if (payment_method === 'manual_mtn') {
+      designated_number = company.payment_number_mtn || '';
+      provider_name = 'MTN';
+    } else if (payment_method === 'manual_airtel') {
+      designated_number = company.payment_number_airtel || '';
+      provider_name = 'Airtel';
+    } else if (payment_method === 'manual_zamtel') {
+      designated_number = company.payment_number_zamtel || '';
+      provider_name = 'Zamtel';
     }
 
-    // Create payment transaction record with enhanced metadata for webhook matching
-    const { data: transaction, error: transactionError } = await supabase
+    if (!designated_number) {
+      throw new Error(`${provider_name} payment number not configured for this company`);
+    }
+
+    // Generate unique reference
+    const reference = `TXN_${company_id.substring(0, 8)}_${Date.now()}`;
+
+    // Create transaction record
+    const { data: transaction, error: txError } = await supabase
       .from('payment_transactions')
       .insert({
-        company_id: company_id,
-        conversation_id: conversation_id,
-        product_id: product_id,
-        customer_phone: customer_phone,
-        customer_name: customer_name,
-        amount: amount,
-        currency: product.currency,
-        payment_method: payment_method,
+        company_id,
+        product_id,
+        conversation_id,
+        customer_name,
+        customer_phone,
+        amount: amount || product.price,
+        currency: product.currency || 'ZMW',
+        payment_method,
         payment_status: 'pending',
-        payment_reference: paymentReference,
-        payment_link: paymentLink,
-        moneyunify_transaction_id: moneyunifyTransactionId,
+        payment_reference: reference,
+        designated_number,
+        verification_status: 'pending',
         metadata: {
-          ...metadata,
-          customer_email: customer_email,
           product_name: product.name,
-          ussd_code: ussdCode,
-          created_for_webhook_matching: true
+          customer_email
         }
       })
       .select()
       .single();
 
-    if (transactionError) {
-      console.error('Error creating transaction:', transactionError);
-      throw transactionError;
+    if (txError) {
+      console.error('Error creating transaction:', txError);
+      throw new Error('Failed to create transaction');
     }
 
-    console.log('Payment transaction created:', transaction.id);
-
+    // Prepare payment instructions
+    const instructions = company.payment_instructions || 'Send payment to the designated number and upload proof of payment for verification.';
+    
     return new Response(
       JSON.stringify({
         success: true,
         transaction_id: transaction.id,
-        payment_link: paymentLink,
-        payment_reference: paymentReference,
-        ussd_code: ussdCode,
-        payment_method: payment_method,
-        amount: amount,
-        currency: product.currency
+        reference: reference,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        designated_number,
+        provider: provider_name,
+        instructions: `
+💰 Amount: ${transaction.currency} ${transaction.amount}
+📱 Send to: ${designated_number} (${provider_name})
+
+${instructions}
+
+📋 Reference: ${reference}
+
+⏱️ Verification Time: Within 30 minutes during business hours
+
+How to send proof:
+1. Send money using ${provider_name} mobile money
+2. Take a screenshot of the confirmation SMS/message
+3. Upload here or send via WhatsApp
+4. Wait for verification (typically under 30 minutes)
+
+Your order will be processed once payment is verified.
+        `.trim()
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

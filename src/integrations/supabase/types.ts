@@ -221,6 +221,10 @@ export type Database = {
           menu_or_offerings: string | null
           metadata: Json | null
           name: string
+          payment_instructions: string | null
+          payment_number_airtel: string | null
+          payment_number_mtn: string | null
+          payment_number_zamtel: string | null
           quick_reference_info: string | null
           seating_areas: string | null
           twilio_number: string | null
@@ -241,6 +245,10 @@ export type Database = {
           menu_or_offerings?: string | null
           metadata?: Json | null
           name: string
+          payment_instructions?: string | null
+          payment_number_airtel?: string | null
+          payment_number_mtn?: string | null
+          payment_number_zamtel?: string | null
           quick_reference_info?: string | null
           seating_areas?: string | null
           twilio_number?: string | null
@@ -261,6 +269,10 @@ export type Database = {
           menu_or_offerings?: string | null
           metadata?: Json | null
           name?: string
+          payment_instructions?: string | null
+          payment_number_airtel?: string | null
+          payment_number_mtn?: string | null
+          payment_number_zamtel?: string | null
           quick_reference_info?: string | null
           seating_areas?: string | null
           twilio_number?: string | null
@@ -675,6 +687,7 @@ export type Database = {
       }
       payment_transactions: {
         Row: {
+          admin_notes: string | null
           amount: number
           company_id: string | null
           completed_at: string | null
@@ -683,17 +696,24 @@ export type Database = {
           currency: string | null
           customer_name: string | null
           customer_phone: string
+          designated_number: string | null
           id: string
           metadata: Json | null
           moneyunify_transaction_id: string | null
           payment_link: string | null
           payment_method: string | null
+          payment_proof_uploaded_at: string | null
+          payment_proof_url: string | null
           payment_reference: string | null
           payment_status: string | null
           product_id: string | null
           updated_at: string | null
+          verification_status: string | null
+          verified_at: string | null
+          verified_by: string | null
         }
         Insert: {
+          admin_notes?: string | null
           amount: number
           company_id?: string | null
           completed_at?: string | null
@@ -702,17 +722,24 @@ export type Database = {
           currency?: string | null
           customer_name?: string | null
           customer_phone: string
+          designated_number?: string | null
           id?: string
           metadata?: Json | null
           moneyunify_transaction_id?: string | null
           payment_link?: string | null
           payment_method?: string | null
+          payment_proof_uploaded_at?: string | null
+          payment_proof_url?: string | null
           payment_reference?: string | null
           payment_status?: string | null
           product_id?: string | null
           updated_at?: string | null
+          verification_status?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Update: {
+          admin_notes?: string | null
           amount?: number
           company_id?: string | null
           completed_at?: string | null
@@ -721,15 +748,21 @@ export type Database = {
           currency?: string | null
           customer_name?: string | null
           customer_phone?: string
+          designated_number?: string | null
           id?: string
           metadata?: Json | null
           moneyunify_transaction_id?: string | null
           payment_link?: string | null
           payment_method?: string | null
+          payment_proof_uploaded_at?: string | null
+          payment_proof_url?: string | null
           payment_reference?: string | null
           payment_status?: string | null
           product_id?: string | null
           updated_at?: string | null
+          verification_status?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
         }
         Relationships: [
           {
