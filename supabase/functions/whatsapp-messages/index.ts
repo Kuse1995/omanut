@@ -139,7 +139,7 @@ Management can ask you questions about customer interactions, reservations, and 
 Business Context:
 - Type: ${company.business_type}
 - Hours: ${company.hours}
-- Offerings: ${company.menu_or_offerings}
+- Services: ${company.services}
 
 ${aiOverrides?.system_instructions ? `Special Instructions: ${aiOverrides.system_instructions}` : ''}
 
@@ -425,7 +425,8 @@ Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
 Business hours: ${company.hours}.
 Locations / branches: ${company.branches}.
-Areas or services: ${company.seating_areas} / ${company.menu_or_offerings}.
+Services offered: ${company.services}.
+Service locations available: ${company.service_locations}.
 Currency: always use ${company.currency_prefix} (Kwacha).
 Your job is to answer messages, help politely, create/record bookings or appointments, and process service orders/payments.
 

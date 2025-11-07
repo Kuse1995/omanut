@@ -106,7 +106,7 @@ Management can ask you questions about customer interactions, reservations, and 
 Business Context:
 - Type: ${company.business_type}
 - Hours: ${company.hours}
-- Offerings: ${company.menu_or_offerings}
+- Services: ${company.services}
 
 ${aiOverrides?.system_instructions ? `Special Instructions: ${aiOverrides.system_instructions}` : ''}
 

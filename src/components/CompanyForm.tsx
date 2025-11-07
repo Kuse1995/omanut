@@ -17,103 +17,102 @@ interface CompanyFormProps {
 }
 
 // Industry-specific configurations
-const industryConfig = {
+const industryConfig: Record<string, {
+  voice_style: string;
+  hours: string;
+  services: string;
+  branches: string;
+  service_locations: string;
+  currency_prefix: string;
+  locations_label: string;
+  services_label: string;
+  locations_prompt: string;
+  confirmation_template: string;
+}> = {
   restaurant: {
     voice_style: "Warm, polite receptionist. Friendly and helpful with menu recommendations.",
     hours: "Mon-Sun 10:00 – 23:00",
-    menu_or_offerings: "Grilled fish, steaks, pasta, salads, desserts",
-    seating_areas: "outdoor,indoor,bar,VIP",
-    areas_label: "Seating Areas",
-    offerings_label: "Menu",
-  },
-  lodge: {
-    voice_style: "Warm, professional lodge receptionist. Welcoming and knowledgeable about amenities.",
-    hours: "24/7 Front Desk",
-    menu_or_offerings: "Accommodation, restaurant, safari tours, spa services",
-    seating_areas: "poolside,garden,restaurant,lounge",
-    areas_label: "Dining Areas",
-    offerings_label: "Services & Amenities",
-  },
-  hotel: {
-    voice_style: "Professional, courteous hotel receptionist. Efficient and helpful.",
-    hours: "24/7 Front Desk",
-    menu_or_offerings: "Room service, restaurant, conference facilities, gym, spa",
-    seating_areas: "restaurant,bar,poolside,lounge",
-    areas_label: "Dining Areas",
-    offerings_label: "Hotel Services",
-  },
-  salon: {
-    voice_style: "Friendly, professional salon receptionist. Knowledgeable about beauty services.",
-    hours: "Mon-Sat 09:00 – 19:00",
-    menu_or_offerings: "Haircuts, coloring, styling, manicures, pedicures, facials",
-    seating_areas: "waiting area,VIP room",
-    areas_label: "Service Areas",
-    offerings_label: "Services",
-  },
-  spa: {
-    voice_style: "Calm, soothing spa receptionist. Promotes relaxation and wellness.",
-    hours: "Mon-Sun 09:00 – 21:00",
-    menu_or_offerings: "Massages, facials, body treatments, aromatherapy, sauna",
-    seating_areas: "relaxation lounge,VIP suite,outdoor area",
-    areas_label: "Treatment Areas",
-    offerings_label: "Treatments & Services",
-  },
-  gym: {
-    voice_style: "Energetic, motivating gym receptionist. Encouraging and supportive.",
-    hours: "Mon-Sun 05:00 – 22:00",
-    menu_or_offerings: "Personal training, group classes, cardio equipment, weights",
-    seating_areas: "main floor,studio,outdoor area",
-    areas_label: "Training Areas",
-    offerings_label: "Services & Facilities",
+    services: "Grilled fish, steaks, pasta, salads, desserts",
+    branches: "Main",
+    service_locations: "outdoor,indoor,bar,VIP",
+    currency_prefix: "K",
+    locations_label: "Seating Areas",
+    services_label: "Menu Items",
+    locations_prompt: "Which area would you prefer - poolside, outdoor terrace, or indoor dining?",
+    confirmation_template: "booking for {guests} guests on {date} at {time} in the {location} area"
   },
   clinic: {
     voice_style: "Professional, empathetic clinic receptionist. Calm and reassuring.",
     hours: "Mon-Fri 08:00 – 17:00, Sat 09:00 – 13:00",
-    menu_or_offerings: "General consultation, specialist appointments, laboratory services",
-    seating_areas: "general,priority,pediatrics",
-    areas_label: "Waiting Areas",
-    offerings_label: "Medical Services",
+    services: "General consultation, specialist appointments, laboratory services, X-rays",
+    branches: "Main",
+    service_locations: "general,priority,pediatrics,specialist wing",
+    currency_prefix: "K",
+    locations_label: "Consultation Areas",
+    services_label: "Medical Services",
+    locations_prompt: "Which department do you need - general consultation, pediatrics, or specialist?",
+    confirmation_template: "appointment on {date} at {time} in the {location} department"
   },
-  school: {
-    voice_style: "Friendly, organized school receptionist. Helpful with inquiries and directions.",
-    hours: "Mon-Fri 07:30 – 16:00",
-    menu_or_offerings: "Primary education, secondary education, extracurricular activities",
-    seating_areas: "reception,visitors area",
-    areas_label: "Reception Areas",
-    offerings_label: "Programs & Services",
+  gym: {
+    voice_style: "Energetic, motivating gym receptionist. Encouraging and supportive.",
+    hours: "Mon-Sun 05:00 – 22:00",
+    services: "Personal training, group classes, cardio equipment, weights, yoga",
+    branches: "Main",
+    service_locations: "main floor,studio,outdoor area,spin room",
+    currency_prefix: "K",
+    locations_label: "Training Zones",
+    services_label: "Facilities & Classes",
+    locations_prompt: "Which area would you like to use - main gym floor, yoga studio, or outdoor training area?",
+    confirmation_template: "session on {date} at {time} in the {location}"
   },
-  library: {
-    voice_style: "Quiet, helpful library receptionist. Knowledgeable about resources.",
-    hours: "Mon-Sat 08:00 – 20:00",
-    menu_or_offerings: "Book lending, study rooms, computer access, research assistance",
-    seating_areas: "reading room,study area,children section",
-    areas_label: "Library Sections",
-    offerings_label: "Services",
-  },
-  barbershop: {
-    voice_style: "Friendly, casual barbershop receptionist. Easy-going and welcoming.",
+  salon: {
+    voice_style: "Friendly, professional salon receptionist. Knowledgeable about beauty services.",
     hours: "Mon-Sat 09:00 – 19:00",
-    menu_or_offerings: "Haircuts, shaves, beard trimming, hair treatments",
-    seating_areas: "waiting area,VIP chair",
-    areas_label: "Service Areas",
-    offerings_label: "Services",
+    services: "Haircuts, coloring, styling, manicures, pedicures, facials",
+    branches: "Main",
+    service_locations: "main salon,VIP room,spa area",
+    currency_prefix: "K",
+    locations_label: "Service Areas",
+    services_label: "Beauty Services",
+    locations_prompt: "Would you prefer the main salon area or our private VIP room?",
+    confirmation_template: "appointment for {service} on {date} at {time}"
   },
-  cafe: {
-    voice_style: "Warm, friendly cafe receptionist. Knowledgeable about menu items.",
-    hours: "Mon-Sun 07:00 – 19:00",
-    menu_or_offerings: "Coffee, tea, pastries, sandwiches, light meals",
-    seating_areas: "indoor,outdoor,counter",
-    areas_label: "Seating Areas",
-    offerings_label: "Menu",
+  hotel: {
+    voice_style: "Warm, professional hotel receptionist. Helpful and accommodating.",
+    hours: "24/7",
+    services: "Room booking, restaurant, spa, pool, gym, conference rooms",
+    branches: "Main",
+    service_locations: "poolside,restaurant,spa,conference,rooms",
+    currency_prefix: "K",
+    locations_label: "Facilities",
+    services_label: "Hotel Services",
+    locations_prompt: "Which facility would you like to book - restaurant, spa, or conference room?",
+    confirmation_template: "reservation on {date} at {time} at our {location}"
+  },
+  spa: {
+    voice_style: "Calm, soothing spa receptionist. Creates relaxing atmosphere.",
+    hours: "Mon-Sun 09:00 – 20:00",
+    services: "Massages, facials, body treatments, manicures, pedicures",
+    branches: "Main",
+    service_locations: "treatment rooms,relaxation lounge,sauna,VIP suite",
+    currency_prefix: "K",
+    locations_label: "Treatment Areas",
+    services_label: "Spa Services",
+    locations_prompt: "Would you like a regular treatment room or our VIP suite?",
+    confirmation_template: "appointment for {service} on {date} at {time}"
   },
   other: {
     voice_style: "Professional, courteous receptionist. Helpful and informative.",
     hours: "Mon-Fri 09:00 – 17:00",
-    menu_or_offerings: "Services and offerings",
-    seating_areas: "main area,waiting area",
-    areas_label: "Areas",
-    offerings_label: "Services",
-  },
+    services: "Various services available",
+    branches: "Main",
+    service_locations: "main area,consultation room,meeting room",
+    currency_prefix: "K",
+    locations_label: "Service Locations",
+    services_label: "Services",
+    locations_prompt: "Which location would you prefer?",
+    confirmation_template: "appointment on {date} at {time}"
+  }
 };
 
 const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
@@ -122,12 +121,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
-    business_type: "restaurant",
-    voice_style: industryConfig.restaurant.voice_style,
-    hours: industryConfig.restaurant.hours,
-    menu_or_offerings: industryConfig.restaurant.menu_or_offerings,
-    branches: "Main",
-    seating_areas: industryConfig.restaurant.seating_areas,
+    business_type: "",
+    voice_style: "",
+    hours: "",
+    services: "",
+    branches: "",
+    service_locations: "",
     currency_prefix: "K",
     twilio_number: "",
     whatsapp_number: "",
@@ -147,18 +146,18 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
   // Update form fields when business type changes
   const handleBusinessTypeChange = (value: string) => {
-    const config = industryConfig[value as keyof typeof industryConfig] || industryConfig.other;
+    const config = industryConfig[value] || industryConfig.other;
     setFormData({
       ...formData,
       business_type: value,
       voice_style: config.voice_style,
       hours: config.hours,
-      menu_or_offerings: config.menu_or_offerings,
-      seating_areas: config.seating_areas,
+      services: config.services,
+      service_locations: config.service_locations,
     });
   };
 
-  const currentIndustryConfig = industryConfig[formData.business_type as keyof typeof industryConfig] || industryConfig.other;
+  const currentIndustryConfig = industryConfig[formData.business_type] || industryConfig.other;
 
   useEffect(() => {
     if (companyId) {
@@ -178,12 +177,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
       if (data) {
         setFormData({
           name: data.name || "",
-          business_type: data.business_type || "restaurant",
-          voice_style: data.voice_style || "Warm, polite Zambian receptionist.",
+          business_type: data.business_type || "",
+          voice_style: data.voice_style || "Warm, polite receptionist.",
           hours: data.hours || "Mon-Sun 10:00 – 23:00",
-          menu_or_offerings: data.menu_or_offerings || "",
+          services: data.services || "",
           branches: data.branches || "Main",
-          seating_areas: data.seating_areas || "poolside,outdoor,inside,VIP",
+          service_locations: data.service_locations || "",
           currency_prefix: data.currency_prefix || "K",
           twilio_number: data.twilio_number || "",
           whatsapp_number: data.whatsapp_number || "",
@@ -234,10 +233,10 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             business_type: formData.business_type,
             voice_style: formData.voice_style,
             hours: formData.hours,
-            menu_or_offerings: formData.menu_or_offerings,
+            services: formData.services,
             branches: formData.branches,
             currency_prefix: formData.currency_prefix,
-            seating_areas: formData.seating_areas,
+            service_locations: formData.service_locations,
             twilio_number: formData.twilio_number,
             whatsapp_number: formData.whatsapp_number,
             boss_phone: formData.boss_phone,
@@ -248,7 +247,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         if (error) throw error;
 
-        // Upsert AI instructions - specify conflict target
+        // Upsert AI instructions
         const { error: aiError } = await supabase
           .from('company_ai_overrides')
           .upsert({
@@ -291,10 +290,10 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               business_type: formData.business_type,
               voice_style: formData.voice_style,
               hours: formData.hours,
-              menu_or_offerings: formData.menu_or_offerings,
+              services: formData.services,
               branches: formData.branches,
               currency_prefix: formData.currency_prefix,
-              seating_areas: formData.seating_areas,
+              service_locations: formData.service_locations,
               twilio_number: formData.twilio_number,
               whatsapp_number: formData.whatsapp_number,
               boss_phone: formData.boss_phone,
@@ -356,44 +355,125 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+          {/* Basic Information */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Basic Information</h3>
+            
+            <div>
               <Label htmlFor="name">Company Name *</Label>
               <Input
                 id="name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="e.g., Streamside Lodge"
                 required
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="business_type">Business Type</Label>
-              <Select
+            <div>
+              <Label htmlFor="business_type">Business Type *</Label>
+              <select
+                id="business_type"
                 value={formData.business_type}
-                onValueChange={handleBusinessTypeChange}
+                onChange={(e) => handleBusinessTypeChange(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                required
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="restaurant">Restaurant</SelectItem>
-                  <SelectItem value="cafe">Cafe</SelectItem>
-                  <SelectItem value="lodge">Lodge</SelectItem>
-                  <SelectItem value="hotel">Hotel</SelectItem>
-                  <SelectItem value="salon">Salon</SelectItem>
-                  <SelectItem value="spa">Spa</SelectItem>
-                  <SelectItem value="barbershop">Barbershop</SelectItem>
-                  <SelectItem value="gym">Gym/Fitness Center</SelectItem>
-                  <SelectItem value="clinic">Clinic/Medical Center</SelectItem>
-                  <SelectItem value="school">School</SelectItem>
-                  <SelectItem value="library">Library</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
+                <option value="">Select business type...</option>
+                <option value="restaurant">Restaurant</option>
+                <option value="clinic">Clinic</option>
+                <option value="gym">Gym</option>
+                <option value="salon">Salon / Spa</option>
+                <option value="hotel">Hotel</option>
+                <option value="spa">Spa</option>
+                <option value="other">Other</option>
+              </select>
             </div>
 
-            <div className="space-y-2">
+            <div>
+              <Label htmlFor="voice_style">Voice Style</Label>
+              <Textarea
+                id="voice_style"
+                value={formData.voice_style}
+                onChange={(e) => setFormData({ ...formData, voice_style: e.target.value })}
+                placeholder="Describe how the AI should speak..."
+                className="min-h-[80px]"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="hours">Hours of Operation</Label>
+              <Input
+                id="hours"
+                value={formData.hours}
+                onChange={(e) => setFormData({ ...formData, hours: e.target.value })}
+                placeholder={currentIndustryConfig.hours}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="services">{currentIndustryConfig.services_label || 'Services'}</Label>
+              <Textarea
+                id="services"
+                value={formData.services}
+                onChange={(e) => setFormData({ ...formData, services: e.target.value })}
+                placeholder={currentIndustryConfig.services}
+                className="min-h-[100px]"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="branches">Branches</Label>
+                <Input
+                  id="branches"
+                  value={formData.branches}
+                  onChange={(e) => setFormData({ ...formData, branches: e.target.value })}
+                  placeholder="Main, Downtown"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="currency_prefix">Currency</Label>
+                <Input
+                  id="currency_prefix"
+                  value={formData.currency_prefix}
+                  onChange={(e) => setFormData({ ...formData, currency_prefix: e.target.value })}
+                  placeholder="K, $, €"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="service_locations">{currentIndustryConfig.locations_label || 'Service Locations'}</Label>
+              <Input
+                id="service_locations"
+                value={formData.service_locations}
+                onChange={(e) => setFormData({ ...formData, service_locations: e.target.value })}
+                placeholder={currentIndustryConfig.service_locations}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="quick_reference_info">Knowledge Base (optional)</Label>
+              <Textarea
+                id="quick_reference_info"
+                value={formData.quick_reference_info}
+                onChange={(e) => setFormData({ ...formData, quick_reference_info: e.target.value })}
+                placeholder="Add important information about your business that the AI should know..."
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                This information will be available to the AI when answering customer questions
+              </p>
+            </div>
+          </div>
+
+          {/* Contact Numbers */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Contact Information</h3>
+
+            <div>
               <Label htmlFor="twilio_number">Phone Number (PSTN)</Label>
               <Input
                 id="twilio_number"
@@ -401,10 +481,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 onChange={(e) => setFormData({ ...formData, twilio_number: e.target.value })}
                 placeholder="+1234567890"
               />
-              <p className="text-xs text-muted-foreground">For regular phone calls</p>
             </div>
 
-            <div className="space-y-2">
+            <div>
               <Label htmlFor="whatsapp_number">WhatsApp Number</Label>
               <Input
                 id="whatsapp_number"
@@ -412,203 +491,114 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 onChange={(e) => setFormData({ ...formData, whatsapp_number: e.target.value })}
                 placeholder="whatsapp:+1234567890"
               />
-              <p className="text-xs text-muted-foreground">For WhatsApp messages and calls</p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="boss_phone">Management WhatsApp Number</Label>
+            <div>
+              <Label htmlFor="boss_phone">Boss/Manager Phone (for notifications)</Label>
               <Input
                 id="boss_phone"
                 value={formData.boss_phone}
                 onChange={(e) => setFormData({ ...formData, boss_phone: e.target.value })}
                 placeholder="whatsapp:+1234567890"
               />
-              <p className="text-xs text-muted-foreground">AI will send reports & respond to queries from this number</p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="currency_prefix">Currency Prefix</Label>
-              <Input
-                id="currency_prefix"
-                value={formData.currency_prefix}
-                onChange={(e) => setFormData({ ...formData, currency_prefix: e.target.value })}
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="whatsapp_voice_enabled"
+                checked={formData.whatsapp_voice_enabled}
+                onChange={(e) => setFormData({ ...formData, whatsapp_voice_enabled: e.target.checked })}
+                className="h-4 w-4 rounded border-gray-300"
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="hours">Hours of Operation</Label>
-              <Input
-                id="hours"
-                value={formData.hours}
-                onChange={(e) => setFormData({ ...formData, hours: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="branches">Branches (comma-separated)</Label>
-              <Input
-                id="branches"
-                value={formData.branches}
-                onChange={(e) => setFormData({ ...formData, branches: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="seating_areas">{currentIndustryConfig.areas_label} (comma-separated)</Label>
-              <Input
-                id="seating_areas"
-                value={formData.seating_areas}
-                onChange={(e) => setFormData({ ...formData, seating_areas: e.target.value })}
-                placeholder={currentIndustryConfig.seating_areas}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="whatsapp_voice_enabled">WhatsApp Voice Calls</Label>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="whatsapp_voice_enabled"
-                  checked={formData.whatsapp_voice_enabled}
-                  onChange={(e) => setFormData({ ...formData, whatsapp_voice_enabled: e.target.checked })}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
-                  Enable voice calls via WhatsApp
-                </Label>
-              </div>
+              <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
+                Enable WhatsApp voice calls
+              </Label>
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="voice_style">Voice Style</Label>
-            <Textarea
-              id="voice_style"
-              value={formData.voice_style}
-              onChange={(e) => setFormData({ ...formData, voice_style: e.target.value })}
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="menu_or_offerings">{currentIndustryConfig.offerings_label}</Label>
-            <Textarea
-              id="menu_or_offerings"
-              value={formData.menu_or_offerings}
-              onChange={(e) => setFormData({ ...formData, menu_or_offerings: e.target.value })}
-              rows={4}
-              placeholder={currentIndustryConfig.menu_or_offerings}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="quick_reference_info">Quick Reference Information</Label>
-            <Textarea
-              id="quick_reference_info"
-              value={formData.quick_reference_info}
-              onChange={(e) => setFormData({ ...formData, quick_reference_info: e.target.value })}
-              rows={6}
-              placeholder="Paste any information the AI should know about your business - pricing, policies, FAQs, special offers, etc. This will be used by the AI to answer client questions."
-            />
-            <p className="text-xs text-muted-foreground">
-              Add frequently requested information here for quick AI access. Use document uploads for large complex files.
-            </p>
-          </div>
-
-          <div className="border-t pt-6">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">AI Instructions & Behavior</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Customize how the AI assistant responds and behaves for this company
-            </p>
+          {/* AI Instructions */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">AI Assistant Instructions</h3>
             
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="system_instructions">Custom System Instructions</Label>
-                <Textarea
-                  id="system_instructions"
-                  value={aiInstructions.system_instructions}
-                  onChange={(e) => setAiInstructions({ ...aiInstructions, system_instructions: e.target.value })}
-                  placeholder="Add specific instructions for the AI (e.g., 'Always mention our special promotions', 'Use friendly, casual language', etc.)"
-                  className="min-h-[120px]"
-                />
-                <p className="text-xs text-muted-foreground">
-                  These instructions will guide how the AI responds. Be specific about tone, topics to emphasize, and how to handle common questions.
-                </p>
-              </div>
+            <div>
+              <Label htmlFor="system_instructions">Custom System Instructions</Label>
+              <Textarea
+                id="system_instructions"
+                value={aiInstructions.system_instructions}
+                onChange={(e) => setAiInstructions({ ...aiInstructions, system_instructions: e.target.value })}
+                placeholder="Add any specific instructions or context for the AI..."
+                className="min-h-[100px]"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="qa_style">Question & Answer Style</Label>
-                <Textarea
-                  id="qa_style"
-                  value={aiInstructions.qa_style}
-                  onChange={(e) => setAiInstructions({ ...aiInstructions, qa_style: e.target.value })}
-                  placeholder="Define how the AI should answer questions (e.g., 'Keep answers under 2 sentences', 'Always ask clarifying questions', 'Provide detailed explanations')"
-                  className="min-h-[100px]"
-                />
-                <p className="text-xs text-muted-foreground">
-                  This helps the AI understand synonyms and variations. Example: "Tuition, fees, cost, price all mean the same thing - answer with our pricing information"
-                </p>
-              </div>
+            <div>
+              <Label htmlFor="qa_style">Answer Style</Label>
+              <Textarea
+                id="qa_style"
+                value={aiInstructions.qa_style}
+                onChange={(e) => setAiInstructions({ ...aiInstructions, qa_style: e.target.value })}
+                placeholder="How should the AI answer questions? (e.g., Be brief and to the point)"
+                className="min-h-[80px]"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="banned_topics">Topics to Avoid</Label>
-                <Textarea
-                  id="banned_topics"
-                  value={aiInstructions.banned_topics}
-                  onChange={(e) => setAiInstructions({ ...aiInstructions, banned_topics: e.target.value })}
-                  placeholder="List topics the AI should not discuss (e.g., 'Do not discuss competitor pricing', 'Avoid political topics', etc.)"
-                  className="min-h-[80px]"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Specify what topics the AI should politely decline to answer or redirect.
-                </p>
-              </div>
+            <div>
+              <Label htmlFor="banned_topics">Topics to Avoid</Label>
+              <Textarea
+                id="banned_topics"
+                value={aiInstructions.banned_topics}
+                onChange={(e) => setAiInstructions({ ...aiInstructions, banned_topics: e.target.value })}
+                placeholder="List topics the AI should not discuss..."
+                className="min-h-[80px]"
+              />
             </div>
           </div>
 
+          {/* Admin Account (only for new companies) */}
           {!companyId && (
-            <>
-              <div className="border-t pt-6">
-                <h3 className="text-lg font-semibold mb-4">Admin Account</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="admin_email">Admin Email *</Label>
-                    <Input
-                      id="admin_email"
-                      type="email"
-                      value={formData.admin_email}
-                      onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
-                      required={!companyId}
-                      placeholder="admin@company.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="admin_password">Admin Password *</Label>
-                    <Input
-                      id="admin_password"
-                      type="password"
-                      value={formData.admin_password}
-                      onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
-                      required={!companyId}
-                      placeholder="Secure password"
-                      minLength={6}
-                    />
-                  </div>
-                </div>
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Admin Account</h3>
+              
+              <div>
+                <Label htmlFor="admin_email">Admin Email *</Label>
+                <Input
+                  id="admin_email"
+                  type="email"
+                  value={formData.admin_email}
+                  onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
+                  placeholder="admin@company.com"
+                  required
+                />
               </div>
 
-              <div className="space-y-2">
+              <div>
+                <Label htmlFor="admin_password">Admin Password *</Label>
+                <Input
+                  id="admin_password"
+                  type="password"
+                  value={formData.admin_password}
+                  onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div>
                 <Label htmlFor="credit_balance">Initial Credit Balance</Label>
                 <Input
                   id="credit_balance"
                   type="number"
                   value={formData.credit_balance}
-                  onChange={(e) => setFormData({ ...formData, credit_balance: parseInt(e.target.value) || 1000 })}
+                  onChange={(e) => setFormData({ ...formData, credit_balance: parseInt(e.target.value) || 0 })}
+                  placeholder="1000"
                 />
               </div>
-            </>
+            </div>
           )}
 
+          {/* Actions */}
           <div className="flex gap-4">
             <Button type="submit" disabled={loading}>
               {loading ? "Saving..." : companyId ? "Update Company" : "Create Company"}

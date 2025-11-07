@@ -218,7 +218,6 @@ export type Database = {
           currency_prefix: string | null
           hours: string | null
           id: string
-          menu_or_offerings: string | null
           metadata: Json | null
           name: string
           payment_instructions: string | null
@@ -226,7 +225,8 @@ export type Database = {
           payment_number_mtn: string | null
           payment_number_zamtel: string | null
           quick_reference_info: string | null
-          seating_areas: string | null
+          service_locations: string | null
+          services: string | null
           twilio_number: string | null
           updated_at: string | null
           voice_style: string | null
@@ -242,7 +242,6 @@ export type Database = {
           currency_prefix?: string | null
           hours?: string | null
           id?: string
-          menu_or_offerings?: string | null
           metadata?: Json | null
           name: string
           payment_instructions?: string | null
@@ -250,7 +249,8 @@ export type Database = {
           payment_number_mtn?: string | null
           payment_number_zamtel?: string | null
           quick_reference_info?: string | null
-          seating_areas?: string | null
+          service_locations?: string | null
+          services?: string | null
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null
@@ -266,7 +266,6 @@ export type Database = {
           currency_prefix?: string | null
           hours?: string | null
           id?: string
-          menu_or_offerings?: string | null
           metadata?: Json | null
           name?: string
           payment_instructions?: string | null
@@ -274,7 +273,8 @@ export type Database = {
           payment_number_mtn?: string | null
           payment_number_zamtel?: string | null
           quick_reference_info?: string | null
-          seating_areas?: string | null
+          service_locations?: string | null
+          services?: string | null
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null

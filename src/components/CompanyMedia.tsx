@@ -26,18 +26,17 @@ interface Media {
   category: string;
 }
 
-type MediaCategory = 'menu' | 'interior' | 'exterior' | 'logo' | 'products' | 'promotional' | 'staff' | 'events' | 'facilities' | 'other';
+type MediaCategory = 'products' | 'interior' | 'exterior' | 'logo' | 'promotional' | 'staff' | 'events' | 'facilities' | 'other';
 
 const MEDIA_CATEGORIES: { value: MediaCategory; label: string; description: string }[] = [
-  { value: 'menu', label: '📋 Menu', description: 'Menu items, food & drink photos' },
-  { value: 'interior', label: '🏢 Interior', description: 'Indoor venue, dining areas' },
+  { value: 'products', label: '📋 Products/Services', description: 'Product photos, services, offerings' },
+  { value: 'interior', label: '🏢 Interior', description: 'Indoor spaces, work areas' },
   { value: 'exterior', label: '🏛️ Exterior', description: 'Building exterior, entrance' },
   { value: 'logo', label: '🎨 Logo', description: 'Company logos, branding' },
-  { value: 'products', label: '📦 Products', description: 'Product photos for sale' },
   { value: 'promotional', label: '🎉 Promotional', description: 'Posters, flyers, special offers' },
   { value: 'staff', label: '👥 Staff', description: 'Team photos' },
-  { value: 'events', label: '🎊 Events', description: 'Past events, parties' },
-  { value: 'facilities', label: '🏊 Facilities', description: 'Amenities like pool, gym' },
+  { value: 'events', label: '🎊 Events', description: 'Past events, gatherings' },
+  { value: 'facilities', label: '🏊 Facilities', description: 'Amenities and equipment' },
   { value: 'other', label: '📁 Other', description: 'Miscellaneous media' },
 ];
 

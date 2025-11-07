@@ -19,12 +19,12 @@ const Settings = () => {
   const [config, setConfig] = useState({
     id: '',
     name: '',
-    business_type: 'restaurant',
+    business_type: '',
     voice_style: 'Warm, polite receptionist.',
     hours: '',
-    menu_or_offerings: '',
+    services: '',
     branches: '',
-    seating_areas: '',
+    service_locations: '',
     currency_prefix: 'K',
     twilio_number: '',
     whatsapp_number: '',
@@ -90,9 +90,9 @@ const Settings = () => {
           business_type: config.business_type,
           voice_style: config.voice_style,
           hours: config.hours,
-          menu_or_offerings: config.menu_or_offerings,
+          services: config.services,
           branches: config.branches,
-          seating_areas: config.seating_areas,
+          service_locations: config.service_locations,
           currency_prefix: config.currency_prefix,
           twilio_number: config.twilio_number,
           whatsapp_number: config.whatsapp_number,
@@ -185,11 +185,11 @@ const Settings = () => {
             </div>
 
             <div>
-              <Label htmlFor="menu_or_offerings">Menu / Services</Label>
+              <Label htmlFor="services">Services / Offerings</Label>
               <Textarea
-                id="menu_or_offerings"
-                value={config.menu_or_offerings}
-                onChange={(e) => setConfig({ ...config, menu_or_offerings: e.target.value })}
+                id="services"
+                value={config.services}
+                onChange={(e) => setConfig({ ...config, services: e.target.value })}
                 placeholder="List your main offerings, services, or menu items..."
                 className="min-h-[100px]"
                 disabled={loading}
@@ -221,12 +221,12 @@ const Settings = () => {
             </div>
 
             <div>
-              <Label htmlFor="seating_areas">Seating/Service Areas</Label>
+              <Label htmlFor="service_locations">Service Locations / Areas</Label>
               <Input
-                id="seating_areas"
-                value={config.seating_areas}
-                onChange={(e) => setConfig({ ...config, seating_areas: e.target.value })}
-                placeholder="e.g., poolside,outdoor,inside,VIP"
+                id="service_locations"
+                value={config.service_locations}
+                onChange={(e) => setConfig({ ...config, service_locations: e.target.value })}
+                placeholder="e.g., main area,consultation room,studio"
                 disabled={loading}
               />
             </div>
@@ -275,6 +275,12 @@ const Settings = () => {
 
           </CardContent>
         </Card>
+
+        <div className="flex justify-end mt-6">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save Settings"}
+          </Button>
+        </div>
 
         {config.id && (
           <div className="mt-6 space-y-6">
