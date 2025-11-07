@@ -23,6 +23,7 @@ serve(async (req) => {
       product_id,
       customer_phone,
       customer_name,
+      customer_email,
       payment_method,
       amount,
       metadata
@@ -59,13 +60,16 @@ serve(async (req) => {
 
     // Determine payment method and generate appropriate link
     if (payment_method === 'selar' || !payment_method) {
-      // Use Selar link (manual international payments)
+      // Use Selar link (international payments with webhook tracking)
       if (product.selar_link) {
         paymentLink = product.selar_link;
       } else {
         throw new Error('Selar link not configured for this product');
       }
-      paymentReference = `SELAR_${Date.now()}`;
+      // Generate trackable reference for webhook matching
+      const companyShort = company_id.substring(0, 8);
+      const productShort = product_id.substring(0, 8);
+      paymentReference = `SELAR_${companyShort}_${productShort}_${Date.now()}`;
     } else if (['mtn', 'airtel', 'zamtel'].includes(payment_method)) {
       // Use MoneyUnify for mobile money
       console.log('Initiating MoneyUnify payment for', payment_method);
@@ -102,7 +106,7 @@ serve(async (req) => {
       throw new Error('Invalid payment method');
     }
 
-    // Create payment transaction record
+    // Create payment transaction record with enhanced metadata for webhook matching
     const { data: transaction, error: transactionError } = await supabase
       .from('payment_transactions')
       .insert({
@@ -118,7 +122,13 @@ serve(async (req) => {
         payment_reference: paymentReference,
         payment_link: paymentLink,
         moneyunify_transaction_id: moneyunifyTransactionId,
-        metadata: metadata || {}
+        metadata: {
+          ...metadata,
+          customer_email: customer_email,
+          product_name: product.name,
+          ussd_code: ussdCode,
+          created_for_webhook_matching: true
+        }
       })
       .select()
       .single();
