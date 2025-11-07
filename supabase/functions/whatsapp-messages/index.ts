@@ -420,6 +420,39 @@ Respond professionally and provide actionable insights when asked.`;
     const currentDate = today.toISOString().split('T')[0]; // YYYY-MM-DD format
     const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
     
+    // Industry-specific configurations
+    const industryPrompts: Record<string, { location_prompt: string; confirmation: string }> = {
+      restaurant: {
+        location_prompt: "Which area would you prefer - poolside, outdoor terrace, or indoor dining?",
+        confirmation: "booking for {guests} guests on {date} at {time} in the {location} area"
+      },
+      clinic: {
+        location_prompt: "Which department do you need - general consultation, pediatrics, or specialist?",
+        confirmation: "appointment on {date} at {time} in the {location} department"
+      },
+      gym: {
+        location_prompt: "Which area would you like to use - main gym floor, yoga studio, or outdoor training area?",
+        confirmation: "session on {date} at {time} in the {location}"
+      },
+      salon: {
+        location_prompt: "Would you prefer the main salon area or our private VIP room?",
+        confirmation: "appointment for your service on {date} at {time}"
+      },
+      hotel: {
+        location_prompt: "Which facility would you like to book - restaurant, spa, or conference room?",
+        confirmation: "reservation on {date} at {time} at our {location}"
+      },
+      spa: {
+        location_prompt: "Would you like a regular treatment room or our VIP suite?",
+        confirmation: "appointment for your service on {date} at {time}"
+      }
+    };
+
+    const businessPrompt = industryPrompts[company.business_type] || {
+      location_prompt: "Which location would you prefer?",
+      confirmation: "appointment on {date} at {time}"
+    };
+    
     const instructions = `You are the receptionist for ${company.name} in Zambia.
 Business type: ${company.business_type}.
 Voice style: ${company.voice_style}.
@@ -463,13 +496,13 @@ Critical rules:
    - Their NAME (ask once: "May I have your name please?")
    - DATE and TIME of booking
    - NUMBER OF GUESTS
-   - WHICH BRANCH (if multiple locations)
-   - SEATING PREFERENCE (if applicable)
+   - WHICH BRANCH (if multiple locations) - Example: "${businessPrompt.location_prompt}"
+   - LOCATION PREFERENCE (if applicable)
    
 4. NEVER ask for the same information twice. Once they give you their name, use it in the conversation.
 
-5. Before creating a reservation, confirm ALL details ONCE:
-   "Perfect! Let me confirm: [NAME], ${customerPhone}, [GUESTS] guests on [DATE] at [TIME] at our [BRANCH], [AREA]. Is that correct?"
+5. Before creating a reservation, confirm ALL details ONCE using this format:
+   "Perfect! Let me confirm: [NAME], ${customerPhone}, ${businessPrompt.confirmation.replace('{guests}', '[GUESTS]').replace('{date}', '[DATE]').replace('{time}', '[TIME]').replace('{location}', '[LOCATION]')}. Is that correct?"
    Only call create_reservation after they confirm.
 
 6. Track what information you already have. Look at the conversation history to see what they've told you.

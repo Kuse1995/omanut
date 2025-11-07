@@ -138,6 +138,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     quick_reference_info: "",
   });
 
+  const [showCustomIndustry, setShowCustomIndustry] = useState(false);
+
   const [aiInstructions, setAiInstructions] = useState({
     system_instructions: "",
     qa_style: "",
@@ -146,10 +148,12 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
   // Update form fields when business type changes
   const handleBusinessTypeChange = (value: string) => {
+    setShowCustomIndustry(value === "other");
+    
     const config = industryConfig[value] || industryConfig.other;
     setFormData({
       ...formData,
-      business_type: value,
+      business_type: value === "other" ? "" : value,
       voice_style: config.voice_style,
       hours: config.hours,
       services: config.services,
@@ -175,6 +179,11 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
       if (error) throw error;
       if (data) {
+        // Check if business type is a custom one (not in our predefined list)
+        const predefinedTypes = ['restaurant', 'clinic', 'gym', 'salon', 'hotel', 'spa'];
+        const isCustom = data.business_type && !predefinedTypes.includes(data.business_type);
+        setShowCustomIndustry(isCustom);
+
         setFormData({
           name: data.name || "",
           business_type: data.business_type || "",
@@ -374,7 +383,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               <Label htmlFor="business_type">Business Type *</Label>
               <select
                 id="business_type"
-                value={formData.business_type}
+                value={showCustomIndustry ? "other" : formData.business_type}
                 onChange={(e) => handleBusinessTypeChange(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 required
@@ -386,9 +395,25 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                 <option value="salon">Salon / Spa</option>
                 <option value="hotel">Hotel</option>
                 <option value="spa">Spa</option>
-                <option value="other">Other</option>
+                <option value="other">Other (Custom)</option>
               </select>
             </div>
+
+            {showCustomIndustry && (
+              <div>
+                <Label htmlFor="custom_industry">Custom Industry Type *</Label>
+                <Input
+                  id="custom_industry"
+                  value={formData.business_type}
+                  onChange={(e) => setFormData({ ...formData, business_type: e.target.value })}
+                  placeholder="e.g., bakery, bookstore, car wash"
+                  required
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter your specific industry type
+                </p>
+              </div>
+            )}
 
             <div>
               <Label htmlFor="voice_style">Voice Style</Label>

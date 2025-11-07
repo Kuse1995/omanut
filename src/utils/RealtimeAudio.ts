@@ -267,6 +267,39 @@ export class RealtimeChat {
         throw new Error("Insufficient credits to start demo");
       }
 
+      // Industry-specific configurations
+      const industryPrompts: Record<string, { location_prompt: string; confirmation: string }> = {
+        restaurant: {
+          location_prompt: "Which area would you prefer - poolside, outdoor terrace, or indoor dining?",
+          confirmation: "booking for {guests} guests on {date} at {time} in the {location} area"
+        },
+        clinic: {
+          location_prompt: "Which department do you need - general consultation, pediatrics, or specialist?",
+          confirmation: "appointment on {date} at {time} in the {location} department"
+        },
+        gym: {
+          location_prompt: "Which area would you like to use - main gym floor, yoga studio, or outdoor training area?",
+          confirmation: "session on {date} at {time} in the {location}"
+        },
+        salon: {
+          location_prompt: "Would you prefer the main salon area or our private VIP room?",
+          confirmation: "appointment for your service on {date} at {time}"
+        },
+        hotel: {
+          location_prompt: "Which facility would you like to book - restaurant, spa, or conference room?",
+          confirmation: "reservation on {date} at {time} at our {location}"
+        },
+        spa: {
+          location_prompt: "Would you like a regular treatment room or our VIP suite?",
+          confirmation: "appointment for your service on {date} at {time}"
+        }
+      };
+
+      const businessPrompt = industryPrompts[company.business_type] || {
+        location_prompt: "Which location would you prefer?",
+        confirmation: "appointment on {date} at {time}"
+      };
+
       // Build comprehensive instructions
       let instructions = `You are the receptionist for ${company.name}.
 Business type: ${company.business_type}.
@@ -292,12 +325,12 @@ Critical rules:
 
 2. Always ask for the caller's phone number FIRST and repeat it back in pairs, like '0977 12 34 56, correct?'.
 
-3. ASK FOR REQUIRED DETAILS: If the customer doesn't mention which branch, area, or other required details, ASK them specifically:
+3. ASK FOR REQUIRED DETAILS: If the customer doesn't mention which branch or location, ASK them specifically:
    - "Which of our branches would you like to book at?"
-   - "Would you prefer poolside, outdoor, or our main dining area?"
+   - "${businessPrompt.location_prompt}"
 
-4. Before you create any reservation or appointment, ALWAYS repeat back ALL details and ask for confirmation:
-   'Just to confirm: You are [EXACT NAME GIVEN], phone number [EXACT PHONE GIVEN], booking for [EXACT NUMBER] guests on [DATE] at [TIME] at our [EXACT BRANCH] in the [EXACT AREA], correct?'
+4. Before you create any reservation or appointment, ALWAYS repeat back ALL details and ask for confirmation using this format:
+   'Just to confirm: You are [EXACT NAME GIVEN], phone number [EXACT PHONE GIVEN], ${businessPrompt.confirmation.replace('{guests}', '[EXACT NUMBER]').replace('{date}', '[DATE]').replace('{time}', '[TIME]').replace('{location}', '[EXACT LOCATION]')}, correct?'
    Only call create_reservation after they clearly confirm yes.
 
 5. If the line is noisy or unclear: say 'I'm sorry, the line is not clear. Can you please repeat that slowly for me?'
