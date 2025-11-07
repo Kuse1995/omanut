@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,20 +19,59 @@ serve(async (req) => {
       throw new Error('OPENAI_API_KEY is not configured');
     }
 
+    // Get JWT from request
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    // Validate input
+    const requestSchema = z.object({
+      company_id: z.string().uuid()
+    });
+
+    const body = await req.json();
+    const { company_id } = requestSchema.parse(body);
+
+    // Verify user has access to this company
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: userData } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!userData || userData.company_id !== company_id) {
+      return new Response(JSON.stringify({ error: 'Forbidden: Access to this company denied' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Use service role for company data access
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Get company_id from request body
-    const { company_id } = await req.json();
-    
-    if (!company_id) {
-      throw new Error('company_id is required');
-    }
-
     // Get company data for the specific company
-    const { data: company } = await supabase
+    const { data: company } = await supabaseAdmin
       .from('companies')
       .select('*, metadata')
       .eq('id', company_id)
@@ -48,7 +88,7 @@ serve(async (req) => {
     }
 
     // Fetch AI overrides for this company
-    const { data: aiOverrides } = await supabase
+    const { data: aiOverrides } = await supabaseAdmin
       .from('company_ai_overrides')
       .select('*')
       .eq('company_id', company.id)

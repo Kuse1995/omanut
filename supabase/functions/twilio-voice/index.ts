@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -70,6 +71,24 @@ serve(async (req) => {
         if (message.event === 'start') {
           currentCallSid = message.start?.callSid;
           const twilioNumber = message.start?.customParameters?.To;
+          
+          // Validate input
+          if (!twilioNumber || !currentCallSid) {
+            console.error('Missing required parameters:', { twilioNumber, currentCallSid });
+            twilioSocket.close();
+            return;
+          }
+
+          // Validate formats
+          try {
+            z.string().regex(/^\+?[1-9]\d{1,14}$/).parse(twilioNumber);
+            z.string().min(1).max(255).parse(currentCallSid);
+          } catch (error) {
+            console.error('Invalid input format:', error);
+            twilioSocket.close();
+            return;
+          }
+          
           console.log('Call started:', currentCallSid, 'To:', twilioNumber);
           
           // Fetch company by Twilio number

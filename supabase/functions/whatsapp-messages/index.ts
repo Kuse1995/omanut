@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,6 +29,26 @@ serve(async (req) => {
     const From = formData.get('From') as string; // User's WhatsApp number
     const To = formData.get('To') as string; // Business WhatsApp number
     const Body = formData.get('Body') as string; // Message text
+
+    // Validate input
+    const messageSchema = z.object({
+      From: z.string().min(1).max(255),
+      To: z.string().min(1).max(255),
+      Body: z.string().max(4096)
+    });
+
+    try {
+      messageSchema.parse({ From, To, Body });
+    } catch (error) {
+      console.error('Invalid input:', error);
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Invalid message format.]]></Message>
+</Response>`, {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      });
+    }
 
     console.log('WhatsApp message received:', { From, To, Body });
 

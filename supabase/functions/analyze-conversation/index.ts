@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,19 +19,46 @@ serve(async (req) => {
       throw new Error('OPENAI_API_KEY is not configured');
     }
 
+    // Get JWT from request
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    // Validate input
+    const requestSchema = z.object({
+      conversation_id: z.string().uuid()
+    });
+
+    const body = await req.json();
+    const { conversation_id } = requestSchema.parse(body);
+
+    // Verify user authentication
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Use service role for operations
+    const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { conversation_id } = await req.json();
-    
-    if (!conversation_id) {
-      throw new Error('conversation_id is required');
-    }
-
-    // Get conversation data
-    const { data: conversation, error: convError } = await supabase
+    // Get conversation data and verify access
+    const { data: conversation, error: convError } = await supabaseAdmin
       .from('conversations')
       .select('*')
       .eq('id', conversation_id)
@@ -38,6 +66,20 @@ serve(async (req) => {
 
     if (convError || !conversation) {
       throw new Error('Conversation not found');
+    }
+
+    // Verify user has access to this conversation's company
+    const { data: userData } = await supabaseAdmin
+      .from('users')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!userData || userData.company_id !== conversation.company_id) {
+      return new Response(JSON.stringify({ error: 'Forbidden: Access denied' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     if (!conversation.transcript || conversation.transcript.trim() === '') {
@@ -118,7 +160,7 @@ Only include items that are genuinely important. If there's nothing significant,
         importance: info.importance || 'normal',
       }));
 
-      const { error: infoError } = await supabase
+      const { error: infoError } = await supabaseAdmin
         .from('client_information')
         .insert(clientInfoRecords);
 
@@ -141,7 +183,7 @@ Only include items that are genuinely important. If there's nothing significant,
         status: 'pending',
       }));
 
-      const { error: actionError } = await supabase
+      const { error: actionError } = await supabaseAdmin
         .from('action_items')
         .insert(actionItemRecords);
 
