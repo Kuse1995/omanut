@@ -215,11 +215,11 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 150 * 1024 * 1024; // 150MB
     if (file.size > maxSize) {
       toast({
         title: "File too large",
-        description: "Maximum file size is 50MB",
+        description: "Maximum file size is 150MB",
         variant: "destructive",
       });
       event.target.value = '';
@@ -441,7 +441,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               disabled={analyzing || uploading}
             />
             <p className="text-sm text-muted-foreground">
-              Maximum file size: 50MB
+              Maximum file size: 150MB
             </p>
           </div>
 

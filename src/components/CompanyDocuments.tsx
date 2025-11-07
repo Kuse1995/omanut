@@ -78,11 +78,11 @@ export const CompanyDocuments = ({ companyId }: CompanyDocumentsProps) => {
       return;
     }
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
+    // Validate file size (max 150MB)
+    if (file.size > 150 * 1024 * 1024) {
       toast({
         title: "File too large",
-        description: "Maximum file size is 10MB",
+        description: "Maximum file size is 150MB",
         variant: "destructive",
       });
       return;
