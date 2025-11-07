@@ -620,6 +620,141 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_products: {
+        Row: {
+          category: string | null
+          company_id: string | null
+          created_at: string | null
+          currency: string | null
+          description: string | null
+          duration_minutes: number | null
+          id: string
+          is_active: boolean | null
+          name: string
+          price: number
+          selar_link: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          price: number
+          selar_link?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          description?: string | null
+          duration_minutes?: number | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          price?: number
+          selar_link?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_products_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_transactions: {
+        Row: {
+          amount: number
+          company_id: string | null
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string | null
+          currency: string | null
+          customer_name: string | null
+          customer_phone: string
+          id: string
+          metadata: Json | null
+          moneyunify_transaction_id: string | null
+          payment_link: string | null
+          payment_method: string | null
+          payment_reference: string | null
+          payment_status: string | null
+          product_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          amount: number
+          company_id?: string | null
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          customer_name?: string | null
+          customer_phone: string
+          id?: string
+          metadata?: Json | null
+          moneyunify_transaction_id?: string | null
+          payment_link?: string | null
+          payment_method?: string | null
+          payment_reference?: string | null
+          payment_status?: string | null
+          product_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          amount?: number
+          company_id?: string | null
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          currency?: string | null
+          customer_name?: string | null
+          customer_phone?: string
+          id?: string
+          metadata?: Json | null
+          moneyunify_transaction_id?: string | null
+          payment_link?: string | null
+          payment_method?: string | null
+          payment_reference?: string | null
+          payment_status?: string | null
+          product_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_transactions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_transactions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_transactions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "payment_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservations: {
         Row: {
           area_preference: string | null
