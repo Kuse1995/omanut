@@ -313,18 +313,57 @@ Respond professionally and provide actionable insights when asked.`;
       knowledgeBase += '\nWhen customers ask questions, check this knowledge base FIRST for accurate information.\n';
     }
 
-    // Build media library context
+    // Build categorized media library context
     let mediaContext = '';
     if (mediaLibrary && mediaLibrary.length > 0) {
-      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY:\n';
+      // Group media by category
+      const categorizedMedia: Record<string, any[]> = {};
       mediaLibrary.forEach((media: any) => {
-        const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${media.file_path}`;
-        mediaContext += `\n- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
-        if (media.description) mediaContext += ` - ${media.description}`;
-        if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
-        mediaContext += `\n  URL: ${url}`;
+        const category = media.category || 'other';
+        if (!categorizedMedia[category]) {
+          categorizedMedia[category] = [];
+        }
+        categorizedMedia[category].push(media);
       });
-      mediaContext += '\n\nWhen customers ask for photos, videos, or images (e.g., "show me the menu", "send me pics", "what does it look like"), use the send_media function to send them the appropriate media from this library.\n';
+
+      const categoryLabels: Record<string, string> = {
+        'menu': '📋 MENU',
+        'interior': '🏢 INTERIOR',
+        'exterior': '🏛️ EXTERIOR',
+        'logo': '🎨 LOGO',
+        'products': '📦 PRODUCTS',
+        'promotional': '🎉 PROMOTIONAL',
+        'staff': '👥 STAFF',
+        'events': '🎊 EVENTS',
+        'facilities': '🏊 FACILITIES',
+        'other': '📁 OTHER'
+      };
+
+      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY (organized by category):\n';
+      
+      Object.entries(categorizedMedia).forEach(([category, items]) => {
+        const label = categoryLabels[category] || category.toUpperCase();
+        mediaContext += `\n${label} (${items.length} file${items.length > 1 ? 's' : ''}):\n`;
+        
+        items.forEach((media: any) => {
+          const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${media.file_path}`;
+          mediaContext += `- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
+          if (media.description) mediaContext += ` - ${media.description}`;
+          if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
+          mediaContext += `\n  URL: ${url}\n`;
+        });
+      });
+      
+      mediaContext += '\n📌 MEDIA SELECTION GUIDE:\n';
+      mediaContext += '- Menu requests ("show menu", "what food") → Use MENU category\n';
+      mediaContext += '- Venue appearance ("show your place", "how it looks") → Use INTERIOR or EXTERIOR\n';
+      mediaContext += '- Logo/branding requests → Use LOGO category\n';
+      mediaContext += '- Product inquiries → Use PRODUCTS category\n';
+      mediaContext += '- Promotional offers/specials → Use PROMOTIONAL category\n';
+      mediaContext += '- Staff/team requests → Use STAFF category\n';
+      mediaContext += '- Event photos → Use EVENTS category\n';
+      mediaContext += '- Amenities (pool, gym, etc.) → Use FACILITIES category\n';
+      mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
     }
 
     // Build comprehensive instructions
@@ -480,20 +519,24 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "Send an image or video from the media library when customers request photos, videos, or visual information",
+              description: "Send the most relevant image or video based on customer's request. Match their intent to the appropriate media category and content. Examples: 'show menu' → MENU category, 'your logo' → LOGO category, 'how it looks' → INTERIOR/EXTERIOR categories.",
               parameters: {
                 type: "object",
                 properties: {
                   media_url: {
                     type: "string",
-                    description: "The complete URL of the media file to send from the media library"
+                    description: "The complete URL of the most relevant media file from the library"
                   },
                   caption: {
                     type: "string",
-                    description: "A friendly caption to accompany the media"
+                    description: "A friendly, contextual caption explaining what the media shows"
+                  },
+                  category: {
+                    type: "string",
+                    description: "Category of media being sent (menu, interior, exterior, logo, products, promotional, staff, events, facilities, other) - for tracking purposes"
                   }
                 },
-                required: ["media_url"]
+                required: ["media_url", "category"]
               }
             }
           }

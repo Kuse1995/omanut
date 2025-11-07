@@ -23,7 +23,23 @@ interface Media {
   tags: string[];
   created_at: string;
   thumbnail_url: string | null;
+  category: string;
 }
+
+type MediaCategory = 'menu' | 'interior' | 'exterior' | 'logo' | 'products' | 'promotional' | 'staff' | 'events' | 'facilities' | 'other';
+
+const MEDIA_CATEGORIES: { value: MediaCategory; label: string; description: string }[] = [
+  { value: 'menu', label: '📋 Menu', description: 'Menu items, food & drink photos' },
+  { value: 'interior', label: '🏢 Interior', description: 'Indoor venue, dining areas' },
+  { value: 'exterior', label: '🏛️ Exterior', description: 'Building exterior, entrance' },
+  { value: 'logo', label: '🎨 Logo', description: 'Company logos, branding' },
+  { value: 'products', label: '📦 Products', description: 'Product photos for sale' },
+  { value: 'promotional', label: '🎉 Promotional', description: 'Posters, flyers, special offers' },
+  { value: 'staff', label: '👥 Staff', description: 'Team photos' },
+  { value: 'events', label: '🎊 Events', description: 'Past events, parties' },
+  { value: 'facilities', label: '🏊 Facilities', description: 'Amenities like pool, gym' },
+  { value: 'other', label: '📁 Other', description: 'Miscellaneous media' },
+];
 
 export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [media, setMedia] = useState<Media[]>([]);
@@ -31,6 +47,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [uploading, setUploading] = useState(false);
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<MediaCategory>('other');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -139,7 +156,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       console.log('User authenticated:', user.id);
 
       const fileExt = file.name.split('.').pop();
-      const fileName = `${companyId}/${Date.now()}.${fileExt}`;
+      const fileName = `${companyId}/${selectedCategory}/${Date.now()}.${fileExt}`;
       
       console.log('Uploading file:', fileName);
 
@@ -161,7 +178,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         try {
           console.log('Generating video thumbnail...');
           const thumbnailBlob = await generateVideoThumbnail(file);
-          const thumbnailFileName = `${companyId}/${Date.now()}_thumb.jpg`;
+          const thumbnailFileName = `${companyId}/${selectedCategory}/${Date.now()}_thumb.jpg`;
           
           const { error: thumbUploadError } = await supabase.storage
             .from('company-media')
@@ -195,7 +212,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           description: description || null,
           tags: tags ? tags.split(',').map(t => t.trim()) : [],
           uploaded_by: user.id,
-          thumbnail_url: thumbnailUrl
+          thumbnail_url: thumbnailUrl,
+          category: selectedCategory
         });
 
       if (dbError) {
@@ -212,6 +230,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
 
       setDescription("");
       setTags("");
+      setSelectedCategory('other');
       loadMedia();
     } catch (error: any) {
       toast({
@@ -277,6 +296,22 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       <CardContent className="space-y-6">
         <div className="space-y-4">
           <div className="space-y-2">
+            <Label htmlFor="category">Media Category</Label>
+            <select
+              id="category"
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value as MediaCategory)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {MEDIA_CATEGORIES.map(cat => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label} - {cat.description}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="space-y-2">
             <Label htmlFor="description">Description (optional)</Label>
             <Textarea
               id="description"
@@ -326,8 +361,21 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               <p>No media uploaded yet</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {media.map((item) => (
+            <div className="space-y-6">
+              {MEDIA_CATEGORIES.map(category => {
+                const categoryMedia = media.filter(m => m.category === category.value);
+                if (categoryMedia.length === 0) return null;
+                
+                return (
+                  <div key={category.value} className="space-y-3">
+                    <h3 className="text-lg font-semibold flex items-center gap-2">
+                      <span>{category.label}</span>
+                      <span className="text-sm text-muted-foreground font-normal">
+                        ({categoryMedia.length} {categoryMedia.length === 1 ? 'file' : 'files'})
+                      </span>
+                    </h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {categoryMedia.map((item) => (
                 <div key={item.id} className="relative group border rounded-lg overflow-hidden">
                   {item.media_type === 'image' ? (
                     <img
@@ -380,7 +428,11 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              ))}
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

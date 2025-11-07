@@ -355,6 +355,7 @@ export type Database = {
       }
       company_media: {
         Row: {
+          category: Database["public"]["Enums"]["media_category"]
           company_id: string
           created_at: string
           description: string | null
@@ -370,6 +371,7 @@ export type Database = {
           uploaded_by: string | null
         }
         Insert: {
+          category?: Database["public"]["Enums"]["media_category"]
           company_id: string
           created_at?: string
           description?: string | null
@@ -385,6 +387,7 @@ export type Database = {
           uploaded_by?: string | null
         }
         Update: {
+          category?: Database["public"]["Enums"]["media_category"]
           company_id?: string
           created_at?: string
           description?: string | null
@@ -769,6 +772,17 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "user" | "client"
+      media_category:
+        | "menu"
+        | "interior"
+        | "exterior"
+        | "logo"
+        | "products"
+        | "promotional"
+        | "staff"
+        | "events"
+        | "facilities"
+        | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -897,6 +911,18 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user", "client"],
+      media_category: [
+        "menu",
+        "interior",
+        "exterior",
+        "logo",
+        "products",
+        "promotional",
+        "staff",
+        "events",
+        "facilities",
+        "other",
+      ],
     },
   },
 } as const
