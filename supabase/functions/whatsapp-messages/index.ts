@@ -792,12 +792,53 @@ Critical rules:
                 console.error('No media URLs provided');
                 assistantReply = "I couldn't find the media to send.";
               } else {
+                // Generate signed URLs for all media files (valid for 1 hour)
+                const signedMediaUrls: string[] = [];
+                
+                for (const mediaUrl of mediaUrls) {
+                  try {
+                    // Extract file path from Supabase storage URL
+                    // URL format: https://<project>.supabase.co/storage/v1/object/company-media/<file-path>
+                    const urlParts = mediaUrl.split('/storage/v1/object/');
+                    if (urlParts.length === 2) {
+                      const pathWithBucket = urlParts[1];
+                      // Remove bucket name to get just the file path
+                      const filePath = pathWithBucket.replace('company-media/', '');
+                      
+                      console.log('Generating signed URL for path:', filePath);
+                      
+                      // Generate signed URL valid for 1 hour
+                      const { data: signedData, error: signError } = await supabase
+                        .storage
+                        .from('company-media')
+                        .createSignedUrl(filePath, 3600);
+                      
+                      if (signError) {
+                        console.error('Error generating signed URL:', signError);
+                        signedMediaUrls.push(mediaUrl); // Fallback to original URL
+                      } else if (signedData?.signedUrl) {
+                        console.log('Generated signed URL successfully');
+                        signedMediaUrls.push(signedData.signedUrl);
+                      } else {
+                        console.error('No signed URL returned');
+                        signedMediaUrls.push(mediaUrl);
+                      }
+                    } else {
+                      console.error('Could not parse storage URL:', mediaUrl);
+                      signedMediaUrls.push(mediaUrl);
+                    }
+                  } catch (urlError) {
+                    console.error('Error processing media URL:', urlError);
+                    signedMediaUrls.push(mediaUrl);
+                  }
+                }
+                
                 let successCount = 0;
                 let failCount = 0;
                 
-                // Send each media file as a separate message
-                for (let i = 0; i < mediaUrls.length; i++) {
-                  const mediaUrl = mediaUrls[i];
+                // Send each media file as a separate message using signed URLs
+                for (let i = 0; i < signedMediaUrls.length; i++) {
+                  const signedUrl = signedMediaUrls[i];
                   const formData = new URLSearchParams();
                   formData.append('From', fromNumber);
                   formData.append('To', From);
@@ -805,13 +846,13 @@ Critical rules:
                   // Add caption only to the first message
                   if (i === 0 && args.caption) {
                     formData.append('Body', args.caption);
-                  } else if (mediaUrls.length > 1) {
-                    formData.append('Body', `${i + 1}/${mediaUrls.length}`);
+                  } else if (signedMediaUrls.length > 1) {
+                    formData.append('Body', `${i + 1}/${signedMediaUrls.length}`);
                   } else {
                     formData.append('Body', 'Here you go!');
                   }
                   
-                  formData.append('MediaUrl', mediaUrl);
+                  formData.append('MediaUrl', signedUrl);
 
                   const twilioResponse = await fetch(twilioUrl, {
                     method: 'POST',
@@ -824,7 +865,7 @@ Critical rules:
 
                   if (twilioResponse.ok) {
                     successCount++;
-                    console.log(`Media ${i + 1}/${mediaUrls.length} sent successfully`);
+                    console.log(`Media ${i + 1}/${signedMediaUrls.length} sent successfully`);
                   } else {
                     failCount++;
                     const errorText = await twilioResponse.text();
@@ -832,7 +873,7 @@ Critical rules:
                   }
                   
                   // Small delay between messages to avoid rate limiting
-                  if (i < mediaUrls.length - 1) {
+                  if (i < signedMediaUrls.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                   }
                 }
@@ -843,18 +884,18 @@ Critical rules:
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent ${mediaUrls.length} ${args.category} media file${mediaUrls.length > 1 ? 's' : ''}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}]${args.caption ? ' - ' + args.caption : ''}`
                   });
                 
                 // Set appropriate response based on results
-                if (successCount === mediaUrls.length) {
+                if (successCount === signedMediaUrls.length) {
                   // Track successful media send for contextual response
                   anyToolExecuted = true;
-                  toolExecutionContext.push(`sent ${mediaUrls.length} ${args.category} media file${mediaUrls.length > 1 ? 's' : ''}`);
-                  console.log(`All ${mediaUrls.length} media files sent successfully`);
+                  toolExecutionContext.push(`sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}`);
+                  console.log(`All ${signedMediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
                   anyToolExecuted = true;
-                  assistantReply = `I sent ${successCount} out of ${mediaUrls.length} media files. Some failed to send.`;
+                  assistantReply = `I sent ${successCount} out of ${signedMediaUrls.length} media files. Some failed to send.`;
                 } else {
                   assistantReply = "I tried to send the media but encountered an issue. Let me try again or I can help you another way.";
                 }
