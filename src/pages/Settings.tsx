@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import BackButton from '@/components/BackButton';
 import { CompanyDocuments } from '@/components/CompanyDocuments';
+import CompanyMedia from '@/components/CompanyMedia';
 import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -257,6 +258,7 @@ const Settings = () => {
 
         {config.id && (
           <div className="mt-6 space-y-6">
+            <CompanyMedia companyId={config.id} />
             <CompanyDocuments companyId={config.id} />
             <ImageGenerationSettings companyId={config.id} />
           </div>

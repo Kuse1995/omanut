@@ -294,6 +294,13 @@ Respond professionally and provide actionable insights when asked.`;
       .eq('company_id', company.id)
       .not('parsed_content', 'is', null);
 
+    // Get company media library
+    const { data: mediaLibrary } = await supabase
+      .from('company_media')
+      .select('*')
+      .eq('company_id', company.id)
+      .order('created_at', { ascending: false });
+
     // Build knowledge base from documents
     let knowledgeBase = '';
     if (documents && documents.length > 0) {
@@ -304,6 +311,20 @@ Respond professionally and provide actionable insights when asked.`;
         }
       });
       knowledgeBase += '\nWhen customers ask questions, check this knowledge base FIRST for accurate information.\n';
+    }
+
+    // Build media library context
+    let mediaContext = '';
+    if (mediaLibrary && mediaLibrary.length > 0) {
+      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY:\n';
+      mediaLibrary.forEach((media: any) => {
+        const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${media.file_path}`;
+        mediaContext += `\n- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
+        if (media.description) mediaContext += ` - ${media.description}`;
+        if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
+        mediaContext += `\n  URL: ${url}`;
+      });
+      mediaContext += '\n\nWhen customers ask for photos, videos, or images (e.g., "show me the menu", "send me pics", "what does it look like"), use the send_media function to send them the appropriate media from this library.\n';
     }
 
     // Build comprehensive instructions
@@ -341,6 +362,7 @@ CRITICAL DATE INFORMATION:
 
 ${quickRefInfo}
 ${knowledgeBase}
+${mediaContext}
 IMPORTANT: The customer is messaging from WhatsApp number ${customerPhone}. This is their contact number - you already have it. DO NOT ask for their phone number again.
 
 ${dynamicInfo}
@@ -453,6 +475,27 @@ Critical rules:
                 required: ["name", "phone", "date", "time", "guests", "area_preference", "branch"]
               }
             }
+          },
+          {
+            type: "function",
+            function: {
+              name: "send_media",
+              description: "Send an image or video from the media library when customers request photos, videos, or visual information",
+              parameters: {
+                type: "object",
+                properties: {
+                  media_url: {
+                    type: "string",
+                    description: "The complete URL of the media file to send from the media library"
+                  },
+                  caption: {
+                    type: "string",
+                    description: "A friendly caption to accompany the media"
+                  }
+                },
+                required: ["media_url"]
+              }
+            }
           }
         ],
         tool_choice: "auto"
@@ -471,10 +514,60 @@ Critical rules:
 
     console.log('AI response:', { assistantReply, toolCalls });
 
-    // Handle tool calls (reservation creation)
+    // Handle tool calls (reservation creation and media sending)
     if (toolCalls && toolCalls.length > 0) {
       for (const toolCall of toolCalls) {
-        if (toolCall.function.name === 'create_reservation') {
+        if (toolCall.function.name === 'send_media') {
+          const args = JSON.parse(toolCall.function.arguments);
+          console.log('AI wants to send media:', args);
+          
+          // Send media directly via Twilio
+          const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+          const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+          
+          if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+            try {
+              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+              
+              const formData = new URLSearchParams();
+              const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
+                ? company.whatsapp_number 
+                : `whatsapp:${company.whatsapp_number}`;
+              formData.append('From', fromNumber);
+              formData.append('To', From);
+              formData.append('Body', args.caption || '');
+              formData.append('MediaUrl', args.media_url);
+
+              const twilioResponse = await fetch(twilioUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: formData.toString(),
+              });
+
+              if (!twilioResponse.ok) {
+                const errorText = await twilioResponse.text();
+                console.error('Twilio API error sending media:', twilioResponse.status, errorText);
+                assistantReply += "\n\nI tried to send you the media but encountered an error. Please let me know if you'd like me to try again.";
+              } else {
+                console.log('Media sent successfully via Twilio');
+                // Log the media send in messages table
+                await supabase
+                  .from('messages')
+                  .insert({
+                    conversation_id: conversation.id,
+                    role: 'assistant',
+                    content: `[Sent media: ${args.media_url}]${args.caption ? ' - ' + args.caption : ''}`
+                  });
+              }
+            } catch (twilioError) {
+              console.error('Error sending media via Twilio:', twilioError);
+              assistantReply += "\n\nI tried to send you the media but encountered an error.";
+            }
+          }
+        } else if (toolCall.function.name === 'create_reservation') {
           const args = JSON.parse(toolCall.function.arguments);
           
           // Use WhatsApp phone number if not provided in args
