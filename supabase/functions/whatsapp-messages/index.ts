@@ -379,6 +379,7 @@ Respond professionally and provide actionable insights when asked.`;
     if (products && products.length > 0) {
       productsContext = '\n\n💳 AVAILABLE SERVICES & PRICING:\n\n';
       products.forEach((product: any) => {
+        productsContext += `Product ID: ${product.id}\n`;
         productsContext += `${product.name} - ${product.currency}${product.price}\n`;
         if (product.description) {
           productsContext += `  ${product.description}\n`;
@@ -394,8 +395,9 @@ Respond professionally and provide actionable insights when asked.`;
       productsContext += `1. Share the relevant product prices from the list above\n`;
       productsContext += `2. If they want to order, collect: product choice, any special requirements\n`;
       productsContext += `3. Ask their payment preference: "Would you like to pay via Mobile Money (MTN, Airtel, Zamtel) or International card?"\n`;
-      productsContext += `4. Once confirmed, call request_payment() with the product details and payment method\n`;
+      productsContext += `4. Once confirmed, call request_payment() with the EXACT Product ID from the list above, product name, amount, and payment method\n`;
       productsContext += `5. After payment link is sent, tell them: "I've sent you the payment link/instructions. Once payment is confirmed, our team will start working on your project immediately!"\n\n`;
+      productsContext += `CRITICAL: When calling request_payment(), you MUST use the exact Product ID (UUID) shown above for the product. Do not make up or guess IDs!\n\n`;
       productsContext += `Payment methods available:\n`;
       productsContext += `✅ Mobile Money (MTN, Airtel, Zamtel) - For Zambian customers (instant USSD prompt)\n`;
       productsContext += `✅ International Cards (via Selar) - For anyone worldwide\n\n`;
