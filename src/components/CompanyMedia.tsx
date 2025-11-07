@@ -86,19 +86,34 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     setUploading(true);
 
     try {
+      console.log('Starting upload for company:', companyId);
+      
+      // Get current user
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) {
+        console.error('User error:', userError);
+        throw new Error('You must be logged in to upload media');
+      }
+      
+      console.log('User authenticated:', user.id);
+
       const fileExt = file.name.split('.').pop();
       const fileName = `${companyId}/${Date.now()}.${fileExt}`;
+      
+      console.log('Uploading file:', fileName);
 
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from('company-media')
         .upload(fileName, file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
+      
+      console.log('File uploaded successfully:', uploadData);
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('company-media')
-        .getPublicUrl(fileName);
-
+      console.log('Inserting into database...');
       const { error: dbError } = await supabase
         .from('company_media')
         .insert({
@@ -110,10 +125,15 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           media_type: isImage ? 'image' : 'video',
           description: description || null,
           tags: tags ? tags.split(',').map(t => t.trim()) : [],
-          uploaded_by: (await supabase.auth.getUser()).data.user?.id
+          uploaded_by: user.id
         });
 
-      if (dbError) throw dbError;
+      if (dbError) {
+        console.error('Database error:', dbError);
+        throw dbError;
+      }
+      
+      console.log('Media record created successfully');
 
       toast({
         title: "Success",
