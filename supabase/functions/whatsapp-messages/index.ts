@@ -416,11 +416,12 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '4. NEVER send images when customer specifically asks for videos\n';
       mediaContext += '5. NEVER send videos when customer specifically asks for photos\n';
       mediaContext += '\n🔁 AVOID REPETITION (CRITICAL):\n';
-      mediaContext += '1. CHECK the conversation history BEFORE selecting media\n';
-      mediaContext += '2. If you see "[Sent X media files]" in the history, look at which URLs were sent\n';
-      mediaContext += '3. NEVER send the same media URLs that were already sent in this conversation\n';
-      mediaContext += '4. If customer asks for "more videos" or "other videos", select DIFFERENT videos from the same category\n';
+      mediaContext += '1. CHECK the conversation history BEFORE selecting media - look for messages like "[Sent X media: filename1.mp4, filename2.webm]"\n';
+      mediaContext += '2. The filenames after "[Sent X media:" show EXACTLY which files were already sent\n';
+      mediaContext += '3. NEVER select media with filenames that appear in previous "[Sent X media:" messages\n';
+      mediaContext += '4. If customer asks for "more videos" or "other videos", select files with DIFFERENT FILENAMES from the same category\n';
       mediaContext += '5. If you\'ve sent all available media in a category, tell customer: "I\'ve already shared all our [category] content with you. Would you like to see something from a different category?"\n';
+      mediaContext += '6. EXAMPLE: If history shows "[Sent 3 media: video1.mp4, video2.webm, video3.mp4]", do NOT select those filenames again\n';
       mediaContext += '\n⚠️ CRITICAL: When customer requests media:\n';
       mediaContext += '1. NEVER include media URLs in your text response\n';
       mediaContext += '2. ALWAYS call send_media() tool to send images/videos directly\n';
@@ -903,13 +904,18 @@ Critical rules:
                   }
                 }
                 
-                // Log the media send in messages table
+                // Log the media send in messages table with file names for AI memory
+                const fileNames = args.media_urls.map((url: string) => {
+                  const parts = url.split('/');
+                  return parts[parts.length - 1]; // Extract filename from URL
+                }).join(', ');
+                
                 await supabase
                   .from('messages')
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${signedMediaUrls.length} ${args.category} media: ${fileNames}]${args.caption ? ' - ' + args.caption : ''}`
                   });
                 
                 // Set appropriate response based on results
