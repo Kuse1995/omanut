@@ -368,19 +368,36 @@ Respond professionally and provide actionable insights when asked.`;
         'other': '📁 OTHER'
       };
 
-      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY (organized by category):\n';
+      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY (organized by category and type):\n';
       
       Object.entries(categorizedMedia).forEach(([category, items]) => {
         const label = categoryLabels[category] || category.toUpperCase();
-        mediaContext += `\n${label} (${items.length} file${items.length > 1 ? 's' : ''}):\n`;
         
-        items.forEach((media: any) => {
-          const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
-          mediaContext += `- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
-          if (media.description) mediaContext += ` - ${media.description}`;
-          if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
-          mediaContext += `\n  URL: ${url}\n`;
-        });
+        // Separate by type within each category
+        const videos = items.filter(m => m.media_type === 'video');
+        const images = items.filter(m => m.media_type === 'image');
+        
+        if (videos.length > 0) {
+          mediaContext += `\n${label} - VIDEOS (${videos.length}):\n`;
+          videos.forEach((media: any) => {
+            const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
+            mediaContext += `- 🎥 VIDEO: "${media.file_name}"`;
+            if (media.description) mediaContext += ` - ${media.description}`;
+            if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
+            mediaContext += `\n  URL: ${url}\n`;
+          });
+        }
+        
+        if (images.length > 0) {
+          mediaContext += `\n${label} - IMAGES (${images.length}):\n`;
+          images.forEach((media: any) => {
+            const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
+            mediaContext += `- 📷 IMAGE: "${media.file_name}"`;
+            if (media.description) mediaContext += ` - ${media.description}`;
+            if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
+            mediaContext += `\n  URL: ${url}\n`;
+          });
+        }
       });
       
       mediaContext += '\n📌 MEDIA SELECTION GUIDE:\n';
@@ -392,13 +409,25 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '- Staff/team requests → Use STAFF category\n';
       mediaContext += '- Event photos → Use EVENTS category\n';
       mediaContext += '- Amenities (pool, gym, etc.) → Use FACILITIES category\n';
+      mediaContext += '\n🎬 VIDEO vs IMAGE SELECTION (CRITICAL):\n';
+      mediaContext += '1. Customer asks for "videos", "video samples", "reels", "footage" → ONLY send files marked as 🎥 VIDEO\n';
+      mediaContext += '2. Customer asks for "photos", "pictures", "images", "pics" → ONLY send files marked as 📷 IMAGE\n';
+      mediaContext += '3. Customer asks for "samples", "portfolio", "work", "examples" → Send BOTH videos AND images from the relevant category\n';
+      mediaContext += '4. NEVER send images when customer specifically asks for videos\n';
+      mediaContext += '5. NEVER send videos when customer specifically asks for photos\n';
+      mediaContext += '\n🔁 AVOID REPETITION (CRITICAL):\n';
+      mediaContext += '1. CHECK the conversation history BEFORE selecting media\n';
+      mediaContext += '2. If you see "[Sent X media files]" in the history, look at which URLs were sent\n';
+      mediaContext += '3. NEVER send the same media URLs that were already sent in this conversation\n';
+      mediaContext += '4. If customer asks for "more videos" or "other videos", select DIFFERENT videos from the same category\n';
+      mediaContext += '5. If you\'ve sent all available media in a category, tell customer: "I\'ve already shared all our [category] content with you. Would you like to see something from a different category?"\n';
       mediaContext += '\n⚠️ CRITICAL: When customer requests media:\n';
       mediaContext += '1. NEVER include media URLs in your text response\n';
       mediaContext += '2. ALWAYS call send_media() tool to send images/videos directly\n';
       mediaContext += '3. In your text, simply acknowledge: "Let me send that to you now!" then call send_media()\n';
       mediaContext += '4. The media will be sent automatically as attachments via WhatsApp\n';
       mediaContext += '5. For galleries/collections ("show me all", "send pictures of", "all your photos"), send multiple media by including multiple URLs\n';
-      mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
+      mediaContext += '\nAlways match customer intent to the most relevant category AND media type, then select media that HASN\'T been sent yet in this conversation.\n';
     }
 
     // Build products/services catalog
@@ -620,7 +649,7 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "MANDATORY USE: Call this tool immediately when customer uses ANY of these keywords or phrases: 'samples', 'portfolio', 'videos', 'photos', 'images', 'examples', 'what you made', 'what you've made', 'show me', 'send me', 'share', 'can I see', 'I would like to see', 'gallery', 'your work'. Send actual media files to WhatsApp (NOT text descriptions or promises). Match the media category: 'logo' for logos, 'products' for product samples, 'promotional' for marketing content, 'menu' for menus, 'interior/exterior' for venue photos. NEVER say 'let me send' or 'I'll share' - just call this tool directly.",
+              description: "MANDATORY USE: Call this tool immediately when customer uses ANY of these keywords or phrases: 'samples', 'portfolio', 'videos', 'photos', 'images', 'examples', 'what you made', 'what you've made', 'show me', 'send me', 'share', 'can I see', 'I would like to see', 'gallery', 'your work', 'more videos', 'other videos', 'different videos'. CRITICAL RULES: 1) If customer asks for 'videos', ONLY select URLs marked as 🎥 VIDEO. 2) If customer asks for 'photos'/'images', ONLY select URLs marked as 📷 IMAGE. 3) If customer says 'more' or 'other', select DIFFERENT media than what was already sent in the conversation history. 4) Check conversation transcript BEFORE selecting media to avoid sending duplicates. Match the media category: 'logo' for logos, 'products' for product samples, 'promotional' for marketing content, 'menu' for menus, 'interior/exterior' for venue photos. NEVER say 'let me send' or 'I'll share' - just call this tool directly.",
               parameters: {
                 type: "object",
                 properties: {
