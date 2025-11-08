@@ -375,7 +375,7 @@ Respond professionally and provide actionable insights when asked.`;
         mediaContext += `\n${label} (${items.length} file${items.length > 1 ? 's' : ''}):\n`;
         
         items.forEach((media: any) => {
-          const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${media.file_path}`;
+          const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
           mediaContext += `- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
           if (media.description) mediaContext += ` - ${media.description}`;
           if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
@@ -802,8 +802,8 @@ Critical rules:
                     const urlParts = mediaUrl.split('/storage/v1/object/');
                     if (urlParts.length === 2) {
                       const pathWithBucket = urlParts[1];
-                      // Remove bucket name to get just the file path
-                      const filePath = pathWithBucket.replace('company-media/', '');
+                      // Remove bucket name and any public prefix to get just the file path
+                      const filePath = pathWithBucket.replace('company-media/', '').replace('public/', '');
                       
                       console.log('Generating signed URL for path:', filePath);
                       
