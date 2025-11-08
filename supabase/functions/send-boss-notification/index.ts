@@ -55,6 +55,10 @@ serve(async (req) => {
         message = `⚠️ Action Required!\n\nType: ${data.action_type}\nPriority: ${data.priority}\n\n${data.description}\n\nCustomer: ${data.customer_name || 'N/A'}\nPhone: ${data.customer_phone || 'N/A'}`;
         break;
       
+      case 'payment_request':
+        message = `💰 Payment Request!\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}${data.customer_email ? `\nEmail: ${data.customer_email}` : ''}\n\nProduct: ${data.product_name}\nAmount: ${data.currency_prefix || 'K'}${data.amount}\nPayment Method: ${data.payment_method?.toUpperCase() || 'Not specified'}\n\nPlease contact the customer to complete the payment.`;
+        break;
+      
       default:
         message = data.message || 'Notification from AI assistant';
     }

@@ -712,63 +712,33 @@ Critical rules:
           console.log('AI requesting payment:', args);
           
           try {
-            // Call edge function to create payment link
-            const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
-            const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-            
-            const paymentResponse = await fetch(
-              `${SUPABASE_URL}/functions/v1/create-payment-link`,
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  company_id: company.id,
-                  conversation_id: conversation.id,
-                  product_id: args.product_id,
+            // Notify management about payment request
+            await supabase.functions.invoke('send-boss-notification', {
+              body: {
+                companyId: company.id,
+                notificationType: 'payment_request',
+                data: {
+                  customer_name: conversation.customer_name || args.customer_details?.name || 'Unknown',
                   customer_phone: From,
-                  customer_name: conversation.customer_name || args.customer_details?.name,
-                  payment_method: args.payment_method,
+                  customer_email: args.customer_details?.email,
+                  product_name: args.product_name,
                   amount: args.amount,
-                  metadata: args.customer_details
-                })
+                  currency_prefix: company.currency_prefix,
+                  payment_method: args.payment_method
+                }
               }
-            );
+            });
             
-            if (paymentResponse.ok) {
-              const paymentData = await paymentResponse.json();
-              
-              anyToolExecuted = true;
-              toolExecutionContext.push(`created payment link for ${args.product_name}`);
-              
-              // Build payment message based on method
-              let paymentMessage = `Great! To proceed with your *${args.product_name}* for ${company.currency_prefix}${args.amount}, `;
-              
-              if (args.payment_method === 'selar') {
-                paymentMessage += `please complete payment using this link:\n\n${paymentData.payment_link}\n\n`;
-                paymentMessage += `✅ Accepts all major cards\n✅ Secure international payment\n`;
-              } else {
-                paymentMessage += `please complete payment via ${args.payment_method.toUpperCase()} Mobile Money:\n\n`;
-                paymentMessage += `📱 Dial: ${paymentData.ussd_code}\n`;
-                paymentMessage += `📝 Reference: ${paymentData.payment_reference}\n\n`;
-                paymentMessage += `You'll receive a prompt on your phone to authorize the payment.\n`;
-              }
-              
-              paymentMessage += `\nOnce payment is confirmed, I'll notify our team to start working on your project immediately! 🚀`;
-              
-              assistantReply = paymentMessage;
-              
-              console.log('Payment link generated successfully:', paymentData.transaction_id);
-            } else {
-              const errorText = await paymentResponse.text();
-              console.error('Failed to create payment link:', errorText);
-              assistantReply += "\n\nI encountered an error generating the payment link. Please try again or contact us directly.";
-            }
+            anyToolExecuted = true;
+            toolExecutionContext.push(`notified management about payment request for ${args.product_name}`);
+            
+            // Inform customer that management will contact them
+            assistantReply = `Thank you for your interest in *${args.product_name}*! Our team has been notified about your payment request and will contact you shortly with payment instructions. You should hear from us within a few hours. 📱`;
+            
+            console.log('Management notified about payment request');
           } catch (paymentError) {
             console.error('Error processing payment request:', paymentError);
-            assistantReply += "\n\nI encountered an error processing your payment request. Please try again.";
+            assistantReply += "\n\nI encountered an error processing your payment request. Please try again or contact us directly.";
           }
         } else if (toolCall.function.name === 'send_media') {
           const args = JSON.parse(toolCall.function.arguments);
