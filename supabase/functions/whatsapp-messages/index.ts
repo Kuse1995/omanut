@@ -792,44 +792,37 @@ Critical rules:
                 console.error('No media URLs provided');
                 assistantReply = "I couldn't find the media to send.";
               } else {
-                // Generate signed URLs for all media files (valid for 1 hour)
-                const signedMediaUrls: string[] = [];
+                // Since bucket is public, use direct public URLs
+                const publicMediaUrls: string[] = [];
                 
                 for (const mediaUrl of mediaUrls) {
                   try {
                     // Extract file path from Supabase storage URL
-                    // URL format: https://<project>.supabase.co/storage/v1/object/company-media/<file-path>
                     const urlParts = mediaUrl.split('/storage/v1/object/');
                     if (urlParts.length === 2) {
                       const pathWithBucket = urlParts[1];
-                      // Remove bucket name and any public prefix to get just the file path
                       const filePath = pathWithBucket.replace('company-media/', '').replace('public/', '');
                       
-                      console.log('Generating signed URL for path:', filePath);
-                      
-                      // Generate signed URL valid for 1 hour
-                      const { data: signedData, error: signError } = await supabase
+                      // Generate public URL
+                      const { data: publicData } = supabase
                         .storage
                         .from('company-media')
-                        .createSignedUrl(filePath, 3600);
+                        .getPublicUrl(filePath);
                       
-                      if (signError) {
-                        console.error('Error generating signed URL:', signError);
-                        signedMediaUrls.push(mediaUrl); // Fallback to original URL
-                      } else if (signedData?.signedUrl) {
-                        console.log('Generated signed URL successfully');
-                        signedMediaUrls.push(signedData.signedUrl);
+                      if (publicData?.publicUrl) {
+                        console.log('Using public URL:', publicData.publicUrl);
+                        publicMediaUrls.push(publicData.publicUrl);
                       } else {
-                        console.error('No signed URL returned');
-                        signedMediaUrls.push(mediaUrl);
+                        console.error('Could not generate public URL for:', filePath);
+                        publicMediaUrls.push(mediaUrl); // Fallback to original
                       }
                     } else {
                       console.error('Could not parse storage URL:', mediaUrl);
-                      signedMediaUrls.push(mediaUrl);
+                      publicMediaUrls.push(mediaUrl);
                     }
                   } catch (urlError) {
                     console.error('Error processing media URL:', urlError);
-                    signedMediaUrls.push(mediaUrl);
+                    publicMediaUrls.push(mediaUrl);
                   }
                 }
                 
@@ -839,9 +832,9 @@ Critical rules:
                 // Construct StatusCallback URL for delivery tracking
                 const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
                 
-                // Send each media file as a separate message using signed URLs
-                for (let i = 0; i < signedMediaUrls.length; i++) {
-                  const signedUrl = signedMediaUrls[i];
+                // Send each media file as a separate message using public URLs
+                for (let i = 0; i < publicMediaUrls.length; i++) {
+                  const publicUrl = publicMediaUrls[i];
                   const originalUrl = args.media_urls[i];
                   const formData = new URLSearchParams();
                   formData.append('From', fromNumber);
@@ -851,13 +844,13 @@ Critical rules:
                   // Add caption only to the first message
                   if (i === 0 && args.caption) {
                     formData.append('Body', args.caption);
-                  } else if (signedMediaUrls.length > 1) {
-                    formData.append('Body', `${i + 1}/${signedMediaUrls.length}`);
+                  } else if (publicMediaUrls.length > 1) {
+                    formData.append('Body', `${i + 1}/${publicMediaUrls.length}`);
                   } else {
                     formData.append('Body', 'Here you go!');
                   }
                   
-                  formData.append('MediaUrl', signedUrl);
+                  formData.append('MediaUrl', publicUrl);
 
                   const twilioResponse = await fetch(twilioUrl, {
                     method: 'POST',
@@ -870,7 +863,7 @@ Critical rules:
 
                   if (twilioResponse.ok) {
                     successCount++;
-                    console.log(`Media ${i + 1}/${signedMediaUrls.length} sent successfully`);
+                    console.log(`Media ${i + 1}/${publicMediaUrls.length} sent successfully`);
                     
                     // Parse Twilio response to get MessageSid
                     try {
@@ -899,7 +892,7 @@ Critical rules:
                   }
                   
                   // Small delay between messages to avoid rate limiting
-                  if (i < signedMediaUrls.length - 1) {
+                  if (i < publicMediaUrls.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                   }
                 }
@@ -915,18 +908,18 @@ Critical rules:
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent ${signedMediaUrls.length} ${args.category} media: ${fileNames}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${publicMediaUrls.length} ${args.category} media: ${fileNames}]${args.caption ? ' - ' + args.caption : ''}`
                   });
                 
                 // Set appropriate response based on results
-                if (successCount === signedMediaUrls.length) {
+                if (successCount === publicMediaUrls.length) {
                   // Track successful media send for contextual response
                   anyToolExecuted = true;
-                  toolExecutionContext.push(`sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}`);
-                  console.log(`All ${signedMediaUrls.length} media files sent successfully`);
+                  toolExecutionContext.push(`sent ${publicMediaUrls.length} ${args.category} media file${publicMediaUrls.length > 1 ? 's' : ''}`);
+                  console.log(`All ${publicMediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
                   anyToolExecuted = true;
-                  assistantReply = `I sent ${successCount} out of ${signedMediaUrls.length} media files. Some failed to send.`;
+                  assistantReply = `I sent ${successCount} out of ${publicMediaUrls.length} media files. Some failed to send.`;
                 } else {
                   assistantReply = "I tried to send the media but encountered an issue. Let me try again or I can help you another way.";
                 }
