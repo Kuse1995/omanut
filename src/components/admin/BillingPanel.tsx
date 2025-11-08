@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CreditCard } from 'lucide-react';
+import { CreditCard, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const BillingPanel = () => {
@@ -15,6 +15,7 @@ export const BillingPanel = () => {
   const [creditUsage, setCreditUsage] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [creditsToAdd, setCreditsToAdd] = useState('');
+  const [retryingMedia, setRetryingMedia] = useState(false);
 
   useEffect(() => {
     if (!selectedCompany?.id) return;
@@ -75,6 +76,28 @@ export const BillingPanel = () => {
     }
   };
 
+  const handleRetryFailedMedia = async () => {
+    setRetryingMedia(true);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('retry-failed-media');
+      
+      if (error) throw error;
+      
+      if (data) {
+        toast.success(
+          `Retry processing complete: ${data.success} succeeded, ${data.failed} failed, ${data.skipped} skipped`,
+          { duration: 5000 }
+        );
+      }
+    } catch (error) {
+      console.error('Error retrying media:', error);
+      toast.error('Failed to retry media deliveries');
+    } finally {
+      setRetryingMedia(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -116,6 +139,37 @@ export const BillingPanel = () => {
                 Add Credits
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-[#1A1A1A] border-white/10">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center gap-2">
+              <RefreshCw className="w-5 h-5" />
+              Media Delivery Retries
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-white/60 mb-4">
+              Manually trigger retry attempts for failed media deliveries. The system uses exponential backoff (2, 4, 8, 16, 32 minutes) with a maximum of 5 retry attempts.
+            </p>
+            <Button 
+              onClick={handleRetryFailedMedia}
+              disabled={retryingMedia}
+              className="bg-[#84CC16] text-black hover:bg-[#84CC16]/90"
+            >
+              {retryingMedia ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Processing Retries...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry Failed Media Deliveries
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
 

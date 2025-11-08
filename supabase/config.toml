@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.twilio-status-webhook]
 verify_jwt = false
+
+[functions.retry-failed-media]
+verify_jwt = true

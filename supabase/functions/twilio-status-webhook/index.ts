@@ -35,6 +35,18 @@ serve(async (req) => {
       return new Response('Missing MessageSid', { status: 400, headers: corsHeaders });
     }
 
+    // Get current delivery record to check retry count
+    const { data: currentRecord, error: fetchError } = await supabase
+      .from('media_delivery_status')
+      .select('*')
+      .eq('twilio_message_sid', messageSid)
+      .single();
+
+    if (fetchError || !currentRecord) {
+      console.error('Delivery record not found:', messageSid);
+      return new Response('Record not found', { status: 404, headers: corsHeaders });
+    }
+
     // Update delivery status in database
     const updateData: any = {
       status: messageStatus,
@@ -43,10 +55,23 @@ serve(async (req) => {
 
     if (messageStatus === 'delivered') {
       updateData.delivered_at = new Date().toISOString();
+      // Clear retry schedule on successful delivery
+      updateData.next_retry_at = null;
     } else if (messageStatus === 'failed' || messageStatus === 'undelivered') {
       updateData.failed_at = new Date().toISOString();
       if (errorCode) updateData.error_code = errorCode;
       if (errorMessage) updateData.error_message = errorMessage;
+      
+      // Schedule retry with exponential backoff if under max retries
+      if (currentRecord.retry_count < currentRecord.max_retries) {
+        const backoffMinutes = Math.pow(2, currentRecord.retry_count + 1); // 2, 4, 8, 16, 32 minutes
+        const nextRetry = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
+        updateData.next_retry_at = nextRetry;
+        
+        console.log(`Scheduled retry ${currentRecord.retry_count + 1}/${currentRecord.max_retries} in ${backoffMinutes} minutes for ${messageSid}`);
+      } else {
+        console.log(`Max retries (${currentRecord.max_retries}) reached for ${messageSid}, no more retries scheduled`);
+      }
     }
 
     const { error } = await supabase

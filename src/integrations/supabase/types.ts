@@ -619,7 +619,11 @@ export type Database = {
           error_message: string | null
           failed_at: string | null
           id: string
+          last_retry_at: string | null
+          max_retries: number | null
           media_url: string
+          next_retry_at: string | null
+          retry_count: number | null
           sent_at: string | null
           status: string
           twilio_message_sid: string | null
@@ -635,7 +639,11 @@ export type Database = {
           error_message?: string | null
           failed_at?: string | null
           id?: string
+          last_retry_at?: string | null
+          max_retries?: number | null
           media_url: string
+          next_retry_at?: string | null
+          retry_count?: number | null
           sent_at?: string | null
           status?: string
           twilio_message_sid?: string | null
@@ -651,7 +659,11 @@ export type Database = {
           error_message?: string | null
           failed_at?: string | null
           id?: string
+          last_retry_at?: string | null
+          max_retries?: number | null
           media_url?: string
+          next_retry_at?: string | null
+          retry_count?: number | null
           sent_at?: string | null
           status?: string
           twilio_message_sid?: string | null
