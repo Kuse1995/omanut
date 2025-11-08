@@ -53,15 +53,43 @@ const Conversations = () => {
   const fetchConversations = async () => {
     // Get current user's company
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) {
+      console.log('No session found - user not authenticated');
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to view conversations.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    const { data: userData } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from('users')
       .select('company_id')
       .eq('id', session.user.id)
       .single();
 
-    if (!userData?.company_id) return;
+    if (userError) {
+      console.error('Error fetching user data:', userError);
+      toast({
+        title: "Error",
+        description: "Failed to load user data. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!userData?.company_id) {
+      console.log('User has no company_id');
+      toast({
+        title: "No Company",
+        description: "Your account is not linked to a company.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    console.log('Fetching conversations for company:', userData.company_id);
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
@@ -72,11 +100,19 @@ const Conversations = () => {
 
     if (convError) {
       console.error('Error fetching conversations:', convError);
+      toast({
+        title: "Error",
+        description: "Failed to load conversations. Please try again.",
+        variant: "destructive",
+      });
       return;
     }
 
+    console.log('Loaded conversations:', convData?.length || 0);
+
     if (!convData || convData.length === 0) {
       setConversations([]);
+      setStats({ total: 0, active: 0, avgDuration: 0 });
       return;
     }
 
