@@ -368,36 +368,19 @@ Respond professionally and provide actionable insights when asked.`;
         'other': '📁 OTHER'
       };
 
-      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY (organized by category and type):\n';
+      mediaContext = '\n\n🖼️ AVAILABLE MEDIA LIBRARY (organized by category):\n';
       
       Object.entries(categorizedMedia).forEach(([category, items]) => {
         const label = categoryLabels[category] || category.toUpperCase();
+        mediaContext += `\n${label} (${items.length} file${items.length > 1 ? 's' : ''}):\n`;
         
-        // Separate by type within each category
-        const videos = items.filter(m => m.media_type === 'video');
-        const images = items.filter(m => m.media_type === 'image');
-        
-        if (videos.length > 0) {
-          mediaContext += `\n${label} - VIDEOS (${videos.length}):\n`;
-          videos.forEach((media: any) => {
-            const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
-            mediaContext += `- 🎥 VIDEO: "${media.file_name}"`;
-            if (media.description) mediaContext += ` - ${media.description}`;
-            if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
-            mediaContext += `\n  URL: ${url}\n`;
-          });
-        }
-        
-        if (images.length > 0) {
-          mediaContext += `\n${label} - IMAGES (${images.length}):\n`;
-          images.forEach((media: any) => {
-            const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
-            mediaContext += `- 📷 IMAGE: "${media.file_name}"`;
-            if (media.description) mediaContext += ` - ${media.description}`;
-            if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
-            mediaContext += `\n  URL: ${url}\n`;
-          });
-        }
+        items.forEach((media: any) => {
+          const url = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/company-media/${media.file_path}`;
+          mediaContext += `- ${media.media_type.toUpperCase()}: "${media.file_name}"`;
+          if (media.description) mediaContext += ` - ${media.description}`;
+          if (media.tags && media.tags.length > 0) mediaContext += ` (Tags: ${media.tags.join(', ')})`;
+          mediaContext += `\n  URL: ${url}\n`;
+        });
       });
       
       mediaContext += '\n📌 MEDIA SELECTION GUIDE:\n';
@@ -409,26 +392,13 @@ Respond professionally and provide actionable insights when asked.`;
       mediaContext += '- Staff/team requests → Use STAFF category\n';
       mediaContext += '- Event photos → Use EVENTS category\n';
       mediaContext += '- Amenities (pool, gym, etc.) → Use FACILITIES category\n';
-      mediaContext += '\n🎬 VIDEO vs IMAGE SELECTION (CRITICAL):\n';
-      mediaContext += '1. Customer asks for "videos", "video samples", "reels", "footage" → ONLY send files marked as 🎥 VIDEO\n';
-      mediaContext += '2. Customer asks for "photos", "pictures", "images", "pics" → ONLY send files marked as 📷 IMAGE\n';
-      mediaContext += '3. Customer asks for "samples", "portfolio", "work", "examples" → Send BOTH videos AND images from the relevant category\n';
-      mediaContext += '4. NEVER send images when customer specifically asks for videos\n';
-      mediaContext += '5. NEVER send videos when customer specifically asks for photos\n';
-      mediaContext += '\n🔁 AVOID REPETITION (CRITICAL):\n';
-      mediaContext += '1. CHECK the conversation history BEFORE selecting media - look for messages like "[Sent X media: filename1.mp4, filename2.webm]"\n';
-      mediaContext += '2. The filenames after "[Sent X media:" show EXACTLY which files were already sent\n';
-      mediaContext += '3. NEVER select media with filenames that appear in previous "[Sent X media:" messages\n';
-      mediaContext += '4. If customer asks for "more videos" or "other videos", select files with DIFFERENT FILENAMES from the same category\n';
-      mediaContext += '5. If you\'ve sent all available media in a category, tell customer: "I\'ve already shared all our [category] content with you. Would you like to see something from a different category?"\n';
-      mediaContext += '6. EXAMPLE: If history shows "[Sent 3 media: video1.mp4, video2.webm, video3.mp4]", do NOT select those filenames again\n';
       mediaContext += '\n⚠️ CRITICAL: When customer requests media:\n';
       mediaContext += '1. NEVER include media URLs in your text response\n';
       mediaContext += '2. ALWAYS call send_media() tool to send images/videos directly\n';
       mediaContext += '3. In your text, simply acknowledge: "Let me send that to you now!" then call send_media()\n';
       mediaContext += '4. The media will be sent automatically as attachments via WhatsApp\n';
       mediaContext += '5. For galleries/collections ("show me all", "send pictures of", "all your photos"), send multiple media by including multiple URLs\n';
-      mediaContext += '\nAlways match customer intent to the most relevant category AND media type, then select media that HASN\'T been sent yet in this conversation.\n';
+      mediaContext += '\nAlways match customer intent to the most relevant category, then select the best media from that category.\n';
     }
 
     // Build products/services catalog
@@ -650,7 +620,7 @@ Critical rules:
             type: "function",
             function: {
               name: "send_media",
-              description: "MANDATORY USE: Call this tool immediately when customer uses ANY of these keywords or phrases: 'samples', 'portfolio', 'videos', 'photos', 'images', 'examples', 'what you made', 'what you've made', 'show me', 'send me', 'share', 'can I see', 'I would like to see', 'gallery', 'your work', 'more videos', 'other videos', 'different videos'. CRITICAL RULES: 1) If customer asks for 'videos', ONLY select URLs marked as 🎥 VIDEO. 2) If customer asks for 'photos'/'images', ONLY select URLs marked as 📷 IMAGE. 3) If customer says 'more' or 'other', select DIFFERENT media than what was already sent in the conversation history. 4) Check conversation transcript BEFORE selecting media to avoid sending duplicates. Match the media category: 'logo' for logos, 'products' for product samples, 'promotional' for marketing content, 'menu' for menus, 'interior/exterior' for venue photos. NEVER say 'let me send' or 'I'll share' - just call this tool directly.",
+              description: "MANDATORY USE: Call this tool immediately when customer uses ANY of these keywords or phrases: 'samples', 'portfolio', 'videos', 'photos', 'images', 'examples', 'what you made', 'what you've made', 'show me', 'send me', 'share', 'can I see', 'I would like to see', 'gallery', 'your work'. Send actual media files to WhatsApp (NOT text descriptions or promises). Match the media category: 'logo' for logos, 'products' for product samples, 'promotional' for marketing content, 'menu' for menus, 'interior/exterior' for venue photos. NEVER say 'let me send' or 'I'll share' - just call this tool directly.",
               parameters: {
                 type: "object",
                 properties: {
@@ -792,37 +762,44 @@ Critical rules:
                 console.error('No media URLs provided');
                 assistantReply = "I couldn't find the media to send.";
               } else {
-                // Since bucket is public, use direct public URLs
-                const publicMediaUrls: string[] = [];
+                // Generate signed URLs for all media files (valid for 1 hour)
+                const signedMediaUrls: string[] = [];
                 
                 for (const mediaUrl of mediaUrls) {
                   try {
                     // Extract file path from Supabase storage URL
+                    // URL format: https://<project>.supabase.co/storage/v1/object/company-media/<file-path>
                     const urlParts = mediaUrl.split('/storage/v1/object/');
                     if (urlParts.length === 2) {
                       const pathWithBucket = urlParts[1];
+                      // Remove bucket name and any public prefix to get just the file path
                       const filePath = pathWithBucket.replace('company-media/', '').replace('public/', '');
                       
-                      // Generate public URL
-                      const { data: publicData } = supabase
+                      console.log('Generating signed URL for path:', filePath);
+                      
+                      // Generate signed URL valid for 1 hour
+                      const { data: signedData, error: signError } = await supabase
                         .storage
                         .from('company-media')
-                        .getPublicUrl(filePath);
+                        .createSignedUrl(filePath, 3600);
                       
-                      if (publicData?.publicUrl) {
-                        console.log('Using public URL:', publicData.publicUrl);
-                        publicMediaUrls.push(publicData.publicUrl);
+                      if (signError) {
+                        console.error('Error generating signed URL:', signError);
+                        signedMediaUrls.push(mediaUrl); // Fallback to original URL
+                      } else if (signedData?.signedUrl) {
+                        console.log('Generated signed URL successfully');
+                        signedMediaUrls.push(signedData.signedUrl);
                       } else {
-                        console.error('Could not generate public URL for:', filePath);
-                        publicMediaUrls.push(mediaUrl); // Fallback to original
+                        console.error('No signed URL returned');
+                        signedMediaUrls.push(mediaUrl);
                       }
                     } else {
                       console.error('Could not parse storage URL:', mediaUrl);
-                      publicMediaUrls.push(mediaUrl);
+                      signedMediaUrls.push(mediaUrl);
                     }
                   } catch (urlError) {
                     console.error('Error processing media URL:', urlError);
-                    publicMediaUrls.push(mediaUrl);
+                    signedMediaUrls.push(mediaUrl);
                   }
                 }
                 
@@ -832,9 +809,9 @@ Critical rules:
                 // Construct StatusCallback URL for delivery tracking
                 const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
                 
-                // Send each media file as a separate message using public URLs
-                for (let i = 0; i < publicMediaUrls.length; i++) {
-                  const publicUrl = publicMediaUrls[i];
+                // Send each media file as a separate message using signed URLs
+                for (let i = 0; i < signedMediaUrls.length; i++) {
+                  const signedUrl = signedMediaUrls[i];
                   const originalUrl = args.media_urls[i];
                   const formData = new URLSearchParams();
                   formData.append('From', fromNumber);
@@ -844,13 +821,13 @@ Critical rules:
                   // Add caption only to the first message
                   if (i === 0 && args.caption) {
                     formData.append('Body', args.caption);
-                  } else if (publicMediaUrls.length > 1) {
-                    formData.append('Body', `${i + 1}/${publicMediaUrls.length}`);
+                  } else if (signedMediaUrls.length > 1) {
+                    formData.append('Body', `${i + 1}/${signedMediaUrls.length}`);
                   } else {
                     formData.append('Body', 'Here you go!');
                   }
                   
-                  formData.append('MediaUrl', publicUrl);
+                  formData.append('MediaUrl', signedUrl);
 
                   const twilioResponse = await fetch(twilioUrl, {
                     method: 'POST',
@@ -863,7 +840,7 @@ Critical rules:
 
                   if (twilioResponse.ok) {
                     successCount++;
-                    console.log(`Media ${i + 1}/${publicMediaUrls.length} sent successfully`);
+                    console.log(`Media ${i + 1}/${signedMediaUrls.length} sent successfully`);
                     
                     // Parse Twilio response to get MessageSid
                     try {
@@ -892,34 +869,29 @@ Critical rules:
                   }
                   
                   // Small delay between messages to avoid rate limiting
-                  if (i < publicMediaUrls.length - 1) {
+                  if (i < signedMediaUrls.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 500));
                   }
                 }
                 
-                // Log the media send in messages table with file names for AI memory
-                const fileNames = args.media_urls.map((url: string) => {
-                  const parts = url.split('/');
-                  return parts[parts.length - 1]; // Extract filename from URL
-                }).join(', ');
-                
+                // Log the media send in messages table
                 await supabase
                   .from('messages')
                   .insert({
                     conversation_id: conversation.id,
                     role: 'assistant',
-                    content: `[Sent ${publicMediaUrls.length} ${args.category} media: ${fileNames}]${args.caption ? ' - ' + args.caption : ''}`
+                    content: `[Sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}]${args.caption ? ' - ' + args.caption : ''}`
                   });
                 
                 // Set appropriate response based on results
-                if (successCount === publicMediaUrls.length) {
+                if (successCount === signedMediaUrls.length) {
                   // Track successful media send for contextual response
                   anyToolExecuted = true;
-                  toolExecutionContext.push(`sent ${publicMediaUrls.length} ${args.category} media file${publicMediaUrls.length > 1 ? 's' : ''}`);
-                  console.log(`All ${publicMediaUrls.length} media files sent successfully`);
+                  toolExecutionContext.push(`sent ${signedMediaUrls.length} ${args.category} media file${signedMediaUrls.length > 1 ? 's' : ''}`);
+                  console.log(`All ${signedMediaUrls.length} media files sent successfully`);
                 } else if (successCount > 0) {
                   anyToolExecuted = true;
-                  assistantReply = `I sent ${successCount} out of ${publicMediaUrls.length} media files. Some failed to send.`;
+                  assistantReply = `I sent ${successCount} out of ${signedMediaUrls.length} media files. Some failed to send.`;
                 } else {
                   assistantReply = "I tried to send the media but encountered an issue. Let me try again or I can help you another way.";
                 }
