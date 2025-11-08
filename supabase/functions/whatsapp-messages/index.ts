@@ -836,12 +836,17 @@ Critical rules:
                 let successCount = 0;
                 let failCount = 0;
                 
+                // Construct StatusCallback URL for delivery tracking
+                const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
+                
                 // Send each media file as a separate message using signed URLs
                 for (let i = 0; i < signedMediaUrls.length; i++) {
                   const signedUrl = signedMediaUrls[i];
+                  const originalUrl = args.media_urls[i];
                   const formData = new URLSearchParams();
                   formData.append('From', fromNumber);
                   formData.append('To', From);
+                  formData.append('StatusCallback', statusCallbackUrl);
                   
                   // Add caption only to the first message
                   if (i === 0 && args.caption) {
@@ -866,6 +871,27 @@ Critical rules:
                   if (twilioResponse.ok) {
                     successCount++;
                     console.log(`Media ${i + 1}/${signedMediaUrls.length} sent successfully`);
+                    
+                    // Parse Twilio response to get MessageSid
+                    try {
+                      const twilioData = await twilioResponse.json();
+                      const messageSid = twilioData.sid;
+                      
+                      // Log to media_delivery_status table
+                      await supabase.from('media_delivery_status').insert({
+                        company_id: company.id,
+                        conversation_id: conversation.id,
+                        customer_phone: customerPhone,
+                        media_url: originalUrl,
+                        twilio_message_sid: messageSid,
+                        status: 'queued'
+                      });
+                      
+                      console.log(`Logged media delivery: ${messageSid}`);
+                    } catch (logError) {
+                      console.error('Error logging media delivery:', logError);
+                      // Don't fail the whole operation if logging fails
+                    }
                   } else {
                     failCount++;
                     const errorText = await twilioResponse.text();

@@ -608,6 +608,72 @@ export type Database = {
           },
         ]
       }
+      media_delivery_status: {
+        Row: {
+          company_id: string
+          conversation_id: string | null
+          created_at: string | null
+          customer_phone: string
+          delivered_at: string | null
+          error_code: string | null
+          error_message: string | null
+          failed_at: string | null
+          id: string
+          media_url: string
+          sent_at: string | null
+          status: string
+          twilio_message_sid: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string | null
+          customer_phone: string
+          delivered_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          failed_at?: string | null
+          id?: string
+          media_url: string
+          sent_at?: string | null
+          status?: string
+          twilio_message_sid?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string | null
+          customer_phone?: string
+          delivered_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          failed_at?: string | null
+          id?: string
+          media_url?: string
+          sent_at?: string | null
+          status?: string
+          twilio_message_sid?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_delivery_status_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "media_delivery_status_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string
