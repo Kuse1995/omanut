@@ -30,13 +30,13 @@ serve(async (req) => {
       return phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '');
     };
     
-    const fromPhone = normalizePhone(From || '');
+    const normalizedFrom = normalizePhone(From || '');
 
     // Find company by management phone
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .select('*, company_ai_overrides(*), company_documents(*)')
-      .eq('boss_phone', From)
+      .ilike('boss_phone', `%${normalizedFrom}%`)
       .single();
 
     if (companyError || !company) {
