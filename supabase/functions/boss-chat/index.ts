@@ -100,37 +100,64 @@ serve(async (req) => {
 
     const aiOverrides = company.company_ai_overrides?.[0];
 
-    const systemPrompt = `You are an AI assistant reporting to the management team of ${company.name}.
-Management can ask you questions about customer interactions, reservations, and business insights.
+    // Format data concisely for AI
+    const conversationsSummary = recentConvs?.length 
+      ? `${recentConvs.length} recent conversations:\n${recentConvs.map((c: any) => 
+          `• ${c.customer_name || 'Unknown'} - ${c.status}${c.quality_flag ? `, Quality: ${c.quality_flag}` : ''}`
+        ).join('\n')}`
+      : 'No recent conversations';
 
-Business Context:
-- Type: ${company.business_type}
-- Hours: ${company.hours}
-- Services: ${company.services}
+    const demoBookingsSummary = demoBookings?.length
+      ? `${demoBookings.length} demo bookings:\n${demoBookings.map((r: any) =>
+          `• ${r.name} - ${r.date} at ${r.time} (${r.status})`
+        ).join('\n')}`
+      : 'No demo bookings';
 
-${aiOverrides?.system_instructions ? `Special Instructions: ${aiOverrides.system_instructions}` : ''}
+    const reservationsSummary = recentReservations?.length
+      ? `${recentReservations.length} recent reservations:\n${recentReservations.map((r: any) =>
+          `• ${r.name} - ${r.guests} guests on ${r.date} at ${r.time} (${r.status})`
+        ).join('\n')}`
+      : 'No recent reservations';
 
-${knowledgeBase ? `Knowledge Base:\n${knowledgeBase}` : ''}
+    const actionItemsSummary = actionItems?.length
+      ? `${actionItems.length} pending actions:\n${actionItems.map((a: any) =>
+          `• [${a.priority}] ${a.action_type}: ${a.description}`
+        ).join('\n')}`
+      : 'No pending actions';
 
-Recent Conversation Stats (last 10):
-${recentConvs?.map((c: any) => `- ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}, Quality: ${c.quality_flag || 'N/A'}`).join('\n') || 'No recent conversations'}
+    const clientInsightsSummary = clientInfo?.length
+      ? `${clientInfo.length} client insights:\n${clientInfo.map((i: any) =>
+          `• ${i.customer_name || 'Unknown'}: ${i.information}`
+        ).join('\n')}`
+      : 'No client insights';
 
-Demo Bookings (${demoBookings?.length || 0} total):
-${demoBookings?.map((r: any) => `- ${r.name} (${r.phone}): ${r.occasion || 'Demo'} scheduled for ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No demo bookings yet'}
+    const systemPrompt = `You are a business intelligence assistant for ${company.name}, a ${company.business_type}.
 
-Recent Reservations (last 10):
-${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests || 'N/A'} guests on ${r.date} at ${r.time}${r.occasion ? ` (${r.occasion})` : ''}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
+BUSINESS INFO:
+Hours: ${company.hours}
+Services: ${company.services}
+${aiOverrides?.system_instructions ? `\nSpecial Instructions: ${aiOverrides.system_instructions}` : ''}
 
-Pending Action Items:
-${actionItems?.map((a: any) => `- ${a.action_type}: ${a.description} (${a.priority} priority)`).join('\n') || 'No pending actions'}
+CURRENT DATA:
+${conversationsSummary}
 
-Client Insights:
-${clientInfo?.map((i: any) => `- ${i.customer_name || 'Unknown'}: ${i.info_type} - ${i.information}`).join('\n') || 'No client insights'}
+${demoBookingsSummary}
 
-Respond professionally and provide actionable insights when asked.`;
+${reservationsSummary}
+
+${actionItemsSummary}
+
+${clientInsightsSummary}
+
+${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
+
+Provide clear, actionable insights. Be concise but thorough. Focus on what matters most for business operations.`;
 
     // Call OpenAI
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    
+    console.log('Boss chat request:', { companyName: company.name, question: Body });
+    
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -138,19 +165,24 @@ Respond professionally and provide actionable insights when asked.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-5-mini-2025-08-07',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: Body }
         ],
-        max_tokens: 500
+        max_completion_tokens: 1000
       }),
     });
 
     const data = await response.json();
+    
+    if (!response.ok || !data.choices?.[0]?.message?.content) {
+      console.error('OpenAI API error:', data);
+      throw new Error(`OpenAI API error: ${data.error?.message || 'Unknown error'}`);
+    }
+    
     const aiResponse = data.choices[0].message.content;
-
-    console.log('AI response for management:', aiResponse);
+    console.log('AI response generated:', aiResponse.substring(0, 100) + '...');
 
     // Log management conversation
     await supabase
