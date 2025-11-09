@@ -93,135 +93,36 @@ serve(async (req) => {
     console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
     
     if (company.boss_phone && fromPhone === bossPhone) {
-      console.log('Message from management detected, routing to management chat');
+      console.log('Message from management detected, forwarding to boss-chat function');
       
-      // Fetch company data for management context
-      const { data: aiOverrides } = await supabase
-        .from('company_ai_overrides')
-        .select('*')
-        .eq('company_id', company.id)
-        .single();
-
-      const { data: documents } = await supabase
-        .from('company_documents')
-        .select('filename, parsed_content')
-        .eq('company_id', company.id)
-        .not('parsed_content', 'is', null);
-
-      const { data: recentConvs } = await supabase
-        .from('conversations')
-        .select('id, customer_name, phone, started_at, ended_at, status, quality_flag')
-        .eq('company_id', company.id)
-        .order('started_at', { ascending: false })
-        .limit(10);
-
-      const { data: recentReservations } = await supabase
-        .from('reservations')
-        .select('*')
-        .eq('company_id', company.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      // Get demo bookings specifically
-      const { data: demoBookings } = await supabase
-        .from('reservations')
-        .select('*')
-        .eq('company_id', company.id)
-        .ilike('occasion', '%demo%')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      console.log('Demo bookings found for management:', demoBookings?.length || 0, demoBookings);
-
-      const { data: actionItems } = await supabase
-        .from('action_items')
-        .select('*')
-        .eq('company_id', company.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      const { data: clientInfo } = await supabase
-        .from('client_information')
-        .select('*')
-        .eq('company_id', company.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      // Build knowledge base
-      const knowledgeBase = documents
-        ?.map((doc: any) => doc.parsed_content)
-        .filter(Boolean)
-        .join('\n\n') || '';
-
-      const systemPrompt = `You are an AI assistant reporting to the management team of ${company.name}.
-Management can ask you questions about customer interactions, reservations, and business insights.
-
-Business Context:
-- Type: ${company.business_type}
-- Hours: ${company.hours}
-- Services: ${company.services}
-
-${aiOverrides?.system_instructions ? `Special Instructions: ${aiOverrides.system_instructions}` : ''}
-
-${knowledgeBase ? `Knowledge Base:\n${knowledgeBase}` : ''}
-
-Recent Conversation Stats (last 10):
-${recentConvs?.map((c: any) => `- ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}, Quality: ${c.quality_flag || 'N/A'}`).join('\n') || 'No recent conversations'}
-
-Demo Bookings (${demoBookings?.length || 0} total):
-${demoBookings?.map((r: any) => `- ${r.name} (${r.phone}): ${r.occasion || 'Demo'} scheduled for ${r.date} at ${r.time}, Status: ${r.status}`).join('\n') || 'No demo bookings yet'}
-
-Recent Reservations (last 10):
-${recentReservations?.map((r: any) => `- ${r.name} (${r.phone}): ${r.guests || 'N/A'} guests on ${r.date} at ${r.time}${r.occasion ? ` (${r.occasion})` : ''}, Status: ${r.status}`).join('\n') || 'No recent reservations'}
-
-Pending Action Items:
-${actionItems?.map((a: any) => `- ${a.action_type}: ${a.description} (${a.priority} priority)`).join('\n') || 'No pending actions'}
-
-Client Insights:
-${clientInfo?.map((i: any) => `- ${i.customer_name || 'Unknown'}: ${i.info_type} - ${i.information}`).join('\n') || 'No client insights'}
-
-Respond professionally and provide actionable insights when asked.`;
-
-      // Call Lovable AI for management response
-      const managementResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      // Forward to the boss-chat edge function
+      const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+      const bossChatUrl = `${SUPABASE_URL}/functions/v1/boss-chat`;
+      
+      // Create a new FormData with the original Twilio webhook data
+      const bossFormData = new FormData();
+      bossFormData.append('From', From);
+      bossFormData.append('To', To);
+      bossFormData.append('Body', Body);
+      
+      const bossChatResponse = await fetch(bossChatUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: Body }
-          ],
-          max_tokens: 500
-        }),
+        body: bossFormData,
       });
-
-      const managementData = await managementResponse.json();
-      const aiResponse = managementData.choices[0].message.content;
-
-      console.log('AI response for management:', aiResponse);
-
-      // Log management conversation
-      await supabase
-        .from('boss_conversations')
-        .insert({
-          company_id: company.id,
-          message_from: 'boss',
-          message_content: Body,
-          response: aiResponse
-        });
-
-      // Return TwiML response
-      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+      
+      if (!bossChatResponse.ok) {
+        console.error('Boss-chat function error:', await bossChatResponse.text());
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Message>${aiResponse}</Message>
-</Response>`;
-
-      return new Response(twiml, {
+  <Message>Error processing management request. Please try again.</Message>
+</Response>`, {
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+        });
+      }
+      
+      // Return the boss-chat function's TwiML response
+      const bossChatTwiml = await bossChatResponse.text();
+      return new Response(bossChatTwiml, {
         headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
       });
     }
