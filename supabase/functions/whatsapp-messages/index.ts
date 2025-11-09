@@ -93,36 +93,117 @@ serve(async (req) => {
     console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
     
     if (company.boss_phone && fromPhone === bossPhone) {
-      console.log('Message from management detected, forwarding to boss-chat function');
+      console.log('Message from BOSS detected - handling internally');
       
-      // Forward to the boss-chat edge function
-      const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-      const bossChatUrl = `${SUPABASE_URL}/functions/v1/boss-chat`;
-      
-      // Create a new FormData with the original Twilio webhook data
-      const bossFormData = new FormData();
-      bossFormData.append('From', From);
-      bossFormData.append('To', To);
-      bossFormData.append('Body', Body);
-      
-      const bossChatResponse = await fetch(bossChatUrl, {
+      // Get boss conversation context
+      const { data: aiOverrides } = await supabase
+        .from('company_ai_overrides')
+        .select('*')
+        .eq('company_id', company.id)
+        .maybeSingle();
+
+      const { data: documents } = await supabase
+        .from('company_documents')
+        .select('parsed_content')
+        .eq('company_id', company.id)
+        .not('parsed_content', 'is', null);
+
+      const { data: recentConvs } = await supabase
+        .from('conversations')
+        .select('customer_name, phone, status, quality_flag, started_at')
+        .eq('company_id', company.id)
+        .order('started_at', { ascending: false })
+        .limit(10);
+
+      const { data: recentReservations } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      const { data: actionItems } = await supabase
+        .from('action_items')
+        .select('*')
+        .eq('company_id', company.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const { data: clientInfo } = await supabase
+        .from('client_information')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      const knowledgeBase = documents?.map((doc: any) => doc.parsed_content).filter(Boolean).join('\n\n') || '';
+
+      const systemPrompt = `You are the internal AI assistant for ${company.name}. You're speaking with the OWNER/MANAGEMENT, not a customer.
+
+IMPORTANT: Be direct, professional, and treat them as part of the business team. Don't pitch services - they own the business! Provide business intelligence and operational insights.
+
+BUSINESS INFO:
+Type: ${company.business_type}
+Hours: ${company.hours}
+Services: ${company.services}
+${aiOverrides?.system_instructions ? `\nInternal Notes: ${aiOverrides.system_instructions}` : ''}
+
+CURRENT OPERATIONS:
+Recent Conversations (${recentConvs?.length || 0}):
+${recentConvs?.map((c: any) => `• ${c.customer_name || 'Unknown'} (${c.phone}): ${c.status}${c.quality_flag ? ` - ${c.quality_flag}` : ''}`).join('\n') || 'None yet'}
+
+Reservations (${recentReservations?.length || 0}):
+${recentReservations?.map((r: any) => `• ${r.name} - ${r.guests} guests on ${r.date} at ${r.time} (${r.status})`).join('\n') || 'None yet'}
+
+Pending Actions (${actionItems?.length || 0}):
+${actionItems?.map((a: any) => `• [${a.priority}] ${a.action_type}: ${a.description}`).join('\n') || 'No pending actions'}
+
+Client Intelligence (${clientInfo?.length || 0}):
+${clientInfo?.map((i: any) => `• ${i.customer_name}: ${i.information}`).join('\n') || 'No insights yet'}
+
+${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
+
+Respond as their business assistant. Be concise, actionable, and focus on operational insights.`;
+
+      const managementResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
-        body: bossFormData,
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: Body }
+          ],
+          max_tokens: 800
+        }),
       });
-      
-      if (!bossChatResponse.ok) {
-        console.error('Boss-chat function error:', await bossChatResponse.text());
-        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>Error processing management request. Please try again.</Message>
-</Response>`, {
-          headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
-        });
+
+      if (!managementResponse.ok) {
+        console.error('AI error for boss:', await managementResponse.text());
+        throw new Error('AI service error');
       }
-      
-      // Return the boss-chat function's TwiML response
-      const bossChatTwiml = await bossChatResponse.text();
-      return new Response(bossChatTwiml, {
+
+      const managementData = await managementResponse.json();
+      const aiResponse = managementData.choices[0].message.content;
+
+      console.log('BOSS response generated:', aiResponse.substring(0, 100));
+
+      // Log boss conversation
+      await supabase.from('boss_conversations').insert({
+        company_id: company.id,
+        message_from: 'boss',
+        message_content: Body,
+        response: aiResponse
+      });
+
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message>${aiResponse}</Message>
+</Response>`, {
         headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
       });
     }
