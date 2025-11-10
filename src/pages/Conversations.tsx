@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Send, UserCog, Bot, Sparkles, Paperclip, X } from 'lucide-react';
+import { Search, Send, UserCog, Bot, Sparkles, Paperclip, X, Image as ImageIcon, Video, FileText, Mic } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
+import { MediaViewer } from '@/components/MediaViewer';
 
 const Conversations = () => {
   const { toast } = useToast();
@@ -18,6 +19,12 @@ const Conversations = () => {
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<Record<string, File | null>>({});
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [mediaViewer, setMediaViewer] = useState<{
+    open: boolean;
+    url: string;
+    type: string;
+    fileName?: string;
+  }>({ open: false, url: '', type: '' });
 
   useEffect(() => {
     fetchConversations();
@@ -319,17 +326,26 @@ const Conversations = () => {
   };
 
   return (
-    <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <BackButton />
-        <ThemeToggle />
-      </div>
-      <div>
-        <h1 className="text-4xl font-bold mb-2">
-          <span className="text-gradient">Conversations</span>
-        </h1>
-        <p className="text-lg text-muted-foreground">All customer interactions</p>
-      </div>
+    <>
+      <MediaViewer
+        open={mediaViewer.open}
+        onOpenChange={(open) => setMediaViewer({ ...mediaViewer, open })}
+        mediaUrl={mediaViewer.url}
+        mediaType={mediaViewer.type}
+        fileName={mediaViewer.fileName}
+      />
+      
+      <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
+        <div className="flex items-center justify-between mb-6">
+          <BackButton />
+          <ThemeToggle />
+        </div>
+        <div>
+          <h1 className="text-4xl font-bold mb-2">
+            <span className="text-gradient">Conversations</span>
+          </h1>
+          <p className="text-lg text-muted-foreground">All customer interactions</p>
+        </div>
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -427,6 +443,9 @@ const Conversations = () => {
                 ) : (
                   conversation.messages.map((message: any) => {
                     const isInbound = message.role === 'user';
+                    const metadata = message.message_metadata as any;
+                    const hasMedia = metadata?.media_urls && metadata.media_urls.length > 0;
+                    
                     return (
                       <div
                         key={message.id}
@@ -439,7 +458,64 @@ const Conversations = () => {
                               : 'bg-primary text-primary-foreground rounded-tr-none'
                           }`}
                         >
-                          <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                          {message.content && (
+                            <p className="text-sm whitespace-pre-wrap break-words mb-2">{message.content}</p>
+                          )}
+                          
+                          {hasMedia && (
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              {metadata.media_urls.map((url: string, idx: number) => {
+                                const mediaType = metadata.media_types[idx];
+                                
+                                if (mediaType.startsWith('image/')) {
+                                  return (
+                                    <img
+                                      key={idx}
+                                      src={url}
+                                      alt="Media"
+                                      className="rounded cursor-pointer hover:opacity-80 transition-opacity w-full h-32 object-cover"
+                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
+                                    />
+                                  );
+                                }
+                                
+                                if (mediaType.startsWith('video/')) {
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
+                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
+                                    >
+                                      <Video className="h-8 w-8 text-muted-foreground" />
+                                    </div>
+                                  );
+                                }
+                                
+                                if (mediaType.startsWith('audio/')) {
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
+                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
+                                    >
+                                      <Mic className="h-8 w-8 text-muted-foreground" />
+                                    </div>
+                                  );
+                                }
+                                
+                                return (
+                                  <div
+                                    key={idx}
+                                    className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
+                                    onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
+                                  >
+                                    <FileText className="h-8 w-8 text-muted-foreground" />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          
                           <div className="flex items-center justify-end gap-1 mt-1">
                             <span className="text-[10px] opacity-70">
                               {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -537,7 +613,8 @@ const Conversations = () => {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 };
 

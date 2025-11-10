@@ -28,7 +28,19 @@ serve(async (req) => {
     const formData = await req.formData();
     const From = formData.get('From') as string; // User's WhatsApp number
     const To = formData.get('To') as string; // Business WhatsApp number
-    const Body = formData.get('Body') as string; // Message text
+    const Body = formData.get('Body') as string || ''; // Message text
+    
+    // Extract media information from Twilio webhook
+    const NumMedia = parseInt(formData.get('NumMedia') as string || '0');
+    const mediaFiles: Array<{ url: string; contentType: string }> = [];
+    
+    for (let i = 0; i < NumMedia; i++) {
+      const mediaUrl = formData.get(`MediaUrl${i}`) as string;
+      const mediaContentType = formData.get(`MediaContentType${i}`) as string;
+      if (mediaUrl && mediaContentType) {
+        mediaFiles.push({ url: mediaUrl, contentType: mediaContentType });
+      }
+    }
 
     // Validate input
     const messageSchema = z.object({
@@ -282,6 +294,55 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
       p_reason: 'whatsapp_message',
       p_conversation_id: conversation.id
     });
+    
+    // Download and store media files if present
+    const storedMediaUrls: string[] = [];
+    const storedMediaTypes: string[] = [];
+    
+    if (mediaFiles.length > 0) {
+      console.log(`Processing ${mediaFiles.length} media files`);
+      
+      for (let i = 0; i < mediaFiles.length; i++) {
+        const media = mediaFiles[i];
+        try {
+          // Download media from Twilio URL
+          const mediaResponse = await fetch(media.url);
+          if (!mediaResponse.ok) {
+            console.error(`Failed to download media ${i}: ${mediaResponse.status}`);
+            continue;
+          }
+          
+          const mediaBlob = await mediaResponse.arrayBuffer();
+          const fileExt = media.contentType.split('/')[1] || 'bin';
+          const fileName = `${conversation.id}/${Date.now()}_${i}.${fileExt}`;
+          
+          // Upload to Supabase Storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('conversation-media')
+            .upload(fileName, mediaBlob, {
+              contentType: media.contentType,
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error(`Failed to upload media ${i}:`, uploadError);
+            continue;
+          }
+          
+          // Get public URL
+          const { data: { publicUrl } } = supabase.storage
+            .from('conversation-media')
+            .getPublicUrl(fileName);
+          
+          storedMediaUrls.push(publicUrl);
+          storedMediaTypes.push(media.contentType);
+          
+          console.log(`Successfully stored media ${i}: ${publicUrl}`);
+        } catch (error) {
+          console.error(`Error processing media ${i}:`, error);
+        }
+      }
+    }
 
     // Fetch AI overrides
     const { data: aiOverrides } = await supabase
@@ -1045,13 +1106,24 @@ Critical rules:
     
     console.log('Final assistant reply to send:', assistantReply);
 
+    // Prepare message metadata
+    const messageMetadata = {
+      media_urls: storedMediaUrls,
+      media_types: storedMediaTypes,
+      media_count: storedMediaUrls.length,
+      message_type: storedMediaUrls.length > 0 
+        ? (Body ? 'text_with_media' : 'media')
+        : 'text'
+    };
+    
     // Insert user message into messages table
     await supabase
       .from('messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
-        content: Body
+        content: Body || (storedMediaUrls.length > 0 ? 'Sent media' : ''),
+        message_metadata: messageMetadata
       });
 
     // Insert assistant message into messages table
