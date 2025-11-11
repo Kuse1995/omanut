@@ -153,32 +153,33 @@ ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 Provide clear, actionable insights. Be concise but thorough. Focus on what matters most for business operations.`;
 
-    // Call OpenAI
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    // Call Kimi AI (Moonshot)
+    const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
     
     console.log('Boss chat request:', { companyName: company.name, question: Body });
     
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${KIMI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-5-mini-2025-08-07',
+        model: 'moonshot-v1-32k',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: Body }
         ],
-        max_completion_tokens: 1000
+        temperature: 0.3,
+        max_tokens: 1000
       }),
     });
 
     const data = await response.json();
     
     if (!response.ok || !data.choices?.[0]?.message?.content) {
-      console.error('OpenAI API error:', data);
-      throw new Error(`OpenAI API error: ${data.error?.message || 'Unknown error'}`);
+      console.error('Kimi AI API error:', data);
+      throw new Error(`Kimi AI error: ${data.error?.message || 'Unknown error'}`);
     }
     
     const aiResponse = data.choices[0].message.content;
