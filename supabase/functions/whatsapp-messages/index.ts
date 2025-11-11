@@ -14,9 +14,9 @@ serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
+    const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
+    if (!KIMI_API_KEY) {
+      throw new Error('KIMI_API_KEY is not configured');
     }
 
     const supabase = createClient(
@@ -178,18 +178,20 @@ ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 Respond as their business assistant. Be concise, actionable, and focus on operational insights.`;
 
-      const managementResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      
+      const managementResponse = await fetch('https://api.moonshot.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Authorization': `Bearer ${KIMI_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
+          model: 'moonshot-v1-32k',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: Body }
           ],
+          temperature: 0.3,
           max_tokens: 800
         }),
       });
@@ -599,16 +601,18 @@ Critical rules:
 
     messages.push({ role: 'user', content: Body });
 
-    // Call Lovable AI
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    // Call Kimi AI
+    
+    const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${KIMI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'moonshot-v1-32k',
         messages,
+        temperature: 0.3,
         tools: [
           {
             type: "function",
@@ -732,8 +736,8 @@ Critical rules:
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
-      throw new Error(`OpenAI API error: ${response.status}`);
+      console.error('Kimi AI error:', response.status, errorText);
+      throw new Error(`Kimi AI error: ${response.status}`);
     }
 
     const aiData = await response.json();
@@ -1047,19 +1051,19 @@ Critical rules:
       try {
         const contextPrompt = `You just ${toolExecutionContext.join(' and ')} to the customer. Generate a brief, friendly confirmation message (1-2 sentences max) in your natural voice that acknowledges what you sent. Keep it conversational and warm.`;
         
-        const contextResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        const contextResponse = await fetch('https://api.moonshot.cn/v1/chat/completions', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Authorization': `Bearer ${KIMI_API_KEY}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
+            model: 'moonshot-v1-32k',
             messages: [
               { role: 'system', content: instructions },
               { role: 'user', content: contextPrompt }
             ],
-            temperature: 0.7,
+            temperature: 0.3,
             max_tokens: 150
           }),
         });
