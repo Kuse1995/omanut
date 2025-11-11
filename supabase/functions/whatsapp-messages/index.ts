@@ -179,7 +179,7 @@ ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 Respond as their business assistant. Be concise, actionable, and focus on operational insights.`;
 
       
-      const managementResponse = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+      const managementResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${KIMI_API_KEY}`,
@@ -603,7 +603,7 @@ Critical rules:
 
     // Call Kimi AI
     
-    const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+    const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${KIMI_API_KEY}`,
@@ -1051,7 +1051,7 @@ Critical rules:
       try {
         const contextPrompt = `You just ${toolExecutionContext.join(' and ')} to the customer. Generate a brief, friendly confirmation message (1-2 sentences max) in your natural voice that acknowledges what you sent. Keep it conversational and warm.`;
         
-        const contextResponse = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+        const contextResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${KIMI_API_KEY}`,
