@@ -464,10 +464,15 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
         response: aiResponse
       });
 
-      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+      const bossTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Message><![CDATA[${aiResponse}]]></Message>
-</Response>`, {
+</Response>`;
+
+      console.log('Boss TwiML Response Length:', bossTwiml.length);
+      console.log('Returning Boss TwiML to Twilio at:', new Date().toISOString());
+
+      return new Response(bossTwiml, {
         headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
       });
     }
@@ -1404,6 +1409,9 @@ Critical rules:
 <Response>
   <Message><![CDATA[${assistantReply}]]></Message>
 </Response>`;
+
+    console.log('TwiML Response Length:', twimlResponse.length);
+    console.log('Returning TwiML to Twilio at:', new Date().toISOString());
 
     return new Response(twimlResponse, {
       status: 200,
