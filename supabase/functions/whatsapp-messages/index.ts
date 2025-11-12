@@ -178,7 +178,125 @@ ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 Respond as their business assistant. Be concise, actionable, and focus on operational insights.`;
 
-      
+      // Define management tools for updating company settings
+      const managementTools = [
+        {
+          type: "function",
+          function: {
+            name: "update_business_hours",
+            description: "Update the company's business operating hours",
+            parameters: {
+              type: "object",
+              properties: {
+                hours: { type: "string", description: "New business hours (e.g., 'Mon-Sun: 9:00 AM - 11:00 PM')" }
+              },
+              required: ["hours"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_services",
+            description: "Update the menu/services list including pricing",
+            parameters: {
+              type: "object",
+              properties: {
+                services: { type: "string", description: "Updated services/menu with prices" }
+              },
+              required: ["services"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_service_locations",
+            description: "Update service areas or seating locations",
+            parameters: {
+              type: "object",
+              properties: {
+                locations: { type: "string", description: "Comma-separated list of locations" }
+              },
+              required: ["locations"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_branches",
+            description: "Update branch information",
+            parameters: {
+              type: "object",
+              properties: {
+                branches: { type: "string", description: "Branch names or locations" }
+              },
+              required: ["branches"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_payment_info",
+            description: "Update payment numbers and instructions",
+            parameters: {
+              type: "object",
+              properties: {
+                mtn_number: { type: "string", description: "MTN mobile money number" },
+                airtel_number: { type: "string", description: "Airtel money number" },
+                zamtel_number: { type: "string", description: "Zamtel money number" },
+                payment_instructions: { type: "string", description: "Payment instructions for customers" }
+              }
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_voice_style",
+            description: "Update the AI voice personality and style",
+            parameters: {
+              type: "object",
+              properties: {
+                voice_style: { type: "string", description: "Description of desired voice/personality" }
+              },
+              required: ["voice_style"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_ai_instructions",
+            description: "Update system instructions for customer AI behavior",
+            parameters: {
+              type: "object",
+              properties: {
+                system_instructions: { type: "string", description: "Special instructions for AI" },
+                qa_style: { type: "string", description: "Question-answer style guidance" },
+                banned_topics: { type: "string", description: "Topics the AI should avoid" }
+              }
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "update_quick_reference",
+            description: "Update quick reference information for AI",
+            parameters: {
+              type: "object",
+              properties: {
+                quick_reference_info: { type: "string", description: "Quick reference info for AI to use" }
+              },
+              required: ["quick_reference_info"]
+            }
+          }
+        }
+      ];
+
       const managementResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -192,7 +310,8 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
             { role: 'user', content: Body }
           ],
           temperature: 1.0,
-          max_tokens: 16000
+          max_tokens: 16000,
+          tools: managementTools
         }),
       });
 
@@ -202,7 +321,138 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
       }
 
       const managementData = await managementResponse.json();
-      const aiResponse = managementData.choices[0].message.content;
+      
+      if (!managementData.choices?.[0]?.message) {
+        console.error('No message in AI response:', managementData);
+        throw new Error('Invalid AI response format');
+      }
+      
+      const aiMessage = managementData.choices[0].message;
+      let aiResponse = aiMessage.content || '';
+
+      // Handle tool calls if present
+      if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+        console.log('Tool calls detected:', aiMessage.tool_calls.length);
+        
+        const toolResults = [];
+        
+        for (const toolCall of aiMessage.tool_calls) {
+          const functionName = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          
+          console.log('Executing tool:', functionName, args);
+          
+          try {
+            let result = { success: false, message: '' };
+            
+            switch (functionName) {
+              case 'update_business_hours':
+                const oldHours = company.hours;
+                await supabase.from('companies').update({ hours: args.hours }).eq('id', company.id);
+                result = { success: true, message: `✅ Hours updated\nFrom: ${oldHours}\nTo: ${args.hours}` };
+                break;
+                
+              case 'update_services':
+                const oldServices = company.services;
+                await supabase.from('companies').update({ services: args.services }).eq('id', company.id);
+                result = { success: true, message: `✅ Services/Menu updated\n\nNew menu:\n${args.services}` };
+                break;
+                
+              case 'update_service_locations':
+                const oldLocations = company.service_locations;
+                await supabase.from('companies').update({ service_locations: args.locations }).eq('id', company.id);
+                result = { success: true, message: `✅ Service locations updated\nFrom: ${oldLocations}\nTo: ${args.locations}` };
+                break;
+                
+              case 'update_branches':
+                const oldBranches = company.branches;
+                await supabase.from('companies').update({ branches: args.branches }).eq('id', company.id);
+                result = { success: true, message: `✅ Branches updated\nFrom: ${oldBranches}\nTo: ${args.branches}` };
+                break;
+                
+              case 'update_payment_info':
+                const updateData: any = {};
+                const changes = [];
+                if (args.mtn_number) {
+                  updateData.payment_number_mtn = args.mtn_number;
+                  changes.push(`MTN: ${args.mtn_number}`);
+                }
+                if (args.airtel_number) {
+                  updateData.payment_number_airtel = args.airtel_number;
+                  changes.push(`Airtel: ${args.airtel_number}`);
+                }
+                if (args.zamtel_number) {
+                  updateData.payment_number_zamtel = args.zamtel_number;
+                  changes.push(`Zamtel: ${args.zamtel_number}`);
+                }
+                if (args.payment_instructions) {
+                  updateData.payment_instructions = args.payment_instructions;
+                  changes.push(`Instructions updated`);
+                }
+                await supabase.from('companies').update(updateData).eq('id', company.id);
+                result = { success: true, message: `✅ Payment info updated\n${changes.join('\n')}` };
+                break;
+                
+              case 'update_voice_style':
+                const oldVoice = company.voice_style;
+                await supabase.from('companies').update({ voice_style: args.voice_style }).eq('id', company.id);
+                result = { success: true, message: `✅ Voice style updated\nFrom: ${oldVoice}\nTo: ${args.voice_style}` };
+                break;
+                
+              case 'update_ai_instructions':
+                const aiUpdateData: any = {};
+                const aiChanges = [];
+                if (args.system_instructions !== undefined) {
+                  aiUpdateData.system_instructions = args.system_instructions;
+                  aiChanges.push('System instructions');
+                }
+                if (args.qa_style !== undefined) {
+                  aiUpdateData.qa_style = args.qa_style;
+                  aiChanges.push('Q&A style');
+                }
+                if (args.banned_topics !== undefined) {
+                  aiUpdateData.banned_topics = args.banned_topics;
+                  aiChanges.push('Banned topics');
+                }
+                
+                // Check if override exists, insert or update
+                const { data: existing } = await supabase
+                  .from('company_ai_overrides')
+                  .select('id')
+                  .eq('company_id', company.id)
+                  .maybeSingle();
+                  
+                if (existing) {
+                  await supabase.from('company_ai_overrides').update(aiUpdateData).eq('company_id', company.id);
+                } else {
+                  await supabase.from('company_ai_overrides').insert({ company_id: company.id, ...aiUpdateData });
+                }
+                
+                result = { success: true, message: `✅ AI instructions updated\nChanged: ${aiChanges.join(', ')}` };
+                break;
+                
+              case 'update_quick_reference':
+                const oldRef = company.quick_reference_info;
+                await supabase.from('companies').update({ quick_reference_info: args.quick_reference_info }).eq('id', company.id);
+                result = { success: true, message: `✅ Quick reference updated` };
+                break;
+                
+              default:
+                result = { success: false, message: `Unknown tool: ${functionName}` };
+            }
+            
+            toolResults.push(result.message);
+            
+          } catch (error) {
+            console.error(`Tool execution error for ${functionName}:`, error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            toolResults.push(`❌ Error updating ${functionName}: ${errorMsg}`);
+          }
+        }
+        
+        // Combine tool results with AI response
+        aiResponse = toolResults.join('\n\n') + (aiResponse ? '\n\n' + aiResponse : '');
+      }
 
       console.log('BOSS response generated:', aiResponse.substring(0, 100));
 
