@@ -165,13 +165,13 @@ Provide clear, actionable insights. Be concise but thorough. Focus on what matte
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'moonshot-v1-32k',
+        model: 'kimi-k2-thinking',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: Body }
         ],
-        temperature: 0.3,
-        max_tokens: 1000
+        temperature: 1.0,
+        max_tokens: 16000
       }),
     });
 

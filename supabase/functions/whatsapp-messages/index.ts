@@ -186,13 +186,13 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'moonshot-v1-32k',
+          model: 'kimi-k2-thinking',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: Body }
           ],
-          temperature: 0.3,
-          max_tokens: 800
+          temperature: 1.0,
+          max_tokens: 16000
         }),
       });
 
@@ -610,9 +610,10 @@ Critical rules:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'moonshot-v1-32k',
+        model: 'kimi-k2-thinking',
         messages,
-        temperature: 0.3,
+        temperature: 1.0,
+        max_tokens: 16000,
         tools: [
           {
             type: "function",
@@ -1058,13 +1059,13 @@ Critical rules:
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'moonshot-v1-32k',
+            model: 'kimi-k2-thinking',
             messages: [
               { role: 'system', content: instructions },
               { role: 'user', content: contextPrompt }
             ],
-            temperature: 0.3,
-            max_tokens: 150
+            temperature: 1.0,
+            max_tokens: 200
           }),
         });
 
