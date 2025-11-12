@@ -297,41 +297,49 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
         }
       ];
 
-      const managementResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${KIMI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'kimi-k2-thinking',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: Body }
-          ],
-          temperature: 1.0,
-          max_tokens: 16000,
-          tools: managementTools
-        }),
-      });
-
-      if (!managementResponse.ok) {
-        console.error('AI error for boss:', await managementResponse.text());
-        throw new Error('AI service error');
-      }
-
-      const managementData = await managementResponse.json();
+      // Add timeout to prevent Twilio webhook timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
       
-      if (!managementData.choices?.[0]?.message) {
-        console.error('No message in AI response:', managementData);
-        throw new Error('Invalid AI response format');
-      }
+      let aiResponse = '';
       
-      const aiMessage = managementData.choices[0].message;
-      let aiResponse = aiMessage.content || '';
-
-      // Handle tool calls if present
-      if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
+      try {
+        const managementResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${KIMI_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: 'kimi-k2-thinking',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: Body }
+            ],
+            temperature: 1.0,
+            max_tokens: 16000,
+            tools: managementTools
+          }),
+        });
+  
+        if (!managementResponse.ok) {
+          console.error('AI error for boss:', await managementResponse.text());
+          throw new Error('AI service error');
+        }
+  
+        const managementData = await managementResponse.json();
+        
+        if (!managementData.choices?.[0]?.message) {
+          console.error('No message in AI response:', managementData);
+          throw new Error('Invalid AI response format');
+        }
+        
+        const aiMessage = managementData.choices[0].message;
+        aiResponse = aiMessage.content || '';
+      
+        // Handle tool calls if present
+        if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
         console.log('Tool calls detected:', aiMessage.tool_calls.length);
         
         const toolResults = [];
@@ -455,6 +463,16 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
       }
 
       console.log('BOSS response generated:', aiResponse.substring(0, 100));
+
+      } catch (error) {
+        clearTimeout(timeoutId);
+        console.error('Boss AI error:', error);
+        
+        // Return a fallback response if AI times out or fails
+        aiResponse = `I'm currently experiencing some technical difficulties responding to your message. Please try again in a moment, or if urgent, you can directly update your settings in the admin dashboard.`;
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       // Log boss conversation
       await supabase.from('boss_conversations').insert({
@@ -856,15 +874,24 @@ Critical rules:
 
     messages.push({ role: 'user', content: Body });
 
-    // Call Kimi AI
+    // Call Kimi AI with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
     
-    const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${KIMI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    // Declare variables outside try block so they're accessible in catch/finally
+    let assistantReply = '';
+    const toolExecutionContext: string[] = [];
+    let anyToolExecuted = false;
+    
+    try {
+      const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${KIMI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
         model: 'kimi-k2-thinking',
         messages,
         temperature: 1.0,
@@ -996,21 +1023,17 @@ Critical rules:
       throw new Error(`Kimi AI error: ${response.status}`);
     }
 
-    const aiData = await response.json();
-    let assistantReply = aiData.choices[0].message.content || '';
-    const toolCalls = aiData.choices[0].message.tool_calls;
+      const aiData = await response.json();
+      assistantReply = aiData.choices[0].message.content || '';
+      const toolCalls = aiData.choices[0].message.tool_calls;
 
-    console.log('AI response:', { assistantReply, toolCalls });
-    console.log('AI response full message:', JSON.stringify(aiData.choices[0].message, null, 2));
+      console.log('AI response:', { assistantReply, toolCalls });
+      console.log('AI response full message:', JSON.stringify(aiData.choices[0].message, null, 2));
 
-    // Track successful tool executions for contextual response generation
-    const toolExecutionContext: string[] = [];
-    let anyToolExecuted = false;
-
-    // Handle tool calls (reservation creation, media sending, and payment requests)
-    if (toolCalls && toolCalls.length > 0) {
-      for (const toolCall of toolCalls) {
-        if (toolCall.function.name === 'request_payment') {
+      // Handle tool calls (reservation creation, media sending, and payment requests)
+      if (toolCalls && toolCalls.length > 0) {
+        for (const toolCall of toolCalls) {
+          if (toolCall.function.name === 'request_payment') {
           const args = JSON.parse(toolCall.function.arguments);
           console.log('AI requesting payment:', args);
           
@@ -1293,6 +1316,16 @@ Critical rules:
       }
     }
 
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('Customer AI error:', error);
+      
+      // Return a fallback response if AI times out or fails
+      assistantReply = `I apologize, but I'm experiencing some technical difficulties processing your message. Please try again in a moment. If this persists, you can contact us directly at ${company.phone || 'our main number'}.`;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     // Phase 2: Generate contextual message if AI didn't provide one but tools were executed
     console.log('Phase 2 check:', { 
       assistantReply, 
@@ -1304,8 +1337,13 @@ Critical rules:
     if (anyToolExecuted && (!assistantReply || assistantReply.trim() === '')) {
       console.log('Generating contextual response for tool executions:', toolExecutionContext);
       
+      const contextController = new AbortController();
+      let contextTimeoutId: number | undefined;
+      
       try {
         const contextPrompt = `You just ${toolExecutionContext.join(' and ')} to the customer. Generate a brief, friendly confirmation message (1-2 sentences max) in your natural voice that acknowledges what you sent. Keep it conversational and warm.`;
+        
+        contextTimeoutId = setTimeout(() => contextController.abort(), 5000);
         
         const contextResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
           method: 'POST',
@@ -1313,6 +1351,7 @@ Critical rules:
             'Authorization': `Bearer ${KIMI_API_KEY}`,
             'Content-Type': 'application/json',
           },
+          signal: contextController.signal,
           body: JSON.stringify({
             model: 'kimi-k2-thinking',
             messages: [
@@ -1332,7 +1371,10 @@ Critical rules:
             console.log('Generated contextual response:', assistantReply);
           }
         }
+        
+        clearTimeout(contextTimeoutId);
       } catch (contextError) {
+        clearTimeout(contextTimeoutId);
         console.error('Error generating contextual response:', contextError);
         // Fall through to the existing fallback
       }
