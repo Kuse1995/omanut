@@ -474,11 +474,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     // Return TwiML response
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Message>${aiResponse}</Message>
+  <Message><![CDATA[${aiResponse}]]></Message>
 </Response>`;
 
     return new Response(twiml, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+      headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
     });
 
   } catch (error) {

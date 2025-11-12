@@ -466,9 +466,9 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
 
       return new Response(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Message>${aiResponse}</Message>
+  <Message><![CDATA[${aiResponse}]]></Message>
 </Response>`, {
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
       });
     }
 
