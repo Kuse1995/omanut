@@ -2,12 +2,14 @@ project_id = "dzheddvoiauevcayifev"
 
 [functions.boss-chat]
 verify_jwt = false
+timeout = 60
 
 [functions.send-boss-notification]
 verify_jwt = false
 
 [functions.twilio-voice]
 verify_jwt = false
+timeout = 60
 
 [functions.realtime-session]
 verify_jwt = true
@@ -17,9 +19,11 @@ verify_jwt = false
 
 [functions.whatsapp-messages]
 verify_jwt = false
+timeout = 60
 
 [functions.whatsapp-voice]
 verify_jwt = false
+timeout = 60
 
 [functions.analyze-conversation]
 verify_jwt = true
