@@ -860,9 +860,9 @@ Critical rules:
 
 10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
-    // Build conversation history - keep full context to avoid repetition
+    // Build conversation history - limit to recent messages for faster processing
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
-    const recentHistory = transcriptLines.join('\n');
+    const recentHistory = transcriptLines.slice(-30).join('\n'); // Last 30 messages only
 
     const messages = [
       { role: 'system', content: instructions }
