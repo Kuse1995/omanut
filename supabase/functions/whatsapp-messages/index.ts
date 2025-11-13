@@ -297,9 +297,9 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
         }
       ];
 
-      // Add timeout to prevent Twilio webhook timeout
+      // Add timeout for boss messages
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout for boss messages
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout for boss messages
       
       let aiResponse = '';
       
@@ -860,9 +860,9 @@ Critical rules:
 
 10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
 
-    // Build conversation history - limit to recent messages for faster processing
+    // Build conversation history - keep recent context
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
-    const recentHistory = transcriptLines.slice(-30).join('\n'); // Last 30 messages only
+    const recentHistory = transcriptLines.slice(-20).join('\n'); // Last 20 messages only
 
     const messages = [
       { role: 'system', content: instructions }
@@ -874,9 +874,9 @@ Critical rules:
 
     messages.push({ role: 'user', content: Body });
 
-    // Call Kimi AI with timeout
+    // Call Kimi AI with extended timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout for customer messages
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout for customer messages
     
     // Declare variables outside try block so they're accessible in catch/finally
     let assistantReply = '';
