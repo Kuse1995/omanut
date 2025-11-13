@@ -299,7 +299,7 @@ Respond as their business assistant. Be concise, actionable, and focus on operat
 
       // Add timeout to prevent Twilio webhook timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second timeout for boss messages
       
       let aiResponse = '';
       
@@ -876,7 +876,7 @@ Critical rules:
 
     // Call Kimi AI with timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout for customer messages
     
     // Declare variables outside try block so they're accessible in catch/finally
     let assistantReply = '';
@@ -1343,7 +1343,7 @@ Critical rules:
       try {
         const contextPrompt = `You just ${toolExecutionContext.join(' and ')} to the customer. Generate a brief, friendly confirmation message (1-2 sentences max) in your natural voice that acknowledges what you sent. Keep it conversational and warm.`;
         
-        contextTimeoutId = setTimeout(() => contextController.abort(), 5000);
+        contextTimeoutId = setTimeout(() => contextController.abort(), 10000); // 10 second timeout for contextual responses
         
         const contextResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
           method: 'POST',
