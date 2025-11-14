@@ -61,8 +61,7 @@ async function processAIResponse(
     const { data: mediaLibrary } = await supabase
       .from('company_media')
       .select('description, category, file_path, media_type, file_type')
-      .eq('company_id', company.id)
-      .eq('status', 'processed');
+      .eq('company_id', company.id);
 
     // Construct full URLs for media
     const mediaWithUrls = mediaLibrary?.map(media => ({
