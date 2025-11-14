@@ -298,16 +298,22 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
                 // Generate signed URLs for media
                 const signedMediaUrls: string[] = [];
                 for (const mediaUrl of args.media_urls) {
-                  const urlParts = mediaUrl.split('/company-media/');
-                  if (urlParts.length === 2) {
-                    const filePath = urlParts[1];
-                    const { data: signedData } = await supabase.storage
-                      .from('company-media')
-                      .createSignedUrl(filePath, 3600);
-                    
-                    if (signedData?.signedUrl) {
-                      signedMediaUrls.push(signedData.signedUrl);
+                  if (mediaUrl.includes('/company-media/')) {
+                    // Supabase storage URL - create signed URL
+                    const urlParts = mediaUrl.split('/company-media/');
+                    if (urlParts.length === 2) {
+                      const filePath = urlParts[1];
+                      const { data: signedData } = await supabase.storage
+                        .from('company-media')
+                        .createSignedUrl(filePath, 3600);
+                      
+                      if (signedData?.signedUrl) {
+                        signedMediaUrls.push(signedData.signedUrl);
+                      }
                     }
+                  } else {
+                    // External URL - use directly
+                    signedMediaUrls.push(mediaUrl);
                   }
                 }
 
