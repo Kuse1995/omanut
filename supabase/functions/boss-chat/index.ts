@@ -229,6 +229,14 @@ RESPONSE GUIDELINES:
 - Quantify opportunities when possible (e.g., "3 customers asked about X - potential revenue opportunity")
 - Prioritize high-impact, low-effort wins alongside long-term strategies
 
+FORMATTING RULES (CRITICAL):
+- DO NOT use markdown formatting (no **, *, #, etc.)
+- Use plain text only with clear line breaks for structure
+- Use emojis sparingly for visual organization
+- Format lists with dashes or numbers
+- Keep responses clean and organized
+- Use proper spacing between sections
+
 Focus on driving revenue growth through data-driven sales and marketing strategies.`;
 
     // Define management tools for updating company settings
