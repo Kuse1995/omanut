@@ -57,11 +57,18 @@ async function processAIResponse(
       .eq('company_id', company.id)
       .eq('status', 'processed');
 
+    // Fetch media library with specific columns
     const { data: mediaLibrary } = await supabase
       .from('company_media')
-      .select('*')
+      .select('description, category, file_path, media_type, file_type')
       .eq('company_id', company.id)
       .eq('status', 'processed');
+
+    // Construct full URLs for media
+    const mediaWithUrls = mediaLibrary?.map(media => ({
+      ...media,
+      full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
+    })) || [];
 
     // Build AI instructions
     let instructions = `You are a friendly AI assistant for ${company.name}`;
@@ -103,15 +110,14 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     }
 
     // Add media library
-    if (mediaLibrary && mediaLibrary.length > 0) {
+    if (mediaWithUrls && mediaWithUrls.length > 0) {
       instructions += '\n\n=== MEDIA LIBRARY ===\n';
       instructions += 'Available media files (use send_media tool to share):\n';
-      for (const media of mediaLibrary) {
-        instructions += `- ${media.title} (${media.category}): ${media.file_url}\n`;
-        if (media.description) {
-          instructions += `  Description: ${media.description}\n`;
-        }
+      for (const media of mediaWithUrls) {
+        const displayName = media.description || media.category;
+        instructions += `- ${displayName} (${media.category}, ${media.media_type}): ${media.full_url}\n`;
       }
+      instructions += '\n⚠️ CRITICAL: When customer asks for samples/examples, IMMEDIATELY call send_media with URLs from above!\n';
     }
 
     instructions += `\n\nKey Guidelines:
@@ -296,26 +302,36 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
                   : `whatsapp:${company.whatsapp_number}`;
 
                 // Generate signed URLs for media
+                console.log('[BACKGROUND] Processing media URLs:', args.media_urls);
                 const signedMediaUrls: string[] = [];
                 for (const mediaUrl of args.media_urls) {
+                  console.log(`[BACKGROUND] Processing media URL: ${mediaUrl}`);
+                  
                   if (mediaUrl.includes('/company-media/')) {
                     // Supabase storage URL - create signed URL
                     const urlParts = mediaUrl.split('/company-media/');
                     if (urlParts.length === 2) {
                       const filePath = urlParts[1];
+                      console.log(`[BACKGROUND] Creating signed URL for file path: ${filePath}`);
                       const { data: signedData } = await supabase.storage
                         .from('company-media')
                         .createSignedUrl(filePath, 3600);
                       
                       if (signedData?.signedUrl) {
                         signedMediaUrls.push(signedData.signedUrl);
+                        console.log(`[BACKGROUND] Created signed URL successfully`);
+                      } else {
+                        console.error(`[BACKGROUND] Failed to create signed URL for: ${filePath}`);
                       }
                     }
                   } else {
                     // External URL - use directly
                     signedMediaUrls.push(mediaUrl);
+                    console.log(`[BACKGROUND] Using external URL directly`);
                   }
                 }
+                
+                console.log(`[BACKGROUND] Total media URLs to send: ${signedMediaUrls.length}`);
 
                 if (signedMediaUrls.length > 0) {
                   let successCount = 0;
@@ -587,36 +603,72 @@ serve(async (req) => {
     console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
     
     if (company.boss_phone && fromPhone === bossPhone) {
-      console.log('Message from BOSS - handling with boss-chat function');
+      console.log('Message from BOSS - starting background processing');
       
-      // Forward to boss-chat function
-      const { data: bossData, error: bossError } = await supabase.functions.invoke('boss-chat', {
-        body: { From, To, Body, ProfileName: formData.get('ProfileName') }
-      });
-
-      if (bossError) {
-        console.error('Boss chat error:', bossError);
-        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message>Error processing your request. Please try again.</Message>
-</Response>`, {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      // Store boss message in database
+      await supabase
+        .from('boss_conversations')
+        .insert({
+          company_id: company.id,
+          message_from: 'management',
+          message_content: Body
         });
-      }
-
-      const bossResponse = bossData?.response || 'Message received.';
-      const bossTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message><![CDATA[${bossResponse}]]></Message>
-</Response>`;
       
-      console.log('Boss TwiML Response Length:', bossTwiml.length);
-      console.log('Returning Boss TwiML to Twilio at:', new Date().toISOString());
-
-      return new Response(bossTwiml, {
+      // Start background processing
+      // @ts-ignore - EdgeRuntime is a Deno Deploy global
+      EdgeRuntime.waitUntil(
+        (async () => {
+          try {
+            console.log('[BOSS] Calling boss-chat function');
+            
+            // Call boss-chat function
+            const { data: bossData, error: bossError } = await supabase.functions.invoke('boss-chat', {
+              body: { From, Body, ProfileName: formData.get('ProfileName') }
+            });
+            
+            if (bossError || !bossData?.response) {
+              console.error('[BOSS] Boss chat error:', bossError);
+              throw new Error('Boss chat failed');
+            }
+            
+            console.log('[BOSS] Got response from boss-chat, sending via Twilio');
+            
+            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+            
+            // Send response via Twilio API
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const twilioFormData = new URLSearchParams();
+            twilioFormData.append('From', To);
+            twilioFormData.append('To', From);
+            twilioFormData.append('Body', bossData.response);
+            
+            const twilioResponse = await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: twilioFormData
+            });
+            
+            if (twilioResponse.ok) {
+              console.log('[BOSS] Response sent successfully via Twilio');
+            } else {
+              const errorText = await twilioResponse.text();
+              console.error('[BOSS] Failed to send via Twilio:', twilioResponse.status, errorText);
+            }
+          } catch (error) {
+            console.error('[BOSS] Error in background processing:', error);
+          }
+        })()
+      );
+      
+      // Return empty TwiML immediately
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
         status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
       });
     }
 
