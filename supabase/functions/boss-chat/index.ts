@@ -122,6 +122,14 @@ serve(async (req) => {
     const pendingRevenue = paymentData?.reduce((sum, p) => 
       p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
 
+    // Get customer segments
+    const { data: segments } = await supabase
+      .from('customer_segments')
+      .select('*')
+      .eq('company_id', company.id)
+      .order('conversion_score', { ascending: false })
+      .limit(20);
+
     // Build context for AI
     const knowledgeBase = company.company_documents
       ?.map((doc: any) => doc.parsed_content)
@@ -167,6 +175,15 @@ serve(async (req) => {
         ).join('\n')}`
       : 'No payment transactions';
 
+    const segmentsSummary = segments?.length
+      ? `CUSTOMER SEGMENTS (top 20 by conversion score):\n${segments.map((s: any) => {
+          const badges = [];
+          if (s.has_payment) badges.push(`${company.currency_prefix}${s.total_spend}`);
+          if (s.has_reservation) badges.push('Reserved');
+          return `• ${s.customer_name || 'Unknown'} (${s.customer_phone}): ${s.segment_type.replace(/_/g, ' ').toUpperCase()} | Engagement: ${s.engagement_level} (${s.engagement_score}%) | Intent: ${s.intent_category} (${s.intent_score}%) | Conversion: ${s.conversion_potential} (${s.conversion_score}%)${badges.length ? ` [${badges.join(', ')}]` : ''}`;
+        }).join('\n')}`
+      : 'No customer segments analyzed yet';
+
     const systemPrompt = `You are the Head of Sales & Marketing AI advisor for ${company.name}, a ${company.business_type}.
 
 Your role is to analyze customer interactions, identify sales opportunities, and provide strategic marketing recommendations to drive revenue growth.
@@ -198,6 +215,8 @@ ${clientInsightsSummary}
 
 ${paymentSummary}
 
+${segmentsSummary}
+
 ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
@@ -206,6 +225,7 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 - All ${totalConversations || 0} conversations with customer names and phone numbers
 - Complete payment history (${company.currency_prefix}${totalRevenue.toFixed(2)} total revenue)
 - All ${totalReservations || 0} reservations
+- Customer segmentation data with engagement, intent, and conversion metrics
 - Action items and client insights
 - Business configuration and settings
 
