@@ -48,3 +48,6 @@ verify_jwt = false
 
 [functions.retry-failed-media]
 verify_jwt = true
+
+[functions.segment-customers]
+verify_jwt = true

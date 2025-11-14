@@ -12,6 +12,7 @@ import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
 import ClientInsights from "./pages/ClientInsights";
+import CustomerSegments from "./pages/CustomerSegments";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminVerify from "./pages/admin/AdminVerify";
 import RequestAccess from "./pages/admin/RequestAccess";
@@ -43,6 +44,7 @@ const App = () => (
           <Route path="/live-demo" element={<LiveDemo />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/client-insights" element={<ClientInsights />} />
+          <Route path="/customer-segments" element={<CustomerSegments />} />
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
