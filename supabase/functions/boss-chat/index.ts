@@ -467,14 +467,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         response: aiResponse
       });
 
-    // Return TwiML response
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message><![CDATA[${aiResponse}]]></Message>
-</Response>`;
-
-    return new Response(twiml, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+    // Return JSON response (not TwiML) for whatsapp-messages to handle
+    return new Response(JSON.stringify({ response: aiResponse }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {

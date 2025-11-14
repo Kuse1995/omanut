@@ -321,11 +321,14 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
                   let successCount = 0;
                   
                   for (let i = 0; i < signedMediaUrls.length; i++) {
+                    const mediaUrl = signedMediaUrls[i];
+                    console.log(`[BACKGROUND] Sending media ${i+1}/${signedMediaUrls.length}: ${mediaUrl}`);
+                    
                     const formData = new URLSearchParams();
                     formData.append('From', fromNumber);
                     formData.append('To', `whatsapp:${customerPhone}`);
                     formData.append('Body', i === 0 && args.caption ? args.caption : '');
-                    formData.append('MediaUrl', signedMediaUrls[i]);
+                    formData.append('MediaUrl', mediaUrl);
 
                     const twilioResponse = await fetch(twilioUrl, {
                       method: 'POST',
@@ -338,6 +341,10 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 
                     if (twilioResponse.ok) {
                       successCount++;
+                      console.log(`[BACKGROUND] Media ${i+1} sent successfully`);
+                    } else {
+                      const errorText = await twilioResponse.text();
+                      console.error(`[BACKGROUND] Failed to send media ${i+1}:`, twilioResponse.status, errorText);
                     }
                   }
 
@@ -763,11 +770,9 @@ serve(async (req) => {
       )
     );
 
-    // Return immediate acknowledgment to Twilio (prevents timeout)
+    // Return empty TwiML response (no immediate message to customer)
     const immediateTwiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Message><![CDATA[Processing your message...]]></Message>
-</Response>`;
+<Response></Response>`;
 
     console.log('Returning immediate TwiML response at:', new Date().toISOString());
 
