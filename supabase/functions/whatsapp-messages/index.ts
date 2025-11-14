@@ -112,12 +112,19 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     // Add media library
     if (mediaWithUrls && mediaWithUrls.length > 0) {
       instructions += '\n\n=== MEDIA LIBRARY ===\n';
-      instructions += 'Available media files (use send_media tool to share):\n';
+      instructions += 'Available media files:\n';
       for (const media of mediaWithUrls) {
         const displayName = media.description || media.category;
         instructions += `- ${displayName} (${media.category}, ${media.media_type}): ${media.full_url}\n`;
       }
-      instructions += '\n⚠️ CRITICAL: When customer asks for samples/examples, IMMEDIATELY call send_media with URLs from above!\n';
+      instructions += '\n⚠️ CRITICAL RULES FOR MEDIA:\n';
+      instructions += '1. ONLY use URLs from the list above - NEVER make up or guess URLs\n';
+      instructions += '2. If customer asks for more samples than available, tell them you have ' + mediaWithUrls.length + ' samples and offer to send what you have\n';
+      instructions += '3. When sending media, call send_media with ONLY the exact URLs listed above\n';
+      instructions += '4. DO NOT create fake URLs like "https://omanut.tech/media/..." or "https://example.com/..."\n';
+      instructions += '5. If no relevant media exists, tell the customer and offer alternatives\n';
+    } else {
+      instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
 
     instructions += `\n\nKey Guidelines:
@@ -289,7 +296,25 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
             }
           } else if (toolCall.function.name === 'send_media') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] Sending media:', args);
+            console.log('[BACKGROUND] send_media called with:', JSON.stringify(args));
+            
+            // Validate all URLs are from allowed sources
+            const allowedDomains = ['supabase.co'];
+            const invalidUrls = args.media_urls.filter((url: string) => {
+              try {
+                const urlObj = new URL(url);
+                return !allowedDomains.some(domain => urlObj.hostname.includes(domain));
+              } catch {
+                return true; // Invalid URL format
+              }
+            });
+            
+            if (invalidUrls.length > 0) {
+              console.error('[BACKGROUND] Rejected invalid/fake URLs:', invalidUrls);
+              anyToolExecuted = true;
+              assistantReply = "Sorry, I can only share media from our official library. Let me know what type of samples you'd like to see.";
+              break;
+            }
             
             const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
             const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -636,27 +661,63 @@ serve(async (req) => {
             const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
             const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
             
-            // Send response via Twilio API
-            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-            const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', To);
-            twilioFormData.append('To', From);
-            twilioFormData.append('Body', bossData.response);
+            // Split message into chunks if too long
+            const splitMessage = (text: string, maxLength: number = 1500): string[] => {
+              if (text.length <= maxLength) return [text];
+              
+              const chunks: string[] = [];
+              let remaining = text;
+              
+              while (remaining.length > 0) {
+                if (remaining.length <= maxLength) {
+                  chunks.push(remaining);
+                  break;
+                }
+                
+                // Find last period, question mark, or newline before maxLength
+                let splitIndex = remaining.lastIndexOf('.', maxLength);
+                if (splitIndex === -1) splitIndex = remaining.lastIndexOf('?', maxLength);
+                if (splitIndex === -1) splitIndex = remaining.lastIndexOf('\n', maxLength);
+                if (splitIndex === -1) splitIndex = maxLength;
+                
+                chunks.push(remaining.substring(0, splitIndex + 1).trim());
+                remaining = remaining.substring(splitIndex + 1).trim();
+              }
+              
+              return chunks;
+            };
             
-            const twilioResponse = await fetch(twilioUrl, {
-              method: 'POST',
-              headers: {
-                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: twilioFormData
-            });
+            const responseChunks = splitMessage(bossData.response);
+            console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
             
-            if (twilioResponse.ok) {
-              console.log('[BOSS] Response sent successfully via Twilio');
-            } else {
-              const errorText = await twilioResponse.text();
-              console.error('[BOSS] Failed to send via Twilio:', twilioResponse.status, errorText);
+            // Send each chunk sequentially
+            for (let i = 0; i < responseChunks.length; i++) {
+              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+              const twilioFormData = new URLSearchParams();
+              twilioFormData.append('From', To);
+              twilioFormData.append('To', From);
+              twilioFormData.append('Body', responseChunks[i]);
+              
+              const twilioResponse = await fetch(twilioUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: twilioFormData
+              });
+              
+              if (twilioResponse.ok) {
+                console.log(`[BOSS] Chunk ${i+1}/${responseChunks.length} sent successfully`);
+              } else {
+                const errorText = await twilioResponse.text();
+                console.error(`[BOSS] Failed to send chunk ${i+1}:`, twilioResponse.status, errorText);
+              }
+              
+              // Add small delay between messages
+              if (i < responseChunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
             }
           } catch (error) {
             console.error('[BOSS] Error in background processing:', error);
