@@ -17,11 +17,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { From, Body, ProfileName } = await req.formData().then(data => ({
-      From: data.get('From') as string,
-      Body: data.get('Body') as string,
-      ProfileName: data.get('ProfileName')
-    }));
+    const { From, Body, ProfileName } = await req.json();
 
     console.log('Management message received:', { From, Body, ProfileName });
 
