@@ -154,7 +154,7 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 
     // Call Kimi AI with extended timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     
     let assistantReply = '';
     let anyToolExecuted = false;
@@ -660,6 +660,21 @@ serve(async (req) => {
             const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
             const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
             
+            // Clean formatting function - removes markdown and organizes text
+            const cleanFormatting = (text: string): string => {
+              return text
+                // Remove markdown bold
+                .replace(/\*\*([^*]+)\*\*/g, '$1')
+                // Remove markdown italic
+                .replace(/\*([^*]+)\*/g, '$1')
+                // Remove markdown headers
+                .replace(/^#+\s+/gm, '')
+                // Clean up excessive newlines
+                .replace(/\n{3,}/g, '\n\n')
+                // Trim whitespace
+                .trim();
+            };
+            
             // Split message into chunks if too long
             const splitMessage = (text: string, maxLength: number = 1500): string[] => {
               if (text.length <= maxLength) return [text];
@@ -686,7 +701,9 @@ serve(async (req) => {
               return chunks;
             };
             
-            const responseChunks = splitMessage(bossData.response);
+            // Clean the response before splitting
+            const cleanedResponse = cleanFormatting(bossData.response);
+            const responseChunks = splitMessage(cleanedResponse);
             console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
             
             // Send each chunk sequentially
