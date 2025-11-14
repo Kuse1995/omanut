@@ -88,6 +88,40 @@ serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(10);
 
+    // Get total statistics for comprehensive sales data
+    const { count: totalConversations } = await supabase
+      .from('conversations')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', company.id);
+
+    const { count: totalReservations } = await supabase
+      .from('reservations')
+      .select('*', { count: 'exact', head: true })
+      .eq('company_id', company.id);
+
+    // Get unique customer count
+    const { data: uniqueCustomers } = await supabase
+      .from('conversations')
+      .select('phone')
+      .eq('company_id', company.id)
+      .not('phone', 'is', null);
+
+    const uniquePhones = new Set(uniqueCustomers?.map(c => c.phone) || []);
+
+    // Get payment transactions for revenue data
+    const { data: paymentData } = await supabase
+      .from('payment_transactions')
+      .select('amount, payment_status, customer_phone, customer_name, created_at')
+      .eq('company_id', company.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const totalRevenue = paymentData?.reduce((sum, p) => 
+      p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
+
+    const pendingRevenue = paymentData?.reduce((sum, p) => 
+      p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
+
     // Build context for AI
     const knowledgeBase = company.company_documents
       ?.map((doc: any) => doc.parsed_content)
@@ -98,8 +132,8 @@ serve(async (req) => {
 
     // Format data concisely for AI
     const conversationsSummary = recentConvs?.length 
-      ? `${recentConvs.length} recent conversations:\n${recentConvs.map((c: any) => 
-          `• ${c.customer_name || 'Unknown'} - ${c.status}${c.quality_flag ? `, Quality: ${c.quality_flag}` : ''}`
+      ? `RECENT CONVERSATIONS (showing ${recentConvs.length} of ${totalConversations || 0} total):\n${recentConvs.map((c: any) => 
+          `• ${c.customer_name || 'Unknown'} | Phone: ${c.phone || 'N/A'} | Status: ${c.status}${c.quality_flag ? `, Quality: ${c.quality_flag}` : ''}`
         ).join('\n')}`
       : 'No recent conversations';
 
@@ -127,6 +161,12 @@ serve(async (req) => {
         ).join('\n')}`
       : 'No client insights';
 
+    const paymentSummary = paymentData?.length
+      ? `RECENT PAYMENTS (last ${Math.min(paymentData.length, 10)}):\n${paymentData.slice(0, 10).map((p: any) =>
+          `• ${p.customer_name || 'Unknown'} (${p.customer_phone || 'N/A'}): ${company.currency_prefix}${Number(p.amount).toFixed(2)} - ${p.payment_status}`
+        ).join('\n')}`
+      : 'No payment transactions';
+
     const systemPrompt = `You are the Head of Sales & Marketing AI advisor for ${company.name}, a ${company.business_type}.
 
 Your role is to analyze customer interactions, identify sales opportunities, and provide strategic marketing recommendations to drive revenue growth.
@@ -136,6 +176,14 @@ Type: ${company.business_type}
 Hours: ${company.hours}
 Services/Menu: ${company.services}
 ${aiOverrides?.system_instructions ? `\nSpecial Context: ${aiOverrides.system_instructions}` : ''}
+
+BUSINESS STATISTICS:
+📊 Total Conversations: ${totalConversations || 0}
+👥 Unique Customers: ${uniquePhones.size}
+💰 Total Revenue: ${company.currency_prefix}${totalRevenue.toFixed(2)}
+⏳ Pending Revenue: ${company.currency_prefix}${pendingRevenue.toFixed(2)}
+📅 Total Reservations: ${totalReservations || 0}
+🔄 Conversion Rate: ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%
 
 CURRENT OPERATIONAL DATA:
 ${conversationsSummary}
@@ -148,11 +196,20 @@ ${actionItemsSummary}
 
 ${clientInsightsSummary}
 
+${paymentSummary}
+
 ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
-1. **Sales Analysis**: Calculate conversion rates, identify hot leads, spot sales patterns, and revenue opportunities from conversation data.
+**DATA ACCESS**: You have FULL access to:
+- All ${totalConversations || 0} conversations with customer names and phone numbers
+- Complete payment history (${company.currency_prefix}${totalRevenue.toFixed(2)} total revenue)
+- All ${totalReservations || 0} reservations
+- Action items and client insights
+- Business configuration and settings
+
+1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
 2. **Marketing Strategy**: Recommend campaigns, pricing adjustments, promotional offers, and customer engagement tactics based on actual customer behavior.
 
@@ -288,6 +345,18 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               quick_reference_info: { type: "string", description: "Quick reference info for AI to use" }
             },
             required: ["quick_reference_info"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_all_customers",
+          description: "Get complete list of all customers with phone numbers and conversation history",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
           }
         }
       }
@@ -436,6 +505,23 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const oldRef = company.quick_reference_info;
               await supabase.from('companies').update({ quick_reference_info: args.quick_reference_info }).eq('id', company.id);
               result = { success: true, message: `✅ Quick reference updated` };
+              break;
+
+            case 'get_all_customers':
+              const { data: allCustomers } = await supabase
+                .from('conversations')
+                .select('customer_name, phone, created_at, status')
+                .eq('company_id', company.id)
+                .order('created_at', { ascending: false });
+              
+              const customerList = allCustomers?.map((c: any) => 
+                `${c.customer_name || 'Unknown'} - ${c.phone || 'N/A'} (${c.status}, ${new Date(c.created_at).toLocaleDateString()})`
+              ).join('\n') || 'No customers';
+              
+              result = { 
+                success: true, 
+                message: `Complete Customer Database (${allCustomers?.length || 0} total conversations, ${uniquePhones.size} unique customers):\n\n${customerList}` 
+              };
               break;
               
             default:
