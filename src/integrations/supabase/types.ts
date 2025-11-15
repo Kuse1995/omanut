@@ -525,6 +525,89 @@ export type Database = {
           },
         ]
       }
+      customer_segments: {
+        Row: {
+          analysis_notes: string | null
+          avg_response_time_seconds: number | null
+          company_id: string
+          conversion_potential: string | null
+          conversion_score: number | null
+          created_at: string | null
+          customer_name: string | null
+          customer_phone: string
+          detected_interests: string[] | null
+          engagement_level: string | null
+          engagement_score: number | null
+          has_payment: boolean | null
+          has_reservation: boolean | null
+          id: string
+          intent_category: string | null
+          intent_score: number | null
+          last_analyzed_at: string | null
+          last_interaction_at: string | null
+          segment_type: string | null
+          total_conversations: number | null
+          total_spend: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          analysis_notes?: string | null
+          avg_response_time_seconds?: number | null
+          company_id: string
+          conversion_potential?: string | null
+          conversion_score?: number | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone: string
+          detected_interests?: string[] | null
+          engagement_level?: string | null
+          engagement_score?: number | null
+          has_payment?: boolean | null
+          has_reservation?: boolean | null
+          id?: string
+          intent_category?: string | null
+          intent_score?: number | null
+          last_analyzed_at?: string | null
+          last_interaction_at?: string | null
+          segment_type?: string | null
+          total_conversations?: number | null
+          total_spend?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          analysis_notes?: string | null
+          avg_response_time_seconds?: number | null
+          company_id?: string
+          conversion_potential?: string | null
+          conversion_score?: number | null
+          created_at?: string | null
+          customer_name?: string | null
+          customer_phone?: string
+          detected_interests?: string[] | null
+          engagement_level?: string | null
+          engagement_score?: number | null
+          has_payment?: boolean | null
+          has_reservation?: boolean | null
+          id?: string
+          intent_category?: string | null
+          intent_score?: number | null
+          last_analyzed_at?: string | null
+          last_interaction_at?: string | null
+          segment_type?: string | null
+          total_conversations?: number | null
+          total_spend?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_segments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_images: {
         Row: {
           company_id: string
