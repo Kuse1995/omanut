@@ -426,6 +426,8 @@ export type Database = {
       }
       conversations: {
         Row: {
+          archived: boolean | null
+          assigned_to: string | null
           company_id: string | null
           created_at: string
           customer_name: string | null
@@ -433,15 +435,20 @@ export type Database = {
           ended_at: string | null
           human_takeover: boolean | null
           id: string
+          last_message_preview: string | null
           phone: string | null
+          pinned: boolean | null
           quality_flag: string | null
           started_at: string
           status: string
           takeover_at: string | null
           takeover_by: string | null
           transcript: string | null
+          unread_count: number | null
         }
         Insert: {
+          archived?: boolean | null
+          assigned_to?: string | null
           company_id?: string | null
           created_at?: string
           customer_name?: string | null
@@ -449,15 +456,20 @@ export type Database = {
           ended_at?: string | null
           human_takeover?: boolean | null
           id?: string
+          last_message_preview?: string | null
           phone?: string | null
+          pinned?: boolean | null
           quality_flag?: string | null
           started_at?: string
           status?: string
           takeover_at?: string | null
           takeover_by?: string | null
           transcript?: string | null
+          unread_count?: number | null
         }
         Update: {
+          archived?: boolean | null
+          assigned_to?: string | null
           company_id?: string | null
           created_at?: string
           customer_name?: string | null
@@ -465,13 +477,16 @@ export type Database = {
           ended_at?: string | null
           human_takeover?: boolean | null
           id?: string
+          last_message_preview?: string | null
           phone?: string | null
+          pinned?: boolean | null
           quality_flag?: string | null
           started_at?: string
           status?: string
           takeover_at?: string | null
           takeover_by?: string | null
           transcript?: string | null
+          unread_count?: number | null
         }
         Relationships: [
           {
@@ -948,6 +963,47 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "payment_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quick_reply_templates: {
+        Row: {
+          category: string | null
+          company_id: string
+          content: string
+          created_at: string
+          id: string
+          shortcut: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string | null
+          company_id: string
+          content: string
+          created_at?: string
+          id?: string
+          shortcut?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string | null
+          company_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          shortcut?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quick_reply_templates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
