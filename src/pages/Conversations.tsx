@@ -1,24 +1,23 @@
-import { useEffect, useState, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Search, Send, UserCog, Bot, Sparkles, Paperclip, X, Image as ImageIcon, Video, FileText, Mic } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
 import { MediaViewer } from '@/components/MediaViewer';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { ConversationsList } from '@/components/conversations/ConversationsList';
+import { ChatView } from '@/components/conversations/ChatView';
 
 const Conversations = () => {
   const { toast } = useToast();
   const [conversations, setConversations] = useState<any[]>([]);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [stats, setStats] = useState({ total: 0, active: 0, avgDuration: 0 });
+  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover'>('all');
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<Record<string, File | null>>({});
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [mediaViewer, setMediaViewer] = useState<{
     open: boolean;
     url: string;
@@ -29,27 +28,10 @@ const Conversations = () => {
   useEffect(() => {
     fetchConversations();
 
-    // Subscribe to realtime updates for both conversations and messages
     const channel = supabase
       .channel('conversations-messages-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations'
-        },
-        () => fetchConversations()
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages'
-        },
-        () => fetchConversations()
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => fetchConversations())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => fetchConversations())
       .subscribe();
 
     return () => {
@@ -58,15 +40,9 @@ const Conversations = () => {
   }, []);
 
   const fetchConversations = async () => {
-    // Get current user's company
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
-      console.log('No session found - user not authenticated');
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to view conversations.",
-        variant: "destructive",
-      });
+      toast({ title: "Authentication Required", description: "Please log in to view conversations.", variant: "destructive" });
       return;
     }
 
@@ -76,545 +52,229 @@ const Conversations = () => {
       .eq('id', session.user.id)
       .single();
 
-    if (userError) {
-      console.error('Error fetching user data:', userError);
-      toast({
-        title: "Error",
-        description: "Failed to load user data. Please try again.",
-        variant: "destructive",
-      });
+    if (userError || !userData?.company_id) {
+      toast({ title: "Error", description: "Failed to load user data.", variant: "destructive" });
       return;
     }
-
-    if (!userData?.company_id) {
-      console.log('User has no company_id');
-      toast({
-        title: "No Company",
-        description: "Your account is not linked to a company.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    console.log('Fetching conversations for company:', userData.company_id);
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, status, duration_seconds, human_takeover')
+      .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived')
       .eq('company_id', userData.company_id)
+      .eq('archived', false)
+      .order('pinned', { ascending: false })
       .order('started_at', { ascending: false })
       .limit(50);
 
     if (convError) {
-      console.error('Error fetching conversations:', convError);
-      toast({
-        title: "Error",
-        description: "Failed to load conversations. Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: "Failed to load conversations.", variant: "destructive" });
       return;
     }
 
-    console.log('Loaded conversations:', convData?.length || 0);
-
-    if (!convData || convData.length === 0) {
-      setConversations([]);
-      setStats({ total: 0, active: 0, avgDuration: 0 });
-      return;
-    }
-
-    const conversationIds = convData.map(c => c.id);
-    
-    const { data: msgData, error: msgError } = await supabase
-      .from('messages')
-      .select('*')
-      .in('conversation_id', conversationIds)
-      .order('created_at', { ascending: true });
-
-    if (msgError) {
-      console.error('Error fetching messages:', msgError);
-      return;
-    }
-
-    const conversationsWithMessages = convData.map(conv => ({
-      ...conv,
-      messages: msgData?.filter(msg => msg.conversation_id === conv.id) || []
-    }));
+    const conversationsWithMessages = await Promise.all(
+      (convData || []).map(async (conv) => {
+        const { data: messages } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conv.id)
+          .order('created_at', { ascending: true });
+        return { ...conv, messages: messages || [] };
+      })
+    );
 
     setConversations(conversationsWithMessages);
 
-    // Calculate stats
-    const total = convData?.length || 0;
-    const active = convData?.filter(c => c.status === 'active').length || 0;
-    const completed = convData?.filter(c => c.duration_seconds) || [];
-    const avgDuration = completed.length > 0
-      ? Math.round(completed.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) / completed.length)
-      : 0;
-
-    setStats({ total, active, avgDuration });
+    // Auto-select first conversation if none selected
+    if (!selectedConversationId && conversationsWithMessages.length > 0) {
+      setSelectedConversationId(conversationsWithMessages[0].id);
+    }
   };
 
-  const filteredConversations = conversations.filter((conv: any) =>
-    conv.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-    conv.phone?.includes(search)
-  ).sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+  const selectedConversation = conversations.find(c => c.id === selectedConversationId);
 
-  const handleTakeover = async (conversationId: string, currentState: boolean) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({
-        title: 'Not authenticated',
-        description: 'Please log in to use takeover mode',
-        variant: 'destructive'
-      });
-      return;
-    }
+  const handleTakeover = async () => {
+    if (!selectedConversation) return;
 
+    const newTakeoverState = !selectedConversation.human_takeover;
+    
     const { error } = await supabase
       .from('conversations')
-      .update({
-        human_takeover: !currentState,
-        takeover_by: !currentState ? session.user.id : null,
-        takeover_at: !currentState ? new Date().toISOString() : null
+      .update({ 
+        human_takeover: newTakeoverState,
+        takeover_at: newTakeoverState ? new Date().toISOString() : null
       })
-      .eq('id', conversationId);
+      .eq('id', selectedConversation.id);
 
     if (error) {
-      console.error('Takeover error:', error);
-      toast({
-        title: 'Error',
-        description: `Failed to toggle takeover mode: ${error.message}`,
-        variant: 'destructive'
-      });
+      toast({ title: "Error", description: "Failed to update takeover status.", variant: "destructive" });
     } else {
-      toast({
-        title: currentState ? 'AI Mode Enabled' : 'Human Takeover Enabled',
-        description: currentState 
-          ? 'AI will now respond to messages' 
-          : 'You can now respond directly to the customer'
+      toast({ 
+        title: newTakeoverState ? "Takeover Activated" : "Released to AI",
+        description: newTakeoverState ? "You can now respond to this customer." : "AI will handle this conversation."
       });
-      
-      // Immediately update local state
-      setConversations(prev => prev.map(conv => 
-        conv.id === conversationId 
-          ? { ...conv, human_takeover: !currentState, takeover_by: !currentState ? session.user.id : null }
-          : conv
-      ));
+      fetchConversations();
     }
   };
 
-  const sendMessage = async (conversationId: string) => {
-    const message = messageInputs[conversationId]?.trim();
-    const attachedFile = attachedFiles[conversationId];
+  const sendMessage = async () => {
+    if (!selectedConversation) return;
     
-    if (!message && !attachedFile) return;
+    const convId = selectedConversation.id;
+    const messageText = messageInputs[convId]?.trim();
+    const attachedFile = attachedFiles[convId];
 
-    setSendingMessage(conversationId);
+    if (!messageText && !attachedFile) return;
+
+    setSendingMessage(convId);
 
     try {
       let mediaUrl = null;
+      let mediaType = null;
+      let fileName = null;
 
-      // Upload file if attached
       if (attachedFile) {
-        console.log('Uploading file:', attachedFile.name, attachedFile.type);
         const fileExt = attachedFile.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `chat-media/${fileName}`;
+        const filePath = `${selectedConversation.phone}/${Date.now()}.${fileExt}`;
 
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('company-documents')
-          .upload(filePath, attachedFile, {
-            contentType: attachedFile.type,
-            upsert: false
-          });
+        const { error: uploadError } = await supabase.storage
+          .from('conversation-media')
+          .upload(filePath, attachedFile);
 
-        if (uploadError) {
-          console.error('Upload error:', uploadError);
-          throw uploadError;
-        }
+        if (uploadError) throw uploadError;
 
-        console.log('Upload successful:', uploadData);
-
-        // Get public URL
         const { data: { publicUrl } } = supabase.storage
-          .from('company-documents')
+          .from('conversation-media')
           .getPublicUrl(filePath);
 
         mediaUrl = publicUrl;
-        console.log('Media URL:', mediaUrl);
+        mediaType = attachedFile.type;
+        fileName = attachedFile.name;
       }
 
-      console.log('Sending message with payload:', { conversationId, message: message || 'Sent an attachment', mediaUrl });
-      
-      const { data, error } = await supabase.functions.invoke('send-whatsapp-message', {
-        body: { conversationId, message: message || 'Sent an attachment', mediaUrl }
+      const { error } = await supabase.functions.invoke('send-whatsapp-message', {
+        body: {
+          phone: selectedConversation.phone,
+          message: messageText || '',
+          conversationId: convId,
+          mediaUrl,
+          mediaType,
+          fileName
+        }
       });
 
-      if (error) {
-        console.error('Function invocation error:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      console.log('Message sent successfully:', data);
-
-      setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
-      setAttachedFiles(prev => ({ ...prev, [conversationId]: null }));
-      toast({
-        title: 'Message sent',
-        description: 'Your message has been sent to the customer'
-      });
+      setMessageInputs(prev => ({ ...prev, [convId]: '' }));
+      setAttachedFiles(prev => ({ ...prev, [convId]: null }));
+      toast({ title: "Success", description: "Message sent successfully" });
       fetchConversations();
     } catch (error: any) {
       console.error('Error sending message:', error);
-      toast({
-        title: 'Error',
-        description: error?.message || 'Failed to send message',
-        variant: 'destructive'
-      });
+      toast({ title: "Error", description: error.message || "Failed to send message", variant: "destructive" });
     } finally {
       setSendingMessage(null);
     }
   };
 
-  const generateAndSendImage = async (conversationId: string) => {
-    const prompt = messageInputs[conversationId]?.trim();
+  const generateAndSendImage = async () => {
+    if (!selectedConversation) return;
+    
+    const convId = selectedConversation.id;
+    const prompt = messageInputs[convId]?.trim();
+
     if (!prompt) {
-      toast({
-        title: 'Prompt required',
-        description: 'Please enter a description for the image you want to generate',
-        variant: 'destructive'
-      });
+      toast({ title: "Error", description: "Please enter a prompt for image generation", variant: "destructive" });
       return;
     }
 
-    setGeneratingImage(conversationId);
+    setGeneratingImage(convId);
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-business-image', {
-        body: { prompt, conversationId }
+        body: { prompt, conversationId: convId }
       });
 
       if (error) throw error;
 
-      if (data?.image_url) {
-        // Send the image as a message
-        const imageMessage = `Here's the image you requested:\n${data.image_url}`;
-        
-        const { error: sendError } = await supabase.functions.invoke('send-whatsapp-message', {
-          body: { conversationId, message: imageMessage }
-        });
-
-        if (sendError) throw sendError;
-
-        setMessageInputs(prev => ({ ...prev, [conversationId]: '' }));
-        toast({
-          title: 'Image generated and sent',
-          description: 'The AI-generated image has been sent to the customer'
-        });
-        fetchConversations();
-      }
+      setMessageInputs(prev => ({ ...prev, [convId]: '' }));
+      toast({ title: "Success", description: "Image generated and sent!" });
+      fetchConversations();
     } catch (error: any) {
       console.error('Error generating image:', error);
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to generate image. Make sure image generation is enabled in Settings.',
-        variant: 'destructive'
-      });
+      toast({ title: "Error", description: error.message || "Failed to generate image", variant: "destructive" });
     } finally {
       setGeneratingImage(null);
     }
   };
 
   return (
-    <>
+    <div className="flex flex-col h-screen bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-border bg-card">
+        <div className="flex items-center gap-4">
+          <BackButton />
+          <h1 className="text-2xl font-bold">Conversations</h1>
+        </div>
+        <ThemeToggle />
+      </div>
+
+      {/* Main Content - Split Pane */}
+      <div className="flex-1 overflow-hidden">
+        <ResizablePanelGroup direction="horizontal">
+          {/* Left Panel - Conversations List */}
+          <ResizablePanel defaultSize={30} minSize={25} maxSize={40}>
+            <ConversationsList
+              conversations={conversations}
+              selectedConversationId={selectedConversationId}
+              onSelectConversation={setSelectedConversationId}
+              search={search}
+              onSearchChange={setSearch}
+              filter={filter}
+              onFilterChange={setFilter}
+            />
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Right Panel - Chat View */}
+          <ResizablePanel defaultSize={70} minSize={60}>
+            {selectedConversation ? (
+              <ChatView
+                conversation={selectedConversation}
+                messageInput={messageInputs[selectedConversation.id] || ''}
+                onMessageInputChange={(value) => 
+                  setMessageInputs(prev => ({ ...prev, [selectedConversation.id]: value }))
+                }
+                onSendMessage={sendMessage}
+                onGenerateImage={generateAndSendImage}
+                onToggleTakeover={handleTakeover}
+                attachedFile={attachedFiles[selectedConversation.id] || null}
+                onAttachFile={(file) => 
+                  setAttachedFiles(prev => ({ ...prev, [selectedConversation.id]: file }))
+                }
+                sendingMessage={sendingMessage === selectedConversation.id}
+                generatingImage={generatingImage === selectedConversation.id}
+                onMediaClick={(url, type, fileName) => 
+                  setMediaViewer({ open: true, url, type, fileName })
+                }
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                <p>Select a conversation to view messages</p>
+              </div>
+            )}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+
       <MediaViewer
         open={mediaViewer.open}
-        onOpenChange={(open) => setMediaViewer({ ...mediaViewer, open })}
+        onOpenChange={(open) => setMediaViewer(prev => ({ ...prev, open }))}
         mediaUrl={mediaViewer.url}
         mediaType={mediaViewer.type}
         fileName={mediaViewer.fileName}
       />
-      
-      <div className="p-8 space-y-8 bg-app min-h-screen animate-fade-in">
-        <div className="flex items-center justify-between mb-6">
-          <BackButton />
-          <ThemeToggle />
-        </div>
-        <div>
-          <h1 className="text-4xl font-bold mb-2">
-            <span className="text-gradient">Conversations</span>
-          </h1>
-          <p className="text-lg text-muted-foreground">All customer interactions</p>
-        </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Calls</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.total}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Now</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">{stats.active}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Duration</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.avgDuration}s</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="relative mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by name or phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
-      </div>
-
-      {filteredConversations.length === 0 ? (
-        <Card className="card-glass">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground">No conversations found</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {filteredConversations.map((conversation: any) => (
-            <Card key={conversation.id} className="card-glass flex flex-col h-[700px]">
-              {/* Header */}
-              <CardHeader className="border-b pb-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <span className="text-sm font-semibold text-primary">
-                        {conversation.customer_name?.[0]?.toUpperCase() || '?'}
-                      </span>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-base">
-                        {conversation.customer_name || 'Unknown Customer'}
-                      </h3>
-                      <p className="text-xs text-muted-foreground">{conversation.phone}</p>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={conversation.human_takeover ? "default" : "outline"}
-                    onClick={() => handleTakeover(conversation.id, conversation.human_takeover)}
-                    className="gap-2"
-                  >
-                    {conversation.human_takeover ? (
-                      <>
-                        <Bot className="w-4 h-4" />
-                        AI Mode
-                      </>
-                    ) : (
-                      <>
-                        <UserCog className="w-4 h-4" />
-                        Take Over
-                      </>
-                    )}
-                  </Button>
-                </div>
-                <div className="text-xs text-muted-foreground mt-2">
-                  Started {new Date(conversation.started_at).toLocaleString()}
-                </div>
-              </CardHeader>
-              
-              {/* Messages Area */}
-              <CardContent className="flex-1 overflow-y-auto p-4 space-y-3">
-                {conversation.messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                    No messages yet
-                  </div>
-                ) : (
-                  conversation.messages.map((message: any) => {
-                    const isInbound = message.role === 'user';
-                    const metadata = message.message_metadata as any;
-                    const hasMedia = metadata?.media_urls && metadata.media_urls.length > 0;
-                    
-                    return (
-                      <div
-                        key={message.id}
-                        className={`flex ${isInbound ? 'justify-start' : 'justify-end'}`}
-                      >
-                        <div
-                          className={`max-w-[75%] rounded-lg px-3 py-2 ${
-                            isInbound 
-                              ? 'bg-muted text-foreground rounded-tl-none' 
-                              : 'bg-primary text-primary-foreground rounded-tr-none'
-                          }`}
-                        >
-                          {message.content && (
-                            <p className="text-sm whitespace-pre-wrap break-words mb-2">{message.content}</p>
-                          )}
-                          
-                          {hasMedia && (
-                            <div className="grid grid-cols-2 gap-2 mt-2">
-                              {metadata.media_urls.map((url: string, idx: number) => {
-                                const mediaType = metadata.media_types[idx];
-                                
-                                if (mediaType.startsWith('image/')) {
-                                  return (
-                                    <img
-                                      key={idx}
-                                      src={url}
-                                      alt="Media"
-                                      className="rounded cursor-pointer hover:opacity-80 transition-opacity w-full h-32 object-cover"
-                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
-                                    />
-                                  );
-                                }
-                                
-                                if (mediaType.startsWith('video/')) {
-                                  return (
-                                    <div
-                                      key={idx}
-                                      className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
-                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
-                                    >
-                                      <Video className="h-8 w-8 text-muted-foreground" />
-                                    </div>
-                                  );
-                                }
-                                
-                                if (mediaType.startsWith('audio/')) {
-                                  return (
-                                    <div
-                                      key={idx}
-                                      className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
-                                      onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
-                                    >
-                                      <Mic className="h-8 w-8 text-muted-foreground" />
-                                    </div>
-                                  );
-                                }
-                                
-                                return (
-                                  <div
-                                    key={idx}
-                                    className="relative rounded overflow-hidden cursor-pointer hover:opacity-80 transition-opacity bg-muted/50 flex items-center justify-center h-32"
-                                    onClick={() => setMediaViewer({ open: true, url, type: mediaType })}
-                                  >
-                                    <FileText className="h-8 w-8 text-muted-foreground" />
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                          
-                          <div className="flex items-center justify-end gap-1 mt-1">
-                            <span className="text-[10px] opacity-70">
-                              {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </CardContent>
-
-              {/* Input Area - Always visible when takeover is active */}
-              {conversation.human_takeover && (
-                <div className="border-t bg-background/50 p-4 space-y-2">
-                  {attachedFiles[conversation.id] && (
-                    <div className="flex items-center gap-2 p-2 bg-muted rounded-lg">
-                      <Paperclip className="w-4 h-4" />
-                      <span className="text-sm flex-1 truncate">{attachedFiles[conversation.id]?.name}</span>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6"
-                        onClick={() => setAttachedFiles(prev => ({ ...prev, [conversation.id]: null }))}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <input
-                      type="file"
-                      ref={(el) => fileInputRefs.current[conversation.id] = el}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          setAttachedFiles(prev => ({ ...prev, [conversation.id]: file }));
-                        }
-                      }}
-                      accept="image/*,video/*,application/pdf"
-                      className="hidden"
-                    />
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => fileInputRefs.current[conversation.id]?.click()}
-                      disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
-                      title="Attach media"
-                    >
-                      <Paperclip className="w-4 h-4" />
-                    </Button>
-                    <Input
-                      placeholder="Type your message or describe an image to generate..."
-                      value={messageInputs[conversation.id] || ''}
-                      onChange={(e) => setMessageInputs(prev => ({
-                        ...prev,
-                        [conversation.id]: e.target.value
-                      }))}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          sendMessage(conversation.id);
-                        }
-                      }}
-                      disabled={sendingMessage === conversation.id || generatingImage === conversation.id}
-                      className="flex-1"
-                    />
-                    <Button
-                      size="icon"
-                      variant="outline"
-                      onClick={() => generateAndSendImage(conversation.id)}
-                      disabled={!messageInputs[conversation.id]?.trim() || generatingImage === conversation.id || sendingMessage === conversation.id}
-                      title="Generate and send AI image"
-                    >
-                      {generatingImage === conversation.id ? (
-                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Sparkles className="w-4 h-4" />
-                      )}
-                    </Button>
-                    <Button
-                      size="icon"
-                      onClick={() => sendMessage(conversation.id)}
-                      disabled={(!messageInputs[conversation.id]?.trim() && !attachedFiles[conversation.id]) || sendingMessage === conversation.id || generatingImage === conversation.id}
-                    >
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground px-1">
-                    Type a message, attach media, or describe an image and click <Sparkles className="w-3 h-3 inline" /> to generate
-                  </p>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-      </div>
-    </>
+    </div>
   );
 };
 
