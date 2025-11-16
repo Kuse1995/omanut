@@ -227,6 +227,7 @@ export type Database = {
           quick_reference_info: string | null
           service_locations: string | null
           services: string | null
+          takeover_number: string | null
           twilio_number: string | null
           updated_at: string | null
           voice_style: string | null
@@ -251,6 +252,7 @@ export type Database = {
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null
+          takeover_number?: string | null
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null
@@ -275,6 +277,7 @@ export type Database = {
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null
+          takeover_number?: string | null
           twilio_number?: string | null
           updated_at?: string | null
           voice_style?: string | null
