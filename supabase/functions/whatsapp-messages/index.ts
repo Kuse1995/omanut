@@ -616,15 +616,86 @@ serve(async (req) => {
       });
     }
 
-    // Check if message is from boss
+    // Check if message is from boss or takeover number
     const normalizePhone = (phone: string) => {
       return phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '');
     };
     
     const fromPhone = normalizePhone(From);
     const bossPhone = company.boss_phone ? normalizePhone(company.boss_phone) : '';
+    const takeoverPhone = company.takeover_number ? normalizePhone(company.takeover_number) : '';
     
-    console.log('Phone comparison:', { fromPhone, bossPhone, isBoss: fromPhone === bossPhone });
+    console.log('Phone comparison:', { fromPhone, bossPhone, takeoverPhone, isBoss: fromPhone === bossPhone, isTakeover: fromPhone === takeoverPhone });
+    
+    // Handle message from takeover number - forward to customer
+    if (company.takeover_number && fromPhone === takeoverPhone) {
+      console.log('Message from TAKEOVER NUMBER - forwarding to customer');
+      
+      // Extract customer phone from message (format: "Customer: +1234567890\n\nMessage...")
+      // Or find most recent active conversation for this company
+      const { data: recentConv } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('company_id', company.id)
+        .eq('status', 'active')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (recentConv) {
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        
+        // Enable takeover mode
+        await supabase
+          .from('conversations')
+          .update({ 
+            human_takeover: true,
+            takeover_at: new Date().toISOString()
+          })
+          .eq('id', recentConv.id);
+        
+        // Store boss message
+        await supabase
+          .from('messages')
+          .insert({
+            conversation_id: recentConv.id,
+            role: 'assistant',
+            content: Body
+          });
+        
+        // Forward to customer via Twilio
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const twilioFormData = new URLSearchParams();
+          twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          twilioFormData.append('To', recentConv.phone);
+          twilioFormData.append('Body', Body);
+          
+          const twilioResponse = await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: twilioFormData
+          });
+          
+          if (twilioResponse.ok) {
+            console.log('[TAKEOVER] Message forwarded to customer successfully');
+          } else {
+            const errorText = await twilioResponse.text();
+            console.error('[TAKEOVER] Failed to forward message:', twilioResponse.status, errorText);
+          }
+        }
+      }
+      
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+      });
+    }
     
     if (company.boss_phone && fromPhone === bossPhone) {
       console.log('Message from BOSS - starting background processing');
@@ -779,7 +850,7 @@ serve(async (req) => {
     
     // Check human takeover mode
     if (conversation && conversation.human_takeover) {
-      console.log('Human takeover mode - storing message only');
+      console.log('Human takeover mode - storing message and forwarding to takeover number');
       
       await supabase
         .from('messages')
@@ -788,6 +859,48 @@ serve(async (req) => {
           role: 'user',
           content: Body
         });
+      
+      // Forward customer message to takeover number if configured
+      if (company.takeover_number) {
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          // @ts-ignore - EdgeRuntime is a Deno Deploy global
+          EdgeRuntime.waitUntil(
+            (async () => {
+              try {
+                const customerName = conversation.customer_name || customerPhone;
+                const forwardMessage = `📱 Customer: ${customerName} (${customerPhone})\n\n${Body}`;
+                
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                const twilioFormData = new URLSearchParams();
+                twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+                twilioFormData.append('To', company.takeover_number.startsWith('whatsapp:') ? company.takeover_number : `whatsapp:${company.takeover_number}`);
+                twilioFormData.append('Body', forwardMessage);
+                
+                const twilioResponse = await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: twilioFormData
+                });
+                
+                if (twilioResponse.ok) {
+                  console.log('[TAKEOVER] Customer message forwarded to takeover number');
+                } else {
+                  const errorText = await twilioResponse.text();
+                  console.error('[TAKEOVER] Failed to forward:', twilioResponse.status, errorText);
+                }
+              } catch (error) {
+                console.error('[TAKEOVER] Error forwarding message:', error);
+              }
+            })()
+          );
+        }
+      }
       
       return new Response(`<?xml version="1.0" encoding="UTF-8"?>
 <Response></Response>`, {

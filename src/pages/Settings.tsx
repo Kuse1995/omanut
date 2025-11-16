@@ -28,7 +28,8 @@ const Settings = () => {
     currency_prefix: 'K',
     twilio_number: '',
     whatsapp_number: '',
-    whatsapp_voice_enabled: false
+    whatsapp_voice_enabled: false,
+    takeover_number: ''
   });
 
   useEffect(() => {
@@ -96,7 +97,8 @@ const Settings = () => {
           currency_prefix: config.currency_prefix,
           twilio_number: config.twilio_number,
           whatsapp_number: config.whatsapp_number,
-          whatsapp_voice_enabled: config.whatsapp_voice_enabled
+          whatsapp_voice_enabled: config.whatsapp_voice_enabled,
+          takeover_number: config.takeover_number
         })
         .eq('id', config.id);
 
@@ -256,6 +258,20 @@ const Settings = () => {
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Your customers can WhatsApp us and our AI will answer automatically
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="takeover_number">Takeover Number (WhatsApp)</Label>
+              <Input
+                id="takeover_number"
+                value={config.takeover_number || ''}
+                onChange={(e) => setConfig({ ...config, takeover_number: e.target.value })}
+                placeholder="+1234567890"
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Boss/Manager WhatsApp number that will receive customer messages during human takeover. Reply from this number to respond to customers directly.
               </p>
             </div>
 
