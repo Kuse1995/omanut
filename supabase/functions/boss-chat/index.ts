@@ -44,13 +44,30 @@ serve(async (req) => {
 
     console.log('Management company found:', company.name);
 
-    // Get recent conversation stats
+    // Get recent conversation stats with messages
     const { data: recentConvs } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, ended_at, status, quality_flag')
+      .select('id, customer_name, phone, started_at, ended_at, status, quality_flag, transcript')
       .eq('company_id', company.id)
       .order('started_at', { ascending: false })
       .limit(10);
+
+    // Get messages for each conversation to build detailed summaries
+    const conversationsWithMessages = await Promise.all(
+      (recentConvs || []).map(async (conv) => {
+        const { data: messages } = await supabase
+          .from('messages')
+          .select('role, content, created_at')
+          .eq('conversation_id', conv.id)
+          .order('created_at', { ascending: true })
+          .limit(20);
+        
+        return {
+          ...conv,
+          messages: messages || []
+        };
+      })
+    );
 
     // Get recent reservations
     const { data: recentReservations } = await supabase
@@ -138,11 +155,24 @@ serve(async (req) => {
 
     const aiOverrides = company.company_ai_overrides?.[0];
 
-    // Format data concisely for AI
-    const conversationsSummary = recentConvs?.length 
-      ? `RECENT CONVERSATIONS (showing ${recentConvs.length} of ${totalConversations || 0} total):\n${recentConvs.map((c: any) => 
-          `• ${c.customer_name || 'Unknown'} | Phone: ${c.phone || 'N/A'} | Status: ${c.status}${c.quality_flag ? `, Quality: ${c.quality_flag}` : ''}`
-        ).join('\n')}`
+    // Format data concisely for AI with actual conversation content
+    const conversationsSummary = conversationsWithMessages?.length 
+      ? `RECENT CONVERSATIONS (showing ${conversationsWithMessages.length} of ${totalConversations || 0} total):\n\n${conversationsWithMessages.map((c: any) => {
+          const messagePreview = c.messages.length > 0 
+            ? c.messages.slice(0, 10).map((m: any) => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content.substring(0, 200)}`).join('\n    ')
+            : 'No messages';
+          
+          const transcript = c.transcript || 'No transcript available';
+          
+          return `\n📞 ${c.customer_name || 'Unknown'} (${c.phone || 'N/A'})
+  Status: ${c.status}${c.quality_flag ? ` | Quality: ${c.quality_flag}` : ''}
+  Started: ${new Date(c.started_at).toLocaleString()}
+  
+  Conversation Preview:
+    ${messagePreview}
+  
+  ${c.transcript ? `Full Transcript Summary:\n    ${transcript.substring(0, 500)}${transcript.length > 500 ? '...' : ''}` : ''}`;
+        }).join('\n\n---\n')}`
       : 'No recent conversations';
 
     const demoBookingsSummary = demoBookings?.length
