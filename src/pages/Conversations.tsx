@@ -7,6 +7,8 @@ import { MediaViewer } from '@/components/MediaViewer';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import { ConversationsList } from '@/components/conversations/ConversationsList';
 import { ChatView } from '@/components/conversations/ChatView';
+import SupervisorAnalysisPanel from '@/components/conversations/SupervisorAnalysisPanel';
+import { Brain } from 'lucide-react';
 
 const Conversations = () => {
   const { toast } = useToast();
@@ -237,7 +239,7 @@ const Conversations = () => {
           <ResizableHandle withHandle />
 
           {/* Right Panel - Chat View */}
-          <ResizablePanel defaultSize={70} minSize={60}>
+          <ResizablePanel defaultSize={50} minSize={40}>
             {selectedConversation ? (
               <ChatView
                 conversation={selectedConversation}
@@ -261,6 +263,23 @@ const Conversations = () => {
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 <p>Select a conversation to view messages</p>
+              </div>
+            )}
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
+
+          {/* Supervisor Analysis Panel */}
+          <ResizablePanel defaultSize={20} minSize={15}>
+            {selectedConversation ? (
+              <SupervisorAnalysisPanel 
+                conversationId={selectedConversation.id}
+                customerPhone={selectedConversation.phone || ''}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-4 text-center">
+                <Brain className="h-12 w-12 mb-2 text-accent-purple/50" />
+                <p className="text-sm">Select a conversation to see supervisor AI analysis</p>
               </div>
             )}
           </ResizablePanel>
