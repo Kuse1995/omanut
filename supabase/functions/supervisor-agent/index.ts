@@ -15,7 +15,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
-    const kimiApiKey = Deno.env.get('KIMI_API_KEY');
+    const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
 
     const {
@@ -171,17 +171,17 @@ Analyze this interaction and provide a strategic recommendation for the main ass
 
 Be strategic, data-driven, and focus on maximizing conversion while maintaining brand integrity.`;
 
-    // Call Kimi AI for supervisor analysis
-    console.log('[Supervisor] Calling Kimi AI for strategic analysis...');
+    // Call DeepSeek AI for supervisor analysis
+    console.log('[Supervisor] Calling DeepSeek AI for strategic analysis...');
     
-    const kimiResponse = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+    const deepseekResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${kimiApiKey}`,
+        'Authorization': `Bearer ${deepseekApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'moonshot-v1-128k',
+        model: 'deepseek-reasoner',
         messages: [
           { role: 'system', content: 'You are a strategic supervisor AI. Analyze conversations and provide actionable recommendations in JSON format.' },
           { role: 'user', content: supervisorPrompt }
@@ -192,14 +192,14 @@ Be strategic, data-driven, and focus on maximizing conversion while maintaining 
       }),
     });
 
-    if (!kimiResponse.ok) {
-      const errorText = await kimiResponse.text();
-      console.error('[Supervisor] Kimi API error:', errorText);
+    if (!deepseekResponse.ok) {
+      const errorText = await deepseekResponse.text();
+      console.error('[Supervisor] DeepSeek API error:', errorText);
       throw new Error('Supervisor analysis failed');
     }
 
-    const kimiData = await kimiResponse.json();
-    const recommendation = JSON.parse(kimiData.choices[0].message.content);
+    const deepseekData = await deepseekResponse.json();
+    const recommendation = JSON.parse(deepseekData.choices[0].message.content);
 
     console.log('[Supervisor] Strategic recommendation generated');
 
