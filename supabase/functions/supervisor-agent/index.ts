@@ -181,14 +181,13 @@ Be strategic, data-driven, and focus on maximizing conversion while maintaining 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'deepseek-reasoner',
+        model: 'deepseek-chat',
         messages: [
-          { role: 'system', content: 'You are a strategic supervisor AI. Analyze conversations and provide actionable recommendations in JSON format.' },
+          { role: 'system', content: 'You are a strategic supervisor AI. Analyze conversations and provide actionable recommendations in JSON format. Always respond with valid JSON only.' },
           { role: 'user', content: supervisorPrompt }
         ],
         temperature: 0.7,
-        max_tokens: 2000,
-        response_format: { type: "json_object" }
+        max_tokens: 4000
       }),
     });
 
@@ -199,7 +198,17 @@ Be strategic, data-driven, and focus on maximizing conversion while maintaining 
     }
 
     const deepseekData = await deepseekResponse.json();
-    const recommendation = JSON.parse(deepseekData.choices[0].message.content);
+    let responseContent = deepseekData.choices[0].message.content;
+    
+    // Strip markdown code blocks if present
+    if (responseContent.includes('```')) {
+      responseContent = responseContent
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .trim();
+    }
+    
+    const recommendation = JSON.parse(responseContent);
 
     console.log('[Supervisor] Strategic recommendation generated');
 
