@@ -3,6 +3,9 @@ project_id = "dzheddvoiauevcayifev"
 [functions.supervisor-agent]
 verify_jwt = true
 
+[functions.analyze-and-followup]
+verify_jwt = true
+
 [functions.boss-chat]
 verify_jwt = false
 timeout = 60

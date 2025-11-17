@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Brain, TrendingUp, Target, AlertTriangle, Lightbulb, MessageSquare } from 'lucide-react';
+import { Brain, TrendingUp, Target, AlertTriangle, Lightbulb, MessageSquare, Send } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from '@/hooks/use-toast';
 
 interface SupervisorRecommendation {
   analysis: string;
@@ -33,7 +35,9 @@ interface SupervisorInsight {
 
 export default function SupervisorInsights() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
   const [insights, setInsights] = useState<SupervisorInsight[]>([]);
   const [selectedInsight, setSelectedInsight] = useState<SupervisorInsight | null>(null);
 
@@ -149,6 +153,42 @@ export default function SupervisorInsights() {
     };
   };
 
+  const handleAnalyzeAndFollowup = async () => {
+    setAnalyzing(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data: user } = await supabase
+        .from('users')
+        .select('company_id')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!user?.company_id) return;
+
+      const { data, error } = await supabase.functions.invoke('analyze-and-followup', {
+        body: { companyId: user.company_id }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Follow-ups Sent",
+        description: `Analyzed and sent ${data.processed} strategic follow-up messages to customers.`,
+      });
+    } catch (error) {
+      console.error('Error analyzing and following up:', error);
+      toast({
+        title: "Error",
+        description: "Failed to analyze conversations and send follow-ups.",
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background p-6">
@@ -175,6 +215,14 @@ export default function SupervisorInsights() {
           <Badge variant="secondary" className="ml-auto">
             {insights.length} Analyses
           </Badge>
+          <Button 
+            onClick={handleAnalyzeAndFollowup}
+            disabled={analyzing}
+            className="gap-2"
+          >
+            <Send className="h-4 w-4" />
+            {analyzing ? 'Analyzing...' : 'Analyze & Follow Up'}
+          </Button>
         </div>
       </div>
 
