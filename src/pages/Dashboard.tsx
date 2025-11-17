@@ -225,6 +225,16 @@ const Dashboard = () => {
               <Button 
                 variant="ghost" 
                 className="w-full justify-start p-3 h-auto"
+                onClick={() => navigate('/supervisor-insights')}
+              >
+                <div className="text-left">
+                  <div className="font-medium text-foreground">Supervisor Insights</div>
+                  <div className="text-sm text-muted-foreground">AI strategy & follow-ups</div>
+                </div>
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start p-3 h-auto"
                 onClick={() => navigate('/client-insights')}
               >
                 <div className="text-left">
