@@ -10,6 +10,7 @@ import { Brain, TrendingUp, Target, AlertTriangle, Lightbulb, MessageSquare, Sen
 import BackButton from '@/components/BackButton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import ScheduledFollowUps from '@/components/ScheduledFollowUps';
 
 interface SupervisorRecommendation {
   analysis: string;
@@ -226,7 +227,9 @@ export default function SupervisorInsights() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="max-w-7xl mx-auto p-6 space-y-6">
+        <ScheduledFollowUps />
+        
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Insights List */}
           <Card>
