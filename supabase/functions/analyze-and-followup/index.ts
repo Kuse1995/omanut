@@ -53,17 +53,26 @@ serve(async (req) => {
         }
 
         // Fetch active/recent conversations that need follow-up
-        const threeDaysAgo = new Date();
-        threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-        const { data: conversations } = await supabase
+        console.log(`Fetching conversations for company ${currentCompanyId} since ${sevenDaysAgo.toISOString()}`);
+
+        const { data: conversations, error: convError } = await supabase
           .from('conversations')
-          .select('*, messages(*)')
+          .select('*')
           .eq('company_id', currentCompanyId)
           .eq('status', 'active')
-          .gte('started_at', threeDaysAgo.toISOString())
+          .gte('started_at', sevenDaysAgo.toISOString())
           .order('started_at', { ascending: false })
           .limit(10);
+
+        if (convError) {
+          console.error(`Error fetching conversations for ${company.name}:`, convError);
+          continue;
+        }
+
+        console.log(`Found ${conversations?.length || 0} conversations for ${company.name}`);
 
         if (!conversations || conversations.length === 0) {
           console.log(`No conversations for company ${company.name}`);
@@ -74,23 +83,71 @@ serve(async (req) => {
 
         for (const conv of conversations) {
           try {
-            // Get supervisor recommendation
-            const supervisorResponse = await supabase.functions.invoke('supervisor-agent', {
-          body: {
-            companyId: company.id,
-            customerPhone: conv.phone,
-            customerName: conv.customer_name,
-            message: 'Follow-up opportunity',
-            conversationHistory: conv.messages || []
-          }
-            });
+            // Fetch full message history
+            const { data: messages } = await supabase
+              .from('messages')
+              .select('*')
+              .eq('conversation_id', conv.id)
+              .order('created_at', { ascending: true });
 
-            if (supervisorResponse.error) {
-              console.error('Supervisor error:', supervisorResponse.error);
+            if (!messages || messages.length === 0) {
+              console.log(`No messages in conversation ${conv.id}, skipping`);
               continue;
             }
 
-            const recommendation = supervisorResponse.data;
+            // Build conversation history for supervisor
+            const conversationHistory = messages.map(m => ({
+              role: m.role,
+              content: m.content,
+              created_at: m.created_at
+            }));
+
+            // Get the last customer message as the trigger
+            const lastCustomerMessage = messages
+              .filter(m => m.role === 'user')
+              .pop();
+
+            if (!lastCustomerMessage) {
+              console.log(`No customer messages in conversation ${conv.id}, skipping`);
+              continue;
+            }
+
+            console.log(`[Analyze] Processing conversation ${conv.id} for ${conv.phone}`);
+
+            // Get supervisor recommendation
+            const supervisorResponse = await fetch(
+              `${supabaseUrl}/functions/v1/supervisor-agent`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${supabaseKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  companyId: company.id,
+                  customerPhone: conv.phone,
+                  customerMessage: lastCustomerMessage.content,
+                  conversationHistory: conversationHistory,
+                  companyData: company,
+                  customerData: conv
+                })
+              }
+            );
+
+            if (!supervisorResponse.ok) {
+              const errorText = await supervisorResponse.text();
+              console.error('Supervisor error:', errorText);
+              continue;
+            }
+
+            const supervisorData = await supervisorResponse.json();
+            
+            if (!supervisorData.success) {
+              console.error('Supervisor returned error:', supervisorData.error);
+              continue;
+            }
+
+            const recommendation = supervisorData.recommendation;
 
             // Use Kimi AI to craft follow-up message based on supervisor's guidance
             const kimiResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
