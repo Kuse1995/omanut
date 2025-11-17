@@ -220,7 +220,16 @@ export default function SupervisorInsights() {
           </Card>
 
           {/* Detailed View */}
-          {selectedInsight?.recommendation ? (
+          {insights.length === 0 ? (
+            <div className="lg:col-span-2 flex flex-col items-center justify-center h-[600px] text-center px-6">
+              <Brain className="h-16 w-16 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Supervisor Insights Yet</h3>
+              <p className="text-muted-foreground max-w-md">
+                The Supervisor Agent will analyze customer conversations and provide strategic recommendations in real-time. 
+                Insights will appear here once customers start messaging your WhatsApp number.
+              </p>
+            </div>
+          ) : selectedInsight?.recommendation ? (
             <div className="lg:col-span-2 space-y-6">
               <Card>
                 <CardHeader>
