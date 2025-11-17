@@ -152,6 +152,75 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 
     messages.push({ role: 'user', content: userMessage });
 
+    // ========== SUPERVISOR AGENT LAYER ==========
+    // Call supervisor to analyze and provide strategic recommendation
+    console.log('[SUPERVISOR] Requesting strategic analysis...');
+    let supervisorRecommendation = null;
+    
+    try {
+      const supervisorResponse = await fetch(
+        `${Deno.env.get('SUPABASE_URL')}/functions/v1/supervisor-agent`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            companyId: company.id,
+            customerPhone,
+            customerMessage: userMessage,
+            conversationHistory: transcriptLines.slice(-20),
+            companyData: company,
+            customerData: conversation
+          })
+        }
+      );
+
+      if (supervisorResponse.ok) {
+        const supervisorData = await supervisorResponse.json();
+        if (supervisorData.success) {
+          supervisorRecommendation = supervisorData.recommendation;
+          console.log('[SUPERVISOR] Strategic guidance received');
+          console.log('[SUPERVISOR] Strategy:', supervisorRecommendation.strategy);
+        }
+      } else {
+        console.log('[SUPERVISOR] Supervisor unavailable, proceeding without guidance');
+      }
+    } catch (error) {
+      console.error('[SUPERVISOR] Supervisor failed, proceeding without guidance:', error);
+    }
+
+    // Enhance instructions with supervisor guidance if available
+    if (supervisorRecommendation) {
+      instructions += `\n\n=== STRATEGIC SUPERVISOR GUIDANCE ===
+Your supervisor has analyzed this interaction and provided strategic recommendations:
+
+ANALYSIS: ${supervisorRecommendation.analysis}
+
+RECOMMENDED STRATEGY: ${supervisorRecommendation.strategy}
+
+KEY POINTS TO ADDRESS:
+${supervisorRecommendation.keyPoints.map((point: string, i: number) => `${i + 1}. ${point}`).join('\n')}
+
+TONE GUIDANCE: ${supervisorRecommendation.toneGuidance}
+
+CONVERSION TIPS:
+${supervisorRecommendation.conversionTips.map((tip: string, i: number) => `${i + 1}. ${tip}`).join('\n')}
+
+AVOID:
+${supervisorRecommendation.avoidances.map((avoid: string, i: number) => `${i + 1}. ${avoid}`).join('\n')}
+
+RECOMMENDED APPROACH:
+${supervisorRecommendation.recommendedResponse}
+
+⚠️ CRITICAL: Use this strategic guidance to craft your response. The customer should only see your final response - never mention the supervisor or internal analysis.`;
+      
+      // Update messages array with enhanced instructions
+      messages[0] = { role: 'system', content: instructions };
+    }
+    // ========== END SUPERVISOR LAYER ==========
+
     // Call Kimi AI with extended timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
