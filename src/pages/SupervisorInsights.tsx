@@ -41,6 +41,11 @@ export default function SupervisorInsights() {
   const [analyzing, setAnalyzing] = useState(false);
   const [insights, setInsights] = useState<SupervisorInsight[]>([]);
   const [selectedInsight, setSelectedInsight] = useState<SupervisorInsight | null>(null);
+  const [progress, setProgress] = useState<{
+    total: number;
+    current: number;
+    status: string;
+  } | null>(null);
 
   useEffect(() => {
     checkAccess();
@@ -156,6 +161,8 @@ export default function SupervisorInsights() {
 
   const handleAnalyzeAndFollowup = async () => {
     setAnalyzing(true);
+    setProgress(null);
+    
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
@@ -168,18 +175,77 @@ export default function SupervisorInsights() {
 
       if (!user?.company_id) return;
 
-      const { data, error } = await supabase.functions.invoke('analyze-and-followup', {
-        body: { companyId: user.company_id }
+      // Use SSE streaming for progress updates
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-and-followup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ companyId: user.company_id, stream: true })
       });
 
-      if (error) throw error;
+      if (!response.ok || !response.body) {
+        throw new Error('Failed to start analysis');
+      }
 
-      toast({
-        title: "Follow-ups Sent",
-        description: `Analyzed and sent ${data.processed} strategic follow-up messages to customers.`,
-      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let totalProcessed = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'start') {
+                setProgress({
+                  total: data.total,
+                  current: 0,
+                  status: 'Starting analysis...'
+                });
+              } else if (data.type === 'progress') {
+                setProgress({
+                  total: data.total,
+                  current: data.current,
+                  status: data.status === 'analyzing' 
+                    ? `Analyzing ${data.phone}...` 
+                    : data.status === 'completed'
+                    ? `✓ Completed ${data.phone}`
+                    : `⊘ Skipped ${data.phone}`
+                });
+                
+                if (data.status === 'completed') {
+                  totalProcessed++;
+                }
+              } else if (data.type === 'complete') {
+                setProgress(null);
+                toast({
+                  title: "Analysis Complete",
+                  description: `Successfully analyzed and sent ${totalProcessed} strategic follow-up messages.`,
+                });
+              } else if (data.type === 'error') {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              console.error('Error parsing SSE data:', e);
+            }
+          }
+        }
+      }
+
     } catch (error) {
       console.error('Error analyzing and following up:', error);
+      setProgress(null);
       toast({
         title: "Error",
         description: "Failed to analyze conversations and send follow-ups.",
@@ -229,6 +295,34 @@ export default function SupervisorInsights() {
 
       <div className="max-w-7xl mx-auto p-6 space-y-6">
         <ScheduledFollowUps />
+        
+        {/* Progress Indicator */}
+        {progress && (
+          <Card className="border-accent-blue/30 bg-accent-blue/5">
+            <CardContent className="pt-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Brain className="h-5 w-5 text-accent-blue animate-pulse" />
+                    <span className="font-semibold text-foreground">Analyzing Conversations</span>
+                  </div>
+                  <Badge variant="secondary">{progress.current} of {progress.total}</Badge>
+                </div>
+                
+                {/* Progress Bar */}
+                <div className="space-y-2">
+                  <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-accent-blue to-accent-purple transition-all duration-500 ease-out"
+                      style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground">{progress.status}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Insights List */}
