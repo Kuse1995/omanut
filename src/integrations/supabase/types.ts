@@ -1070,6 +1070,51 @@ export type Database = {
           },
         ]
       }
+      takeover_sessions: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          expires_at: string | null
+          id: string
+          selected_conversation_id: string | null
+          takeover_phone: string
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          selected_conversation_id?: string | null
+          takeover_phone: string
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          selected_conversation_id?: string | null
+          takeover_phone?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "takeover_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "takeover_sessions_selected_conversation_id_fkey"
+            columns: ["selected_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null

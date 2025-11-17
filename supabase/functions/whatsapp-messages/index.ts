@@ -627,52 +627,69 @@ serve(async (req) => {
     
     console.log('Phone comparison:', { fromPhone, bossPhone, takeoverPhone, isBoss: fromPhone === bossPhone, isTakeover: fromPhone === takeoverPhone });
     
-    // Handle message from takeover number - forward to customer
+    // Handle message from takeover number - conversation selector
     if (company.takeover_number && fromPhone === takeoverPhone) {
-      console.log('Message from TAKEOVER NUMBER - forwarding to customer');
+      console.log('Message from TAKEOVER NUMBER - checking session');
       
-      // Extract customer phone from message (format: "Customer: +1234567890\n\nMessage...")
-      // Or find most recent active conversation for this company
-      const { data: recentConv } = await supabase
-        .from('conversations')
+      const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+      const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+      
+      // Clean up expired sessions
+      await supabase
+        .from('takeover_sessions')
+        .delete()
+        .lt('expires_at', new Date().toISOString());
+      
+      // Check for existing session
+      const { data: session } = await supabase
+        .from('takeover_sessions')
         .select('*')
         .eq('company_id', company.id)
-        .eq('status', 'active')
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .single();
+        .eq('takeover_phone', fromPhone)
+        .gt('expires_at', new Date().toISOString())
+        .maybeSingle();
       
-      if (recentConv) {
-        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+      // Check if message is a numeric selection (1, 2, 3, etc.)
+      const numericSelection = parseInt(Body.trim());
+      const isNumericSelection = !isNaN(numericSelection) && numericSelection > 0;
+      
+      // Get active conversations with human takeover
+      const { data: activeConvs } = await supabase
+        .from('conversations')
+        .select('id, customer_name, phone, started_at, last_message_preview')
+        .eq('company_id', company.id)
+        .eq('status', 'active')
+        .eq('human_takeover', true)
+        .order('started_at', { ascending: false })
+        .limit(10);
+      
+      // If numeric selection, update session
+      if (isNumericSelection && activeConvs && activeConvs.length >= numericSelection) {
+        const selectedConv = activeConvs[numericSelection - 1];
         
-        // Enable takeover mode
+        // Update or create session
         await supabase
-          .from('conversations')
-          .update({ 
-            human_takeover: true,
-            takeover_at: new Date().toISOString()
-          })
-          .eq('id', recentConv.id);
-        
-        // Store boss message
-        await supabase
-          .from('messages')
-          .insert({
-            conversation_id: recentConv.id,
-            role: 'assistant',
-            content: Body
+          .from('takeover_sessions')
+          .upsert({
+            company_id: company.id,
+            takeover_phone: fromPhone,
+            selected_conversation_id: selectedConv.id,
+            expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() // 2 hours
+          }, {
+            onConflict: 'company_id,takeover_phone'
           });
         
-        // Forward to customer via Twilio
+        // Send confirmation
         if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          const confirmMessage = `✅ Now responding to: ${selectedConv.customer_name || 'Unknown'} (${selectedConv.phone?.replace('whatsapp:', '')})\n\nSend your message to reply to this customer.`;
+          
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const twilioFormData = new URLSearchParams();
           twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
-          twilioFormData.append('To', recentConv.phone);
-          twilioFormData.append('Body', Body);
+          twilioFormData.append('To', From);
+          twilioFormData.append('Body', confirmMessage);
           
-          const twilioResponse = await fetch(twilioUrl, {
+          await fetch(twilioUrl, {
             method: 'POST',
             headers: {
               'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
@@ -680,12 +697,135 @@ serve(async (req) => {
             },
             body: twilioFormData
           });
+        }
+        
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+        });
+      }
+      
+      // If no session or asking for menu, show conversation list
+      if (!session || Body.toLowerCase().includes('menu') || Body.toLowerCase().includes('list')) {
+        if (!activeConvs || activeConvs.length === 0) {
+          // No active conversations
+          if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+            const noConvsMessage = `No active conversations in takeover mode.\n\nTo start managing a conversation:\n1. Go to your dashboard\n2. Select a conversation\n3. Click "Take Over"\n4. You'll receive messages here`;
+            
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const twilioFormData = new URLSearchParams();
+            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('To', From);
+            twilioFormData.append('Body', noConvsMessage);
+            
+            await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: twilioFormData
+            });
+          }
+        } else {
+          // Show menu of active conversations
+          let menuMessage = `📱 *Active Conversations*\n\nReply with a number to select:\n\n`;
           
-          if (twilioResponse.ok) {
-            console.log('[TAKEOVER] Message forwarded to customer successfully');
-          } else {
-            const errorText = await twilioResponse.text();
-            console.error('[TAKEOVER] Failed to forward message:', twilioResponse.status, errorText);
+          activeConvs.forEach((conv, index) => {
+            const customerDisplay = conv.customer_name || 'Unknown';
+            const phoneDisplay = conv.phone?.replace('whatsapp:', '') || 'N/A';
+            const preview = conv.last_message_preview ? `\n   "${conv.last_message_preview.substring(0, 60)}..."` : '';
+            menuMessage += `*${index + 1}.* ${customerDisplay}\n   ${phoneDisplay}${preview}\n\n`;
+          });
+          
+          menuMessage += `Send "menu" anytime to see this list again.`;
+          
+          if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const twilioFormData = new URLSearchParams();
+            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('To', From);
+            twilioFormData.append('Body', menuMessage);
+            
+            await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: twilioFormData
+            });
+          }
+        }
+        
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+        });
+      }
+      
+      // If session exists, forward message to selected conversation
+      if (session && session.selected_conversation_id) {
+        const { data: conversation } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', session.selected_conversation_id)
+          .single();
+        
+        if (conversation) {
+          // Enable takeover mode if not already
+          if (!conversation.human_takeover) {
+            await supabase
+              .from('conversations')
+              .update({ 
+                human_takeover: true,
+                takeover_at: new Date().toISOString()
+              })
+              .eq('id', conversation.id);
+          }
+          
+          // Store boss message
+          await supabase
+            .from('messages')
+            .insert({
+              conversation_id: conversation.id,
+              role: 'assistant',
+              content: Body
+            });
+          
+          // Update session expiry
+          await supabase
+            .from('takeover_sessions')
+            .update({
+              expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+            })
+            .eq('id', session.id);
+          
+          // Forward to customer
+          if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const twilioFormData = new URLSearchParams();
+            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('To', conversation.phone);
+            twilioFormData.append('Body', Body);
+            
+            const twilioResponse = await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: twilioFormData
+            });
+            
+            if (twilioResponse.ok) {
+              console.log('[TAKEOVER] Message forwarded to customer');
+            } else {
+              const errorText = await twilioResponse.text();
+              console.error('[TAKEOVER] Failed to forward:', twilioResponse.status, errorText);
+            }
           }
         }
       }
@@ -870,8 +1010,25 @@ serve(async (req) => {
           EdgeRuntime.waitUntil(
             (async () => {
               try {
+                // Check if there's an active session for this conversation
+                const { data: session } = await supabase
+                  .from('takeover_sessions')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .eq('selected_conversation_id', conversation.id)
+                  .gt('expires_at', new Date().toISOString())
+                  .maybeSingle();
+                
                 const customerName = conversation.customer_name || customerPhone;
-                const forwardMessage = `📱 Customer: ${customerName} (${customerPhone})\n\n${Body}`;
+                let forwardMessage;
+                
+                if (session) {
+                  // Active session - just send the message
+                  forwardMessage = `💬 ${customerName}: ${Body}`;
+                } else {
+                  // No active session - include context
+                  forwardMessage = `📱 *New message from ${customerName}*\n${customerPhone}\n\n${Body}\n\n_Reply "menu" to see all conversations_`;
+                }
                 
                 const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
                 const twilioFormData = new URLSearchParams();
