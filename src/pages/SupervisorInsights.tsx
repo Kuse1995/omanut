@@ -281,143 +281,176 @@ export default function SupervisorInsights() {
               </p>
             </div>
           ) : selectedInsight?.recommendation ? (
-            <div className="lg:col-span-2 space-y-6">
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Customer Context</CardTitle>
-                    <Badge variant="outline">{selectedInsight.customerPhone}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">Customer Message:</p>
-                    <p className="font-medium">{selectedInsight.customerMessage}</p>
-                  </div>
-                </CardContent>
-              </Card>
+            <ScrollArea className="lg:col-span-2 h-[calc(100vh-200px)]">
+              <div className="space-y-4 pr-4">
+                {/* Customer Message Section */}
+                <Card className="border-accent-blue/30">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5 text-accent-blue" />
+                      Customer Message
+                    </CardTitle>
+                    <CardDescription>Original inquiry from {selectedInsight.customerPhone}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-accent-blue/5 border border-accent-blue/20 rounded-lg p-4">
+                      <p className="text-foreground whitespace-pre-wrap">{selectedInsight.customerMessage}</p>
+                    </div>
+                  </CardContent>
+                </Card>
 
-              <Tabs defaultValue="analysis" className="w-full">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="analysis">
-                    <Brain className="h-4 w-4 mr-2" />
-                    Analysis
-                  </TabsTrigger>
-                  <TabsTrigger value="strategy">
-                    <Target className="h-4 w-4 mr-2" />
-                    Strategy
-                  </TabsTrigger>
-                  <TabsTrigger value="tips">
-                    <TrendingUp className="h-4 w-4 mr-2" />
-                    Tips
-                  </TabsTrigger>
-                  <TabsTrigger value="response">
-                    <MessageSquare className="h-4 w-4 mr-2" />
-                    Response
-                  </TabsTrigger>
-                </TabsList>
+                {/* Supervisor Reasoning Flow */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="h-px flex-1 bg-border"></div>
+                    <span className="flex items-center gap-2">
+                      <Brain className="h-4 w-4 text-accent-purple" />
+                      Supervisor AI Reasoning Process
+                    </span>
+                    <div className="h-px flex-1 bg-border"></div>
+                  </div>
 
-                <TabsContent value="analysis" className="space-y-4">
-                  <Card>
+                  {/* Analysis Card */}
+                  <Card className="border-accent-purple/30">
                     <CardHeader>
-                      <CardTitle>Strategic Analysis</CardTitle>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Brain className="h-5 w-5 text-accent-purple" />
+                        Strategic Analysis
+                      </CardTitle>
+                      <CardDescription>Supervisor's understanding of the situation</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <h4 className="font-semibold mb-2">Situation Assessment</h4>
-                        <p className="text-muted-foreground">{selectedInsight.recommendation.analysis}</p>
-                      </div>
-                      
-                      <div>
-                        <h4 className="font-semibold mb-2">Tone Guidance</h4>
-                        <Badge variant="secondary">{selectedInsight.recommendation.toneGuidance}</Badge>
+                    <CardContent>
+                      <div className="bg-accent-purple/5 border border-accent-purple/20 rounded-lg p-4">
+                        <p className="text-foreground whitespace-pre-wrap">{selectedInsight.recommendation.analysis}</p>
                       </div>
                     </CardContent>
                   </Card>
-                </TabsContent>
 
-                <TabsContent value="strategy" className="space-y-4">
-                  <Card>
+                  {/* Strategy Card */}
+                  <Card className="border-accent-green/30">
                     <CardHeader>
-                      <CardTitle>Recommended Strategy</CardTitle>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Target className="h-5 w-5 text-accent-green" />
+                        Recommended Strategy
+                      </CardTitle>
+                      <CardDescription>How to approach this conversation</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="p-4 bg-primary/10 rounded-lg">
-                        <p className="font-medium">{selectedInsight.recommendation.strategy}</p>
+                    <CardContent>
+                      <div className="bg-accent-green/5 border border-accent-green/20 rounded-lg p-4">
+                        <p className="text-foreground">{selectedInsight.recommendation.strategy}</p>
                       </div>
+                    </CardContent>
+                  </Card>
 
-                      <div>
-                        <h4 className="font-semibold mb-3">Key Points to Address</h4>
+                  {/* Key Points & Tone Grid */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Lightbulb className="h-4 w-4 text-accent-yellow" />
+                          Key Points to Address
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
                         <ul className="space-y-2">
                           {selectedInsight.recommendation.keyPoints.map((point, idx) => (
                             <li key={idx} className="flex items-start gap-2">
-                              <span className="text-primary shrink-0">•</span>
-                              <span>{point}</span>
+                              <span className="text-accent-yellow mt-1">•</span>
+                              <span className="text-sm">{point}</span>
                             </li>
                           ))}
                         </ul>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <MessageSquare className="h-4 w-4 text-accent-purple" />
+                          Tone Guidance
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-muted/50 rounded-lg p-3">
+                          <p className="text-sm">{selectedInsight.recommendation.toneGuidance}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Recommended Response */}
+                  <Card className="border-accent-orange/30">
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Send className="h-5 w-5 text-accent-orange" />
+                        Recommended Response
+                      </CardTitle>
+                      <CardDescription>Supervisor's suggested message for main AI to deliver</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="bg-accent-orange/5 border border-accent-orange/20 rounded-lg p-4">
+                        <p className="text-foreground whitespace-pre-wrap">{selectedInsight.recommendation.recommendedResponse}</p>
+                      </div>
+                      <div className="mt-3 flex items-start gap-2 text-xs text-muted-foreground">
+                        <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                        <span>This is guidance for the main AI. The actual response may be adapted based on conversation context.</span>
                       </div>
                     </CardContent>
                   </Card>
-                </TabsContent>
 
-                <TabsContent value="tips" className="space-y-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5" />
-                        Conversion Tips
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-3">
-                        {selectedInsight.recommendation.conversionTips.map((tip, idx) => (
-                          <li key={idx} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
-                            <span className="text-primary font-semibold">{idx + 1}</span>
-                            <span>{tip}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
+                  {/* Tips & Avoidances Grid */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <Card className="border-accent-green/30">
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4 text-accent-green" />
+                          Conversion Tips
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="space-y-2">
+                          {selectedInsight.recommendation.conversionTips.map((tip, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-accent-green mt-1">✓</span>
+                              <span className="text-sm">{tip}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5 text-destructive" />
-                        Avoid These
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-2">
-                        {selectedInsight.recommendation.avoidances.map((avoid, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-destructive">
-                            <span className="shrink-0">✗</span>
-                            <span>{avoid}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                    <Card className="border-destructive/30">
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-destructive" />
+                          Things to Avoid
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="space-y-2">
+                          {selectedInsight.recommendation.avoidances.map((avoid, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-destructive mt-1">✗</span>
+                              <span className="text-sm">{avoid}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
+                  </div>
 
-                <TabsContent value="response">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Recommended Response Approach</CardTitle>
-                      <CardDescription>
-                        This is the guidance provided to the main assistant
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="p-4 bg-muted/50 rounded-lg whitespace-pre-wrap">
-                        {selectedInsight.recommendation.recommendedResponse}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
-            </div>
+                  {/* Research Badge */}
+                  {selectedInsight.recommendation.researchUsed && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                      <Badge variant="secondary" className="bg-accent-blue/10">
+                        <Brain className="h-3 w-3 mr-1" />
+                        Market research performed
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </ScrollArea>
           ) : (
             <div className="lg:col-span-2 flex items-center justify-center h-[600px]">
               <p className="text-muted-foreground">Select an insight to view details</p>
