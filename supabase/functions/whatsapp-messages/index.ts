@@ -432,12 +432,30 @@ async function processAIResponse(
           });
         }
 
-        // Update conversation with new agent
-        await supabase.from('conversations').update({ active_agent: selectedAgent }).eq('id', conversationId);
-
-        // Handle BOSS agent - trigger handoff
+        // Update conversation with new agent and pause state
         if (selectedAgent === 'boss') {
-          await supabase.from('conversations').update({ is_paused_for_human: true, human_takeover: true }).eq('id', conversationId);
+          // Boss agent - pause for human takeover
+          await supabase.from('conversations').update({ 
+            active_agent: 'boss',
+            is_paused_for_human: true, 
+            human_takeover: true 
+          }).eq('id', conversationId);
+        } else {
+          // Support or Sales agent - ensure NOT paused
+          await supabase.from('conversations').update({ 
+            active_agent: selectedAgent,
+            is_paused_for_human: false,
+            human_takeover: false
+          }).eq('id', conversationId);
+          
+          // Log unpause events for debugging
+          if (conversation.is_paused_for_human) {
+            console.log(`[UNPAUSE] Auto-unpausing conversation ${conversationId} - routed to ${selectedAgent} agent`);
+          }
+        }
+
+        // Handle BOSS agent - trigger handoff notification
+        if (selectedAgent === 'boss') {
           const summary = await generateConversationSummary(conversationId, supabase);
           
           const handoffSource = agentSwitched ? `${previousAgent}_agent` : 'supervisor_router';
