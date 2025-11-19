@@ -210,6 +210,7 @@ export type Database = {
       }
       companies: {
         Row: {
+          admin_last_active: string | null
           boss_phone: string | null
           branches: string | null
           business_type: string | null
@@ -235,6 +236,7 @@ export type Database = {
           whatsapp_voice_enabled: boolean | null
         }
         Insert: {
+          admin_last_active?: string | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
@@ -260,6 +262,7 @@ export type Database = {
           whatsapp_voice_enabled?: boolean | null
         }
         Update: {
+          admin_last_active?: string | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
@@ -438,6 +441,7 @@ export type Database = {
           ended_at: string | null
           human_takeover: boolean | null
           id: string
+          is_paused_for_human: boolean | null
           last_message_preview: string | null
           phone: string | null
           pinned: boolean | null
@@ -459,6 +463,7 @@ export type Database = {
           ended_at?: string | null
           human_takeover?: boolean | null
           id?: string
+          is_paused_for_human?: boolean | null
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
@@ -480,6 +485,7 @@ export type Database = {
           ended_at?: string | null
           human_takeover?: boolean | null
           id?: string
+          is_paused_for_human?: boolean | null
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
