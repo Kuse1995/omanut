@@ -461,6 +461,47 @@ async function processAIResponse(
           const handoffSource = agentSwitched ? `${previousAgent}_agent` : 'supervisor_router';
           await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, handoffSource);
           
+          // Send notification to CLIENT that a representative will reach out
+          const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+          const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+          
+          if (company.boss_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+            const clientNotificationMessage = `Thank you for your message. A representative will reach out to you shortly on ${company.boss_phone} to assist you further.`;
+            
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
+              ? company.whatsapp_number 
+              : `whatsapp:${company.whatsapp_number}`;
+            
+            const formData = new URLSearchParams();
+            formData.append('From', fromNumber);
+            formData.append('To', `whatsapp:${customerPhone}`);
+            formData.append('Body', clientNotificationMessage);
+            
+            const twilioResponse = await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: formData.toString(),
+            });
+            
+            if (twilioResponse.ok) {
+              console.log('[HANDOFF] Client notification sent successfully');
+              
+              // Store client notification message in database
+              await supabase.from('messages').insert({
+                conversation_id: conversationId,
+                role: 'assistant',
+                content: clientNotificationMessage
+              });
+            } else {
+              const errorText = await twilioResponse.text();
+              console.error('[HANDOFF] Failed to send client notification:', twilioResponse.status, errorText);
+            }
+          }
+          
           // Trigger post-handoff mini-briefing
           try {
             await supabase.functions.invoke('daily-briefing', {
