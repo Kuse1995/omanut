@@ -1,6 +1,6 @@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { UserCog, Bot, Pin } from 'lucide-react';
+import { UserCog, Bot, Pin, Headset, TrendingUp, UserCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ interface ConversationItemProps {
     last_message_preview: string | null;
     pinned: boolean;
     messages: any[];
+    active_agent?: string | null;
   };
   isSelected: boolean;
   onClick: () => void;
@@ -77,12 +78,30 @@ export const ConversationItem = ({ conversation, isSelected, onClick }: Conversa
           </p>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {conversation.active_agent === 'support' && (
+              <Badge variant="outline" className="gap-1 bg-green-50 text-green-700 border-green-200">
+                <Headset className="h-3 w-3" />
+                <span className="text-xs">Support</span>
+              </Badge>
+            )}
+            {conversation.active_agent === 'sales' && (
+              <Badge variant="outline" className="gap-1 bg-blue-50 text-blue-700 border-blue-200">
+                <TrendingUp className="h-3 w-3" />
+                <span className="text-xs">Sales</span>
+              </Badge>
+            )}
+            {conversation.active_agent === 'boss' && (
+              <Badge variant="outline" className="gap-1 bg-purple-50 text-purple-700 border-purple-200">
+                <UserCircle className="h-3 w-3" />
+                <span className="text-xs">Boss</span>
+              </Badge>
+            )}
             {conversation.human_takeover ? (
               <Badge variant="secondary" className="gap-1">
                 <UserCog className="h-3 w-3" />
                 <span className="text-xs">Human</span>
               </Badge>
-            ) : (
+            ) : !conversation.active_agent && (
               <Badge variant="outline" className="gap-1">
                 <Bot className="h-3 w-3" />
                 <span className="text-xs">AI</span>

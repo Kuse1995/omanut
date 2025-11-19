@@ -119,10 +119,68 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_performance: {
+        Row: {
+          agent_type: string
+          company_id: string | null
+          conversation_id: string | null
+          conversation_resolved: boolean | null
+          created_at: string | null
+          handoff_occurred: boolean | null
+          handoff_reason: string | null
+          id: string
+          notes: string | null
+          routed_at: string | null
+          routing_confidence: number | null
+        }
+        Insert: {
+          agent_type: string
+          company_id?: string | null
+          conversation_id?: string | null
+          conversation_resolved?: boolean | null
+          created_at?: string | null
+          handoff_occurred?: boolean | null
+          handoff_reason?: string | null
+          id?: string
+          notes?: string | null
+          routed_at?: string | null
+          routing_confidence?: number | null
+        }
+        Update: {
+          agent_type?: string
+          company_id?: string | null
+          conversation_id?: string | null
+          conversation_resolved?: boolean | null
+          created_at?: string | null
+          handoff_occurred?: boolean | null
+          handoff_reason?: string | null
+          id?: string
+          notes?: string | null
+          routed_at?: string | null
+          routing_confidence?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_performance_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_performance_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       boss_conversations: {
         Row: {
           company_id: string
           created_at: string
+          handed_off_by: string | null
           id: string
           message_content: string
           message_from: string
@@ -131,6 +189,7 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string
+          handed_off_by?: string | null
           id?: string
           message_content: string
           message_from: string
@@ -139,6 +198,7 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string
+          handed_off_by?: string | null
           id?: string
           message_content?: string
           message_from?: string
@@ -211,6 +271,7 @@ export type Database = {
       companies: {
         Row: {
           admin_last_active: string | null
+          agent_routing_enabled: boolean | null
           boss_phone: string | null
           branches: string | null
           business_type: string | null
@@ -237,6 +298,7 @@ export type Database = {
         }
         Insert: {
           admin_last_active?: string | null
+          agent_routing_enabled?: boolean | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
@@ -263,6 +325,7 @@ export type Database = {
         }
         Update: {
           admin_last_active?: string | null
+          agent_routing_enabled?: boolean | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
@@ -432,6 +495,7 @@ export type Database = {
       }
       conversations: {
         Row: {
+          active_agent: string | null
           archived: boolean | null
           assigned_to: string | null
           company_id: string | null
@@ -454,6 +518,7 @@ export type Database = {
           unread_count: number | null
         }
         Insert: {
+          active_agent?: string | null
           archived?: boolean | null
           assigned_to?: string | null
           company_id?: string | null
@@ -476,6 +541,7 @@ export type Database = {
           unread_count?: number | null
         }
         Update: {
+          active_agent?: string | null
           archived?: boolean | null
           assigned_to?: string | null
           company_id?: string | null

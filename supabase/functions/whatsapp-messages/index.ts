@@ -152,7 +152,8 @@ async function sendBossHandoffNotification(
   customerPhone: string,
   customerName: string,
   summary: string,
-  supabase: any
+  supabase: any,
+  handedOffBy: string = 'unknown'
 ) {
   const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -176,10 +177,16 @@ async function sendBossHandoffNotification(
   
   if (windowActive) {
     // Send free-form notification (within 24-hour window)
-    const message = `🔔 ACTION REQUIRED
+  const agentLabel = handedOffBy === 'support_agent' ? 'Support Agent' : 
+                    handedOffBy === 'sales_agent' ? 'Sales Agent' : 
+                    handedOffBy === 'supervisor_router' ? 'Supervisor (Payment/Critical)' : 
+                    'System';
+
+  const message = `🔔 ACTION REQUIRED
 
 Client Name: ${customerName}
 Client Number: ${displayPhone}
+Handed off by: ${agentLabel}
 
 Summary:
 ${summary}
