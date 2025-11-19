@@ -638,9 +638,9 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     instructions += `\n\nKey Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
-3. For reservations, collect ALL required details before calling create_reservation
-4. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
-5. For payments, use request_payment tool to notify management
+3. For reservations, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
+4. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
+5. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 6. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
    - Only provide detailed explanations when customer explicitly asks or for complex topics
@@ -782,8 +782,43 @@ ${supervisorRecommendation.recommendedResponse}
             {
               type: "function",
               function: {
+                name: "send_flow",
+                description: "Send a WhatsApp Flow form to collect information from the customer. Use this INSTEAD of asking multiple questions. Available for reservations and payment information.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    flow_type: {
+                      type: "string",
+                      enum: ["reservation", "payment"],
+                      description: "Type of flow to send"
+                    },
+                    header_text: {
+                      type: "string",
+                      description: "Header text for the flow message (e.g., 'Complete Your Reservation')"
+                    },
+                    button_text: {
+                      type: "string",
+                      description: "Button text (e.g., 'Fill Form')"
+                    },
+                    prefill_data: {
+                      type: "object",
+                      description: "Optional pre-filled data from conversation context",
+                      properties: {
+                        customer_name: { type: "string" },
+                        phone: { type: "string" },
+                        email: { type: "string" }
+                      }
+                    }
+                  },
+                  required: ["flow_type", "header_text", "button_text"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
                 name: "create_reservation",
-                description: "Create a booking ONLY after confirming all details with the customer.",
+                description: "DEPRECATED: Use send_flow instead. Only use if flow fails.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -1012,6 +1047,34 @@ ${supervisorRecommendation.recommendedResponse}
                 console.error('[BACKGROUND] Media send error:', error);
                 assistantReply = "I tried to send the media but encountered an error.";
               }
+            }
+          } else if (toolCall.function.name === 'send_flow') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BACKGROUND] send_flow called with:', JSON.stringify(args));
+            
+            try {
+              // Call send-whatsapp-flow edge function
+              const flowResponse = await supabase.functions.invoke('send-whatsapp-flow', {
+                body: {
+                  flow_type: args.flow_type,
+                  header_text: args.header_text,
+                  button_text: args.button_text,
+                  prefill_data: args.prefill_data || {},
+                  customer_phone: customerPhone,
+                  company_id: company.id
+                }
+              });
+              
+              if (flowResponse.error) {
+                console.error('[BACKGROUND] Flow send error:', flowResponse.error);
+                assistantReply = `I'll help you with that. ${args.flow_type === 'reservation' ? 'Please provide your name, preferred date, time, and number of guests.' : 'Please provide your name, phone, and email for payment.'}`;
+              } else {
+                console.log('[BACKGROUND] Flow sent successfully');
+                assistantReply = `I've sent you a quick form to complete. Please fill it out and submit. 📋`;
+              }
+            } catch (error) {
+              console.error('[BACKGROUND] send_flow error:', error);
+              assistantReply = `I'll help you with that. ${args.flow_type === 'reservation' ? 'Please provide your name, preferred date, time, and number of guests.' : 'Please provide your name, phone, and email for payment.'}`;
             }
           } else if (toolCall.function.name === 'create_reservation') {
             const args = JSON.parse(toolCall.function.arguments);
@@ -1362,6 +1425,159 @@ serve(async (req) => {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
       });
+    }
+
+    // Detect WhatsApp Flow Response
+    if (Body.includes('__flow_response__')) {
+      console.log('[FLOW-RESPONSE] Detected flow submission');
+      
+      try {
+        // Parse the flow response data
+        const flowData = JSON.parse(Body.replace('__flow_response__', ''));
+        const flowType = flowData.flow_type;
+        
+        console.log('[FLOW-RESPONSE] Flow data:', JSON.stringify(flowData));
+        
+        // Find or create conversation
+        const customerPhone = From;
+        let conversationId: string;
+        
+        const { data: existingConv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('phone', customerPhone)
+          .eq('company_id', company.id)
+          .eq('status', 'active')
+          .maybeSingle();
+        
+        if (existingConv) {
+          conversationId = existingConv.id;
+        } else {
+          const { data: newConv } = await supabase
+            .from('conversations')
+            .insert({
+              phone: customerPhone,
+              company_id: company.id,
+              customer_name: flowData.customer_name || 'Customer',
+              status: 'active'
+            })
+            .select('id')
+            .single();
+          conversationId = newConv!.id;
+        }
+        
+        if (flowType === 'reservation') {
+          // Create reservation from flow data
+          const { error: resError } = await supabase
+            .from('reservations')
+            .insert({
+              conversation_id: conversationId,
+              company_id: company.id,
+              name: flowData.customer_name,
+              phone: flowData.phone,
+              email: flowData.email || null,
+              date: flowData.date,
+              time: flowData.time,
+              guests: parseInt(flowData.guests),
+              occasion: flowData.occasion || null,
+              area_preference: flowData.area_preference || null,
+              branch: flowData.branch || null,
+              status: 'confirmed'
+            });
+          
+          if (resError) {
+            console.error('[FLOW-RESPONSE] Reservation creation error:', resError);
+            return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Sorry, there was an error processing your reservation. Please try again.]]></Message>
+</Response>`, {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+            });
+          }
+          
+          // Send confirmation
+          const confirmMsg = `🎉 *Reservation Confirmed!*\n\n✅ Name: ${flowData.customer_name}\n📅 Date: ${flowData.date}\n🕐 Time: ${flowData.time}\n👥 Guests: ${flowData.guests}\n\nWe look forward to seeing you!`;
+          
+          return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${confirmMsg}]]></Message>
+</Response>`, {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+          });
+          
+        } else if (flowType === 'payment') {
+          // Create payment transaction from flow data
+          const { error: payError } = await supabase
+            .from('payment_transactions')
+            .insert({
+              company_id: company.id,
+              conversation_id: conversationId,
+              customer_name: flowData.customer_name,
+              customer_phone: flowData.phone,
+              amount: parseFloat(flowData.amount || '0'),
+              currency: company.currency_prefix || 'ZMW',
+              payment_method: flowData.payment_method,
+              payment_status: 'pending'
+            });
+          
+          if (payError) {
+            console.error('[FLOW-RESPONSE] Payment creation error:', payError);
+            return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Sorry, there was an error processing your payment. Please try again.]]></Message>
+</Response>`, {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+            });
+          }
+          
+          // Notify boss
+          if (company.boss_phone) {
+            const bossMsg = `💰 *Payment Request*\n\nCustomer: ${flowData.customer_name}\nPhone: ${flowData.phone}\nEmail: ${flowData.email || 'Not provided'}\nMethod: ${flowData.payment_method}\nAmount: ${company.currency_prefix}${flowData.amount || 'TBD'}`;
+            
+            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+            
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const notifFormData = new URLSearchParams();
+            notifFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            notifFormData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+            notifFormData.append('Body', bossMsg);
+            
+            await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: notifFormData.toString(),
+            });
+          }
+          
+          // Send confirmation to customer
+          const confirmMsg = `✅ *Payment Information Received*\n\nThank you ${flowData.customer_name}! Our team will contact you shortly with payment instructions.`;
+          
+          return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${confirmMsg}]]></Message>
+</Response>`, {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+          });
+        }
+        
+      } catch (error) {
+        console.error('[FLOW-RESPONSE] Error processing flow:', error);
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Sorry, there was an error processing your form. Please try again.]]></Message>
+</Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+        });
+      }
     }
 
     // Check if message is from boss or takeover number
