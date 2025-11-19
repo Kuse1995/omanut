@@ -82,6 +82,166 @@ async function sendFallbackMessage(
   }
 }
 
+// Generate 3-bullet conversation summary using AI
+async function generateConversationSummary(
+  conversationId: string,
+  supabase: any
+): Promise<string> {
+  try {
+    // Fetch last 10 messages
+    const { data: messages } = await supabase
+      .from('messages')
+      .select('role, content, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    if (!messages || messages.length === 0) {
+      return '• No conversation history available';
+    }
+    
+    // Format conversation
+    const conversationText = messages
+      .reverse()
+      .map((m: any) => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
+      .join('\n');
+    
+    // Use DeepSeek to generate summary
+    const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+    if (!DEEPSEEK_API_KEY) {
+      // Fallback: simple summary
+      const lastUserMsg = messages.find((m: any) => m.role === 'user')?.content || 'No message';
+      return `• Customer's last message: ${lastUserMsg.substring(0, 100)}...`;
+    }
+    
+    const summaryResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a business analyst. Create a brief 3-bullet point executive summary of this conversation for a manager. Focus on: 1) What the customer wants, 2) Key details discussed, 3) Why human intervention is needed. Keep each bullet under 20 words.'
+          },
+          {
+            role: 'user',
+            content: `Conversation:\n${conversationText}\n\nCreate 3-bullet summary:`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 200
+      })
+    });
+    
+    const summaryData = await summaryResponse.json();
+    return summaryData.choices[0]?.message?.content || '• Summary generation failed';
+    
+  } catch (error) {
+    console.error('[SUMMARY] Error generating summary:', error);
+    return '• Unable to generate summary';
+  }
+}
+
+// Send boss handoff notification with formatted message
+async function sendBossHandoffNotification(
+  company: any,
+  customerPhone: string,
+  customerName: string,
+  summary: string,
+  supabase: any
+) {
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  
+  if (!company.boss_phone || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    console.log('[HANDOFF] Cannot send boss notification - missing config');
+    return;
+  }
+  
+  // Format phone number for display (remove whatsapp: prefix)
+  const displayPhone = customerPhone.replace('whatsapp:', '');
+  
+  // Check if 24-hour service window is active
+  const now = new Date();
+  const adminLastActive = company.admin_last_active ? new Date(company.admin_last_active) : null;
+  const hoursSinceActive = adminLastActive 
+    ? (now.getTime() - adminLastActive.getTime()) / (1000 * 60 * 60)
+    : 999;
+  
+  const windowActive = hoursSinceActive < 24;
+  
+  if (windowActive) {
+    // Send free-form notification (within 24-hour window)
+    const message = `🔔 ACTION REQUIRED
+
+Client Name: ${customerName}
+Client Number: ${displayPhone}
+
+Summary:
+${summary}
+
+Reply with 'Unmute' to resume AI for this client.`;
+    
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+    const formData = new URLSearchParams();
+    
+    const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
+      ? company.whatsapp_number 
+      : `whatsapp:${company.whatsapp_number}`;
+    const toNumber = company.boss_phone.startsWith('whatsapp:')
+      ? company.boss_phone
+      : `whatsapp:${company.boss_phone}`;
+    
+    formData.append('From', fromNumber);
+    formData.append('To', toNumber);
+    formData.append('Body', message);
+    
+    const response = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+    
+    if (response.ok) {
+      console.log('[HANDOFF] Boss notification sent successfully (free-form)');
+    } else {
+      const errorText = await response.text();
+      console.error('[HANDOFF] Failed to send notification:', errorText);
+    }
+    
+  } else {
+    // Service window expired
+    console.log('[HANDOFF] Service window expired - storing pending notification');
+    
+    // Store notification for next admin wake-up
+    await supabase
+      .from('boss_conversations')
+      .insert({
+        company_id: company.id,
+        message_from: 'system',
+        message_content: `Pending handoff for ${customerName} (${displayPhone})`,
+        response: summary
+      });
+  }
+  
+  // Log notification in boss_conversations
+  await supabase
+    .from('boss_conversations')
+    .insert({
+      company_id: company.id,
+      message_from: 'system',
+      message_content: `Handoff notification sent to boss`,
+      response: `Client: ${customerName} (${displayPhone})\nSummary: ${summary}`
+    });
+}
+
 // Background processing function that handles AI response
 async function processAIResponse(
   conversationId: string,
@@ -218,7 +378,19 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 7. If you don't know something, admit it politely
 8. Never make up information not provided above
 9. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
-10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.`;
+10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.
+
+CRITICAL HANDOFF PROTOCOL:
+- If the customer AGREES TO PAYMENT or expresses clear intent to pay, append [HANDOFF_REQUIRED] at the very end of your response
+- If you encounter a COMPLEX QUESTION you cannot solve confidently, append [HANDOFF_REQUIRED] at the very end
+- Examples requiring handoff:
+  * "Yes, I'd like to pay now"
+  * "How can I make the payment?"
+  * "I have a technical issue with..."
+  * Questions about custom requests, refunds, complaints requiring human judgment
+- IMPORTANT: The customer will NOT see the [HANDOFF_REQUIRED] tag - it's for internal system use only
+- Continue to provide a helpful response to the customer, then add the tag`;
+
 
     // Build conversation history
     const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
@@ -637,6 +809,42 @@ ${supervisorRecommendation.recommendedResponse}
     // Ensure we have a response
     if (!assistantReply || assistantReply.trim() === '') {
       assistantReply = "Thank you for your message. How can I help you today?";
+    }
+
+    // Check for [HANDOFF_REQUIRED] tag
+    const handoffRequired = assistantReply.includes('[HANDOFF_REQUIRED]');
+
+    if (handoffRequired) {
+      console.log('[HANDOFF] Detected [HANDOFF_REQUIRED] tag - initiating handoff sequence');
+      
+      // Step 1: Remove tag from customer-facing message
+      assistantReply = assistantReply.replace(/\[HANDOFF_REQUIRED\]/g, '').trim();
+      
+      // Step 2: Mute AI for this client
+      await supabase
+        .from('conversations')
+        .update({ 
+          is_paused_for_human: true,
+          human_takeover: true,
+          takeover_at: new Date().toISOString()
+        })
+        .eq('id', conversationId);
+      
+      console.log('[HANDOFF] Conversation muted for AI, marked for human takeover');
+      
+      // Step 3: Generate 3-bullet summary
+      const conversationSummary = await generateConversationSummary(conversationId, supabase);
+      
+      // Step 4: Notify Boss with strict format
+      await sendBossHandoffNotification(
+        company,
+        customerPhone,
+        conversation.customer_name || 'Unknown',
+        conversationSummary,
+        supabase
+      );
+      
+      console.log('[HANDOFF] Boss notified with conversation summary');
     }
 
     console.log('[BACKGROUND] Final reply:', assistantReply);
@@ -1077,9 +1285,109 @@ serve(async (req) => {
     }
     
     if (company.boss_phone && fromPhone === bossPhone) {
-      console.log('Message from BOSS - starting background processing');
+      console.log('Message from BOSS - Wake Up Routine + Command Handler');
       
-      // Store boss message in database
+      // Update admin_last_active to open 24-hour service window
+      await supabase
+        .from('companies')
+        .update({ 
+          admin_last_active: new Date().toISOString() 
+        })
+        .eq('id', company.id);
+      
+      console.log('[WAKE-UP] Boss activity logged, 24-hour service window active');
+      
+      // Check for "Unmute" command
+      const trimmedBody = Body.trim().toLowerCase();
+      
+      if (trimmedBody === 'unmute' || trimmedBody.startsWith('unmute')) {
+        console.log('[UNMUTE] Boss requesting to unmute a client');
+        
+        // Extract phone number if provided (e.g., "Unmute +260977123456")
+        const phoneMatch = Body.match(/\+?\d{10,15}/);
+        let targetPhone = phoneMatch ? phoneMatch[0] : null;
+        
+        if (!targetPhone) {
+          // If no phone provided, get the most recent paused conversation
+          const { data: recentPaused } = await supabase
+            .from('conversations')
+            .select('id, customer_name, phone')
+            .eq('company_id', company.id)
+            .eq('is_paused_for_human', true)
+            .order('takeover_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (recentPaused) {
+            targetPhone = recentPaused.phone;
+          }
+        }
+        
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        
+        if (targetPhone) {
+          // Normalize phone
+          const normalizedTarget = targetPhone.replace(/[^\d]/g, '');
+          
+          // Unmute all conversations for this customer
+          const { data: unmuteResult } = await supabase
+            .from('conversations')
+            .update({ 
+              is_paused_for_human: false,
+              human_takeover: false
+            })
+            .eq('company_id', company.id)
+            .eq('phone', `whatsapp:+${normalizedTarget}`)
+            .select();
+          
+          console.log('[UNMUTE] Unmuted conversations:', unmuteResult);
+          
+          // Send confirmation to Boss
+          const confirmMsg = `✅ AI resumed for ${targetPhone}. Future messages will be handled automatically.`;
+          
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+          formData.append('Body', confirmMsg);
+          
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+        } else {
+          // No client found to unmute
+          const errorMsg = `❌ No paused clients found. Please specify phone number: "Unmute +260977123456"`;
+          
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+          formData.append('Body', errorMsg);
+          
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+        }
+        
+        // Return empty TwiML after unmute command
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+        });
+      }
+      
+      // Store boss message in database (for non-unmute messages)
       await supabase
         .from('boss_conversations')
         .insert({
@@ -1226,6 +1534,62 @@ serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
+    
+    // Check if conversation is paused for human (AI handoff)
+    if (conversation && conversation.is_paused_for_human) {
+      console.log('[PAUSED] Conversation paused - not processing with AI');
+      
+      // Store the message but don't trigger AI response
+      await supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversation.id,
+          role: 'user',
+          content: Body || ''
+        });
+      
+      // Update last message preview
+      await supabase
+        .from('conversations')
+        .update({ 
+          last_message_preview: Body || '',
+          unread_count: (conversation.unread_count || 0) + 1
+        })
+        .eq('id', conversation.id);
+      
+      // Forward message to Boss's takeover number if configured
+      if (company.takeover_number) {
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+          const forwardMsg = `📨 Message from ${conversation.customer_name || 'Unknown'} (${From}):\n\n${Body}`;
+          
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', company.takeover_number.startsWith('whatsapp:') ? company.takeover_number : `whatsapp:${company.takeover_number}`);
+          formData.append('Body', forwardMsg);
+          
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+          
+          console.log('[PAUSED] Message forwarded to takeover number');
+        }
+      }
+      
+      // Return empty TwiML (AI is paused, Boss will handle)
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      });
+    }
     
     // Check human takeover mode
     if (conversation && conversation.human_takeover) {
