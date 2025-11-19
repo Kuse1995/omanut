@@ -20,6 +20,7 @@ const Conversations = () => {
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<Record<string, File | null>>({});
+  const [agentSwitches, setAgentSwitches] = useState<Record<string, any[]>>({});
   const [mediaViewer, setMediaViewer] = useState<{
     open: boolean;
     url: string;
@@ -61,7 +62,7 @@ const Conversations = () => {
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived')
+      .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived, active_agent')
       .eq('company_id', userData.company_id)
       .eq('archived', false)
       .order('pinned', { ascending: false })
@@ -80,6 +81,18 @@ const Conversations = () => {
           .select('*')
           .eq('conversation_id', conv.id)
           .order('created_at', { ascending: true });
+        
+        // Fetch agent switches for this conversation
+        const { data: switches } = await supabase
+          .from('agent_performance')
+          .select('id, agent_type, routed_at, notes')
+          .eq('conversation_id', conv.id)
+          .order('routed_at', { ascending: true });
+        
+        if (switches) {
+          setAgentSwitches(prev => ({ ...prev, [conv.id]: switches }));
+        }
+        
         return { ...conv, messages: messages || [] };
       })
     );
@@ -259,6 +272,7 @@ const Conversations = () => {
                 onMediaClick={(url, type, fileName) => 
                   setMediaViewer({ open: true, url, type, fileName })
                 }
+                agentSwitches={agentSwitches[selectedConversation.id] || []}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground">
