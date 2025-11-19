@@ -1,5 +1,8 @@
 project_id = "dzheddvoiauevcayifev"
 
+[functions.send-whatsapp-flow]
+verify_jwt = false
+
 [functions.daily-briefing]
 verify_jwt = false
 

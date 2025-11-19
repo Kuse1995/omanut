@@ -294,6 +294,8 @@ export type Database = {
           updated_at: string | null
           voice_style: string | null
           whatsapp_number: string | null
+          whatsapp_payment_flow_id: string | null
+          whatsapp_reservation_flow_id: string | null
           whatsapp_voice_enabled: boolean | null
         }
         Insert: {
@@ -321,6 +323,8 @@ export type Database = {
           updated_at?: string | null
           voice_style?: string | null
           whatsapp_number?: string | null
+          whatsapp_payment_flow_id?: string | null
+          whatsapp_reservation_flow_id?: string | null
           whatsapp_voice_enabled?: boolean | null
         }
         Update: {
@@ -348,6 +352,8 @@ export type Database = {
           updated_at?: string | null
           voice_style?: string | null
           whatsapp_number?: string | null
+          whatsapp_payment_flow_id?: string | null
+          whatsapp_reservation_flow_id?: string | null
           whatsapp_voice_enabled?: boolean | null
         }
         Relationships: []
