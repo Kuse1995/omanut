@@ -1,5 +1,8 @@
 project_id = "dzheddvoiauevcayifev"
 
+[functions.daily-briefing]
+verify_jwt = false
+
 [functions.supervisor-agent]
 verify_jwt = true
 

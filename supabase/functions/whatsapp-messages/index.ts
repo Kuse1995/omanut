@@ -443,6 +443,20 @@ async function processAIResponse(
           const handoffSource = agentSwitched ? `${previousAgent}_agent` : 'supervisor_router';
           await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, handoffSource);
           
+          // Trigger post-handoff mini-briefing
+          try {
+            await supabase.functions.invoke('daily-briefing', {
+              body: {
+                triggerType: 'handoff',
+                conversationId: conversationId,
+                companyId: company.id
+              }
+            });
+            console.log('[ROUTER] Post-handoff briefing triggered');
+          } catch (briefingError) {
+            console.error('[ROUTER] Error triggering handoff briefing:', briefingError);
+          }
+          
           console.log('[ROUTER] Handoff complete');
           return;
         }
@@ -1045,6 +1059,20 @@ ${supervisorRecommendation.recommendedResponse}
         supabase,
         handoffAgent
       );
+      
+      // Trigger post-handoff mini-briefing
+      try {
+        await supabase.functions.invoke('daily-briefing', {
+          body: {
+            triggerType: 'handoff',
+            conversationId: conversationId,
+            companyId: company.id
+          }
+        });
+        console.log('[HANDOFF] Post-handoff briefing triggered');
+      } catch (briefingError) {
+        console.error('[HANDOFF] Error triggering handoff briefing:', briefingError);
+      }
       
       // Step 6: Log handoff to agent_performance
       await supabase
