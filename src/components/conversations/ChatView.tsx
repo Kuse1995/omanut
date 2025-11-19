@@ -17,6 +17,13 @@ interface Message {
   message_metadata?: any;
 }
 
+interface AgentSwitch {
+  id: string;
+  agent_type: string;
+  routed_at: string;
+  notes: string;
+}
+
 interface ChatViewProps {
   conversation: {
     id: string;
@@ -25,6 +32,7 @@ interface ChatViewProps {
     status: string;
     human_takeover: boolean;
     messages: Message[];
+    active_agent?: string;
   };
   messageInput: string;
   onMessageInputChange: (value: string) => void;
@@ -36,6 +44,7 @@ interface ChatViewProps {
   sendingMessage: boolean;
   generatingImage: boolean;
   onMediaClick: (url: string, type: string, fileName?: string) => void;
+  agentSwitches?: AgentSwitch[];
 }
 
 export const ChatView = ({
@@ -49,7 +58,8 @@ export const ChatView = ({
   onAttachFile,
   sendingMessage,
   generatingImage,
-  onMediaClick
+  onMediaClick,
+  agentSwitches = []
 }: ChatViewProps) => {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +75,33 @@ export const ChatView = ({
   const handleQuickReplySelect = (template: any) => {
     onMessageInputChange(template.content);
     setShowQuickReplies(false);
+  };
+
+  const getAgentLabel = (agentType: string) => {
+    switch (agentType) {
+      case 'support': return { label: 'Support Agent', color: 'bg-blue-500/20 text-blue-400' };
+      case 'sales': return { label: 'Sales Agent', color: 'bg-green-500/20 text-green-400' };
+      case 'boss': return { label: 'Human Handoff', color: 'bg-amber-500/20 text-amber-400' };
+      default: return { label: agentType, color: 'bg-muted text-muted-foreground' };
+    }
+  };
+
+  const renderAgentSwitch = (agentSwitch: AgentSwitch) => {
+    const agentInfo = getAgentLabel(agentSwitch.agent_type);
+    const isSwitch = agentSwitch.notes.includes('Agent switch:');
+    
+    return (
+      <div key={agentSwitch.id} className="flex justify-center my-4">
+        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 text-xs text-muted-foreground">
+          <div className={cn("w-2 h-2 rounded-full", agentInfo.color)} />
+          {isSwitch ? (
+            <span>🔄 Switched to <span className="font-semibold">{agentInfo.label}</span></span>
+          ) : (
+            <span>Routed to <span className="font-semibold">{agentInfo.label}</span></span>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const renderMessageContent = (message: Message) => {
@@ -160,6 +197,14 @@ export const ChatView = ({
               format(new Date(message.created_at), 'yyyy-MM-dd') !== 
               format(new Date(conversation.messages[idx - 1].created_at), 'yyyy-MM-dd');
 
+            // Find agent switches that occurred just before this message
+            const relevantSwitches = agentSwitches.filter(sw => {
+              const switchTime = new Date(sw.routed_at).getTime();
+              const messageTime = new Date(message.created_at).getTime();
+              const prevMessageTime = idx > 0 ? new Date(conversation.messages[idx - 1].created_at).getTime() : 0;
+              return switchTime > prevMessageTime && switchTime <= messageTime;
+            });
+
             return (
               <div key={message.id}>
                 {showDateDivider && (
@@ -169,6 +214,10 @@ export const ChatView = ({
                     </div>
                   </div>
                 )}
+                
+                {/* Show agent switches that occurred before this message */}
+                {relevantSwitches.map(sw => renderAgentSwitch(sw))}
+                
                 <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
                   <div className={cn(
                     "max-w-[70%] rounded-lg p-3",

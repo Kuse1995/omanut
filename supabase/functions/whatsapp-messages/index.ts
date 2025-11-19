@@ -390,37 +390,65 @@ async function processAIResponse(
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
-    // ========== AGENT ROUTING ==========
+    // ========== DYNAMIC AGENT ROUTING ==========
     let selectedAgent = 'sales';
     let routingReasoning = 'Default routing';
+    const previousAgent = conversation.active_agent || 'sales';
 
     if (agentRoutingEnabled) {
       try {
         console.log('[ROUTER] Classifying intent...');
+        console.log(`[ROUTER] Current active agent: ${previousAgent}`);
+        
         const routingResult = await routeToAgent(userMessage, messageHistory || []);
         selectedAgent = routingResult.agent;
         routingReasoning = routingResult.reasoning;
         
-        console.log(`[ROUTER] Routed to ${selectedAgent}`);
+        // ========== DETECT AGENT SWITCH ==========
+        const agentSwitched = previousAgent !== selectedAgent;
+        
+        if (agentSwitched) {
+          console.log(`[ROUTER] 🔄 AGENT SWITCH DETECTED: ${previousAgent} → ${selectedAgent}`);
+          console.log(`[ROUTER] Switch reason: ${routingReasoning}`);
+          
+          // Log the agent switch event
+          await supabase.from('agent_performance').insert({
+            company_id: companyId,
+            conversation_id: conversationId,
+            agent_type: selectedAgent,
+            routing_confidence: routingResult.confidence,
+            notes: `Agent switch: ${previousAgent} → ${selectedAgent}. Reason: ${routingReasoning}`
+          });
+        } else {
+          console.log(`[ROUTER] Agent remains: ${selectedAgent}`);
+          
+          // Log routing decision even if no switch
+          await supabase.from('agent_performance').insert({
+            company_id: companyId,
+            conversation_id: conversationId,
+            agent_type: selectedAgent,
+            routing_confidence: routingResult.confidence,
+            notes: routingReasoning
+          });
+        }
 
+        // Update conversation with new agent
         await supabase.from('conversations').update({ active_agent: selectedAgent }).eq('id', conversationId);
-        await supabase.from('agent_performance').insert({
-          company_id: companyId,
-          conversation_id: conversationId,
-          agent_type: selectedAgent,
-          routing_confidence: routingResult.confidence,
-          notes: routingReasoning
-        });
 
+        // Handle BOSS agent - trigger handoff
         if (selectedAgent === 'boss') {
           await supabase.from('conversations').update({ is_paused_for_human: true, human_takeover: true }).eq('id', conversationId);
           const summary = await generateConversationSummary(conversationId, supabase);
-          await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, 'supervisor_router');
+          
+          const handoffSource = agentSwitched ? `${previousAgent}_agent` : 'supervisor_router';
+          await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, handoffSource);
+          
           console.log('[ROUTER] Handoff complete');
           return;
         }
       } catch (error) {
         console.error('[ROUTER] Error:', error);
+        selectedAgent = previousAgent; // Fallback to previous agent on error
       }
     }
 
