@@ -43,6 +43,97 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   return 'complex';
 }
 
+// Agent routing function using DeepSeek for intent classification
+async function routeToAgent(
+  userMessage: string,
+  conversationHistory: any[]
+): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
+  
+  const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+  
+  // Build recent conversation context (last 5 messages)
+  const recentContext = conversationHistory
+    .slice(-5)
+    .map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
+    .join('\n');
+  
+  const routingPrompt = `You are an intent classification system for a WhatsApp business AI.
+
+ANALYZE the customer's message and conversation context to determine the BEST agent to handle this:
+
+AGENT OPTIONS:
+1. **SUPPORT** - Customer needs help, has a complaint, problem, or question (non-sales)
+   - Keywords: "issue", "problem", "wrong", "broken", "not working", "help", "how to", "why", "confused", "disappointed", "frustrated"
+   - Intent: Resolve issues, answer questions, handle complaints
+
+2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent
+   - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me"
+   - Intent: Convert to sale, persuade, close deal
+
+3. **BOSS** - Payment discussion OR critical issue requiring human escalation
+   - Keywords: "pay", "payment", "transfer", "invoice", "receipt", "money", OR extremely upset customer
+   - Intent: Human must handle payment or critical situation
+
+CONVERSATION CONTEXT:
+${recentContext}
+
+CURRENT MESSAGE:
+${userMessage}
+
+Respond with ONLY valid JSON (no markdown):
+{
+  "agent": "support" | "sales" | "boss",
+  "reasoning": "Brief explanation (1 sentence)",
+  "confidence": 0.0-1.0
+}`;
+
+  try {
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+          { role: 'user', content: routingPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 150
+      })
+    });
+    
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content || '{}';
+    
+    // Parse JSON response
+    const result = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
+    
+    return {
+      agent: result.agent || 'sales',
+      reasoning: result.reasoning || 'Classification failed, defaulting to sales',
+      confidence: result.confidence || 0.5
+    };
+    
+  } catch (error) {
+    console.error('[ROUTER] Error classifying intent:', error);
+    // Fallback to simple keyword matching
+    const lowerMsg = userMessage.toLowerCase();
+    
+    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt/)) {
+      return { agent: 'boss', reasoning: 'Payment keyword detected', confidence: 0.9 };
+    }
+    
+    if (lowerMsg.match(/problem|issue|wrong|broken|not working|help|disappointed|frustrated|complaint/)) {
+      return { agent: 'support', reasoning: 'Support keyword detected', confidence: 0.7 };
+    }
+    
+    return { agent: 'sales', reasoning: 'Default routing', confidence: 0.5 };
+  }
+}
+
 // Send fallback "please hold" message
 async function sendFallbackMessage(
   customerPhone: string, 
@@ -289,6 +380,50 @@ async function processAIResponse(
       return;
     }
 
+    // Check if agent routing is enabled for this company
+    const agentRoutingEnabled = company.agent_routing_enabled !== false;
+    
+    // Fetch conversation history for routing
+    const { data: messageHistory } = await supabase
+      .from('messages')
+      .select('role, content, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+
+    // ========== AGENT ROUTING ==========
+    let selectedAgent = 'sales';
+    let routingReasoning = 'Default routing';
+
+    if (agentRoutingEnabled) {
+      try {
+        console.log('[ROUTER] Classifying intent...');
+        const routingResult = await routeToAgent(userMessage, messageHistory || []);
+        selectedAgent = routingResult.agent;
+        routingReasoning = routingResult.reasoning;
+        
+        console.log(`[ROUTER] Routed to ${selectedAgent}`);
+
+        await supabase.from('conversations').update({ active_agent: selectedAgent }).eq('id', conversationId);
+        await supabase.from('agent_performance').insert({
+          company_id: companyId,
+          conversation_id: conversationId,
+          agent_type: selectedAgent,
+          routing_confidence: routingResult.confidence,
+          notes: routingReasoning
+        });
+
+        if (selectedAgent === 'boss') {
+          await supabase.from('conversations').update({ is_paused_for_human: true, human_takeover: true }).eq('id', conversationId);
+          const summary = await generateConversationSummary(conversationId, supabase);
+          await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, 'supervisor_router');
+          console.log('[ROUTER] Handoff complete');
+          return;
+        }
+      } catch (error) {
+        console.error('[ROUTER] Error:', error);
+      }
+    }
+
     // Fetch AI overrides and other company data
     const { data: aiOverrides } = await supabase
       .from('company_ai_overrides')
@@ -314,6 +449,34 @@ async function processAIResponse(
       full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
     })) || [];
 
+    // ========== AGENT-SPECIFIC SYSTEM PROMPTS ==========
+    let agentPersonality = '';
+    
+    if (selectedAgent === 'support') {
+      agentPersonality = `
+
+🛠️ YOU ARE THE SUPPORT AGENT:
+- Your role is to EMPATHIZE and RESOLVE customer issues
+- Listen carefully to complaints and acknowledge their frustration
+- Apologize sincerely when appropriate
+- Provide clear step-by-step solutions
+- Be patient, helpful, and understanding
+- Focus on making things right for the customer
+- If you cannot resolve the issue, escalate by using [HANDOFF_REQUIRED]`;
+    } else if (selectedAgent === 'sales') {
+      agentPersonality = `
+
+💼 YOU ARE THE SALES AGENT:
+- Your role is to CONVERT and CLOSE sales
+- Highlight product benefits and value propositions
+- Create urgency and excitement
+- Ask qualifying questions to understand needs
+- Offer personalized recommendations
+- Be persuasive but not pushy
+- Guide customers toward making a purchase decision
+- Address pricing objections with value-focused responses`;
+    }
+
     // Build AI instructions
     let instructions = `You are a friendly AI assistant for ${company.name}`;
     
@@ -321,7 +484,7 @@ async function processAIResponse(
       instructions += ` (${company.industry})`;
     }
     
-    instructions += `.
+    instructions += `.${agentPersonality}
 
 Business Information:
 - Business Name: ${company.name}
@@ -842,16 +1005,32 @@ ${supervisorRecommendation.recommendedResponse}
       // Step 3: Generate 3-bullet summary
       const conversationSummary = await generateConversationSummary(conversationId, supabase);
       
-      // Step 4: Notify Boss with strict format
+      // Step 4: Determine which agent triggered handoff
+      const handoffAgent = selectedAgent === 'support' ? 'support_agent' : 'sales_agent';
+      
+      // Step 5: Notify Boss with agent information
       await sendBossHandoffNotification(
         company,
         customerPhone,
         conversation.customer_name || 'Unknown',
         conversationSummary,
-        supabase
+        supabase,
+        handoffAgent
       );
       
-      console.log('[HANDOFF] Boss notified with conversation summary');
+      // Step 6: Log handoff to agent_performance
+      await supabase
+        .from('agent_performance')
+        .insert({
+          company_id: companyId,
+          conversation_id: conversationId,
+          agent_type: selectedAgent,
+          handoff_occurred: true,
+          handoff_reason: 'Agent detected need for human intervention via [HANDOFF_REQUIRED]',
+          notes: `${selectedAgent} agent escalated to boss`
+        });
+      
+      console.log(`[HANDOFF] Boss notified - handoff triggered by ${selectedAgent} agent`);
     }
 
     console.log('[BACKGROUND] Final reply:', assistantReply);
