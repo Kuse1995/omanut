@@ -8,6 +8,80 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Message complexity classifier
+function classifyMessageComplexity(message: string): 'simple' | 'complex' {
+  const simpleTriggers = [
+    /^(hi|hello|hey|good morning|good afternoon|good evening|how are you)/i,
+    /^(yes|no|yeah|yep|nope|ok|okay|sure|thanks|thank you|alright)/i,
+    /how much|price|cost|hours|location|address|phone|email/i,
+    /^what (is|are) (your|the)/i,
+    /^(can i|do you|are you)/i,
+  ];
+  
+  const complexTriggers = [
+    /book|reserve|reservation|appointment|schedule/i,
+    /pay|payment|invoice|receipt|transaction/i,
+    /complain|problem|issue|wrong|disappointed|unhappy|frustrated/i,
+    /why|how does|explain|tell me about|describe/i,
+    /urgent|asap|immediately|emergency/i,
+  ];
+  
+  const lowerMsg = message.toLowerCase().trim();
+  
+  // Check complex first (higher priority)
+  if (complexTriggers.some(pattern => pattern.test(lowerMsg))) {
+    return 'complex';
+  }
+  
+  if (simpleTriggers.some(pattern => pattern.test(lowerMsg))) {
+    return 'simple';
+  }
+  
+  // Default to simple for short messages
+  if (lowerMsg.length < 50) return 'simple';
+  
+  return 'complex';
+}
+
+// Send fallback "please hold" message
+async function sendFallbackMessage(
+  customerPhone: string, 
+  company: any, 
+  supabase: any, 
+  conversationId: string
+) {
+  const fallbackMsg = "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
+  
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  
+  if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+    const formData = new URLSearchParams();
+    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('Body', fallbackMsg);
+    
+    await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+    
+    // Log fallback message
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: fallbackMsg
+    });
+    
+    console.log('[FALLBACK] Sent hold message to customer');
+  }
+}
+
 // Background processing function that handles AI response
 async function processAIResponse(
   conversationId: string,
@@ -18,6 +92,10 @@ async function processAIResponse(
   customerPhone: string
 ) {
   console.log('[BACKGROUND] Starting AI processing for conversation:', conversationId);
+  
+  // Classify message complexity
+  const messageComplexity = classifyMessageComplexity(userMessage);
+  console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
   
   const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
   const supabase = createClient(
@@ -132,7 +210,11 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 3. For reservations, collect ALL required details before calling create_reservation
 4. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 5. For payments, use request_payment tool to notify management
-6. Keep responses concise and conversational
+6. KEEP RESPONSES SHORT AND CONCISE:
+   - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
+   - Only provide detailed explanations when customer explicitly asks or for complex topics
+   - Use bullet points for lists instead of long paragraphs
+   - Get straight to the point
 7. If you don't know something, admit it politely
 8. Never make up information not provided above
 9. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
@@ -153,42 +235,47 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     messages.push({ role: 'user', content: userMessage });
 
     // ========== SUPERVISOR AGENT LAYER ==========
-    // Call supervisor to analyze and provide strategic recommendation
-    console.log('[SUPERVISOR] Requesting strategic analysis...');
+    // Call supervisor ONLY for complex queries
     let supervisorRecommendation = null;
     
-    try {
-      const supervisorResponse = await fetch(
-        `${Deno.env.get('SUPABASE_URL')}/functions/v1/supervisor-agent`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            companyId: company.id,
-            customerPhone,
-            customerMessage: userMessage,
-            conversationHistory: transcriptLines.slice(-20),
-            companyData: company,
-            customerData: conversation
-          })
-        }
-      );
+    if (messageComplexity === 'complex') {
+      console.log('[SUPERVISOR] Requesting strategic analysis for complex query...');
+      
+      try {
+        const supervisorResponse = await fetch(
+          `${Deno.env.get('SUPABASE_URL')}/functions/v1/supervisor-agent`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              companyId: company.id,
+              customerPhone,
+              customerMessage: userMessage,
+              conversationHistory: transcriptLines.slice(-20),
+              companyData: company,
+              customerData: conversation
+            })
+          }
+        );
 
-      if (supervisorResponse.ok) {
-        const supervisorData = await supervisorResponse.json();
-        if (supervisorData.success) {
-          supervisorRecommendation = supervisorData.recommendation;
-          console.log('[SUPERVISOR] Strategic guidance received');
-          console.log('[SUPERVISOR] Strategy:', supervisorRecommendation.strategy);
+        if (supervisorResponse.ok) {
+          const supervisorData = await supervisorResponse.json();
+          if (supervisorData.success) {
+            supervisorRecommendation = supervisorData.recommendation;
+            console.log('[SUPERVISOR] Strategic guidance received');
+            console.log('[SUPERVISOR] Strategy:', supervisorRecommendation.strategy);
+          }
+        } else {
+          console.log('[SUPERVISOR] Supervisor unavailable, proceeding without guidance');
         }
-      } else {
-        console.log('[SUPERVISOR] Supervisor unavailable, proceeding without guidance');
+      } catch (error) {
+        console.error('[SUPERVISOR] Supervisor failed, proceeding without guidance:', error);
       }
-    } catch (error) {
-      console.error('[SUPERVISOR] Supervisor failed, proceeding without guidance:', error);
+    } else {
+      console.log('[SUPERVISOR] Skipping supervisor for simple query - responding quickly');
     }
 
     // Enhance instructions with supervisor guidance if available
@@ -219,7 +306,13 @@ ${supervisorRecommendation.recommendedResponse}
       // Update messages array with enhanced instructions
       messages[0] = { role: 'system', content: instructions };
     }
-    // ========== END SUPERVISOR LAYER ==========
+    // Update system message with supervisor guidance
+    messages[0] = { role: 'system', content: instructions };
+
+    // Select AI model based on complexity
+    const selectedModel = messageComplexity === 'simple' ? 'moonshot-v1-32k' : 'kimi-k2-thinking';
+    const maxTokens = messageComplexity === 'simple' ? 1000 : 16000;
+    console.log(`[AI] Using model: ${selectedModel} with max_tokens: ${maxTokens}`);
 
     // Call Kimi AI with extended timeout
     const controller = new AbortController();
@@ -238,9 +331,10 @@ ${supervisorRecommendation.recommendedResponse}
         },
         signal: controller.signal,
         body: JSON.stringify({
-          model: 'kimi-k2-thinking',
+          model: selectedModel,
           messages,
           temperature: 1.0,
+          max_tokens: maxTokens,
           tools: [
             {
               type: "function",
@@ -596,7 +690,83 @@ ${supervisorRecommendation.recommendedResponse}
     }
 
   } catch (error) {
-    console.error('[BACKGROUND] Fatal error in background processing:', error);
+    console.error('[BACKGROUND] Error processing AI response:', error);
+    
+    // Send error fallback message to customer
+    try {
+      const { data: company } = await supabase
+        .from('companies')
+        .select('whatsapp_number, boss_phone')
+        .eq('id', companyId)
+        .single();
+      
+      if (company) {
+        const errorFallback = "I'm experiencing technical difficulties right now. Please hold while I connect you with someone who can help.";
+        
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', `whatsapp:${customerPhone}`);
+          formData.append('Body', errorFallback);
+          
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+          
+          await supabase.from('messages').insert({
+            conversation_id: conversationId,
+            role: 'assistant',
+            content: errorFallback
+          });
+          
+          console.log('[ERROR] Sent error fallback message to customer');
+        }
+        
+        // Mark conversation for human takeover
+        await supabase
+          .from('conversations')
+          .update({ 
+            human_takeover: true,
+            takeover_at: new Date().toISOString()
+          })
+          .eq('id', conversationId);
+        
+        console.log('[ERROR] Marked conversation for human takeover');
+        
+        // Notify management via boss number if available
+        if (company.boss_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          const bossNotification = `⚠️ AI Error Alert\n\nCustomer: ${customerPhone}\nConversation ID: ${conversationId}\n\nThe AI encountered an error and the conversation has been marked for human takeover. Please check the conversation.`;
+          
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+          formData.append('Body', bossNotification);
+          
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+          
+          console.log('[ERROR] Notified management about AI error');
+        }
+      }
+    } catch (fallbackError) {
+      console.error('[ERROR] Failed to send error fallback:', fallbackError);
+    }
   }
 }
 
