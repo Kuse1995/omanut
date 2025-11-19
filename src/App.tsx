@@ -22,6 +22,7 @@ import Companies from "./pages/admin/Companies";
 import NewCompany from "./pages/admin/NewCompany";
 import EditCompany from "./pages/admin/EditCompany";
 import NotFound from "./pages/NotFound";
+import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +51,7 @@ const App = () => (
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
