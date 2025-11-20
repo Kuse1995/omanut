@@ -22,9 +22,23 @@ async function createJWT(serviceAccountEmail: string, privateKey: string): Promi
   const encodedClaim = btoa(JSON.stringify(claim)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const signatureInput = `${encodedHeader}.${encodedClaim}`;
 
-  // Import private key
+  // Import private key - handle both escaped newlines and actual newlines
   const pemKey = privateKey.replace(/\\n/g, '\n');
-  const binaryDer = Uint8Array.from(atob(pemKey.replace(/-----BEGIN PRIVATE KEY-----/, '').replace(/-----END PRIVATE KEY-----/, '').replace(/\n/g, '')), c => c.charCodeAt(0));
+  
+  // Ensure proper PEM format with headers
+  const keyWithHeaders = pemKey.includes('-----BEGIN PRIVATE KEY-----') 
+    ? pemKey 
+    : `-----BEGIN PRIVATE KEY-----\n${pemKey}\n-----END PRIVATE KEY-----`;
+  
+  // Extract only the base64 content between headers
+  const base64Key = keyWithHeaders
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s/g, ''); // Remove all whitespace including newlines
+  
+  console.log('[CALENDAR] Private key base64 length:', base64Key.length);
+  
+  const binaryDer = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
   
   const cryptoKey = await crypto.subtle.importKey(
     "pkcs8",

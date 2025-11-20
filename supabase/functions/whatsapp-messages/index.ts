@@ -1121,6 +1121,12 @@ ${supervisorRecommendation.recommendedResponse}
               if (calError) {
                 console.error('[BACKGROUND] Calendar check error:', calError);
                 toolExecutionContext.push('calendar unavailable - proceeding without availability check');
+                
+                // CRITICAL FIX: Set helpful response when calendar fails
+                assistantReply = "I'd be happy to help you schedule a visit! While our calendar system is updating, " +
+                  "let me record your details and our team will confirm availability shortly. " +
+                  "What date and time works best for you?";
+                anyToolExecuted = true;
               } else {
                 anyToolExecuted = true;
                 if (calendarData.available) {
