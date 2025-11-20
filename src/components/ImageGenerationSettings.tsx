@@ -69,6 +69,8 @@ export const ImageGenerationSettings = ({ companyId }: ImageGenerationSettingsPr
           business_context: settings.business_context,
           style_description: settings.style_description,
           sample_prompts: settings.sample_prompts
+        }, {
+          onConflict: 'company_id'
         });
 
       if (error) throw error;
