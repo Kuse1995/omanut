@@ -121,6 +121,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
+    industry: "",
+    custom_industry: "",
     business_type: "",
     voice_style: "",
     hours: "",
@@ -136,6 +138,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     admin_email: "",
     admin_password: "",
     quick_reference_info: "",
+    google_calendar_id: "",
+    calendar_sync_enabled: false,
+    booking_buffer_minutes: 15
   });
 
   const [showCustomIndustry, setShowCustomIndustry] = useState(false);
@@ -186,6 +191,8 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         setFormData({
           name: data.name || "",
+          industry: "",
+          custom_industry: "",
           business_type: data.business_type || "",
           voice_style: data.voice_style || "Warm, polite receptionist.",
           hours: data.hours || "Mon-Sun 10:00 – 23:00",
@@ -201,6 +208,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           admin_email: "",
           admin_password: "",
           quick_reference_info: data.quick_reference_info || "",
+          google_calendar_id: data.google_calendar_id || "",
+          calendar_sync_enabled: data.calendar_sync_enabled || false,
+          booking_buffer_minutes: data.booking_buffer_minutes || 15
         });
 
         // Fetch AI overrides
@@ -251,6 +261,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             boss_phone: formData.boss_phone,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             quick_reference_info: formData.quick_reference_info,
+            google_calendar_id: formData.google_calendar_id,
+            calendar_sync_enabled: formData.calendar_sync_enabled,
+            booking_buffer_minutes: formData.booking_buffer_minutes
           })
           .eq('id', companyId);
 
@@ -314,6 +327,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               system_instructions: aiInstructions.system_instructions,
               qa_style: aiInstructions.qa_style,
               banned_topics: aiInstructions.banned_topics,
+              google_calendar_id: formData.google_calendar_id,
+              calendar_sync_enabled: formData.calendar_sync_enabled,
+              booking_buffer_minutes: formData.booking_buffer_minutes
             }),
           }
         );
@@ -539,6 +555,51 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
                 Enable WhatsApp voice calls
               </Label>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Google Calendar Integration</h3>
+              
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="calendar_sync_enabled"
+                  checked={formData.calendar_sync_enabled}
+                  onChange={(e) => setFormData({ ...formData, calendar_sync_enabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="calendar_sync_enabled" className="font-normal">
+                  Enable calendar sync for reservations
+                </Label>
+              </div>
+
+              <div>
+                <Label htmlFor="google_calendar_id">Google Calendar ID</Label>
+                <Input
+                  id="google_calendar_id"
+                  value={formData.google_calendar_id}
+                  onChange={(e) => setFormData({ ...formData, google_calendar_id: e.target.value })}
+                  placeholder="your-calendar@gmail.com"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Calendar ID from Google Calendar settings (typically your email)
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="booking_buffer_minutes">Booking Buffer (minutes)</Label>
+                <Input
+                  type="number"
+                  id="booking_buffer_minutes"
+                  value={formData.booking_buffer_minutes}
+                  onChange={(e) => setFormData({ ...formData, booking_buffer_minutes: parseInt(e.target.value) || 15 })}
+                  min="0"
+                  max="60"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Time buffer before/after reservations to prevent back-to-back bookings
+                </p>
+              </div>
             </div>
           </div>
 
