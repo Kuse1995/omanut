@@ -101,7 +101,10 @@ const Settings = () => {
           twilio_number: config.twilio_number,
           whatsapp_number: config.whatsapp_number,
           whatsapp_voice_enabled: config.whatsapp_voice_enabled,
-          takeover_number: config.takeover_number
+          takeover_number: config.takeover_number,
+          google_calendar_id: config.google_calendar_id,
+          calendar_sync_enabled: config.calendar_sync_enabled,
+          booking_buffer_minutes: config.booking_buffer_minutes
         })
         .eq('id', config.id);
 
