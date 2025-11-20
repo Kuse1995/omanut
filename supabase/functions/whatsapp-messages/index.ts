@@ -1180,16 +1180,22 @@ ${supervisorRecommendation.recommendedResponse}
                 }
               });
               
-              if (flowResponse.error) {
-                console.error('[BACKGROUND] Flow send error:', flowResponse.error);
-                assistantReply = `I'll help you with that. ${args.flow_type === 'reservation' ? 'Please provide your name, preferred date, time, and number of guests.' : 'Please provide your name, phone, and email for payment.'}`;
+              if (flowResponse.error || flowResponse.data?.error) {
+                console.error('[BACKGROUND] Flow send error:', flowResponse.error || flowResponse.data?.error);
+                toolExecutionContext.push('whatsapp flow unavailable - falling back to manual details');
+                assistantReply = args.flow_type === 'reservation'
+                  ? "Our quick reservation form isn't available right now. Please send your name, preferred date, time, and number of guests in one message, and I'll record it for the team."
+                  : "Our quick payment form isn't available right now. Please send your name, phone, email, and what you're paying for in one message.";
               } else {
                 console.log('[BACKGROUND] Flow sent successfully');
                 assistantReply = `I've sent you a quick form to complete. Please fill it out and submit. 📋`;
               }
             } catch (error) {
               console.error('[BACKGROUND] send_flow error:', error);
-              assistantReply = `I'll help you with that. ${args.flow_type === 'reservation' ? 'Please provide your name, preferred date, time, and number of guests.' : 'Please provide your name, phone, and email for payment.'}`;
+              toolExecutionContext.push('whatsapp flow error - falling back to manual details');
+              assistantReply = args.flow_type === 'reservation'
+                ? "Our quick reservation form isn't available right now. Please send your name, preferred date, time, and number of guests in one message, and I'll record it for the team."
+                : "Our quick payment form isn't available right now. Please send your name, phone, email, and what you're paying for in one message.";
             }
           } else if (toolCall.function.name === 'create_reservation') {
             const args = JSON.parse(toolCall.function.arguments);
