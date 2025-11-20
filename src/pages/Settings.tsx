@@ -29,7 +29,10 @@ const Settings = () => {
     twilio_number: '',
     whatsapp_number: '',
     whatsapp_voice_enabled: false,
-    takeover_number: ''
+    takeover_number: '',
+    google_calendar_id: '',
+    calendar_sync_enabled: false,
+    booking_buffer_minutes: 15
   });
 
   useEffect(() => {
@@ -287,6 +290,54 @@ const Settings = () => {
               <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
                 Enable WhatsApp voice calls
               </Label>
+            </div>
+
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Google Calendar Integration</h3>
+              
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="calendar_sync_enabled"
+                  checked={config.calendar_sync_enabled || false}
+                  onChange={(e) => setConfig({ ...config, calendar_sync_enabled: e.target.checked })}
+                  disabled={loading}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="calendar_sync_enabled" className="font-normal">
+                  Enable calendar sync for reservations
+                </Label>
+              </div>
+
+              <div>
+                <Label htmlFor="google_calendar_id">Google Calendar ID</Label>
+                <Input
+                  id="google_calendar_id"
+                  value={config.google_calendar_id || ''}
+                  onChange={(e) => setConfig({ ...config, google_calendar_id: e.target.value })}
+                  placeholder="your-calendar@gmail.com"
+                  disabled={loading}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Calendar ID from Google Calendar settings (typically your email)
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="booking_buffer_minutes">Booking Buffer (minutes)</Label>
+                <Input
+                  type="number"
+                  id="booking_buffer_minutes"
+                  value={config.booking_buffer_minutes || 15}
+                  onChange={(e) => setConfig({ ...config, booking_buffer_minutes: parseInt(e.target.value) })}
+                  disabled={loading}
+                  min="0"
+                  max="60"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Time buffer before/after reservations to prevent back-to-back bookings
+                </p>
+              </div>
             </div>
 
           </CardContent>

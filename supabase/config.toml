@@ -63,3 +63,6 @@ verify_jwt = true
 
 [functions.segment-customers]
 verify_jwt = true
+
+[functions.google-calendar]
+verify_jwt = false

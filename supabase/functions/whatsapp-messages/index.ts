@@ -656,18 +656,22 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     instructions += `\n\nKey Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
-3. For reservations, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
-4. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
-5. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
-6. KEEP RESPONSES SHORT AND CONCISE:
+3. CALENDAR AVAILABILITY - CRITICAL:
+   - ALWAYS check_calendar_availability BEFORE sending reservation flow
+   - If time slot is busy, suggest alternative available times
+   - Never confirm reservations without checking calendar first
+4. For reservations, use send_flow tool IMMEDIATELY after confirming availability
+5. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
+6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
+7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
    - Only provide detailed explanations when customer explicitly asks or for complex topics
    - Use bullet points for lists instead of long paragraphs
    - Get straight to the point
-7. If you don't know something, admit it politely
-8. Never make up information not provided above
-9. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
-10. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.
+8. If you don't know something, admit it politely
+9. Never make up information not provided above
+10. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
+11. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.
 
 CRITICAL HANDOFF PROTOCOL:
 - If the customer AGREES TO PAYMENT or expresses clear intent to pay, append [HANDOFF_REQUIRED] at the very end of your response
@@ -883,6 +887,39 @@ ${supervisorRecommendation.recommendedResponse}
             {
               type: "function",
               function: {
+                name: "check_calendar_availability",
+                description: "Check if a date/time slot is available before confirming reservation. ALWAYS use this BEFORE sending reservation flow.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    date: { type: "string", description: "Date in YYYY-MM-DD format" },
+                    time: { type: "string", description: "Time in HH:MM format" },
+                    duration_minutes: { type: "number", description: "Expected duration in minutes (default 120)" }
+                  },
+                  required: ["date", "time"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "create_calendar_event",
+                description: "Create Google Calendar event for confirmed reservation. Use after customer confirms booking.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    reservation_id: { type: "string", description: "Reservation UUID from database" },
+                    title: { type: "string", description: "Event title (e.g., 'Reservation: John Doe - 4 guests')" },
+                    description: { type: "string", description: "Event notes (customer details, preferences)" },
+                    send_notifications: { type: "boolean", description: "Send email notifications (default true)" }
+                  },
+                  required: ["reservation_id", "title"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
                 name: "request_payment",
                 description: "Request payment from customer and notify management",
                 parameters: {
@@ -1065,6 +1102,66 @@ ${supervisorRecommendation.recommendedResponse}
                 console.error('[BACKGROUND] Media send error:', error);
                 assistantReply = "I tried to send the media but encountered an error.";
               }
+            }
+          } else if (toolCall.function.name === 'check_calendar_availability') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BACKGROUND] Checking calendar availability:', args);
+            
+            try {
+              const { data: calendarData, error: calError } = await supabase.functions.invoke('google-calendar', {
+                body: {
+                  action: 'check_availability',
+                  companyId: company.id,
+                  date: args.date,
+                  time: args.time,
+                  duration: args.duration_minutes || 120
+                }
+              });
+              
+              if (calError) {
+                console.error('[BACKGROUND] Calendar check error:', calError);
+                toolExecutionContext.push('calendar unavailable - proceeding without availability check');
+              } else {
+                anyToolExecuted = true;
+                if (calendarData.available) {
+                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} is AVAILABLE`);
+                } else {
+                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} is BUSY: ${calendarData.message}`);
+                  assistantReply = `I checked our calendar and ${args.time} on ${args.date} is already booked. ` +
+                    `Would you like to try a different time? I can check other available slots for you.`;
+                }
+              }
+            } catch (error) {
+              console.error('[BACKGROUND] Calendar availability error:', error);
+              toolExecutionContext.push('calendar check failed - proceeding without availability');
+            }
+          } else if (toolCall.function.name === 'create_calendar_event') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BACKGROUND] Creating calendar event:', args);
+            
+            try {
+              const { data: eventData, error: eventError } = await supabase.functions.invoke('google-calendar', {
+                body: {
+                  action: 'create_event',
+                  companyId: company.id,
+                  reservationId: args.reservation_id,
+                  title: args.title,
+                  description: args.description || '',
+                  sendNotifications: args.send_notifications !== false
+                }
+              });
+              
+              if (eventError) {
+                console.error('[BACKGROUND] Calendar event creation error:', eventError);
+                toolExecutionContext.push('calendar event creation failed - reservation saved but not synced to calendar');
+              } else {
+                anyToolExecuted = true;
+                toolExecutionContext.push(`calendar event created: ${eventData.event_id}`);
+                assistantReply += `\n\n📅 Added to calendar: ${eventData.link}`;
+              }
+            } catch (error) {
+              console.error('[BACKGROUND] Calendar event error:', error);
+              toolExecutionContext.push('calendar event failed - reservation saved but not in calendar');
             }
           } else if (toolCall.function.name === 'send_flow') {
             const args = JSON.parse(toolCall.function.arguments);
