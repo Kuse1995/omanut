@@ -177,13 +177,86 @@ async function createEvent(
   };
 }
 
+async function updateEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  reservation: any,
+  title: string,
+  description: string
+): Promise<{ event_id: string; link: string }> {
+  const [year, month, day] = reservation.date.split('-');
+  const [hour, minute] = reservation.time.split(':');
+  
+  const startDateTime = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+  const endDateTime = new Date(startDateTime.getTime() + 120 * 60000);
+
+  const event = {
+    summary: title,
+    description: description,
+    start: {
+      dateTime: startDateTime.toISOString(),
+      timeZone: 'Africa/Lusaka',
+    },
+    end: {
+      dateTime: endDateTime.toISOString(),
+      timeZone: 'Africa/Lusaka',
+    },
+  };
+
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=all`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(event),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to update event: ${error}`);
+  }
+
+  const data = await response.json();
+  return {
+    event_id: data.id,
+    link: data.htmlLink,
+  };
+}
+
+async function deleteEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  sendNotifications: boolean
+): Promise<void> {
+  const response = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${eventId}?sendUpdates=${sendNotifications ? 'all' : 'none'}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (!response.ok && response.status !== 410) { // 410 = already deleted
+    const error = await response.text();
+    throw new Error(`Failed to delete event: ${error}`);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { action, companyId, date, time, duration, reservationId, title, description, sendNotifications } = await req.json();
+    const { action, companyId, date, time, duration, reservationId, eventId, title, description, sendNotifications } = await req.json();
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -272,6 +345,78 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (action === 'update_event') {
+      if (!eventId || !reservationId) {
+        throw new Error('eventId and reservationId are required for update_event');
+      }
+
+      const { data: reservation, error: resError } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('id', reservationId)
+        .single();
+
+      if (resError || !reservation) {
+        throw new Error('Reservation not found');
+      }
+
+      const result = await updateEvent(
+        accessToken,
+        calendarId,
+        eventId,
+        reservation,
+        title,
+        description || ''
+      );
+
+      console.log(`[CALENDAR] Event updated: ${result.event_id}`);
+
+      await supabase
+        .from('reservations')
+        .update({
+          google_calendar_event_id: result.event_id,
+          calendar_event_link: result.link,
+          calendar_sync_status: 'synced',
+        })
+        .eq('id', reservationId);
+
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (action === 'delete_event') {
+      if (!eventId) {
+        throw new Error('eventId is required for delete_event');
+      }
+
+      await deleteEvent(
+        accessToken,
+        calendarId,
+        eventId,
+        sendNotifications !== false
+      );
+
+      console.log(`[CALENDAR] Event deleted: ${eventId}`);
+
+      if (reservationId) {
+        await supabase
+          .from('reservations')
+          .update({
+            google_calendar_event_id: null,
+            calendar_event_link: null,
+            calendar_sync_status: 'cancelled',
+          })
+          .eq('id', reservationId);
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'Event deleted' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
