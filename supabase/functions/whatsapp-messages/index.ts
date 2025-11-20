@@ -399,10 +399,13 @@ async function processAIResponse(
       try {
         console.log('[ROUTER] Classifying intent...');
         console.log(`[ROUTER] Current active agent: ${previousAgent}`);
+        console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
         const routingResult = await routeToAgent(userMessage, messageHistory || []);
         selectedAgent = routingResult.agent;
         routingReasoning = routingResult.reasoning;
+        
+        console.log(`[ROUTER] ✓ Classification complete - Selected agent: ${selectedAgent}, Confidence: ${routingResult.confidence}`);
         
         // ========== DETECT AGENT SWITCH ==========
         const agentSwitched = previousAgent !== selectedAgent;
@@ -433,33 +436,46 @@ async function processAIResponse(
         }
 
         // Update conversation with new agent and pause state
+        const wasAlreadyPaused = conversation.is_paused_for_human;
+        const wasAlreadyHandoff = conversation.human_takeover;
+        
+        console.log(`[STATE] Before update - Paused: ${wasAlreadyPaused}, Handoff: ${wasAlreadyHandoff}, Agent: ${previousAgent}`);
+        
         if (selectedAgent === 'boss') {
           // Boss agent - pause for human takeover
+          console.log(`[PAUSE] 🛑 Pausing conversation ${conversationId} for boss/human takeover`);
+          
           await supabase.from('conversations').update({ 
             active_agent: 'boss',
             is_paused_for_human: true, 
             human_takeover: true 
           }).eq('id', conversationId);
+          
+          console.log(`[STATE] After update - Paused: true, Handoff: true, Agent: boss`);
         } else {
           // Support or Sales agent - ensure NOT paused
+          if (wasAlreadyPaused) {
+            console.log(`[UNPAUSE] ✅ Auto-unpausing conversation ${conversationId} - routed to ${selectedAgent} agent`);
+          }
+          
           await supabase.from('conversations').update({ 
             active_agent: selectedAgent,
             is_paused_for_human: false,
             human_takeover: false
           }).eq('id', conversationId);
           
-          // Log unpause events for debugging
-          if (conversation.is_paused_for_human) {
-            console.log(`[UNPAUSE] Auto-unpausing conversation ${conversationId} - routed to ${selectedAgent} agent`);
-          }
+          console.log(`[STATE] After update - Paused: false, Handoff: false, Agent: ${selectedAgent}`);
         }
 
         // Handle BOSS agent - trigger handoff notification
         if (selectedAgent === 'boss') {
+          console.log(`[HANDOFF] 📞 Generating handoff notification for boss`);
           const summary = await generateConversationSummary(conversationId, supabase);
           
           const handoffSource = agentSwitched ? `${previousAgent}_agent` : 'supervisor_router';
+          console.log(`[HANDOFF] Source: ${handoffSource}, Customer: ${conversation.customer_name || 'Unknown'}`);
           await sendBossHandoffNotification(company, customerPhone, conversation.customer_name || 'Unknown', summary, supabase, handoffSource);
+          console.log(`[HANDOFF] ✓ Boss notification sent successfully`);
           
           // Send notification to CLIENT that a representative will reach out
           const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
@@ -467,6 +483,8 @@ async function processAIResponse(
           
           if (company.boss_phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             const clientNotificationMessage = `Thank you for your message. A representative will reach out to you shortly on ${company.boss_phone} to assist you further.`;
+            
+            console.log(`[HANDOFF] 📤 Sending client notification: "${clientNotificationMessage.substring(0, 50)}..."`);
             
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
@@ -1848,6 +1866,8 @@ serve(async (req) => {
           const normalizedTarget = targetPhone.replace(/[^\d]/g, '');
           
           // Unmute all conversations for this customer
+          console.log(`[UNMUTE] 🔓 Boss manually unpausing conversations for ${targetPhone}`);
+          
           const { data: unmuteResult } = await supabase
             .from('conversations')
             .update({ 
@@ -1858,7 +1878,8 @@ serve(async (req) => {
             .eq('phone', `whatsapp:+${normalizedTarget}`)
             .select();
           
-          console.log('[UNMUTE] Unmuted conversations:', unmuteResult);
+          console.log(`[UNMUTE] ✓ Unmuted ${unmuteResult?.length || 0} conversation(s) for ${targetPhone}`);
+          console.log('[UNMUTE] Updated conversations:', unmuteResult?.map(c => c.id));
           
           // Send confirmation to Boss
           const confirmMsg = `✅ AI resumed for ${targetPhone}. Future messages will be handled automatically.`;
@@ -2056,6 +2077,8 @@ serve(async (req) => {
     // Human takeover check removed - routing system now manages takeover state dynamically
     
     if (convError || !conversation) {
+      console.log(`[CONVERSATION] 🆕 Creating new conversation for ${customerPhone}`);
+      
       const { data: newConv, error: createError } = await supabase
         .from('conversations')
         .insert({
@@ -2068,10 +2091,14 @@ serve(async (req) => {
         .single();
 
       if (createError) {
-        console.error('Error creating conversation:', createError);
+        console.error('[CONVERSATION] ❌ Error creating conversation:', createError);
         throw createError;
       }
       conversation = newConv;
+      console.log(`[CONVERSATION] ✓ New conversation created with ID: ${conversation.id}`);
+    } else {
+      console.log(`[CONVERSATION] 📝 Using existing conversation ${conversation.id}`);
+      console.log(`[CONVERSATION] Current state - Paused: ${conversation.is_paused_for_human}, Handoff: ${conversation.human_takeover}, Agent: ${conversation.active_agent || 'none'}`);
     }
 
     // Deduct credits
