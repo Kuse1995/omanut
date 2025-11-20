@@ -214,6 +214,47 @@ export type Database = {
           },
         ]
       }
+      calendar_conflicts: {
+        Row: {
+          company_id: string | null
+          conflicting_event_id: string | null
+          conflicting_event_title: string | null
+          created_at: string | null
+          id: string
+          requested_date: string
+          requested_time: string
+          resolved: boolean | null
+        }
+        Insert: {
+          company_id?: string | null
+          conflicting_event_id?: string | null
+          conflicting_event_title?: string | null
+          created_at?: string | null
+          id?: string
+          requested_date: string
+          requested_time: string
+          resolved?: boolean | null
+        }
+        Update: {
+          company_id?: string | null
+          conflicting_event_id?: string | null
+          conflicting_event_title?: string | null
+          created_at?: string | null
+          id?: string
+          requested_date?: string
+          requested_time?: string
+          resolved?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_conflicts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_information: {
         Row: {
           company_id: string
@@ -272,12 +313,15 @@ export type Database = {
         Row: {
           admin_last_active: string | null
           agent_routing_enabled: boolean | null
+          booking_buffer_minutes: number | null
           boss_phone: string | null
           branches: string | null
           business_type: string | null
+          calendar_sync_enabled: boolean | null
           created_at: string | null
           credit_balance: number | null
           currency_prefix: string | null
+          google_calendar_id: string | null
           hours: string | null
           id: string
           metadata: Json | null
@@ -301,12 +345,15 @@ export type Database = {
         Insert: {
           admin_last_active?: string | null
           agent_routing_enabled?: boolean | null
+          booking_buffer_minutes?: number | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
+          calendar_sync_enabled?: boolean | null
           created_at?: string | null
           credit_balance?: number | null
           currency_prefix?: string | null
+          google_calendar_id?: string | null
           hours?: string | null
           id?: string
           metadata?: Json | null
@@ -330,12 +377,15 @@ export type Database = {
         Update: {
           admin_last_active?: string | null
           agent_routing_enabled?: boolean | null
+          booking_buffer_minutes?: number | null
           boss_phone?: string | null
           branches?: string | null
           business_type?: string | null
+          calendar_sync_enabled?: boolean | null
           created_at?: string | null
           credit_balance?: number | null
           currency_prefix?: string | null
+          google_calendar_id?: string | null
           hours?: string | null
           id?: string
           metadata?: Json | null
@@ -1093,11 +1143,14 @@ export type Database = {
         Row: {
           area_preference: string | null
           branch: string | null
+          calendar_event_link: string | null
+          calendar_sync_status: string | null
           company_id: string | null
           conversation_id: string | null
           created_at: string
           date: string
           email: string | null
+          google_calendar_event_id: string | null
           guests: number
           id: string
           name: string
@@ -1109,11 +1162,14 @@ export type Database = {
         Insert: {
           area_preference?: string | null
           branch?: string | null
+          calendar_event_link?: string | null
+          calendar_sync_status?: string | null
           company_id?: string | null
           conversation_id?: string | null
           created_at?: string
           date: string
           email?: string | null
+          google_calendar_event_id?: string | null
           guests: number
           id?: string
           name: string
@@ -1125,11 +1181,14 @@ export type Database = {
         Update: {
           area_preference?: string | null
           branch?: string | null
+          calendar_event_link?: string | null
+          calendar_sync_status?: string | null
           company_id?: string | null
           conversation_id?: string | null
           created_at?: string
           date?: string
           email?: string | null
+          google_calendar_event_id?: string | null
           guests?: number
           id?: string
           name?: string
