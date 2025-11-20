@@ -66,3 +66,6 @@ verify_jwt = true
 
 [functions.google-calendar]
 verify_jwt = false
+
+[functions.update-reservation]
+verify_jwt = true
