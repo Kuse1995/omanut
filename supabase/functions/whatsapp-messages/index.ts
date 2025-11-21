@@ -785,7 +785,7 @@ ${supervisorRecommendation.recommendedResponse}
     messages[0] = { role: 'system', content: instructions };
 
     // Select Gemini model based on complexity
-    const selectedModel = messageComplexity === 'simple' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-pro';
+    const selectedModel = messageComplexity === 'simple' ? 'google/gemini-2.5-flash' : 'google/gemini-3-pro-preview';
     const maxTokens = messageComplexity === 'simple' ? 2048 : 8192;
     console.log(`[AI] Using model: ${selectedModel} with max_tokens: ${maxTokens}`);
 
