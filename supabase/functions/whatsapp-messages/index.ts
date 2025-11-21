@@ -614,6 +614,11 @@ ${company.services ? `- Services: ${company.services}` : ''}
 ${company.currency_prefix ? `- Currency: ${company.currency_prefix}` : ''}
 ${company.email ? `- Email: ${company.email}` : ''}`;
 
+    // Add quick reference knowledge base
+    if (company.quick_reference_info && company.quick_reference_info.trim()) {
+      instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
+    }
+
     // Add AI overrides if present
     if (aiOverrides) {
       if (aiOverrides.system_instructions) {
@@ -631,7 +636,7 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     if (documents && documents.length > 0) {
       instructions += '\n\n=== KNOWLEDGE BASE ===\n';
       for (const doc of documents) {
-        instructions += `\nDocument: ${doc.file_name}\n${doc.content}\n`;
+        instructions += `\nDocument: ${doc.filename}\n${doc.parsed_content}\n`;
       }
     }
 

@@ -320,6 +320,7 @@ COMPANY CONTEXT:
 - Services: ${company.services}
 - Hours: ${company.hours}
 - Currency: ${company.currency_prefix}
+${company.quick_reference_info ? `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}` : ''}
 ${aiOverrides?.system_instructions ? `\n\n=== CUSTOM SYSTEM INSTRUCTIONS ===\n${aiOverrides.system_instructions}` : ''}
 ${aiOverrides?.qa_style ? `\n\n=== Q&A STYLE ===\n${aiOverrides.qa_style}` : ''}
 ${aiOverrides?.banned_topics ? `\n\n=== BANNED TOPICS ===\n${aiOverrides.banned_topics}` : ''}
