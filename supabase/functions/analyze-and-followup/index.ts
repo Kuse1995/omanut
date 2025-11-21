@@ -281,15 +281,15 @@ async function processCompany(
 
         const recommendation = supervisorData.recommendation;
 
-        // Use Kimi AI to craft follow-up message based on supervisor's guidance
-        const kimiResponse = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+        // Use Lovable AI Gateway with Gemini 3 Pro to craft follow-up message
+        const geminiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${Deno.env.get('KIMI_API_KEY')}`,
+            'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'kimi-k2-thinking',
+            model: 'google/gemini-3-pro-preview',
             messages: [
               {
                 role: 'system',
@@ -328,12 +328,12 @@ Return ONLY the message text, no prefix or explanation.`
               }
             ],
             temperature: 1.0,
-            max_tokens: 16000
+            max_tokens: 8192
           }),
         });
 
-        if (!kimiResponse.ok) {
-          console.error('Kimi AI failed:', await kimiResponse.text());
+        if (!geminiResponse.ok) {
+          console.error('Lovable AI failed:', await geminiResponse.text());
           if (sendEvent) {
             sendEvent({ 
               type: 'progress', 
@@ -346,8 +346,8 @@ Return ONLY the message text, no prefix or explanation.`
           continue;
         }
 
-        const kimiData = await kimiResponse.json();
-        const followUpMessage = kimiData.choices[0]?.message?.content?.trim();
+        const geminiData = await geminiResponse.json();
+        const followUpMessage = geminiData.choices[0]?.message?.content?.trim();
 
         if (!followUpMessage) {
           console.error('No follow-up message generated');

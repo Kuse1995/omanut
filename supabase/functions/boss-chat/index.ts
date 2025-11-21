@@ -420,25 +420,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
     ];
 
-    // Call Kimi AI (Moonshot)
-    const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
+    // Call Lovable AI Gateway with Gemini 3 Pro
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
     console.log('Boss chat request:', { companyName: company.name, question: Body });
     
-    const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${KIMI_API_KEY}`,
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'kimi-k2-thinking',
+        model: 'google/gemini-3-pro-preview',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: Body }
         ],
         temperature: 1.0,
-        max_tokens: 16000,
+        max_tokens: 8192,
         tools: managementTools
       }),
     });
@@ -446,8 +446,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const data = await response.json();
     
     if (!response.ok) {
-      console.error('Kimi AI API error:', data);
-      throw new Error(`Kimi AI error: ${data.error?.message || 'Unknown error'}`);
+      console.error('Lovable AI API error:', data);
+      throw new Error(`Lovable AI error: ${data.error?.message || 'Unknown error'}`);
     }
     
     if (!data.choices?.[0]?.message) {
