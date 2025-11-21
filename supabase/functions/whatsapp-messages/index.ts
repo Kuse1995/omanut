@@ -355,7 +355,7 @@ async function processAIResponse(
   const messageComplexity = classifyMessageComplexity(userMessage);
   console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
   
-  const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -779,12 +779,12 @@ ${supervisorRecommendation.recommendedResponse}
     // Update system message with supervisor guidance
     messages[0] = { role: 'system', content: instructions };
 
-    // Select AI model based on complexity
-    const selectedModel = messageComplexity === 'simple' ? 'moonshot-v1-32k' : 'kimi-k2-thinking';
-    const maxTokens = messageComplexity === 'simple' ? 1000 : 16000;
+    // Select Gemini model based on complexity
+    const selectedModel = messageComplexity === 'simple' ? 'google/gemini-2.5-flash' : 'google/gemini-3-pro-preview';
+    const maxTokens = messageComplexity === 'simple' ? 2048 : 8192;
     console.log(`[AI] Using model: ${selectedModel} with max_tokens: ${maxTokens}`);
 
-    // Call Kimi AI with extended timeout
+    // Call Lovable AI Gateway with extended timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
     
@@ -793,10 +793,10 @@ ${supervisorRecommendation.recommendedResponse}
     let toolExecutionContext: string[] = [];
 
     try {
-      const response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${KIMI_API_KEY}`,
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
           'Content-Type': 'application/json',
         },
         signal: controller.signal,
@@ -1490,9 +1490,9 @@ serve(async (req) => {
   }
 
   try {
-    const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
-    if (!KIMI_API_KEY) {
-      throw new Error('KIMI_API_KEY is not configured');
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY is not configured');
     }
 
     const supabase = createClient(
