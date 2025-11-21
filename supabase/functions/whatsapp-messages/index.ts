@@ -660,7 +660,12 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
    - ALWAYS check_calendar_availability BEFORE sending reservation flow
    - If time slot is busy, suggest alternative available times
    - Never confirm reservations without checking calendar first
-4. For reservations, use send_flow tool IMMEDIATELY after confirming availability
+   - CALENDAR UNAVAILABLE PROTOCOL: If calendar check fails/errors:
+     * DO NOT keep asking for date/time if customer already provided it
+     * Proceed with reservation collection anyway using send_flow tool
+     * Inform customer that team will confirm availability shortly
+     * Never create conversation loops by repeating the same question
+4. For reservations, use send_flow tool IMMEDIATELY after confirming availability OR if calendar is unavailable
 5. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
@@ -1122,10 +1127,20 @@ ${supervisorRecommendation.recommendedResponse}
                 console.error('[BACKGROUND] Calendar check error:', calError);
                 toolExecutionContext.push('calendar unavailable - proceeding without availability check');
                 
-                // CRITICAL FIX: Set helpful response when calendar fails
-                assistantReply = "I'd be happy to help you schedule a visit! While our calendar system is updating, " +
-                  "let me record your details and our team will confirm availability shortly. " +
-                  "What date and time works best for you?";
+                // Context-aware error handling: Check if customer already provided date/time
+                const hasDateTime = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|tonight|weekend|\d{1,2}:\d{2}|am|pm|morning|afternoon|evening|noon|midnight)\b/i.test(userMessage);
+                
+                if (hasDateTime) {
+                  // Customer already mentioned time - proceed with reservation flow
+                  assistantReply = "Perfect! Let me collect your reservation details. While our calendar system is updating, " +
+                    "our team will confirm availability and get back to you shortly.";
+                  toolExecutionContext.push('customer provided date/time - proceed with reservation flow despite calendar error');
+                } else {
+                  // Customer didn't mention time yet - ask for it once
+                  assistantReply = "I'd be happy to help you schedule a visit! While our calendar system is updating, " +
+                    "let me record your details and our team will confirm availability shortly. " +
+                    "What date and time works best for you?";
+                }
                 anyToolExecuted = true;
               } else {
                 anyToolExecuted = true;
