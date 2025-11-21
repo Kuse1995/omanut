@@ -110,7 +110,7 @@ async function processCompany(
     // Fetch company details
     const { data: company } = await supabase
       .from('companies')
-      .select('*')
+      .select('*, company_ai_overrides(*)')
       .eq('id', currentCompanyId)
       .single();
 
@@ -280,6 +280,9 @@ async function processCompany(
         }
 
         const recommendation = supervisorData.recommendation;
+        
+        // Get AI overrides for follow-up message
+        const aiOverrides = company.company_ai_overrides?.[0];
 
         // Use Lovable AI Gateway with Gemini 3 Pro to craft follow-up message
         const geminiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -317,6 +320,9 @@ COMPANY CONTEXT:
 - Services: ${company.services}
 - Hours: ${company.hours}
 - Currency: ${company.currency_prefix}
+${aiOverrides?.system_instructions ? `\n\n=== CUSTOM SYSTEM INSTRUCTIONS ===\n${aiOverrides.system_instructions}` : ''}
+${aiOverrides?.qa_style ? `\n\n=== Q&A STYLE ===\n${aiOverrides.qa_style}` : ''}
+${aiOverrides?.banned_topics ? `\n\n=== BANNED TOPICS ===\n${aiOverrides.banned_topics}` : ''}
 
 Create a warm, personalized follow-up message (max 150 words) that:
 1. References their previous interaction naturally
