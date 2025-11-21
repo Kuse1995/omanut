@@ -616,14 +616,14 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 
     // Add AI overrides if present
     if (aiOverrides) {
-      if (aiOverrides.custom_greeting) {
-        instructions += `\n\nGreeting Style: ${aiOverrides.custom_greeting}`;
+      if (aiOverrides.system_instructions) {
+        instructions += `\n\n=== CUSTOM SYSTEM INSTRUCTIONS ===\n${aiOverrides.system_instructions}`;
       }
-      if (aiOverrides.response_tone) {
-        instructions += `\nTone: ${aiOverrides.response_tone}`;
+      if (aiOverrides.qa_style) {
+        instructions += `\n\n=== Q&A STYLE ===\n${aiOverrides.qa_style}`;
       }
-      if (aiOverrides.additional_instructions) {
-        instructions += `\n\nAdditional Instructions:\n${aiOverrides.additional_instructions}`;
+      if (aiOverrides.banned_topics) {
+        instructions += `\n\n=== BANNED TOPICS ===\n${aiOverrides.banned_topics}`;
       }
     }
 
