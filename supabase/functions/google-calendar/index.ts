@@ -289,8 +289,12 @@ serve(async (req) => {
     }
 
     if (!company.calendar_sync_enabled) {
+      console.log(`[CALENDAR] Calendar sync disabled for company ${companyId}`);
       return new Response(
-        JSON.stringify({ error: 'Calendar sync is not enabled for this company' }),
+        JSON.stringify({ 
+          error: 'Calendar sync is not enabled for this company',
+          hint: 'Enable in Settings → Calendar Integration'
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -300,10 +304,15 @@ serve(async (req) => {
     const calendarId = company.google_calendar_id || Deno.env.get('GOOGLE_CALENDAR_ID');
 
     if (!serviceAccountEmail || !privateKey || !calendarId) {
-      throw new Error('Google Calendar credentials not configured');
+      console.error('[CALENDAR] Missing config:', { 
+        hasEmail: !!serviceAccountEmail, 
+        hasKey: !!privateKey, 
+        hasCalendarId: !!calendarId 
+      });
+      throw new Error('Google Calendar credentials not configured. Check: GOOGLE_CALENDAR_SERVICE_ACCOUNT_EMAIL, GOOGLE_CALENDAR_PRIVATE_KEY, and company.google_calendar_id');
     }
 
-    console.log(`[CALENDAR] Action: ${action}, Company: ${companyId}`);
+    console.log(`[CALENDAR] Action: ${action}, Company: ${companyId}, Calendar: ${calendarId}, Service Account: ${serviceAccountEmail}`);
 
     const accessToken = await getAccessToken(serviceAccountEmail, privateKey);
 
