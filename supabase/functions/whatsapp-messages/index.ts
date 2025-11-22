@@ -1150,7 +1150,34 @@ ${supervisorRecommendation.recommendedResponse}
               } else {
                 anyToolExecuted = true;
                 if (calendarData.available) {
-                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} is AVAILABLE`);
+                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} is AVAILABLE - NOW SEND RESERVATION FLOW`);
+                  console.log('[BACKGROUND] Availability confirmed, automatically sending reservation flow');
+                  
+                  // Automatically send reservation flow after confirming availability
+                  try {
+                    const flowResponse = await supabase.functions.invoke('send-whatsapp-flow', {
+                      body: {
+                        flow_type: 'reservation',
+                        header_text: '📋 Complete Your Reservation',
+                        button_text: 'Fill Details',
+                        prefill_data: {},
+                        customer_phone: `whatsapp:${customerPhone}`,
+                        company_id: company.id
+                      }
+                    });
+                    
+                    if (flowResponse.error) {
+                      console.error('[BACKGROUND] Flow send error:', flowResponse.error);
+                      assistantReply = `Great news! ${args.time} on ${args.date} is available. Please provide your name, email, and number of guests so I can complete your reservation.`;
+                    } else {
+                      console.log('[BACKGROUND] Reservation flow sent successfully');
+                      toolExecutionContext.push('sent reservation flow to customer');
+                      assistantReply = `Perfect! ${args.time} on ${args.date} is available. I've sent you a form to complete your reservation details. 📋`;
+                    }
+                  } catch (flowError) {
+                    console.error('[BACKGROUND] Error sending flow:', flowError);
+                    assistantReply = `Great news! ${args.time} on ${args.date} is available. Please provide your name, email, and number of guests so I can complete your reservation.`;
+                  }
                 } else {
                   toolExecutionContext.push(`Time slot ${args.date} ${args.time} is BUSY: ${calendarData.message}`);
                   assistantReply = `I checked our calendar and ${args.time} on ${args.date} is already booked. ` +
