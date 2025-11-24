@@ -658,7 +658,16 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
 
-    instructions += `\n\nKey Guidelines:
+    instructions += `\n\nCONVERSATION MEMORY & CONTEXT - CRITICAL:
+- ALWAYS review the conversation history before asking questions
+- If customer already provided name, email, phone, or guest count, EXTRACT IT from conversation
+- Use prefill_data parameter in send_flow to pre-fill known information
+- NEVER ask for information the customer already gave you
+- Example: If customer says "John, john@email.com, 3 guests" → extract and prefill all three fields
+- If customer provided partial info across multiple messages, extract ALL of it before calling send_flow
+- The customer's WhatsApp phone number is always available from the conversation
+
+Key Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
 3. RESERVATION & CALENDAR - CRITICAL:
@@ -672,6 +681,14 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
      * Proceed with reservation collection anyway using send_flow tool
      * Inform customer that team will confirm availability shortly
      * Never create conversation loops by repeating the same question
+   - After checking availability, IMMEDIATELY call send_flow tool
+   - CRITICAL: When calling send_flow, analyze conversation history for:
+     * Customer name (from messages like "I'm John" or "Abraham here" or "My name is X")
+     * Email address (any text with @ symbol)
+     * Phone number (customer's WhatsApp number is always available)
+     * Guest count (numbers like "3 guests", "party of 4", "for 2 people")
+   - Pass ALL extracted info in prefill_data parameter
+   - The form will only ask for missing fields
 4. For reservations, use send_flow tool IMMEDIATELY after checking availability
 5. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
@@ -684,6 +701,13 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 9. Never make up information not provided above
 10. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
 11. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.
+12. CRITICAL - NO REPETITIVE QUESTIONS:
+    - Before asking ANY question, check if the answer is in conversation history
+    - If customer already provided partial information, acknowledge it and only ask for missing pieces
+    - Example: If customer said "Abraham, 3 guests", respond with:
+      "Perfect! I have Abraham and 3 guests. I just need your email address to complete the booking."
+    - NEVER ask for the same information twice
+    - If unsure, send the flow with whatever info you have in prefill_data - the form handles the rest
 
 CRITICAL HANDOFF PROTOCOL:
 - If the customer AGREES TO PAYMENT or expresses clear intent to pay, append [HANDOFF_REQUIRED] at the very end of your response
@@ -817,7 +841,7 @@ ${supervisorRecommendation.recommendedResponse}
               type: "function",
               function: {
                 name: "send_flow",
-                description: "Send a WhatsApp Flow form to collect information from the customer. Use this INSTEAD of asking multiple questions. Available for reservations and payment information.",
+                description: "Send a WhatsApp Flow form to collect information from the customer. Use this INSTEAD of asking multiple questions. ALWAYS extract any customer info from conversation history and pass in prefill_data (name, email, phone, guest count). The form will only show fields that need to be filled. Available for reservations and payment information.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -836,11 +860,12 @@ ${supervisorRecommendation.recommendedResponse}
                     },
                     prefill_data: {
                       type: "object",
-                      description: "Optional pre-filled data from conversation context",
+                      description: "CRITICAL: Pre-filled data extracted from conversation history. Always analyze conversation for name, email, phone, guest count and include whatever you find here.",
                       properties: {
-                        customer_name: { type: "string" },
-                        phone: { type: "string" },
-                        email: { type: "string" }
+                        customer_name: { type: "string", description: "Customer's name from conversation (e.g., 'I'm John', 'Abraham here')" },
+                        phone: { type: "string", description: "Customer's phone number (WhatsApp number is always available)" },
+                        email: { type: "string", description: "Email address if mentioned (look for @ symbol)" },
+                        guests: { type: "number", description: "Number of guests if mentioned (e.g., '3 guests', 'party of 4')" }
                       }
                     }
                   },
@@ -1223,6 +1248,7 @@ ${supervisorRecommendation.recommendedResponse}
           } else if (toolCall.function.name === 'send_flow') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] send_flow called with:', JSON.stringify(args));
+            console.log('[BACKGROUND] prefill_data being sent:', JSON.stringify(args.prefill_data || {}));
             
             try {
               // Call send-whatsapp-flow edge function
