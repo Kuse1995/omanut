@@ -19,6 +19,12 @@ timeout = 60
 [functions.send-boss-notification]
 verify_jwt = false
 
+[functions.send-boss-reservation-request]
+verify_jwt = false
+
+[functions.handle-boss-response]
+verify_jwt = false
+
 [functions.twilio-voice]
 verify_jwt = false
 timeout = 60

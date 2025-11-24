@@ -661,16 +661,18 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     instructions += `\n\nKey Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
-3. CALENDAR AVAILABILITY - CRITICAL:
-   - ALWAYS check_calendar_availability BEFORE sending reservation flow
+3. RESERVATION & CALENDAR - CRITICAL:
+   - ALWAYS check_calendar_availability BEFORE sending reservation flow (checks our database for conflicts)
    - If time slot is busy, suggest alternative available times
-   - Never confirm reservations without checking calendar first
-   - CALENDAR UNAVAILABLE PROTOCOL: If calendar check fails/errors:
+   - ALL RESERVATIONS REQUIRE BOSS CONFIRMATION - make this clear to customers
+   - Tell customers: "I'll send your request to our team for final confirmation"
+   - Database availability check: Shows bookings already in our system
+   - CALENDAR UNAVAILABLE PROTOCOL: If database check fails/errors:
      * DO NOT keep asking for date/time if customer already provided it
      * Proceed with reservation collection anyway using send_flow tool
      * Inform customer that team will confirm availability shortly
      * Never create conversation loops by repeating the same question
-4. For reservations, use send_flow tool IMMEDIATELY after confirming availability OR if calendar is unavailable
+4. For reservations, use send_flow tool IMMEDIATELY after checking availability
 5. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
@@ -898,7 +900,7 @@ ${supervisorRecommendation.recommendedResponse}
               type: "function",
               function: {
                 name: "check_calendar_availability",
-                description: "Check if a date/time slot is available before confirming reservation. ALWAYS use this BEFORE sending reservation flow.",
+                description: "Check reservation database for scheduling conflicts. Always call BEFORE sending reservation form to customer. Returns conflict status and suggests alternatives if busy.",
                 parameters: {
                   type: "object",
                   properties: {
@@ -914,14 +916,14 @@ ${supervisorRecommendation.recommendedResponse}
               type: "function",
               function: {
                 name: "create_calendar_event",
-                description: "Create Google Calendar event for confirmed reservation. Use after customer confirms booking.",
+                description: "Notify boss about pending reservation for approval. Automatically called after customer completes reservation form. Boss will receive context about the day's schedule and approve/reject.",
                 parameters: {
                   type: "object",
                   properties: {
-                    reservation_id: { type: "string", description: "Reservation UUID from database" },
-                    title: { type: "string", description: "Event title (e.g., 'Reservation: John Doe - 4 guests')" },
-                    description: { type: "string", description: "Event notes (customer details, preferences)" },
-                    send_notifications: { type: "boolean", description: "Send email notifications (default true)" }
+                    reservation_id: { type: "string", description: "Reservation UUID from database to notify boss about" },
+                    title: { type: "string", description: "Reservation title (e.g., 'Reservation: John Doe - 4 guests')" },
+                    description: { type: "string", description: "Additional reservation details or notes" },
+                    send_notifications: { type: "boolean", description: "Deprecated - kept for compatibility" }
                   },
                   required: ["reservation_id", "title"]
                 }
@@ -1115,22 +1117,25 @@ ${supervisorRecommendation.recommendedResponse}
             }
           } else if (toolCall.function.name === 'check_calendar_availability') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] Checking calendar availability:', args);
+            console.log('[BACKGROUND] Checking database availability:', args);
             
             try {
-              const { data: calendarData, error: calError } = await supabase.functions.invoke('google-calendar', {
-                body: {
-                  action: 'check_availability',
-                  companyId: company.id,
-                  date: args.date,
-                  time: args.time,
-                  duration: args.duration_minutes || 120
-                }
-              });
+              // Check database for conflicting reservations
+              const requestedDateTime = new Date(`${args.date} ${args.time}`);
+              const bufferMinutes = 120; // 2 hour buffer
+              const startTime = new Date(requestedDateTime.getTime() - bufferMinutes * 60000);
+              const endTime = new Date(requestedDateTime.getTime() + bufferMinutes * 60000);
               
-              if (calError) {
-                console.error('[BACKGROUND] Calendar check error:', calError);
-                toolExecutionContext.push('calendar unavailable - proceeding without availability check');
+              const { data: conflicts, error: conflictError } = await supabase
+                .from('reservations')
+                .select('name, time, guests, status')
+                .eq('company_id', company.id)
+                .eq('date', args.date)
+                .in('status', ['pending_boss_approval', 'confirmed']);
+              
+              if (conflictError) {
+                console.error('[BACKGROUND] Database check error:', conflictError);
+                toolExecutionContext.push('database unavailable - proceeding without availability check');
                 
                 // Context-aware error handling: Check if customer already provided date/time
                 const hasDateTime = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|tonight|weekend|\d{1,2}:\d{2}|am|pm|morning|afternoon|evening|noon|midnight)\b/i.test(userMessage);
@@ -1149,7 +1154,9 @@ ${supervisorRecommendation.recommendedResponse}
                 anyToolExecuted = true;
               } else {
                 anyToolExecuted = true;
-                if (calendarData.available) {
+                const hasConflicts = conflicts && conflicts.length > 0;
+                
+                if (!hasConflicts) {
                   toolExecutionContext.push(`Time slot ${args.date} ${args.time} is AVAILABLE - NOW SEND RESERVATION FLOW`);
                   console.log('[BACKGROUND] Availability confirmed, automatically sending reservation flow');
                   
@@ -1168,20 +1175,21 @@ ${supervisorRecommendation.recommendedResponse}
                     
                     if (flowResponse.error) {
                       console.error('[BACKGROUND] Flow send error:', flowResponse.error);
-                      assistantReply = `Great news! ${args.time} on ${args.date} is available. Please provide your name, email, and number of guests so I can complete your reservation.`;
+                      assistantReply = `Great news! ${args.time} on ${args.date} is available. Please note that all reservations require final confirmation from our team. Please provide your name, email, and number of guests.`;
                     } else {
                       console.log('[BACKGROUND] Reservation flow sent successfully');
                       toolExecutionContext.push('sent reservation flow to customer');
-                      assistantReply = `Perfect! ${args.time} on ${args.date} is available. I've sent you a form to complete your reservation details. 📋`;
+                      assistantReply = `Perfect! ${args.time} on ${args.date} looks available. I've sent you a form to complete your reservation details. Please note that all reservations require final confirmation from our team. 📋`;
                     }
                   } catch (flowError) {
                     console.error('[BACKGROUND] Error sending flow:', flowError);
-                    assistantReply = `Great news! ${args.time} on ${args.date} is available. Please provide your name, email, and number of guests so I can complete your reservation.`;
+                    assistantReply = `Great news! ${args.time} on ${args.date} is available. Please note that reservations require team confirmation. Please provide your name, email, and number of guests.`;
                   }
                 } else {
-                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} is BUSY: ${calendarData.message}`);
-                  assistantReply = `I checked our calendar and ${args.time} on ${args.date} is already booked. ` +
-                    `Would you like to try a different time? I can check other available slots for you.`;
+                  const conflictDetails = conflicts.map(c => `${c.time} (${c.guests} guests${c.status === 'pending_boss_approval' ? ' - pending' : ''})`).join(', ');
+                  toolExecutionContext.push(`Time slot ${args.date} ${args.time} has ${conflicts.length} booking(s): ${conflictDetails}`);
+                  assistantReply = `I checked our schedule and ${args.time} on ${args.date} has ${conflicts.length} booking(s) around that time. ` +
+                    `Would you like to try a different time? I can suggest alternative slots for you.`;
                 }
               }
             } catch (error) {
@@ -1190,31 +1198,27 @@ ${supervisorRecommendation.recommendedResponse}
             }
           } else if (toolCall.function.name === 'create_calendar_event') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] Creating calendar event:', args);
+            console.log('[BACKGROUND] Notifying boss about reservation:', args);
             
             try {
-              const { data: eventData, error: eventError } = await supabase.functions.invoke('google-calendar', {
+              // Send boss notification instead of creating calendar event
+              const { data: bossData, error: bossError } = await supabase.functions.invoke('send-boss-reservation-request', {
                 body: {
-                  action: 'create_event',
-                  companyId: company.id,
-                  reservationId: args.reservation_id,
-                  title: args.title,
-                  description: args.description || '',
-                  sendNotifications: args.send_notifications !== false
+                  reservationId: args.reservation_id
                 }
               });
               
-              if (eventError) {
-                console.error('[BACKGROUND] Calendar event creation error:', eventError);
-                toolExecutionContext.push('calendar event creation failed - reservation saved but not synced to calendar');
+              if (bossError) {
+                console.error('[BACKGROUND] Boss notification error:', bossError);
+                toolExecutionContext.push('boss notification failed - reservation saved but boss not notified');
               } else {
                 anyToolExecuted = true;
-                toolExecutionContext.push(`calendar event created: ${eventData.event_id}`);
-                assistantReply += `\n\n📅 Added to calendar: ${eventData.link}`;
+                toolExecutionContext.push('boss notified about pending reservation');
+                console.log('[BACKGROUND] Boss notification sent successfully');
               }
             } catch (error) {
-              console.error('[BACKGROUND] Calendar event error:', error);
-              toolExecutionContext.push('calendar event failed - reservation saved but not in calendar');
+              console.error('[BACKGROUND] Boss notification error:', error);
+              toolExecutionContext.push('boss notification failed - reservation saved but boss not notified');
             }
           } else if (toolCall.function.name === 'send_flow') {
             const args = JSON.parse(toolCall.function.arguments);
@@ -2081,7 +2085,43 @@ serve(async (req) => {
         });
       }
       
-      // Store boss message in database (for non-unmute messages)
+      // Check if message contains reservation command (APPROVE/REJECT/SUGGEST)
+      const upperBody = Body.toUpperCase();
+      if (upperBody.includes('APPROVE') || upperBody.includes('REJECT') || upperBody.includes('SUGGEST')) {
+        console.log('[BOSS-WEBHOOK] Boss reservation command detected, routing to handler');
+        
+        // @ts-ignore - EdgeRuntime is a Deno Deploy global
+        EdgeRuntime.waitUntil(
+          (async () => {
+            try {
+              const { data: responseData, error: responseError } = await supabase.functions.invoke('handle-boss-response', {
+                body: {
+                  bossPhone: From,
+                  messageBody: Body,
+                  companyId: company.id
+                }
+              });
+              
+              if (responseError) {
+                console.error('[BOSS-WEBHOOK] Error handling boss response:', responseError);
+              } else {
+                console.log('[BOSS-WEBHOOK] Boss response handled successfully');
+              }
+            } catch (error) {
+              console.error('[BOSS-WEBHOOK] Exception handling boss response:', error);
+            }
+          })()
+        );
+        
+        // Return empty TwiML - customer already notified by handler
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response></Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+        });
+      }
+      
+      // Store boss message in database (for non-unmute, non-reservation messages)
       await supabase
         .from('boss_conversations')
         .insert({
