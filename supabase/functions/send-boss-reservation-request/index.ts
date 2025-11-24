@@ -16,15 +16,15 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { reservationId } = await req.json();
+    const { reservation_id } = await req.json();
 
-    console.log('[BOSS-REQUEST] Processing reservation request:', reservationId);
+    console.log('[BOSS-REQUEST] Processing reservation request:', reservation_id);
 
     // Fetch reservation details
     const { data: reservation, error: resError } = await supabase
       .from('reservations')
       .select('*, company_id')
-      .eq('id', reservationId)
+      .eq('id', reservation_id)
       .single();
 
     if (resError || !reservation) {
@@ -94,9 +94,9 @@ Guests: ${reservation.guests}
 ${reservation.occasion ? `Occasion: ${reservation.occasion}\n` : ''}${reservation.area_preference ? `Area: ${reservation.area_preference}\n` : ''}${reservation.branch ? `Branch: ${reservation.branch}\n` : ''}${scheduleContext}
 
 Reply with:
-✅ "APPROVE ${reservationId.slice(0, 8)}" to confirm
-❌ "REJECT ${reservationId.slice(0, 8)} [reason]" to decline
-💬 "SUGGEST ${reservationId.slice(0, 8)} [alternative]" to propose different time`;
+✅ "APPROVE ${reservation_id.slice(0, 8)}" to confirm
+❌ "REJECT ${reservation_id.slice(0, 8)} [reason]" to decline
+💬 "SUGGEST ${reservation_id.slice(0, 8)} [alternative]" to propose different time`;
 
     console.log('[BOSS-REQUEST] Sending notification to boss:', company.boss_phone);
     console.log('[BOSS-REQUEST] Message:', message);
