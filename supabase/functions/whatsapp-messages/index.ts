@@ -661,36 +661,38 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     instructions += `\n\nCONVERSATION MEMORY & CONTEXT - CRITICAL:
 - ALWAYS review the conversation history before asking questions
 - If customer already provided name, email, phone, or guest count, EXTRACT IT from conversation
-- Use prefill_data parameter in send_flow to pre-fill known information
 - NEVER ask for information the customer already gave you
-- Example: If customer says "John, john@email.com, 3 guests" → extract and prefill all three fields
-- If customer provided partial info across multiple messages, extract ALL of it before calling send_flow
+- Example: If customer says "John, john@email.com, 3 guests" → you have name, email, and guests
+- If customer provided partial info across multiple messages, extract ALL of it before proceeding
 - The customer's WhatsApp phone number is always available from the conversation
 
 Key Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
-3. RESERVATION & CALENDAR - CRITICAL:
-   - ALWAYS check_calendar_availability BEFORE sending reservation flow (checks our database for conflicts)
+3. RESERVATION & CALENDAR - NEW WORKFLOW:
+   - ALWAYS check_calendar_availability BEFORE proceeding (checks our database for conflicts)
    - If time slot is busy, suggest alternative available times
-   - ALL RESERVATIONS REQUIRE BOSS CONFIRMATION - make this clear to customers
-   - Tell customers: "I'll send your request to our team for final confirmation"
-   - Database availability check: Shows bookings already in our system
-   - CALENDAR UNAVAILABLE PROTOCOL: If database check fails/errors:
-     * DO NOT keep asking for date/time if customer already provided it
-     * Proceed with reservation collection anyway using send_flow tool
-     * Inform customer that team will confirm availability shortly
-     * Never create conversation loops by repeating the same question
-   - After checking availability, IMMEDIATELY call send_flow tool
-   - CRITICAL: When calling send_flow, analyze conversation history for:
-     * Customer name (from messages like "I'm John" or "Abraham here" or "My name is X")
-     * Email address (any text with @ symbol)
-     * Phone number (customer's WhatsApp number is always available)
-     * Guest count (numbers like "3 guests", "party of 4", "for 2 people")
-   - Pass ALL extracted info in prefill_data parameter
-   - The form will only ask for missing fields
-4. For reservations, use send_flow tool IMMEDIATELY after checking availability
-5. For payments, use send_flow tool IMMEDIATELY - DO NOT ask questions one-by-one
+   - Collect information conversationally by extracting from messages:
+     * Customer name (from conversation history - look for "I'm John", "Abraham here", "My name is X")
+     * Phone number (always available from WhatsApp conversation)
+     * Email address (ask ONCE if not provided - look for @ symbol in messages)
+     * Date and time (already discussed during availability check)
+     * Number of guests (ask ONCE if not provided - look for "3 guests", "party of 4")
+     * Occasion (optional)
+     * Area preference (optional)
+   
+   CRITICAL - Information Collection Rules:
+   - Review conversation history FIRST before asking anything
+   - If customer said "Abraham, abkanyanta@gmail.com, 3 guests" → you have everything
+   - NEVER ask for information twice
+   - Once you have: name, phone, email, date, time, guests → IMMEDIATELY call create_reservation tool
+   - After creating reservation, explain: "Thank you! Your reservation request has been received. Our team will review and confirm within a few hours."
+   
+   ALL RESERVATIONS REQUIRE BOSS CONFIRMATION:
+   - Make this clear to customers: "Your request will be reviewed by our team"
+   - Status starts as pending_boss_approval
+   - Boss receives notification with context for approval
+4. For payments, collect info conversationally then use request_payment tool
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
@@ -840,58 +842,21 @@ ${supervisorRecommendation.recommendedResponse}
             {
               type: "function",
               function: {
-                name: "send_flow",
-                description: "Send a WhatsApp Flow form to collect information from the customer. Use this INSTEAD of asking multiple questions. ALWAYS extract any customer info from conversation history and pass in prefill_data (name, email, phone, guest count). The form will only show fields that need to be filled. Available for reservations and payment information.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    flow_type: {
-                      type: "string",
-                      enum: ["reservation", "payment"],
-                      description: "Type of flow to send"
-                    },
-                    header_text: {
-                      type: "string",
-                      description: "Header text for the flow message (e.g., 'Complete Your Reservation')"
-                    },
-                    button_text: {
-                      type: "string",
-                      description: "Button text (e.g., 'Fill Form')"
-                    },
-                    prefill_data: {
-                      type: "object",
-                      description: "CRITICAL: Pre-filled data extracted from conversation history. Always analyze conversation for name, email, phone, guest count and include whatever you find here.",
-                      properties: {
-                        customer_name: { type: "string", description: "Customer's name from conversation (e.g., 'I'm John', 'Abraham here')" },
-                        phone: { type: "string", description: "Customer's phone number (WhatsApp number is always available)" },
-                        email: { type: "string", description: "Email address if mentioned (look for @ symbol)" },
-                        guests: { type: "number", description: "Number of guests if mentioned (e.g., '3 guests', 'party of 4')" }
-                      }
-                    }
-                  },
-                  required: ["flow_type", "header_text", "button_text"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
                 name: "create_reservation",
-                description: "DEPRECATED: Use send_flow instead. Only use if flow fails.",
+                description: "Create a new reservation in the database with pending_boss_approval status. Use this IMMEDIATELY after you have collected: name, phone, email, date, time, guests. Extract information from conversation history before calling this.",
                 parameters: {
                   type: "object",
                   properties: {
-                    name: { type: "string", description: "Customer's full name" },
-                    phone: { type: "string", description: "Customer's phone number" },
-                    date: { type: "string", description: "Date in YYYY-MM-DD format" },
-                    time: { type: "string", description: "Time in HH:MM 24-hour format" },
+                    customer_name: { type: "string", description: "Customer's full name extracted from conversation" },
+                    phone: { type: "string", description: "Customer's phone number (WhatsApp number always available)" },
+                    email: { type: "string", description: "Customer's email address" },
+                    date: { type: "string", description: "Reservation date (YYYY-MM-DD)" },
+                    time: { type: "string", description: "Reservation time (HH:MM format, 24-hour)" },
                     guests: { type: "number", description: "Number of guests" },
-                    occasion: { type: "string", description: "Occasion or reason for booking" },
-                    area_preference: { type: "string", description: "Seating preference" },
-                    branch: { type: "string", description: "Branch or location" },
-                    email: { type: "string", description: "Email address (optional)" }
+                    occasion: { type: "string", description: "Special occasion (optional)" },
+                    area_preference: { type: "string", description: "Seating area preference (optional)" }
                   },
-                  required: ["name", "phone", "date", "time", "guests", "area_preference", "branch"]
+                  required: ["customer_name", "phone", "email", "date", "time", "guests"]
                 }
               }
             },
@@ -1245,88 +1210,71 @@ ${supervisorRecommendation.recommendedResponse}
               console.error('[BACKGROUND] Boss notification error:', error);
               toolExecutionContext.push('boss notification failed - reservation saved but boss not notified');
             }
-          } else if (toolCall.function.name === 'send_flow') {
-            const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] send_flow called with:', JSON.stringify(args));
-            console.log('[BACKGROUND] prefill_data being sent:', JSON.stringify(args.prefill_data || {}));
-            
-            try {
-              // Call send-whatsapp-flow edge function
-              const flowResponse = await supabase.functions.invoke('send-whatsapp-flow', {
-                body: {
-                  flow_type: args.flow_type,
-                  header_text: args.header_text,
-                  button_text: args.button_text,
-                  prefill_data: args.prefill_data || {},
-                  customer_phone: customerPhone,
-                  company_id: company.id
-                }
-              });
-              
-              if (flowResponse.error || flowResponse.data?.error) {
-                console.error('[BACKGROUND] Flow send error:', flowResponse.error || flowResponse.data?.error);
-                toolExecutionContext.push('whatsapp flow unavailable - falling back to manual details');
-                assistantReply = args.flow_type === 'reservation'
-                  ? "Our quick reservation form isn't available right now. Please send your name, preferred date, time, and number of guests in one message, and I'll record it for the team."
-                  : "Our quick payment form isn't available right now. Please send your name, phone, email, and what you're paying for in one message.";
-              } else {
-                console.log('[BACKGROUND] Flow sent successfully');
-                assistantReply = `I've sent you a quick form to complete. Please fill it out and submit. 📋`;
-              }
-            } catch (error) {
-              console.error('[BACKGROUND] send_flow error:', error);
-              toolExecutionContext.push('whatsapp flow error - falling back to manual details');
-              assistantReply = args.flow_type === 'reservation'
-                ? "Our quick reservation form isn't available right now. Please send your name, preferred date, time, and number of guests in one message, and I'll record it for the team."
-                : "Our quick payment form isn't available right now. Please send your name, phone, email, and what you're paying for in one message.";
-            }
           } else if (toolCall.function.name === 'create_reservation') {
             const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BACKGROUND] create_reservation called with:', JSON.stringify(args));
             const reservationPhone = args.phone || customerPhone;
             
-            const { error: resError } = await supabase
-              .from('reservations')
-              .insert({
-                company_id: company.id,
-                conversation_id: conversationId,
-                name: args.name,
-                phone: reservationPhone,
-                email: args.email || null,
-                date: args.date,
-                time: args.time,
-                guests: args.guests,
-                occasion: args.occasion || null,
-                area_preference: args.area_preference,
-                branch: args.branch,
-                status: 'confirmed'
-              });
+            try {
+              // Create reservation with pending_boss_approval status
+              const { data: reservation, error: resError } = await supabase
+                .from('reservations')
+                .insert({
+                  company_id: company.id,
+                  conversation_id: conversationId,
+                  name: args.customer_name,
+                  phone: reservationPhone,
+                  email: args.email,
+                  date: args.date,
+                  time: args.time,
+                  guests: args.guests,
+                  occasion: args.occasion || null,
+                  area_preference: args.area_preference || null,
+                  branch: null,
+                  status: 'pending_boss_approval'
+                })
+                .select()
+                .single();
 
-            if (resError) {
-              console.error('[BACKGROUND] Reservation error:', resError);
-              assistantReply += "\n\nI encountered an error saving your reservation. Please contact us directly.";
-            } else {
-              anyToolExecuted = true;
-              toolExecutionContext.push(`created reservation for ${args.name}`);
-              
-              await supabase
-                .from('conversations')
-                .update({ customer_name: args.name })
-                .eq('id', conversationId);
+              if (resError) {
+                console.error('[BACKGROUND] Reservation error:', resError);
+                toolExecutionContext.push('reservation creation failed');
+                assistantReply = "I encountered an error saving your reservation. Please contact us directly.";
+              } else {
+                anyToolExecuted = true;
+                toolExecutionContext.push(`created reservation for ${args.customer_name} - pending boss approval`);
+                console.log('[BACKGROUND] Reservation created:', reservation.id);
                 
-              assistantReply += "\n\nYour reservation has been confirmed! We look forward to serving you.";
-              
-              if (args.email) {
-                await supabase.functions.invoke('send-reservation-confirmation', {
-                  body: {
-                    name: args.name,
-                    email: args.email,
-                    date: args.date,
-                    time: args.time,
-                    guests: args.guests,
-                    restaurantName: company.name
+                // Update conversation with customer name
+                await supabase
+                  .from('conversations')
+                  .update({ customer_name: args.customer_name })
+                  .eq('id', conversationId);
+                
+                // Notify boss about new reservation request
+                try {
+                  const { error: notifyError } = await supabase.functions.invoke('send-boss-reservation-request', {
+                    body: {
+                      reservation_id: reservation.id,
+                      company_id: company.id
+                    }
+                  });
+
+                  if (notifyError) {
+                    console.error('[BACKGROUND] Error notifying boss:', notifyError);
+                  } else {
+                    console.log('[BACKGROUND] Boss notified successfully');
                   }
-                });
+                } catch (notifyError) {
+                  console.error('[BACKGROUND] Exception notifying boss:', notifyError);
+                }
+                
+                assistantReply = `Perfect! Your reservation request for ${args.date} at ${args.time} for ${args.guests} guest${args.guests > 1 ? 's' : ''} has been received. Our team will review and send you confirmation within a few hours. Thank you! 🙏`;
               }
+            } catch (error) {
+              console.error('[BACKGROUND] Exception in create_reservation:', error);
+              toolExecutionContext.push('reservation creation exception');
+              assistantReply = "I encountered an error saving your reservation. Please contact us directly.";
             }
           }
         }
