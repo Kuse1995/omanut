@@ -666,6 +666,15 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 - If customer provided partial info across multiple messages, extract ALL of it before proceeding
 - The customer's WhatsApp phone number is always available from the conversation
 
+AUTOMATIC BOSS NOTIFICATIONS:
+You have access to tools that automatically notify the boss in these situations:
+- New reservations (automatically sent)
+- Payment proof uploads (automatically sent)
+- Reservation changes/cancellations (automatically sent via notify_boss tool)
+- High-value opportunities: 10+ guests, corporate events, VIP mentions (use notify_boss tool)
+- Customer complaints/negative sentiment (use notify_boss tool)
+- Important client information capture (use notify_boss tool)
+
 Key Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
@@ -710,6 +719,14 @@ Key Guidelines:
       "Perfect! I have Abraham and 3 guests. I just need your email address to complete the booking."
     - NEVER ask for the same information twice
     - If unsure, send the flow with whatever info you have in prefill_data - the form handles the rest
+
+AUTOMATIC NOTIFICATION DETECTION:
+When you detect these scenarios, call notify_boss tool immediately:
+- High-value opportunity: 10+ guests, "corporate", "business event", "conference"
+- Reservation cancellation: "cancel my booking", "need to cancel"
+- Reservation change request: "change my reservation", "different time"
+- Complaint/negative sentiment: "disappointed", "unhappy", "terrible", "worst", "angry"
+- VIP/important info: Customer mentions being a regular, celebrity, VIP treatment needed
 
 CRITICAL HANDOFF PROTOCOL:
 - If the customer AGREES TO PAYMENT or expresses clear intent to pay, append [HANDOFF_REQUIRED] at the very end of your response
@@ -857,6 +874,37 @@ ${supervisorRecommendation.recommendedResponse}
                     area_preference: { type: "string", description: "Seating area preference (optional)" }
                   },
                   required: ["customer_name", "phone", "email", "date", "time", "guests"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "notify_boss",
+                description: "Send an immediate notification to the boss for important situations: high-value opportunities (10+ guests, corporate events), complaints, reservation changes/cancellations, VIP information. Use when customer situation requires owner attention.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    notification_type: { 
+                      type: "string", 
+                      enum: ["high_value", "complaint", "reservation_change", "cancellation", "vip_info"],
+                      description: "Type of notification to send"
+                    },
+                    priority: {
+                      type: "string",
+                      enum: ["high", "urgent"],
+                      description: "Priority level - use urgent for complaints or cancellations"
+                    },
+                    summary: { 
+                      type: "string", 
+                      description: "Brief summary of the situation (1-2 sentences)"
+                    },
+                    details: {
+                      type: "string",
+                      description: "Additional context or customer message"
+                    }
+                  },
+                  required: ["notification_type", "priority", "summary"]
                 }
               }
             },
@@ -1275,6 +1323,105 @@ ${supervisorRecommendation.recommendedResponse}
               console.error('[BACKGROUND] Exception in create_reservation:', error);
               toolExecutionContext.push('reservation creation exception');
               assistantReply = "I encountered an error saving your reservation. Please contact us directly.";
+            }
+          } else if (toolCall.function.name === 'notify_boss') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
+            
+            try {
+              // Map notification types to message formats
+              let emoji = '📢';
+              let title = 'Notification';
+              
+              switch (args.notification_type) {
+                case 'high_value':
+                  emoji = '💎';
+                  title = 'High-Value Opportunity';
+                  break;
+                case 'complaint':
+                  emoji = '⚠️';
+                  title = 'Customer Complaint';
+                  break;
+                case 'reservation_change':
+                  emoji = '🔄';
+                  title = 'Reservation Change Request';
+                  break;
+                case 'cancellation':
+                  emoji = '❌';
+                  title = 'Cancellation Request';
+                  break;
+                case 'vip_info':
+                  emoji = '⭐';
+                  title = 'VIP Customer Alert';
+                  break;
+              }
+              
+              const priorityText = args.priority === 'urgent' ? ' [URGENT]' : '';
+              
+              const message = `${emoji} ${title}${priorityText}
+
+Customer: ${conversation.customer_name || 'Unknown'}
+Phone: ${customerPhone}
+
+${args.summary}
+
+${args.details ? `Details: ${args.details}\n` : ''}
+Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
+
+              // Send notification via Twilio
+              const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+              
+              if (!twilioSid || !twilioToken) {
+                console.error('[BACKGROUND] Twilio credentials not configured');
+                toolExecutionContext.push('boss notification failed - no twilio config');
+              } else {
+                // Get boss phone
+                const bossPhone = company.boss_phone;
+                if (!bossPhone) {
+                  console.log('[BACKGROUND] No boss phone configured');
+                  toolExecutionContext.push('boss notification skipped - no phone');
+                } else {
+                  const twilioResponse = await fetch(
+                    `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
+                    {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                      },
+                      body: new URLSearchParams({
+                        To: bossPhone.startsWith('whatsapp:') ? bossPhone : `whatsapp:${bossPhone}`,
+                        From: `whatsapp:${company.whatsapp_number || Deno.env.get('TWILIO_WHATSAPP_NUMBER') || '+13344685065'}`,
+                        Body: message,
+                      }),
+                    }
+                  );
+
+                  if (!twilioResponse.ok) {
+                    const errorText = await twilioResponse.text();
+                    console.error('[BACKGROUND] Twilio error:', errorText);
+                    toolExecutionContext.push('boss notification failed - twilio error');
+                  } else {
+                    anyToolExecuted = true;
+                    toolExecutionContext.push(`boss notified: ${args.notification_type}`);
+                    console.log('[BACKGROUND] Boss notification sent successfully');
+                    
+                    // Log to boss_conversations
+                    await supabase
+                      .from('boss_conversations')
+                      .insert({
+                        company_id: company.id,
+                        message_from: 'ai',
+                        message_content: message,
+                        response: null
+                      });
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('[BACKGROUND] Exception in notify_boss:', error);
+              toolExecutionContext.push('boss notification exception');
             }
           }
         }

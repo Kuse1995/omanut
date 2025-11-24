@@ -59,6 +59,30 @@ serve(async (req) => {
         message = `💰 Payment Request!\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}${data.customer_email ? `\nEmail: ${data.customer_email}` : ''}\n\nProduct: ${data.product_name}\nAmount: ${data.currency_prefix || 'K'}${data.amount}\nPayment Method: ${data.payment_method?.toUpperCase() || 'Not specified'}\n\nPlease contact the customer to complete the payment.`;
         break;
       
+      case 'payment_proof_uploaded':
+        message = `💳 Payment Proof Uploaded\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nAmount: ${data.currency_prefix || 'K'}${data.amount}\nMethod: ${data.payment_method?.toUpperCase()}\n\n${data.proof_url ? `Proof: ${data.proof_url}\n\n` : ''}Reply:\n✅ VERIFY ${data.transaction_id?.slice(0, 8) || 'ID'}\n❌ REJECT ${data.transaction_id?.slice(0, 8) || 'ID'} [reason]`;
+        break;
+      
+      case 'high_value_opportunity':
+        message = `💎 High-Value Opportunity!\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nType: ${data.opportunity_type}\n\n${data.details}\n\nEstimated Value: ${data.estimated_value || 'TBD'}`;
+        break;
+      
+      case 'customer_complaint':
+        message = `⚠️ Customer Issue Detected\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nSentiment: Negative\n\nIssue: ${data.issue_summary}\n\nRequires immediate attention!`;
+        break;
+      
+      case 'vip_client_info':
+        message = `⭐ Important Client Information\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nInfo Type: ${data.info_type}\n\n${data.information}`;
+        break;
+      
+      case 'reservation_modified':
+        message = `🔄 Reservation Modification\n\nCustomer: ${data.customer_name}\nOriginal: ${data.original_date} at ${data.original_time}\nRequested: ${data.new_date} at ${data.new_time}\n\nReason: ${data.reason || 'Not provided'}\n\nReply: APPROVE or REJECT`;
+        break;
+      
+      case 'low_credit_alert':
+        message = `🔋 Low Credit Balance Alert\n\nCurrent Balance: ${data.credit_balance} credits\nUsage Rate: ${data.usage_rate} credits/day\n\nEstimated days remaining: ${data.days_remaining}\n\nPlease top up to avoid service interruption.`;
+        break;
+      
       default:
         message = data.message || 'Notification from AI assistant';
     }
