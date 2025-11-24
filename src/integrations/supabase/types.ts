@@ -1142,6 +1142,8 @@ export type Database = {
       reservations: {
         Row: {
           area_preference: string | null
+          boss_approved_at: string | null
+          boss_rejection_reason: string | null
           branch: string | null
           calendar_event_link: string | null
           calendar_sync_status: string | null
@@ -1161,6 +1163,8 @@ export type Database = {
         }
         Insert: {
           area_preference?: string | null
+          boss_approved_at?: string | null
+          boss_rejection_reason?: string | null
           branch?: string | null
           calendar_event_link?: string | null
           calendar_sync_status?: string | null
@@ -1180,6 +1184,8 @@ export type Database = {
         }
         Update: {
           area_preference?: string | null
+          boss_approved_at?: string | null
+          boss_rejection_reason?: string | null
           branch?: string | null
           calendar_event_link?: string | null
           calendar_sync_status?: string | null
