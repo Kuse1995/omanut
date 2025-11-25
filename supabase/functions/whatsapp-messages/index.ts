@@ -1435,19 +1435,13 @@ ${supervisorRecommendation.recommendedResponse}
               
               console.log(`[DATE-INFO] Query: "${query}" -> ${formatted} (${dayName})${isPast ? ' - PAST' : ''}`);
               
-              assistantReply = JSON.stringify({
-                date: formatted,
-                day_name: dayName,
-                is_past: isPast,
-                current_date: lusaka.toISOString().split('T')[0],
-                message: isPast ? 'This date is in the past' : 'This date is valid'
-              });
+              toolExecutionContext.push(`date_info: ${formatted} (${dayName})${isPast ? ' [PAST DATE - INVALID]' : ' [FUTURE DATE - OK]'}`);
+              anyToolExecuted = true;
             } else {
               console.log(`[DATE-INFO] Could not parse date query: "${query}"`);
-              assistantReply = JSON.stringify({ error: 'Could not parse date' });
+              toolExecutionContext.push(`date_info: unable to parse "${query}"`);
+              anyToolExecuted = true;
             }
-            
-            anyToolExecuted = true;
           } else if (toolCall.function.name === 'notify_boss') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
