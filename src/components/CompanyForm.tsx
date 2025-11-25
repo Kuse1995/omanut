@@ -134,6 +134,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     whatsapp_number: "",
     boss_phone: "",
     whatsapp_voice_enabled: false,
+    test_mode: true,
     credit_balance: 1000,
     admin_email: "",
     admin_password: "",
@@ -204,6 +205,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           whatsapp_number: data.whatsapp_number || "",
           boss_phone: data.boss_phone || "",
           whatsapp_voice_enabled: data.whatsapp_voice_enabled || false,
+          test_mode: data.test_mode ?? true,
           credit_balance: data.credit_balance || 1000,
           admin_email: "",
           admin_password: "",
@@ -260,6 +262,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             whatsapp_number: formData.whatsapp_number,
             boss_phone: formData.boss_phone,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
+            test_mode: formData.test_mode,
             quick_reference_info: formData.quick_reference_info,
             google_calendar_id: formData.google_calendar_id,
             calendar_sync_enabled: formData.calendar_sync_enabled,
@@ -320,6 +323,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               whatsapp_number: formData.whatsapp_number,
               boss_phone: formData.boss_phone,
               whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
+              test_mode: formData.test_mode,
               credit_balance: formData.credit_balance,
               quick_reference_info: formData.quick_reference_info,
               admin_email: formData.admin_email,
@@ -557,10 +561,39 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               </Label>
             </div>
 
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Google Calendar Integration</h3>
+            <div className="space-y-2 p-4 border border-border rounded-lg bg-muted/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="test_mode" className="text-base font-semibold">AI Mode</Label>
+                  <p className="text-sm text-muted-foreground">
+                    {formData.test_mode 
+                      ? "🧪 Test Mode: Boss notifications are logged but not sent" 
+                      : "🚀 Production Mode: Boss notifications are sent to WhatsApp"}
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-muted-foreground">Test</span>
+                  <input
+                    type="checkbox"
+                    id="test_mode"
+                    checked={!formData.test_mode}
+                    onChange={(e) => setFormData({ ...formData, test_mode: !e.target.checked })}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <span className="text-sm text-muted-foreground">Production</span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                ⚠️ Toggle to production mode only when you're ready to receive real boss notifications
+              </p>
+            </div>
+          </div>
+
+          {/* Google Calendar Integration */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Google Calendar Integration</h3>
               
-              <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2">
                 <input
                   type="checkbox"
                   id="calendar_sync_enabled"
@@ -600,7 +633,6 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                   Time buffer before/after reservations to prevent back-to-back bookings
                 </p>
               </div>
-            </div>
           </div>
 
           {/* AI Instructions */}

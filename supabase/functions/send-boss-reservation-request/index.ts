@@ -34,7 +34,7 @@ serve(async (req) => {
     // Fetch company details
     const { data: company, error: compError } = await supabase
       .from('companies')
-      .select('boss_phone, name')
+      .select('boss_phone, name, test_mode')
       .eq('id', reservation.company_id)
       .single();
 
@@ -42,6 +42,20 @@ serve(async (req) => {
       console.log('[BOSS-REQUEST] No boss phone configured');
       return new Response(
         JSON.stringify({ success: false, message: 'No boss phone configured' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check if company is in test mode (before building message for efficiency)
+    if (company.test_mode) {
+      console.log('[BOSS-REQUEST] 🧪 TEST MODE: Notification would be sent to:', company.boss_phone);
+      console.log('[BOSS-REQUEST] 🧪 TEST MODE: Reservation:', reservation.name, reservation.date, reservation.time);
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          test_mode: true,
+          message: 'Test mode: Notification logged but not sent' 
+        }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

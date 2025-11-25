@@ -57,6 +57,7 @@ serve(async (req) => {
       twilio_number,
       whatsapp_number,
       whatsapp_voice_enabled,
+      test_mode,
       credit_balance,
       quick_reference_info,
       admin_email,
@@ -99,6 +100,7 @@ serve(async (req) => {
         twilio_number,
         whatsapp_number,
         whatsapp_voice_enabled,
+        test_mode: test_mode ?? true,
         credit_balance,
         quick_reference_info,
       })
