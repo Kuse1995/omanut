@@ -697,31 +697,56 @@ CRITICAL DATE VALIDATION:
 Key Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
-3. RESERVATION & CALENDAR - NEW WORKFLOW:
-   - FIRST: If customer mentions a date, use get_date_info to validate it's in the future
-   - If date is in the past, politely inform them and ask for a future date
-   - THEN: check_calendar_availability BEFORE proceeding (checks our database for conflicts)
-   - If time slot is busy, suggest alternative available times
-   - Collect information conversationally by extracting from messages:
-     * Customer name (from conversation history - look for "I'm John", "Abraham here", "My name is X")
-     * Phone number (always available from WhatsApp conversation)
-     * Email address (ask ONCE if not provided - look for @ symbol in messages)
-     * Date and time (already discussed during availability check)
-     * Number of guests (ask ONCE if not provided - look for "3 guests", "party of 4")
-     * Occasion (optional)
-     * Area preference (optional)
+3. RESERVATION WORKFLOW - MANDATORY STEPS (DO NOT SKIP):
    
-   CRITICAL - Information Collection Rules:
-   - Review conversation history FIRST before asking anything
-   - If customer said "Abraham, abkanyanta@gmail.com, 3 guests" → you have everything
-   - NEVER ask for information twice
-   - Once you have: name, phone, email, date, time, guests → IMMEDIATELY call create_reservation tool
-   - After creating reservation, explain: "Thank you! Your reservation request has been received. Our team will review and confirm within a few hours."
+   STEP 1 - DATE VALIDATION:
+   - When customer mentions ANY date, IMMEDIATELY call get_date_info tool
+   - If date is in past, inform customer and ask for future date
+   - Only proceed once you have a VALID FUTURE DATE
+   
+   STEP 2 - CALENDAR CHECK:
+   - Call check_calendar_availability with the validated date and proposed time
+   - If slot is busy, suggest alternatives
+   - Only proceed once you have a CONFIRMED AVAILABLE SLOT
+   
+   STEP 3 - COLLECT ALL REQUIRED INFORMATION:
+   YOU MUST HAVE ALL 6 ITEMS BEFORE CREATING RESERVATION:
+   1. ✅ Customer name - Look in conversation for "I'm John", "Abraham here", "My name is X"
+   2. ✅ Phone number - ALWAYS available from WhatsApp conversation (use customerPhone variable)
+   3. ✅ Email address - Look for @ symbol in messages, ask ONCE if not provided: "What's your email address?"
+   4. ✅ Date - Already validated in Step 1
+   5. ✅ Time - Ask: "What time would you prefer?" (use 24-hour format HH:MM)
+   6. ✅ Number of guests - Look for "3 guests", "party of 4", ask: "How many guests?"
+   
+   OPTIONAL INFORMATION (nice to have but not required):
+   - Occasion: "Is this for a special occasion?"
+   - Area preference: "Do you have a seating preference?"
+   
+   🚨 CRITICAL RULES - READ CAREFULLY:
+   - DO NOT say "Done!" or "All set!" until you call create_reservation tool
+   - DO NOT skip information collection - you need all 6 required items
+   - DO NOT make assumptions - if customer didn't provide info, ASK for it
+   - DO NOT create reservation without email - it's REQUIRED
+   - Review conversation history FIRST - customer may have already provided info
+   - If customer said "Abraham, abkanyanta@gmail.com, 3 guests" in one message → you have name, email, guests
+   
+   STEP 4 - CREATE RESERVATION:
+   Once you have all 6 required items, IMMEDIATELY call create_reservation tool.
+   DO NOT ask "Should I book this?" - just create it.
+   
+   STEP 5 - CONFIRM TO CUSTOMER:
+   After create_reservation tool executes, explain:
+   "Perfect! Your reservation request for [DATE] at [TIME] for [GUESTS] guests has been received.
+   Our team will review and send confirmation within a few hours. Thank you! 🙏"
+   
+   🔔 BOSS NOTIFICATION (AUTOMATIC):
+   - The create_reservation tool AUTOMATICALLY notifies the boss
+   - You do NOT need to call notify_boss separately for new reservations
+   - Boss receives: date, time, guests, customer details, and approval options
    
    ALL RESERVATIONS REQUIRE BOSS CONFIRMATION:
    - Make this clear to customers: "Your request will be reviewed by our team"
    - Status starts as pending_boss_approval
-   - Boss receives notification with context for approval
 4. For payments, collect info conversationally then use request_payment tool
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
@@ -1044,6 +1069,15 @@ ${supervisorRecommendation.recommendedResponse}
       assistantReply = aiData.choices[0].message.content || '';
       const toolCalls = aiData.choices[0].message.tool_calls;
 
+      // Enhanced logging for AI decision making
+      console.log('[AI-TOOLS] Response from AI:', {
+        hasReply: !!assistantReply,
+        replyPreview: assistantReply?.substring(0, 150) + (assistantReply?.length > 150 ? '...' : ''),
+        hasToolCalls: !!aiData.choices[0].message.tool_calls,
+        toolCount: aiData.choices[0].message.tool_calls?.length || 0,
+        toolNames: aiData.choices[0].message.tool_calls?.map((t: any) => t.function.name) || []
+      });
+      
       console.log('[BACKGROUND] AI response:', { assistantReply, toolCalls });
 
       // Handle tool calls
@@ -1298,7 +1332,37 @@ ${supervisorRecommendation.recommendedResponse}
             }
           } else if (toolCall.function.name === 'create_reservation') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] create_reservation called with:', JSON.stringify(args));
+            console.log('[RESERVATION-ATTEMPT] Tool called with arguments:', JSON.stringify(args));
+            
+            // Validate all required fields are present
+            const missingFields = [];
+            if (!args.customer_name) missingFields.push('customer_name');
+            if (!args.phone && !customerPhone) missingFields.push('phone');
+            if (!args.email) missingFields.push('email');
+            if (!args.date) missingFields.push('date');
+            if (!args.time) missingFields.push('time');
+            if (!args.guests) missingFields.push('guests');
+            
+            if (missingFields.length > 0) {
+              console.error('[RESERVATION-BLOCKED] Missing required fields:', missingFields);
+              toolExecutionContext.push(`reservation blocked - missing: ${missingFields.join(', ')}`);
+              
+              const fieldLabels: Record<string, string> = {
+                customer_name: 'your name',
+                phone: 'your phone number',
+                email: 'your email address',
+                date: 'the date',
+                time: 'the time',
+                guests: 'the number of guests'
+              };
+              
+              const missingLabels = missingFields.map(f => fieldLabels[f] || f);
+              assistantReply = `To complete your reservation, I still need: ${missingLabels.join(', ')}. Could you please provide these details?`;
+              anyToolExecuted = true;
+              continue;
+            }
+            
+            console.log('[RESERVATION-CREATE] All required fields present, proceeding...');
             const reservationPhone = args.phone || customerPhone;
             
             try {
