@@ -48,13 +48,37 @@ serve(async (req) => {
 
     // Check if company is in test mode (before building message for efficiency)
     if (company.test_mode) {
-      console.log('[BOSS-REQUEST] 🧪 TEST MODE: Notification would be sent to:', company.boss_phone);
-      console.log('[BOSS-REQUEST] 🧪 TEST MODE: Reservation:', reservation.name, reservation.date, reservation.time);
+      console.log('═══════════════════════════════════════════════');
+      console.log('🧪 TEST MODE - BOSS NOTIFICATION (NOT SENT)');
+      console.log('═══════════════════════════════════════════════');
+      console.log('Boss Phone:', company.boss_phone);
+      console.log('Company:', company.name);
+      console.log('Reservation ID:', reservation_id);
+      console.log('Customer:', reservation.name);
+      console.log('Date/Time:', reservation.date, reservation.time);
+      console.log('Guests:', reservation.guests);
+      console.log('Email:', reservation.email);
+      console.log('Occasion:', reservation.occasion || 'None');
+      console.log('Area Preference:', reservation.area_preference || 'None');
+      console.log('═══════════════════════════════════════════════');
+      
       return new Response(
         JSON.stringify({ 
           success: true, 
           test_mode: true,
-          message: 'Test mode: Notification logged but not sent' 
+          message: 'Test mode: Notification logged but not sent',
+          details: {
+            boss_phone: company.boss_phone,
+            company_name: company.name,
+            reservation: {
+              id: reservation_id,
+              customer: reservation.name,
+              date: reservation.date,
+              time: reservation.time,
+              guests: reservation.guests,
+              email: reservation.email
+            }
+          }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
