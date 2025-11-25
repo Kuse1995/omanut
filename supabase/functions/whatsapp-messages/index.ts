@@ -675,11 +675,32 @@ You have access to tools that automatically notify the boss in these situations:
 - Customer complaints/negative sentiment (use notify_boss tool)
 - Important client information capture (use notify_boss tool)
 
+CURRENT DATE & TIME (Zambia):
+📅 ${new Date().toLocaleString('en-US', { 
+  timeZone: 'Africa/Lusaka',
+  weekday: 'long',
+  year: 'numeric', 
+  month: 'long', 
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+})}
+
+CRITICAL DATE VALIDATION:
+- ALWAYS validate that requested dates are in the FUTURE
+- If customer requests a past date, politely inform them and ask for a future date
+- Example: If today is Nov 25, 2025 and customer asks for Nov 20, respond:
+  "I notice that date has already passed. Did you mean a date coming up? When would you like to visit?"
+- Accept "today", "tomorrow", "this weekend" and convert to actual dates using get_date_info tool
+- For same-day bookings, check if the requested time hasn't passed yet
+
 Key Guidelines:
 1. Be warm, friendly, and professional
 2. Answer questions about our business using the information above
 3. RESERVATION & CALENDAR - NEW WORKFLOW:
-   - ALWAYS check_calendar_availability BEFORE proceeding (checks our database for conflicts)
+   - FIRST: If customer mentions a date, use get_date_info to validate it's in the future
+   - If date is in the past, politely inform them and ask for a future date
+   - THEN: check_calendar_availability BEFORE proceeding (checks our database for conflicts)
    - If time slot is busy, suggest alternative available times
    - Collect information conversationally by extracting from messages:
      * Customer name (from conversation history - look for "I'm John", "Abraham here", "My name is X")
@@ -874,6 +895,23 @@ ${supervisorRecommendation.recommendedResponse}
                     area_preference: { type: "string", description: "Seating area preference (optional)" }
                   },
                   required: ["customer_name", "phone", "email", "date", "time", "guests"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "get_date_info",
+                description: "Get information about dates. Use this to convert relative dates like 'tomorrow', 'next Monday', 'this weekend' into actual YYYY-MM-DD format, or to validate if a date is in the future.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    query: { 
+                      type: "string", 
+                      description: "Date query like 'tomorrow', 'next Monday', 'this Friday', or specific date to validate like '2025-11-20'" 
+                    }
+                  },
+                  required: ["query"]
                 }
               }
             },
@@ -1299,9 +1337,13 @@ ${supervisorRecommendation.recommendedResponse}
                   .update({ customer_name: args.customer_name })
                   .eq('id', conversationId);
                 
-                // Notify boss about new reservation request
+                // Notify boss about new reservation request with enhanced logging
+                console.log('[BOSS-NOTIFY] Attempting to notify boss about reservation:', reservation.id);
+                console.log('[BOSS-NOTIFY] Boss phone:', company.boss_phone);
+                console.log('[BOSS-NOTIFY] Company ID:', company.id);
+                
                 try {
-                  const { error: notifyError } = await supabase.functions.invoke('send-boss-reservation-request', {
+                  const { data: bossNotifyData, error: notifyError } = await supabase.functions.invoke('send-boss-reservation-request', {
                     body: {
                       reservation_id: reservation.id,
                       company_id: company.id
@@ -1309,12 +1351,15 @@ ${supervisorRecommendation.recommendedResponse}
                   });
 
                   if (notifyError) {
-                    console.error('[BACKGROUND] Error notifying boss:', notifyError);
+                    console.error('[BOSS-NOTIFY] Failed to send notification:', notifyError);
+                    console.error('[BOSS-NOTIFY] Error details:', JSON.stringify(notifyError));
                   } else {
-                    console.log('[BACKGROUND] Boss notified successfully');
+                    console.log('[BOSS-NOTIFY] ✅ Boss notification sent successfully');
+                    console.log('[BOSS-NOTIFY] Response:', JSON.stringify(bossNotifyData));
                   }
                 } catch (notifyError) {
-                  console.error('[BACKGROUND] Exception notifying boss:', notifyError);
+                  console.error('[BOSS-NOTIFY] Exception while notifying boss:', notifyError);
+                  console.error('[BOSS-NOTIFY] Exception details:', JSON.stringify(notifyError, Object.getOwnPropertyNames(notifyError)));
                 }
                 
                 assistantReply = `Perfect! Your reservation request for ${args.date} at ${args.time} for ${args.guests} guest${args.guests > 1 ? 's' : ''} has been received. Our team will review and send you confirmation within a few hours. Thank you! 🙏`;
@@ -1324,6 +1369,85 @@ ${supervisorRecommendation.recommendedResponse}
               toolExecutionContext.push('reservation creation exception');
               assistantReply = "I encountered an error saving your reservation. Please contact us directly.";
             }
+          } else if (toolCall.function.name === 'get_date_info') {
+            const args = JSON.parse(toolCall.function.arguments);
+            const now = new Date();
+            const lusaka = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Lusaka' }));
+            
+            let resultDate = null;
+            let isPast = false;
+            const query = args.query.toLowerCase();
+            
+            // Handle relative dates
+            if (query.includes('today')) {
+              resultDate = lusaka;
+            } else if (query.includes('tomorrow')) {
+              resultDate = new Date(lusaka);
+              resultDate.setDate(resultDate.getDate() + 1);
+            } else if (query.includes('next monday') || query.includes('monday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilMonday = (1 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilMonday);
+            } else if (query.includes('next tuesday') || query.includes('tuesday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilTuesday = (2 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilTuesday);
+            } else if (query.includes('next wednesday') || query.includes('wednesday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilWednesday = (3 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilWednesday);
+            } else if (query.includes('next thursday') || query.includes('thursday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilThursday = (4 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilThursday);
+            } else if (query.includes('next friday') || query.includes('friday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilFriday = (5 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilFriday);
+            } else if (query.includes('next saturday') || query.includes('saturday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilSaturday = (6 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilSaturday);
+            } else if (query.includes('next sunday') || query.includes('sunday')) {
+              resultDate = new Date(lusaka);
+              const daysUntilSunday = (7 - resultDate.getDay() + 7) % 7 || 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilSunday);
+            } else if (query.includes('this weekend')) {
+              resultDate = new Date(lusaka);
+              const daysUntilSaturday = (6 - resultDate.getDay() + 7) % 7;
+              resultDate.setDate(resultDate.getDate() + daysUntilSaturday);
+            } else {
+              // Try to parse as actual date
+              try {
+                resultDate = new Date(query);
+                if (isNaN(resultDate.getTime())) {
+                  resultDate = null;
+                }
+              } catch (e) {
+                resultDate = null;
+              }
+            }
+            
+            if (resultDate) {
+              isPast = resultDate < lusaka;
+              const formatted = resultDate.toISOString().split('T')[0];
+              const dayName = resultDate.toLocaleDateString('en-US', { weekday: 'long' });
+              
+              console.log(`[DATE-INFO] Query: "${query}" -> ${formatted} (${dayName})${isPast ? ' - PAST' : ''}`);
+              
+              assistantReply = JSON.stringify({
+                date: formatted,
+                day_name: dayName,
+                is_past: isPast,
+                current_date: lusaka.toISOString().split('T')[0],
+                message: isPast ? 'This date is in the past' : 'This date is valid'
+              });
+            } else {
+              console.log(`[DATE-INFO] Could not parse date query: "${query}"`);
+              assistantReply = JSON.stringify({ error: 'Could not parse date' });
+            }
+            
+            anyToolExecuted = true;
           } else if (toolCall.function.name === 'notify_boss') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
