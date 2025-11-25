@@ -355,6 +355,18 @@ async function processAIResponse(
   const messageComplexity = classifyMessageComplexity(userMessage);
   console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
   
+  // Debug logging for reservation tracking
+  const hasEmail = userMessage.includes('@');
+  const hasName = /[A-Z][a-z]+\s+[A-Z][a-z]+/.test(userMessage);
+  const hasGuests = /\d+\s*(guest|people|person|pax)/i.test(userMessage);
+  console.log('[RESERVATION-CHECK] Message analysis:', {
+    customerPhone,
+    hasEmail,
+    hasName,
+    hasGuests,
+    messagePreview: userMessage.substring(0, 100)
+  });
+  
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -730,14 +742,34 @@ Key Guidelines:
    - Review conversation history FIRST - customer may have already provided info
    - If customer said "Abraham, abkanyanta@gmail.com, 3 guests" in one message → you have name, email, guests
    
-   STEP 4 - CREATE RESERVATION:
-   Once you have all 6 required items, IMMEDIATELY call create_reservation tool.
-   DO NOT ask "Should I book this?" - just create it.
-   
-   STEP 5 - CONFIRM TO CUSTOMER:
-   After create_reservation tool executes, explain:
-   "Perfect! Your reservation request for [DATE] at [TIME] for [GUESTS] guests has been received.
-   Our team will review and send confirmation within a few hours. Thank you! 🙏"
+   🔍 AFTER CUSTOMER PROVIDES INFORMATION - MANDATORY CHECK:
+    When customer responds with name, email, or guest count:
+    1. PAUSE - Do NOT send any reply yet
+    2. REVIEW conversation - Extract all 6 required fields:
+       - Name: Look for "I'm X", "My name is X", "X here", or name in latest message
+       - Email: Look for pattern with @ symbol
+       - Guests: Look for numbers like "3 guests", "5 people", "party of 4"
+       - Phone: ALWAYS available (${conversation.phone})
+       - Date: From previous get_date_info tool result or conversation
+       - Time: From previous conversation or calendar check
+    3. COUNT how many of 6 items you have
+    4. If count === 6 → IMMEDIATELY call create_reservation (DO NOT send text reply first)
+    5. If count < 6 → Send reply asking ONLY for missing items
+
+    EXAMPLE - Customer says "Abraham, abraham@email.com, 5 guests":
+    ✅ Extracted: name=Abraham, email=abraham@email.com, guests=5
+    ✅ Already have: phone, date, time
+    ✅ Count: 6/6 → CALL create_reservation tool immediately
+    ❌ Do NOT say "Got it!" or "I processed your request" without calling the tool
+    
+    STEP 4 - CREATE RESERVATION:
+    Once you have all 6 required items, IMMEDIATELY call create_reservation tool.
+    DO NOT ask "Should I book this?" - just create it.
+    
+    STEP 5 - CONFIRM TO CUSTOMER:
+    After create_reservation tool executes, explain:
+    "Perfect! Your reservation request for [DATE] at [TIME] for [GUESTS] guests has been received.
+    Our team will review and send confirmation within a few hours. Thank you! 🙏"
    
    🔔 BOSS NOTIFICATION (AUTOMATIC):
    - The create_reservation tool AUTOMATICALLY notifies the boss
@@ -1684,6 +1716,23 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         ];
         
         console.log('[TOOL-LOOP] Calling AI with tool results...');
+        
+        // Check if this is a reservation flow and add validation reminder
+        const isReservationFlow = messages.some(msg => 
+          msg.content && typeof msg.content === 'string' && 
+          (msg.content.toLowerCase().includes('reservation') || 
+           msg.content.toLowerCase().includes('booking') || 
+           msg.content.toLowerCase().includes('table') ||
+           msg.content.toLowerCase().includes('meeting'))
+        );
+        
+        if (isReservationFlow) {
+          console.log('[RESERVATION-CHECK] Detected reservation flow, adding validation reminder');
+          messagesWithToolResults.push({
+            role: "system",
+            content: `CRITICAL REMINDER: If customer just provided name/email/guests, CHECK if you now have all 6 required items (name, email, guests, phone, date, time). If ALL 6 present → IMMEDIATELY call create_reservation tool. If any missing → Ask for specific missing items only. DO NOT say "processed" or "done" without calling the tool.`
+          });
+        }
         
         const secondController = new AbortController();
         const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
