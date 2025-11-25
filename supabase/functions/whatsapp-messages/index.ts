@@ -887,6 +887,8 @@ ${supervisorRecommendation.recommendedResponse}
     let assistantReply = '';
     let anyToolExecuted = false;
     let toolExecutionContext: string[] = [];
+    let toolResults: Array<{tool_call_id: string, role: string, content: string}> = [];
+    let aiData: any = null; // Store AI response for tool loop
 
     try {
       const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -1065,7 +1067,7 @@ ${supervisorRecommendation.recommendedResponse}
         throw new Error(`Kimi AI error: ${response.status}`);
       }
 
-      const aiData = await response.json();
+      aiData = await response.json();
       assistantReply = aiData.choices[0].message.content || '';
       const toolCalls = aiData.choices[0].message.tool_calls;
 
@@ -1389,11 +1391,37 @@ ${supervisorRecommendation.recommendedResponse}
               if (resError) {
                 console.error('[BACKGROUND] Reservation error:', resError);
                 toolExecutionContext.push('reservation creation failed');
+                
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: false,
+                    error: 'Failed to create reservation',
+                    message: 'Database error occurred. Please try again or contact support'
+                  })
+                });
+                
                 assistantReply = "I encountered an error saving your reservation. Please contact us directly.";
               } else {
                 anyToolExecuted = true;
                 toolExecutionContext.push(`created reservation for ${args.customer_name} - pending boss approval`);
                 console.log('[BACKGROUND] Reservation created:', reservation.id);
+                
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: true,
+                    reservation_id: reservation.id,
+                    customer_name: args.customer_name,
+                    date: args.date,
+                    time: args.time,
+                    guests: args.guests,
+                    status: 'pending_boss_approval',
+                    message: 'Reservation created successfully and boss has been notified for approval'
+                  })
+                });
                 
                 // Update conversation with customer name
                 await supabase
@@ -1499,10 +1527,30 @@ ${supervisorRecommendation.recommendedResponse}
               
               console.log(`[DATE-INFO] Query: "${query}" -> ${formatted} (${dayName})${isPast ? ' - PAST' : ''}`);
               
+              // Push to toolResults for AI to process
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  date: formatted,
+                  day_name: dayName,
+                  is_past: isPast,
+                  current_date: lusaka.toISOString().split('T')[0],
+                  message: isPast ? 'This date is in the past' : 'This date is valid'
+                })
+              });
+              
               toolExecutionContext.push(`date_info: ${formatted} (${dayName})${isPast ? ' [PAST DATE - INVALID]' : ' [FUTURE DATE - OK]'}`);
               anyToolExecuted = true;
             } else {
               console.log(`[DATE-INFO] Could not parse date query: "${query}"`);
+              
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ error: 'Could not parse date', message: 'Please specify the date more clearly' })
+              });
+              
               toolExecutionContext.push(`date_info: unable to parse "${query}"`);
               anyToolExecuted = true;
             }
@@ -1616,9 +1664,68 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       assistantReply = `I apologize, but I'm experiencing some technical difficulties. Please try again in a moment. If this persists, contact us at ${company.phone || 'our main number'}.`;
     }
 
-    // Generate contextual message if tools were executed but no reply
-    if (anyToolExecuted && (!assistantReply || assistantReply.trim() === '')) {
-      assistantReply = "Done! Let me know if you need anything else.";
+    // CRITICAL: If tools were executed, make SECOND AI call to process results
+    if (toolResults.length > 0) {
+      console.log('[TOOL-LOOP] Tools executed, making second AI call with results:', {
+        toolCount: toolResults.length,
+        results: toolResults.map(r => ({ id: r.tool_call_id, content: r.content.substring(0, 100) }))
+      });
+      
+      try {
+        // Build messages array with tool results
+        const messagesWithToolResults = [
+          ...messages,
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: aiData.choices[0].message.tool_calls
+          },
+          ...toolResults
+        ];
+        
+        console.log('[TOOL-LOOP] Calling AI with tool results...');
+        
+        const secondController = new AbortController();
+        const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
+        
+        const secondResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          signal: secondController.signal,
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: messagesWithToolResults,
+            temperature: 1.0,
+            max_tokens: 2048
+          }),
+        });
+        
+        clearTimeout(secondTimeoutId);
+        
+        if (secondResponse.ok) {
+          const secondData = await secondResponse.json();
+          assistantReply = secondData.choices[0].message.content || '';
+          console.log('[TOOL-LOOP] Second AI call successful, got natural response');
+          
+          // Check if AI wants to call MORE tools (recursive case)
+          const newToolCalls = secondData.choices[0].message.tool_calls;
+          if (newToolCalls && newToolCalls.length > 0) {
+            console.log('[TOOL-LOOP] AI requesting additional tools:', newToolCalls.map((t: any) => t.function.name));
+            // For now, we'll limit to 2 rounds to prevent infinite loops
+            assistantReply = assistantReply || "I'm processing your request. One moment please...";
+          }
+        } else {
+          console.error('[TOOL-LOOP] Second AI call failed:', secondResponse.status);
+          assistantReply = "I processed your request. How else can I help you?";
+        }
+        
+      } catch (toolLoopError) {
+        console.error('[TOOL-LOOP] Error in second AI call:', toolLoopError);
+        assistantReply = "Got it! What else can I help you with?";
+      }
     }
 
     // Ensure we have a response
