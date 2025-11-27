@@ -1,5 +1,9 @@
 project_id = "dzheddvoiauevcayifev"
 
+[functions.research-company]
+verify_jwt = true
+timeout = 60
+
 [functions.send-whatsapp-flow]
 verify_jwt = false
 
