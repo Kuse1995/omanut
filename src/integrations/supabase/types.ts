@@ -945,6 +945,53 @@ export type Database = {
         }
         Relationships: []
       }
+      onboarding_sessions: {
+        Row: {
+          collected_data: Json
+          created_at: string
+          created_company_id: string | null
+          current_step: string
+          expires_at: string
+          id: string
+          phone: string
+          research_data: Json | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          collected_data?: Json
+          created_at?: string
+          created_company_id?: string | null
+          current_step?: string
+          expires_at?: string
+          id?: string
+          phone: string
+          research_data?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          collected_data?: Json
+          created_at?: string
+          created_company_id?: string | null
+          current_step?: string
+          expires_at?: string
+          id?: string
+          phone?: string
+          research_data?: Json | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_sessions_created_company_id_fkey"
+            columns: ["created_company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_products: {
         Row: {
           category: string | null

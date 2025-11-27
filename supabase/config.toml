@@ -4,6 +4,10 @@ project_id = "dzheddvoiauevcayifev"
 verify_jwt = true
 timeout = 60
 
+[functions.whatsapp-onboarding]
+verify_jwt = false
+timeout = 60
+
 [functions.send-whatsapp-flow]
 verify_jwt = false
 
