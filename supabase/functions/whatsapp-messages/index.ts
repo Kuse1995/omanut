@@ -2035,6 +2035,51 @@ serve(async (req) => {
 
     console.log('WhatsApp message received:', { From, To, Body });
 
+    // === CHECK FOR ONBOARDING KEYWORDS ===
+    const onboardingKeywords = ['ONBOARD', 'SETUP', 'REGISTER', 'START SETUP', 'NEW COMPANY'];
+    const isOnboardingRequest = onboardingKeywords.some(keyword => 
+      Body.trim().toUpperCase().includes(keyword)
+    );
+
+    if (isOnboardingRequest) {
+      console.log('[ONBOARDING] Detected onboarding keyword, redirecting to onboarding flow');
+      
+      const customerPhone = From.replace('whatsapp:', '');
+      
+      // Call onboarding function
+      try {
+        const onboardingResponse = await fetch(
+          `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-onboarding`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              phone: customerPhone,
+              message: Body
+            }),
+          }
+        );
+
+        const onboardingResult = await onboardingResponse.json();
+        
+        // Return TwiML response with onboarding message
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${onboardingResult.response || 'Onboarding started!'}]]></Message>
+</Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' }
+        });
+      } catch (onboardingError) {
+        console.error('[ONBOARDING] Error calling onboarding function:', onboardingError);
+        // Continue with regular message processing if onboarding fails
+      }
+    }
+
+    // === REGULAR MESSAGE PROCESSING BELOW ===
+
     // Look up company by WhatsApp number
     const { data: company, error: companyError } = await supabase
       .from('companies')
