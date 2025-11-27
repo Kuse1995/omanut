@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Search, Loader2, Sparkles, Check, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface CompanyFormProps {
   companyId?: string;
@@ -145,6 +146,9 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   });
 
   const [showCustomIndustry, setShowCustomIndustry] = useState(false);
+  const [isResearching, setIsResearching] = useState(false);
+  const [researchResults, setResearchResults] = useState<any>(null);
+  const [showResearchPreview, setShowResearchPreview] = useState(false);
 
   const [aiInstructions, setAiInstructions] = useState({
     system_instructions: "",
@@ -372,6 +376,91 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     }
   };
 
+  const handleResearchCompany = async () => {
+    if (!formData.name.trim()) {
+      toast({
+        title: "Company name required",
+        description: "Please enter a company name before researching",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsResearching(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/research-company`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            company_name: formData.name,
+            industry_hint: formData.business_type || undefined
+          }),
+        }
+      );
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Research failed');
+      }
+
+      setResearchResults(result.data);
+      setShowResearchPreview(true);
+      
+    } catch (error: any) {
+      console.error('Research error:', error);
+      toast({
+        title: "Research failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsResearching(false);
+    }
+  };
+
+  const applyResearchResults = () => {
+    if (!researchResults) return;
+
+    setFormData(prev => ({
+      ...prev,
+      business_type: researchResults.business_type || prev.business_type,
+      voice_style: researchResults.voice_style || prev.voice_style,
+      hours: researchResults.hours || prev.hours,
+      services: researchResults.services || prev.services,
+      branches: researchResults.branches || prev.branches,
+      service_locations: researchResults.service_locations || prev.service_locations,
+      quick_reference_info: researchResults.quick_reference_info || prev.quick_reference_info,
+    }));
+
+    setAiInstructions(prev => ({
+      ...prev,
+      system_instructions: researchResults.system_instructions || prev.system_instructions,
+      qa_style: researchResults.qa_style || prev.qa_style,
+      banned_topics: researchResults.banned_topics || prev.banned_topics,
+    }));
+
+    // Update industry dropdown if needed
+    const predefinedTypes = ['restaurant', 'clinic', 'gym', 'salon', 'hotel', 'spa'];
+    if (researchResults.business_type && !predefinedTypes.includes(researchResults.business_type)) {
+      setShowCustomIndustry(true);
+    }
+
+    setShowResearchPreview(false);
+    toast({
+      title: "Research applied!",
+      description: "Form fields have been populated with AI research results",
+    });
+  };
+
   return (
     <Card className="card-glass">
       <CardHeader>
@@ -390,13 +479,38 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             
             <div>
               <Label htmlFor="name">Company Name *</Label>
-              <Input
-                id="name"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g., Your Business Name"
-                required
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="e.g., Your Business Name"
+                  required
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleResearchCompany}
+                  disabled={isResearching || !formData.name.trim()}
+                  className="shrink-0"
+                >
+                  {isResearching ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Researching...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      AI Research
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Enter company name and click "AI Research" to auto-fill fields
+              </p>
             </div>
 
             <div>
@@ -726,6 +840,124 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             </Button>
           </div>
         </form>
+
+        {/* Research Results Preview Dialog */}
+        <Dialog open={showResearchPreview} onOpenChange={setShowResearchPreview}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                AI Research Results for "{formData.name}"
+              </DialogTitle>
+              <DialogDescription>
+                Review the researched information before applying to your form
+              </DialogDescription>
+            </DialogHeader>
+            
+            {researchResults && (
+              <div className="space-y-4">
+                {/* Confidence Score */}
+                <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">Confidence Score</p>
+                    <p className="text-xs text-muted-foreground">
+                      {researchResults.confidence_score >= 80 ? "Verified company data" : 
+                       researchResults.confidence_score >= 50 ? "Estimated from industry standards" : 
+                       "Generic industry defaults"}
+                    </p>
+                  </div>
+                  <div className="text-2xl font-bold text-primary">
+                    {researchResults.confidence_score}%
+                  </div>
+                </div>
+
+                {/* Research Summary */}
+                {researchResults.research_summary && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <p className="text-sm font-medium mb-1">Research Summary</p>
+                    <p className="text-sm text-muted-foreground">{researchResults.research_summary}</p>
+                  </div>
+                )}
+
+                {/* Field Preview */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-sm">Fields to be populated:</h4>
+                  
+                  {researchResults.business_type && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Business Type</p>
+                        <p className="text-sm text-muted-foreground">{researchResults.business_type}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchResults.voice_style && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Voice Style</p>
+                        <p className="text-sm text-muted-foreground">{researchResults.voice_style}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchResults.hours && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Operating Hours</p>
+                        <p className="text-sm text-muted-foreground">{researchResults.hours}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchResults.services && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Services</p>
+                        <p className="text-sm text-muted-foreground">{researchResults.services}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchResults.quick_reference_info && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">Knowledge Base</p>
+                        <p className="text-sm text-muted-foreground line-clamp-3">{researchResults.quick_reference_info}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchResults.system_instructions && (
+                    <div className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">AI System Instructions</p>
+                        <p className="text-sm text-muted-foreground line-clamp-3">{researchResults.system_instructions}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setShowResearchPreview(false)}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button onClick={applyResearchResults}>
+                <Check className="h-4 w-4 mr-2" />
+                Apply All
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
