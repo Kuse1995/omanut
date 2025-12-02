@@ -2,6 +2,8 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -10,6 +12,73 @@ const corsHeaders = {
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+async function sendOnboardingCompletionEmail(
+  adminEmail: string,
+  companyName: string,
+  phoneNumber: string
+): Promise<void> {
+  if (!RESEND_API_KEY) {
+    console.log('RESEND_API_KEY not configured, skipping email notification');
+    return;
+  }
+
+  try {
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Omanut <onboarding@resend.dev>',
+        to: [adminEmail],
+        subject: `Welcome to Omanut! Your company "${companyName}" is ready`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h1 style="color: #333; margin-bottom: 24px;">🎉 Welcome to Omanut!</h1>
+            
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">
+              Your company <strong>"${companyName}"</strong> has been successfully set up via WhatsApp onboarding.
+            </p>
+            
+            <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 24px 0;">
+              <h3 style="color: #333; margin-top: 0;">Account Details</h3>
+              <p style="margin: 8px 0; color: #555;"><strong>Company:</strong> ${companyName}</p>
+              <p style="margin: 8px 0; color: #555;"><strong>Admin Email:</strong> ${adminEmail}</p>
+              <p style="margin: 8px 0; color: #555;"><strong>Registered Phone:</strong> ${phoneNumber}</p>
+            </div>
+            
+            <h3 style="color: #333;">What's Next?</h3>
+            <ul style="color: #555; line-height: 1.8;">
+              <li>Log in to your admin dashboard to customize your AI assistant</li>
+              <li>Upload documents and media for your knowledge base</li>
+              <li>Configure your business hours, services, and payment options</li>
+              <li>Start receiving customer inquiries via WhatsApp!</li>
+            </ul>
+            
+            <p style="color: #555; margin-top: 24px;">
+              Your AI-powered customer service assistant is now ready to handle inquiries 24/7.
+            </p>
+            
+            <p style="color: #888; font-size: 14px; margin-top: 32px; border-top: 1px solid #eee; padding-top: 16px;">
+              If you have any questions, reply to this email or reach out via WhatsApp.
+            </p>
+          </div>
+        `,
+      }),
+    });
+
+    if (!emailResponse.ok) {
+      const errorText = await emailResponse.text();
+      console.error('Failed to send onboarding email:', errorText);
+    } else {
+      console.log('Onboarding completion email sent to:', adminEmail);
+    }
+  } catch (error) {
+    console.error('Error sending onboarding email:', error);
+  }
+}
 
 interface OnboardingSession {
   id: string;
@@ -437,6 +506,13 @@ async function handleFinalConfirmation(supabase: any, session: OnboardingSession
         created_company_id: createResult.companyId
       })
       .eq('id', session.id);
+
+    // Send welcome email notification
+    await sendOnboardingCompletionEmail(
+      session.collected_data.admin_email,
+      session.collected_data.company_name,
+      session.phone
+    );
 
     return `🎉 Success! Your company "${session.collected_data.company_name}" is now set up!
 
