@@ -6,7 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, CheckCircle, XCircle, Plus, Trash2, Edit, Loader2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { AlertTriangle, CheckCircle, XCircle, Plus, Trash2, Bot, Loader2, Sparkles, TrendingDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -22,6 +23,20 @@ interface ErrorLog {
   fix_applied: string | null;
   created_at: string;
   conversation_id: string | null;
+  quality_score: number | null;
+  confidence_score: number | null;
+  detected_flags: string[] | null;
+  auto_flagged: boolean | null;
+  analysis_details: {
+    reasoning?: string;
+    tone_issues?: boolean;
+    incomplete_response?: boolean;
+    potential_hallucination?: boolean;
+    off_topic?: boolean;
+    too_verbose?: boolean;
+    missing_action?: boolean;
+    broken_promise?: boolean;
+  } | null;
 }
 
 interface AIErrorTrackerProps {
@@ -56,7 +71,7 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setErrors(data || []);
+      setErrors((data as ErrorLog[]) || []);
     } catch (error) {
       console.error("Error fetching error logs:", error);
       toast.error("Failed to load error logs");
@@ -136,8 +151,29 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
     }
   };
 
+  const getQualityScoreColor = (score: number | null) => {
+    if (score === null) return "text-muted-foreground";
+    if (score >= 80) return "text-green-500";
+    if (score >= 60) return "text-yellow-500";
+    if (score >= 40) return "text-orange-500";
+    return "text-red-500";
+  };
+
+  const getQualityProgressColor = (score: number | null) => {
+    if (score === null) return "bg-muted";
+    if (score >= 80) return "bg-green-500";
+    if (score >= 60) return "bg-yellow-500";
+    if (score >= 40) return "bg-orange-500";
+    return "bg-red-500";
+  };
+
+  const formatFlag = (flag: string) => {
+    return flag.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   const filteredErrors = errors.filter(e => {
     if (filter === "all") return true;
+    if (filter === "auto_flagged") return e.auto_flagged;
     return e.status === filter;
   });
 
@@ -145,12 +181,16 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
     total: errors.length,
     open: errors.filter(e => e.status === "open").length,
     fixed: errors.filter(e => e.status === "fixed").length,
+    autoFlagged: errors.filter(e => e.auto_flagged).length,
+    avgQuality: errors.filter(e => e.quality_score !== null).length > 0
+      ? Math.round(errors.filter(e => e.quality_score !== null).reduce((sum, e) => sum + (e.quality_score || 0), 0) / errors.filter(e => e.quality_score !== null).length)
+      : null,
   };
 
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="text-2xl font-bold">{stats.total}</div>
@@ -169,12 +209,29 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
             <p className="text-sm text-muted-foreground">Fixed</p>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-primary" />
+              <span className="text-2xl font-bold">{stats.autoFlagged}</span>
+            </div>
+            <p className="text-sm text-muted-foreground">Auto-Flagged</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <div className={`text-2xl font-bold ${getQualityScoreColor(stats.avgQuality)}`}>
+              {stats.avgQuality !== null ? `${stats.avgQuality}%` : "N/A"}
+            </div>
+            <p className="text-sm text-muted-foreground">Avg Quality</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Controls */}
       <div className="flex items-center justify-between">
         <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-48">
             <SelectValue placeholder="Filter" />
           </SelectTrigger>
           <SelectContent>
@@ -182,6 +239,11 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="fixed">Fixed</SelectItem>
             <SelectItem value="ignored">Ignored</SelectItem>
+            <SelectItem value="auto_flagged">
+              <span className="flex items-center gap-2">
+                <Bot className="h-4 w-4" /> Auto-Flagged
+              </span>
+            </SelectItem>
           </SelectContent>
         </Select>
 
@@ -272,7 +334,15 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
       {/* Error List */}
       <Card>
         <CardHeader>
-          <CardTitle>Error Log</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Error Log
+            {stats.autoFlagged > 0 && (
+              <Badge variant="secondary" className="flex items-center gap-1">
+                <Sparkles className="h-3 w-3" />
+                {stats.autoFlagged} auto-detected
+              </Badge>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -294,16 +364,41 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
                     onClick={() => setSelectedError(error)}
                   >
                     <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {getStatusIcon(error.status)}
                         <Badge variant={getSeverityColor(error.severity)}>{error.severity}</Badge>
                         <Badge variant="outline">{error.error_type.replace("_", " ")}</Badge>
+                        {error.auto_flagged && (
+                          <Badge variant="secondary" className="flex items-center gap-1">
+                            <Bot className="h-3 w-3" />
+                            Auto
+                          </Badge>
+                        )}
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {format(new Date(error.created_at), "MMM d, h:mm a")}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        {error.quality_score !== null && (
+                          <div className="flex items-center gap-2">
+                            <TrendingDown className={`h-4 w-4 ${getQualityScoreColor(error.quality_score)}`} />
+                            <span className={`text-sm font-medium ${getQualityScoreColor(error.quality_score)}`}>
+                              {error.quality_score}%
+                            </span>
+                          </div>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          {format(new Date(error.created_at), "MMM d, h:mm a")}
+                        </span>
+                      </div>
                     </div>
                     <p className="text-sm mt-2 line-clamp-2">{error.original_message}</p>
+                    {error.detected_flags && error.detected_flags.length > 0 && (
+                      <div className="flex gap-1 mt-2 flex-wrap">
+                        {error.detected_flags.map((flag, i) => (
+                          <Badge key={i} variant="outline" className="text-xs">
+                            {formatFlag(flag)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -314,20 +409,73 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
 
       {/* Error Detail Dialog */}
       <Dialog open={!!selectedError} onOpenChange={() => setSelectedError(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {selectedError && getStatusIcon(selectedError.status)}
               Error Details
+              {selectedError?.auto_flagged && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  <Bot className="h-3 w-3" />
+                  Auto-Detected
+                </Badge>
+              )}
             </DialogTitle>
           </DialogHeader>
           {selectedError && (
             <div className="space-y-4">
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <Badge variant={getSeverityColor(selectedError.severity)}>{selectedError.severity}</Badge>
                 <Badge variant="outline">{selectedError.error_type.replace("_", " ")}</Badge>
                 <Badge variant="secondary">{selectedError.status}</Badge>
               </div>
+
+              {/* Quality Score Section */}
+              {selectedError.quality_score !== null && (
+                <Card className="bg-muted/30">
+                  <CardContent className="pt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Quality Score</span>
+                      <span className={`text-lg font-bold ${getQualityScoreColor(selectedError.quality_score)}`}>
+                        {selectedError.quality_score}%
+                      </span>
+                    </div>
+                    <Progress 
+                      value={selectedError.quality_score} 
+                      className="h-2"
+                    />
+                    {selectedError.confidence_score !== null && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Confidence: {selectedError.confidence_score}%
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Detected Flags */}
+              {selectedError.detected_flags && selectedError.detected_flags.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Detected Issues</label>
+                  <div className="flex gap-2 mt-1 flex-wrap">
+                    {selectedError.detected_flags.map((flag, i) => (
+                      <Badge key={i} variant="destructive" className="text-xs">
+                        {formatFlag(flag)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* AI Analysis Reasoning */}
+              {selectedError.analysis_details?.reasoning && (
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">AI Analysis</label>
+                  <p className="mt-1 p-3 bg-primary/10 rounded-lg text-sm">
+                    {selectedError.analysis_details.reasoning}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Customer Message</label>
