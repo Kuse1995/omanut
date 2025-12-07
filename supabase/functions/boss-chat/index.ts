@@ -420,10 +420,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
     ];
 
-    // Call Lovable AI Gateway with Gemini 3 Pro
+    // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
+    // Use AI overrides from company_ai_overrides table instead of hardcoded values
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-3-pro-preview';
+    const temperature = aiOverrides?.primary_temperature || 1.0;
+    const maxTokens = aiOverrides?.max_tokens || 8192;
+    const bossAgentPrompt = aiOverrides?.boss_agent_prompt;
+    
+    // If there's a custom boss agent prompt, append it to the system prompt
+    const finalSystemPrompt = bossAgentPrompt 
+      ? `${systemPrompt}\n\n=== CUSTOM BOSS AGENT INSTRUCTIONS ===\n${bossAgentPrompt}`
+      : systemPrompt;
+    
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     
-    console.log('Boss chat request:', { companyName: company.name, question: Body });
+    console.log('Boss chat request:', { 
+      companyName: company.name, 
+      question: Body,
+      aiConfig: { primaryModel, temperature, maxTokens, hasBossPrompt: !!bossAgentPrompt }
+    });
     
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -432,13 +447,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-pro-preview',
+        model: primaryModel,
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: finalSystemPrompt },
           { role: 'user', content: Body }
         ],
-        temperature: 1.0,
-        max_tokens: 8192,
+        temperature,
+        max_tokens: maxTokens,
         tools: managementTools
       }),
     });
