@@ -83,3 +83,6 @@ verify_jwt = false
 
 [functions.update-reservation]
 verify_jwt = true
+
+[functions.ai-playground]
+verify_jwt = true
