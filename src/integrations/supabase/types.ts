@@ -523,28 +523,121 @@ export type Database = {
       }
       company_ai_overrides: {
         Row: {
+          ab_test_enabled: boolean | null
+          ab_test_model: string | null
+          ab_test_variant: string | null
+          analysis_model: string | null
+          auto_flag_threshold: number | null
+          auto_handoff_triggers: string[] | null
           banned_topics: string
+          boss_agent_prompt: string | null
           company_id: string
+          complexity_threshold: number | null
+          content_filtering_level: string | null
+          custom_tools: Json | null
+          enabled_tools: string[] | null
+          escalation_rules: Json | null
+          fallback_message: string | null
           id: string
+          max_tokens: number | null
+          max_tool_rounds: number | null
+          primary_model: string | null
+          primary_temperature: number | null
           qa_style: string
+          quality_scoring_enabled: boolean | null
+          require_confirmation_for: string[] | null
+          response_length: string | null
+          response_templates: Json | null
+          response_timeout_seconds: number | null
+          routing_confidence_threshold: number | null
+          routing_enabled: boolean | null
+          routing_model: string | null
+          routing_temperature: number | null
+          sales_agent_prompt: string | null
+          supervisor_enabled: boolean | null
+          support_agent_prompt: string | null
           system_instructions: string
           updated_at: string | null
+          voice_model: string | null
+          voice_style: string | null
         }
         Insert: {
+          ab_test_enabled?: boolean | null
+          ab_test_model?: string | null
+          ab_test_variant?: string | null
+          analysis_model?: string | null
+          auto_flag_threshold?: number | null
+          auto_handoff_triggers?: string[] | null
           banned_topics?: string
+          boss_agent_prompt?: string | null
           company_id: string
+          complexity_threshold?: number | null
+          content_filtering_level?: string | null
+          custom_tools?: Json | null
+          enabled_tools?: string[] | null
+          escalation_rules?: Json | null
+          fallback_message?: string | null
           id?: string
+          max_tokens?: number | null
+          max_tool_rounds?: number | null
+          primary_model?: string | null
+          primary_temperature?: number | null
           qa_style?: string
+          quality_scoring_enabled?: boolean | null
+          require_confirmation_for?: string[] | null
+          response_length?: string | null
+          response_templates?: Json | null
+          response_timeout_seconds?: number | null
+          routing_confidence_threshold?: number | null
+          routing_enabled?: boolean | null
+          routing_model?: string | null
+          routing_temperature?: number | null
+          sales_agent_prompt?: string | null
+          supervisor_enabled?: boolean | null
+          support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
+          voice_model?: string | null
+          voice_style?: string | null
         }
         Update: {
+          ab_test_enabled?: boolean | null
+          ab_test_model?: string | null
+          ab_test_variant?: string | null
+          analysis_model?: string | null
+          auto_flag_threshold?: number | null
+          auto_handoff_triggers?: string[] | null
           banned_topics?: string
+          boss_agent_prompt?: string | null
           company_id?: string
+          complexity_threshold?: number | null
+          content_filtering_level?: string | null
+          custom_tools?: Json | null
+          enabled_tools?: string[] | null
+          escalation_rules?: Json | null
+          fallback_message?: string | null
           id?: string
+          max_tokens?: number | null
+          max_tool_rounds?: number | null
+          primary_model?: string | null
+          primary_temperature?: number | null
           qa_style?: string
+          quality_scoring_enabled?: boolean | null
+          require_confirmation_for?: string[] | null
+          response_length?: string | null
+          response_templates?: Json | null
+          response_timeout_seconds?: number | null
+          routing_confidence_threshold?: number | null
+          routing_enabled?: boolean | null
+          routing_model?: string | null
+          routing_temperature?: number | null
+          sales_agent_prompt?: string | null
+          supervisor_enabled?: boolean | null
+          support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
+          voice_model?: string | null
+          voice_style?: string | null
         }
         Relationships: [
           {

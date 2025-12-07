@@ -61,12 +61,17 @@ serve(async (req) => {
       });
     }
 
-    // Fetch AI overrides
+    // Fetch AI overrides with all configuration
     const { data: aiOverrides } = await supabase
       .from('company_ai_overrides')
       .select('*')
       .eq('company_id', company_id)
-      .single();
+      .maybeSingle();
+
+    // Get configured model or use defaults
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    const temperature = aiOverrides?.primary_temperature ?? 0.7;
+    const maxTokens = aiOverrides?.max_tokens ?? 2048;
 
     // Fetch documents for knowledge base
     const { data: documents } = await supabase
@@ -144,7 +149,7 @@ Acknowledge training inputs and demonstrate how you would apply them.`;
       { role: 'user', content: message }
     ];
 
-    // Call Lovable AI
+    // Call Lovable AI with configured model
     const startTime = Date.now();
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -153,9 +158,10 @@ Acknowledge training inputs and demonstrate how you would apply them.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: primaryModel,
         messages,
-        temperature: 0.7,
+        temperature,
+        max_tokens: maxTokens,
       }),
     });
 
@@ -176,10 +182,12 @@ Acknowledge training inputs and demonstrate how you would apply them.`;
     const analysis = {
       mode,
       response_time_ms: responseTime,
-      model_used: 'google/gemini-2.5-flash',
+      model_used: primaryModel,
       tokens_used: aiData.usage?.total_tokens || 0,
       system_prompt_length: systemPrompt.length,
       knowledge_base_loaded: knowledgeBase.length > 0,
+      temperature_used: temperature,
+      max_tokens_configured: maxTokens,
       ai_overrides_applied: {
         system_instructions: !!aiOverrides?.system_instructions,
         qa_style: !!aiOverrides?.qa_style,

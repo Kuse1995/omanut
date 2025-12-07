@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MessageSquare, AlertTriangle, Settings, BarChart3, BookOpen } from "lucide-react";
+import { MessageSquare, AlertTriangle, Settings, BarChart3, BookOpen, Cpu } from "lucide-react";
 import { AIPlayground } from "./AIPlayground";
 import { AIErrorTracker } from "./AIErrorTracker";
-import { AIBehaviorSettings } from "./AIBehaviorSettings";
+import { AIDeepSettings } from "./AIDeepSettings";
 import { AIPerformanceMetrics } from "./AIPerformanceMetrics";
 import { AITrainingEditor } from "./AITrainingEditor";
 
@@ -31,9 +31,9 @@ export const AIControlPanel = ({ companyId }: AIControlPanelProps) => {
             <AlertTriangle className="h-4 w-4" />
             <span className="hidden sm:inline">Errors</span>
           </TabsTrigger>
-          <TabsTrigger value="behavior" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            <span className="hidden sm:inline">Behavior</span>
+          <TabsTrigger value="config" className="flex items-center gap-2">
+            <Cpu className="h-4 w-4" />
+            <span className="hidden sm:inline">Deep Config</span>
           </TabsTrigger>
           <TabsTrigger value="metrics" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
@@ -53,8 +53,8 @@ export const AIControlPanel = ({ companyId }: AIControlPanelProps) => {
           <AIErrorTracker companyId={companyId} />
         </TabsContent>
 
-        <TabsContent value="behavior" className="mt-6">
-          <AIBehaviorSettings companyId={companyId} />
+        <TabsContent value="config" className="mt-6">
+          <AIDeepSettings companyId={companyId} />
         </TabsContent>
 
         <TabsContent value="metrics" className="mt-6">
