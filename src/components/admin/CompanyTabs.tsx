@@ -5,12 +5,16 @@ import { ReservationsPanel } from './ReservationsPanel';
 import { CompanySettingsPanel } from './CompanySettingsPanel';
 import { BillingPanel } from './BillingPanel';
 import { PaymentsPanel } from './PaymentsPanel';
-import { MessageSquare, Info, Calendar, Settings, CreditCard, DollarSign } from 'lucide-react';
+import { AIControlPanel } from './AIControlPanel';
+import { MessageSquare, Info, Calendar, Settings, CreditCard, DollarSign, Bot } from 'lucide-react';
+import { useCompany } from '@/context/CompanyContext';
 
 export const CompanyTabs = () => {
+  const { selectedCompany } = useCompany();
+
   return (
     <Tabs defaultValue="conversations" className="flex-1 flex flex-col">
-      <TabsList className="w-full justify-start rounded-none border-b border-white/10 bg-[#1A1A1A] p-0 h-auto">
+      <TabsList className="w-full justify-start rounded-none border-b border-white/10 bg-[#1A1A1A] p-0 h-auto overflow-x-auto">
         <TabsTrigger 
           value="conversations" 
           className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#84CC16] data-[state=active]:bg-transparent px-6 py-4"
@@ -31,6 +35,13 @@ export const CompanyTabs = () => {
         >
           <Calendar className="w-4 h-4 mr-2" />
           Reservations
+        </TabsTrigger>
+        <TabsTrigger 
+          value="ai-control" 
+          className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#84CC16] data-[state=active]:bg-transparent px-6 py-4"
+        >
+          <Bot className="w-4 h-4 mr-2" />
+          AI Control
         </TabsTrigger>
         <TabsTrigger 
           value="settings" 
@@ -65,6 +76,16 @@ export const CompanyTabs = () => {
 
       <TabsContent value="reservations" className="flex-1 m-0">
         <ReservationsPanel />
+      </TabsContent>
+
+      <TabsContent value="ai-control" className="flex-1 m-0 p-6">
+        {selectedCompany ? (
+          <AIControlPanel companyId={selectedCompany.id} />
+        ) : (
+          <div className="text-center text-muted-foreground py-12">
+            Select a company to access AI Control
+          </div>
+        )}
       </TabsContent>
 
       <TabsContent value="settings" className="flex-1 m-0">

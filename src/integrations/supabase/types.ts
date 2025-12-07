@@ -176,6 +176,101 @@ export type Database = {
           },
         ]
       }
+      ai_error_logs: {
+        Row: {
+          ai_response: string
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          error_type: string
+          expected_response: string | null
+          fix_applied: string | null
+          id: string
+          original_message: string
+          severity: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          ai_response: string
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          error_type?: string
+          expected_response?: string | null
+          fix_applied?: string | null
+          id?: string
+          original_message: string
+          severity?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          ai_response?: string
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          error_type?: string
+          expected_response?: string | null
+          fix_applied?: string | null
+          id?: string
+          original_message?: string
+          severity?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_error_logs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_error_logs_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_playground_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          messages: Json
+          mode: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          messages?: Json
+          mode?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          messages?: Json
+          mode?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_playground_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       boss_conversations: {
         Row: {
           company_id: string
