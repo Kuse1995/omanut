@@ -43,13 +43,24 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   return 'complex';
 }
 
-// Agent routing function using DeepSeek for intent classification
+// Agent routing function with configurable model from database
 async function routeToAgent(
   userMessage: string,
-  conversationHistory: any[]
+  conversationHistory: any[],
+  config?: {
+    routingModel?: string;
+    routingTemperature?: number;
+    confidenceThreshold?: number;
+  }
 ): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  
+  // Use configured values or defaults
+  const routingModel = config?.routingModel || 'deepseek-chat';
+  const routingTemperature = config?.routingTemperature ?? 0.3;
+  const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   
   // Build recent conversation context (last 5 messages)
   const recentContext = conversationHistory
@@ -87,23 +98,48 @@ Respond with ONLY valid JSON (no markdown):
   "confidence": 0.0-1.0
 }`;
 
+  console.log(`[ROUTER] Using routing model: ${routingModel}, temperature: ${routingTemperature}`);
+
   try {
-    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
-          { role: 'user', content: routingPrompt }
-        ],
-        temperature: 0.3,
-        max_tokens: 150
-      })
-    });
+    let response;
+    
+    // Check if using DeepSeek or Lovable AI Gateway
+    if (routingModel === 'deepseek-chat' && DEEPSEEK_API_KEY) {
+      response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: routingModel,
+          messages: [
+            { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+            { role: 'user', content: routingPrompt }
+          ],
+          temperature: routingTemperature,
+          max_tokens: 150
+        })
+      });
+    } else {
+      // Use Lovable AI Gateway for other models (Gemini, GPT, etc.)
+      response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: routingModel,
+          messages: [
+            { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+            { role: 'user', content: routingPrompt }
+          ],
+          temperature: routingTemperature,
+          max_tokens: 150
+        })
+      });
+    }
     
     const data = await response.json();
     const content = data.choices[0]?.message?.content || '{}';
@@ -395,6 +431,13 @@ async function processAIResponse(
     // Check if agent routing is enabled for this company
     const agentRoutingEnabled = company.agent_routing_enabled !== false;
     
+    // Fetch AI overrides EARLY - needed for routing configuration
+    const { data: aiOverrides } = await supabase
+      .from('company_ai_overrides')
+      .select('*')
+      .eq('company_id', company.id)
+      .maybeSingle();
+    
     // Fetch conversation history for routing
     const { data: messageHistory } = await supabase
       .from('messages')
@@ -407,13 +450,20 @@ async function processAIResponse(
     let routingReasoning = 'Default routing';
     const previousAgent = conversation.active_agent || 'sales';
 
-    if (agentRoutingEnabled) {
+    if (agentRoutingEnabled && aiOverrides?.routing_enabled !== false) {
       try {
         console.log('[ROUTER] Classifying intent...');
         console.log(`[ROUTER] Current active agent: ${previousAgent}`);
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
-        const routingResult = await routeToAgent(userMessage, messageHistory || []);
+        // Pass routing configuration from database
+        const routingConfig = {
+          routingModel: aiOverrides?.routing_model || 'deepseek-chat',
+          routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
+          confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6
+        };
+        
+        const routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
         selectedAgent = routingResult.agent;
         routingReasoning = routingResult.reasoning;
         
@@ -555,12 +605,7 @@ async function processAIResponse(
       }
     }
 
-    // Fetch AI overrides and other company data
-    const { data: aiOverrides } = await supabase
-      .from('company_ai_overrides')
-      .select('*')
-      .eq('company_id', company.id)
-      .maybeSingle();
+    // Note: aiOverrides already fetched earlier for routing configuration
 
     const { data: documents } = await supabase
       .from('company_documents')
@@ -580,11 +625,12 @@ async function processAIResponse(
       full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
     })) || [];
 
-    // ========== AGENT-SPECIFIC SYSTEM PROMPTS ==========
+    // ========== AGENT-SPECIFIC SYSTEM PROMPTS (from database or defaults) ==========
     let agentPersonality = '';
     
     if (selectedAgent === 'support') {
-      agentPersonality = `
+      // Use custom support agent prompt from database, or default
+      agentPersonality = aiOverrides?.support_agent_prompt || `
 
 🛠️ YOU ARE THE SUPPORT AGENT:
 - Your role is to EMPATHIZE and RESOLVE customer issues
@@ -595,7 +641,8 @@ async function processAIResponse(
 - Focus on making things right for the customer
 - If you cannot resolve the issue, escalate by using [HANDOFF_REQUIRED]`;
     } else if (selectedAgent === 'sales') {
-      agentPersonality = `
+      // Use custom sales agent prompt from database, or default
+      agentPersonality = aiOverrides?.sales_agent_prompt || `
 
 💼 YOU ARE THE SALES AGENT:
 - Your role is to CONVERT and CLOSE sales
@@ -607,6 +654,11 @@ async function processAIResponse(
 - Guide customers toward making a purchase decision
 - Address pricing objections with value-focused responses`;
     }
+    
+    console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
+      isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
+      promptLength: agentPersonality.length
+    });
 
     // Build AI instructions
     let instructions = `You are a friendly AI assistant for ${company.name}`;
@@ -907,14 +959,31 @@ ${supervisorRecommendation.recommendedResponse}
     // Update system message with supervisor guidance
     messages[0] = { role: 'system', content: instructions };
 
-    // Select Gemini model based on complexity
-    const selectedModel = messageComplexity === 'simple' ? 'google/gemini-2.5-flash' : 'google/gemini-3-pro-preview';
-    const maxTokens = messageComplexity === 'simple' ? 2048 : 8192;
-    console.log(`[AI] Using model: ${selectedModel} with max_tokens: ${maxTokens}`);
+    // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
+    // Use AI overrides from company_ai_overrides table instead of hardcoded values
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-3-pro-preview';
+    const fallbackModel = 'google/gemini-2.5-flash';
+    
+    // Select model based on complexity - use configured primary for complex, fallback for simple
+    const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;
+    const configuredMaxTokens = aiOverrides?.max_tokens || 8192;
+    const maxTokens = messageComplexity === 'simple' ? Math.min(2048, configuredMaxTokens) : configuredMaxTokens;
+    const temperature = aiOverrides?.primary_temperature || 1.0;
+    const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
+    const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
+    
+    console.log(`[AI-CONFIG] Using database configuration:`, {
+      primaryModel,
+      selectedModel,
+      maxTokens,
+      temperature,
+      responseTimeout: responseTimeout / 1000 + 's',
+      hasFallbackMessage: !!aiOverrides?.fallback_message
+    });
 
-    // Call Lovable AI Gateway with extended timeout
+    // Call Lovable AI Gateway with configurable timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), responseTimeout);
     
     let assistantReply = '';
     let anyToolExecuted = false;
@@ -933,7 +1002,7 @@ ${supervisorRecommendation.recommendedResponse}
         body: JSON.stringify({
           model: selectedModel,
           messages,
-          temperature: 1.0,
+          temperature,
           max_tokens: maxTokens,
           tools: [
             {
