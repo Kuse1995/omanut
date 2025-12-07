@@ -179,42 +179,57 @@ export type Database = {
       ai_error_logs: {
         Row: {
           ai_response: string
+          analysis_details: Json | null
+          auto_flagged: boolean | null
           company_id: string
+          confidence_score: number | null
           conversation_id: string | null
           created_at: string
+          detected_flags: string[] | null
           error_type: string
           expected_response: string | null
           fix_applied: string | null
           id: string
           original_message: string
+          quality_score: number | null
           severity: string
           status: string
           updated_at: string
         }
         Insert: {
           ai_response: string
+          analysis_details?: Json | null
+          auto_flagged?: boolean | null
           company_id: string
+          confidence_score?: number | null
           conversation_id?: string | null
           created_at?: string
+          detected_flags?: string[] | null
           error_type?: string
           expected_response?: string | null
           fix_applied?: string | null
           id?: string
           original_message: string
+          quality_score?: number | null
           severity?: string
           status?: string
           updated_at?: string
         }
         Update: {
           ai_response?: string
+          analysis_details?: Json | null
+          auto_flagged?: boolean | null
           company_id?: string
+          confidence_score?: number | null
           conversation_id?: string | null
           created_at?: string
+          detected_flags?: string[] | null
           error_type?: string
           expected_response?: string | null
           fix_applied?: string | null
           id?: string
           original_message?: string
+          quality_score?: number | null
           severity?: string
           status?: string
           updated_at?: string
