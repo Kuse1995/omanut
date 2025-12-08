@@ -557,7 +557,7 @@ export const PaymentsPanel = () => {
                 Add Product
               </Button>
             </DialogTrigger>
-            <DialogContent className="bg-card border-border max-w-2xl">
+            <DialogContent className="bg-card border-border max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="text-foreground">
                   {editingProduct ? 'Edit Product' : 'Add New Product'}
@@ -982,7 +982,7 @@ export const PaymentsPanel = () => {
 
       {/* Proof Viewer Dialog */}
       <Dialog open={isProofDialogOpen} onOpenChange={setIsProofDialogOpen}>
-        <DialogContent className="bg-card border-border max-w-3xl">
+        <DialogContent className="bg-card border-border max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground">Payment Proof</DialogTitle>
           </DialogHeader>
@@ -1005,7 +1005,7 @@ export const PaymentsPanel = () => {
 
       {/* Verification Dialog */}
       <Dialog open={isVerifyDialogOpen} onOpenChange={setIsVerifyDialogOpen}>
-        <DialogContent className="bg-card border-border">
+        <DialogContent className="bg-card border-border max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground">Verify Payment</DialogTitle>
           </DialogHeader>
