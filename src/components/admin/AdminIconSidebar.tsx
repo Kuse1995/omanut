@@ -1,7 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Building2,
   MessageSquare,
   Users,
   Calendar,
@@ -13,6 +12,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -39,6 +40,23 @@ const navItems = [
 export const AdminIconSidebar = ({ activeTab, onTabChange, onOpenCommandPalette }: AdminIconSidebarProps) => {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(true);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    const initialTheme = savedTheme || 'dark';
+    setTheme(initialTheme);
+    document.documentElement.classList.toggle('dark', initialTheme === 'dark');
+    document.documentElement.classList.toggle('light', initialTheme === 'light');
+  }, []);
+
+  const toggleTheme = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+    localStorage.setItem('theme', newTheme);
+    document.documentElement.classList.toggle('dark', newTheme === 'dark');
+    document.documentElement.classList.toggle('light', newTheme === 'light');
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -121,6 +139,27 @@ export const AdminIconSidebar = ({ activeTab, onTabChange, onOpenCommandPalette 
 
         {/* Bottom Actions */}
         <div className="p-3 border-t border-sidebar-border space-y-1">
+          {/* Theme Toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleTheme}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 h-10 rounded-lg transition-all text-sm text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent",
+                  collapsed && "justify-center px-0"
+                )}
+              >
+                {theme === 'dark' ? (
+                  <Sun className="w-4 h-4 flex-shrink-0" />
+                ) : (
+                  <Moon className="w-4 h-4 flex-shrink-0" />
+                )}
+                {!collapsed && <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+              </button>
+            </TooltipTrigger>
+            {collapsed && <TooltipContent side="right">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</TooltipContent>}
+          </Tooltip>
+
           {/* Collapse Toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
