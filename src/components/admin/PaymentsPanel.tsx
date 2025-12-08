@@ -52,6 +52,15 @@ interface Transaction {
   admin_notes: string | null;
 }
 
+interface DeliveryStatus {
+  id: string;
+  transaction_id: string;
+  download_count: number;
+  max_downloads: number;
+  delivered_at: string | null;
+  expires_at: string | null;
+}
+
 interface PaymentNumbers {
   payment_number_mtn: string;
   payment_number_airtel: string;
@@ -63,6 +72,7 @@ export const PaymentsPanel = () => {
   const { selectedCompany } = useCompany();
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [deliveries, setDeliveries] = useState<Record<string, DeliveryStatus>>({});
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isProofDialogOpen, setIsProofDialogOpen] = useState(false);
@@ -181,6 +191,25 @@ export const PaymentsPanel = () => {
       console.error(error);
     } else {
       setTransactions(data || []);
+      
+      // Load delivery statuses for transactions
+      const transactionIds = (data || []).map(t => t.id);
+      if (transactionIds.length > 0) {
+        const { data: deliveryData } = await supabase
+          .from('digital_product_deliveries')
+          .select('id, transaction_id, download_count, max_downloads, delivered_at, expires_at')
+          .in('transaction_id', transactionIds);
+        
+        if (deliveryData) {
+          const deliveryMap: Record<string, DeliveryStatus> = {};
+          deliveryData.forEach(d => {
+            if (d.transaction_id) {
+              deliveryMap[d.transaction_id] = d as DeliveryStatus;
+            }
+          });
+          setDeliveries(deliveryMap);
+        }
+      }
     }
   };
 
@@ -805,6 +834,7 @@ export const PaymentsPanel = () => {
                 <TableHead className="text-foreground">Method</TableHead>
                 <TableHead className="text-foreground">Payment Status</TableHead>
                 <TableHead className="text-foreground">Verification</TableHead>
+                <TableHead className="text-foreground">Delivery</TableHead>
                 <TableHead className="text-foreground">Proof</TableHead>
                 <TableHead className="text-foreground">Actions</TableHead>
               </TableRow>
@@ -812,7 +842,7 @@ export const PaymentsPanel = () => {
             <TableBody>
               {filteredTransactions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                     No transactions found
                   </TableCell>
                 </TableRow>
@@ -836,6 +866,27 @@ export const PaymentsPanel = () => {
                     </TableCell>
                     <TableCell>{getStatusBadge(transaction.payment_status)}</TableCell>
                     <TableCell>{getVerificationBadge(transaction.verification_status)}</TableCell>
+                    <TableCell>
+                      {(() => {
+                        const delivery = deliveries[transaction.id];
+                        const product = products.find(p => p.id === transaction.product_id);
+                        if (product?.product_type !== 'digital') return <span className="text-muted-foreground text-xs">N/A</span>;
+                        if (!delivery) return <Badge variant="secondary">Not Sent</Badge>;
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="default" className="text-xs">
+                              <Download className="w-3 h-3 mr-1" />
+                              {delivery.download_count}/{delivery.max_downloads}
+                            </Badge>
+                            {delivery.delivered_at && (
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(delivery.delivered_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell>
                       {transaction.payment_proof_url ? (
                         <Button
@@ -904,8 +955,9 @@ export const PaymentsPanel = () => {
                                     customer_phone: transaction.customer_phone
                                   }
                                 });
-                                if (error) throw error;
+                              if (error) throw error;
                                 toast.success('Digital product delivered');
+                                loadTransactions(); // Refresh to show delivery status
                               } catch (err) {
                                 console.error('Delivery error:', err);
                                 toast.error('Failed to deliver product');
