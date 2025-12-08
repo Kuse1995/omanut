@@ -72,6 +72,7 @@ export const PaymentsPanel = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [uploadingProof, setUploadingProof] = useState(false);
   const [verifyNotes, setVerifyNotes] = useState('');
+  const [deliveringProduct, setDeliveringProduct] = useState<string | null>(null);
   
   const [paymentNumbers, setPaymentNumbers] = useState<PaymentNumbers>({
     payment_number_mtn: '',
@@ -872,17 +873,52 @@ export const PaymentsPanel = () => {
                       />
                     </TableCell>
                     <TableCell>
-                      {transaction.verification_status === 'proof_submitted' && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setSelectedTransaction(transaction);
-                            setIsVerifyDialogOpen(true);
-                          }}
-                        >
-                          Review
-                        </Button>
-                      )}
+                      <div className="flex gap-1">
+                        {transaction.verification_status === 'proof_submitted' && (
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setSelectedTransaction(transaction);
+                              setIsVerifyDialogOpen(true);
+                            }}
+                          >
+                            Review
+                          </Button>
+                        )}
+                        {transaction.payment_status === 'completed' && transaction.product_id && (() => {
+                          const product = products.find(p => p.id === transaction.product_id);
+                          return product?.product_type === 'digital';
+                        })() && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={deliveringProduct === transaction.id}
+                            onClick={async () => {
+                              setDeliveringProduct(transaction.id);
+                              try {
+                                const { error } = await supabase.functions.invoke('deliver-digital-product', {
+                                  body: {
+                                    transaction_id: transaction.id,
+                                    product_id: transaction.product_id,
+                                    company_id: selectedCompany?.id,
+                                    customer_phone: transaction.customer_phone
+                                  }
+                                });
+                                if (error) throw error;
+                                toast.success('Digital product delivered');
+                              } catch (err) {
+                                console.error('Delivery error:', err);
+                                toast.error('Failed to deliver product');
+                              } finally {
+                                setDeliveringProduct(null);
+                              }
+                            }}
+                          >
+                            <Download className="w-4 h-4 mr-1" />
+                            {deliveringProduct === transaction.id ? 'Sending...' : 'Deliver'}
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
