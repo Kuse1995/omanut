@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, CheckCircle, XCircle, Upload, Eye, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, CheckCircle, XCircle, Upload, Eye, AlertCircle, Download, Package } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Product {
@@ -23,6 +23,12 @@ interface Product {
   duration_minutes: number | null;
   is_active: boolean;
   created_at: string;
+  product_type: 'physical' | 'digital' | 'service';
+  delivery_type: 'manual' | 'auto_download' | 'email_delivery';
+  digital_file_path: string | null;
+  download_url: string | null;
+  download_limit: number | null;
+  download_expiry_hours: number | null;
 }
 
 interface Transaction {
@@ -81,8 +87,16 @@ export const PaymentsPanel = () => {
     currency: 'ZMW',
     category: 'video_ad',
     duration_minutes: '',
-    is_active: true
+    is_active: true,
+    product_type: 'service' as 'physical' | 'digital' | 'service',
+    delivery_type: 'manual' as 'manual' | 'auto_download' | 'email_delivery',
+    digital_file_path: '',
+    download_url: '',
+    download_limit: '3',
+    download_expiry_hours: '48'
   });
+  const [digitalFile, setDigitalFile] = useState<File | null>(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -146,7 +160,7 @@ export const PaymentsPanel = () => {
       toast.error('Failed to load products');
       console.error(error);
     } else {
-      setProducts(data || []);
+      setProducts((data || []) as Product[]);
     }
     setLoading(false);
   };
@@ -173,6 +187,30 @@ export const PaymentsPanel = () => {
     e.preventDefault();
     if (!selectedCompany) return;
 
+    setUploadingFile(true);
+    let digitalFilePath = formData.digital_file_path;
+
+    // Upload digital file if provided
+    if (digitalFile && formData.product_type === 'digital') {
+      try {
+        const fileExt = digitalFile.name.split('.').pop();
+        const fileName = `${selectedCompany.id}/${Date.now()}_${digitalFile.name}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('digital-products')
+          .upload(fileName, digitalFile);
+
+        if (uploadError) throw uploadError;
+        digitalFilePath = fileName;
+        toast.success('Digital file uploaded successfully');
+      } catch (error) {
+        console.error('Error uploading digital file:', error);
+        toast.error('Failed to upload digital file');
+        setUploadingFile(false);
+        return;
+      }
+    }
+
     const productData = {
       company_id: selectedCompany.id,
       name: formData.name,
@@ -181,7 +219,13 @@ export const PaymentsPanel = () => {
       currency: formData.currency,
       category: formData.category,
       duration_minutes: formData.duration_minutes ? parseInt(formData.duration_minutes) : null,
-      is_active: formData.is_active
+      is_active: formData.is_active,
+      product_type: formData.product_type,
+      delivery_type: formData.delivery_type,
+      digital_file_path: digitalFilePath || null,
+      download_url: formData.download_url || null,
+      download_limit: formData.download_limit ? parseInt(formData.download_limit) : 3,
+      download_expiry_hours: formData.download_expiry_hours ? parseInt(formData.download_expiry_hours) : 48
     };
 
     if (editingProduct) {
@@ -212,6 +256,7 @@ export const PaymentsPanel = () => {
         loadProducts();
       }
     }
+    setUploadingFile(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -240,7 +285,13 @@ export const PaymentsPanel = () => {
       currency: product.currency,
       category: product.category || 'video_ad',
       duration_minutes: product.duration_minutes?.toString() || '',
-      is_active: product.is_active
+      is_active: product.is_active,
+      product_type: product.product_type || 'service',
+      delivery_type: product.delivery_type || 'manual',
+      digital_file_path: product.digital_file_path || '',
+      download_url: product.download_url || '',
+      download_limit: product.download_limit?.toString() || '3',
+      download_expiry_hours: product.download_expiry_hours?.toString() || '48'
     });
     setIsDialogOpen(true);
   };
@@ -331,8 +382,15 @@ export const PaymentsPanel = () => {
       currency: 'ZMW',
       category: 'video_ad',
       duration_minutes: '',
-      is_active: true
+      is_active: true,
+      product_type: 'service',
+      delivery_type: 'manual',
+      digital_file_path: '',
+      download_url: '',
+      download_limit: '3',
+      download_expiry_hours: '48'
     });
+    setDigitalFile(null);
     setEditingProduct(null);
     setIsDialogOpen(false);
   };
@@ -474,6 +532,20 @@ export const PaymentsPanel = () => {
                   </div>
 
                   <div>
+                    <Label htmlFor="product_type" className="text-foreground">Product Type</Label>
+                    <Select value={formData.product_type} onValueChange={(value: 'physical' | 'digital' | 'service') => setFormData({ ...formData, product_type: value })}>
+                      <SelectTrigger className="bg-background border-border text-foreground">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="service">Service</SelectItem>
+                        <SelectItem value="digital">Digital Product</SelectItem>
+                        <SelectItem value="physical">Physical Product</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
                     <Label htmlFor="price" className="text-foreground">Price</Label>
                     <Input
                       id="price"
@@ -510,6 +582,9 @@ export const PaymentsPanel = () => {
                         <SelectItem value="video_ad">Video Ad</SelectItem>
                         <SelectItem value="image_design">Image Design</SelectItem>
                         <SelectItem value="logo">Logo Design</SelectItem>
+                        <SelectItem value="ebook">E-Book</SelectItem>
+                        <SelectItem value="template">Template</SelectItem>
+                        <SelectItem value="course">Course/Tutorial</SelectItem>
                         <SelectItem value="custom">Custom</SelectItem>
                       </SelectContent>
                     </Select>
@@ -526,14 +601,90 @@ export const PaymentsPanel = () => {
                       className="bg-background border-border text-foreground"
                     />
                   </div>
+
+                  {/* Digital Product Options */}
+                  {formData.product_type === 'digital' && (
+                    <>
+                      <div className="col-span-2 border-t border-border pt-4 mt-2">
+                        <h4 className="text-sm font-semibold text-foreground mb-3">Digital Product Settings</h4>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="delivery_type" className="text-foreground">Delivery Method</Label>
+                        <Select value={formData.delivery_type} onValueChange={(value: 'manual' | 'auto_download' | 'email_delivery') => setFormData({ ...formData, delivery_type: value })}>
+                          <SelectTrigger className="bg-background border-border text-foreground">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto_download">Auto Deliver (WhatsApp)</SelectItem>
+                            <SelectItem value="email_delivery">Email Delivery</SelectItem>
+                            <SelectItem value="manual">Manual Delivery</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label htmlFor="download_limit" className="text-foreground">Download Limit</Label>
+                        <Input
+                          id="download_limit"
+                          type="number"
+                          value={formData.download_limit}
+                          onChange={(e) => setFormData({ ...formData, download_limit: e.target.value })}
+                          placeholder="3"
+                          className="bg-background border-border text-foreground"
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="download_expiry" className="text-foreground">Link Expires (hours)</Label>
+                        <Input
+                          id="download_expiry"
+                          type="number"
+                          value={formData.download_expiry_hours}
+                          onChange={(e) => setFormData({ ...formData, download_expiry_hours: e.target.value })}
+                          placeholder="48"
+                          className="bg-background border-border text-foreground"
+                        />
+                      </div>
+
+                      <div className="col-span-2">
+                        <Label htmlFor="digital_file" className="text-foreground">Upload Digital File</Label>
+                        <Input
+                          id="digital_file"
+                          type="file"
+                          onChange={(e) => setDigitalFile(e.target.files?.[0] || null)}
+                          className="bg-background border-border text-foreground"
+                        />
+                        {formData.digital_file_path && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Current file: {formData.digital_file_path.split('/').pop()}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="col-span-2">
+                        <Label htmlFor="download_url" className="text-foreground">Or External Download URL</Label>
+                        <Input
+                          id="download_url"
+                          value={formData.download_url}
+                          onChange={(e) => setFormData({ ...formData, download_url: e.target.value })}
+                          placeholder="https://drive.google.com/..."
+                          className="bg-background border-border text-foreground"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Use if file is hosted externally (Google Drive, Dropbox, etc.)
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex gap-2 justify-end">
                   <Button type="button" variant="outline" onClick={resetForm}>
                     Cancel
                   </Button>
-                  <Button type="submit">
-                    {editingProduct ? 'Update Product' : 'Create Product'}
+                  <Button type="submit" disabled={uploadingFile}>
+                    {uploadingFile ? 'Uploading...' : editingProduct ? 'Update Product' : 'Create Product'}
                   </Button>
                 </div>
               </form>
@@ -553,7 +704,21 @@ export const PaymentsPanel = () => {
               <Card key={product.id} className="bg-card border-border p-4">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-foreground">{product.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-semibold text-foreground">{product.name}</h3>
+                      {product.product_type === 'digital' && (
+                        <Badge variant="outline" className="flex items-center gap-1">
+                          <Download className="w-3 h-3" />
+                          Digital
+                        </Badge>
+                      )}
+                      {product.product_type === 'physical' && (
+                        <Badge variant="outline" className="flex items-center gap-1">
+                          <Package className="w-3 h-3" />
+                          Physical
+                        </Badge>
+                      )}
+                    </div>
                     {product.description && (
                       <p className="text-muted-foreground text-sm mt-1">{product.description}</p>
                     )}
@@ -561,6 +726,9 @@ export const PaymentsPanel = () => {
                       <span className="font-semibold">{product.currency} {product.price}</span>
                       {product.category && <span className="capitalize">{product.category.replace('_', ' ')}</span>}
                       {product.duration_minutes && <span>{product.duration_minutes} min</span>}
+                      {product.product_type === 'digital' && product.delivery_type === 'auto_download' && (
+                        <span className="text-green-500">Auto-deliver</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2 items-center">
