@@ -75,7 +75,7 @@ const ClientSidebar = ({ collapsed, onToggle }: ClientSidebarProps) => {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    navigate("/login");
+    navigate("/");
   };
 
   const NavItem = ({ item }: { item: typeof navigation[0] }) => {
