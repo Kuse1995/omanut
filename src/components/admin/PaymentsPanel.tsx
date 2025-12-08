@@ -998,28 +998,36 @@ export const PaymentsPanel = () => {
                             Review
                           </Button>
                         )}
-                        {transaction.payment_status === 'completed' && transaction.product_id && (() => {
+                        {/* Manual Deliver button for verified digital products */}
+                        {transaction.product_id && (() => {
                           const product = products.find(p => p.id === transaction.product_id);
-                          return product?.product_type === 'digital';
+                          const isDigital = product?.product_type === 'digital';
+                          const isVerifiedOrCompleted = transaction.verification_status === 'verified' || transaction.payment_status === 'completed';
+                          const delivery = deliveries[transaction.id];
+                          const alreadyDelivered = !!delivery?.delivered_at;
+                          return isDigital && isVerifiedOrCompleted;
                         })() && (
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant={deliveries[transaction.id]?.delivered_at ? "ghost" : "outline"}
                             disabled={deliveringProduct === transaction.id}
                             onClick={async () => {
+                              const delivery = deliveries[transaction.id];
+                              if (delivery?.delivered_at) {
+                                const confirm = window.confirm('This product was already delivered. Send again?');
+                                if (!confirm) return;
+                              }
                               setDeliveringProduct(transaction.id);
                               try {
                                 const { error } = await supabase.functions.invoke('deliver-digital-product', {
                                   body: {
-                                    transaction_id: transaction.id,
-                                    product_id: transaction.product_id,
-                                    company_id: selectedCompany?.id,
-                                    customer_phone: transaction.customer_phone
+                                    transactionId: transaction.id,
+                                    companyId: selectedCompany?.id
                                   }
                                 });
-                              if (error) throw error;
-                                toast.success('Digital product delivered');
-                                loadTransactions(); // Refresh to show delivery status
+                                if (error) throw error;
+                                toast.success('Digital product delivered to customer');
+                                loadTransactions();
                               } catch (err) {
                                 console.error('Delivery error:', err);
                                 toast.error('Failed to deliver product');
@@ -1028,8 +1036,16 @@ export const PaymentsPanel = () => {
                               }
                             }}
                           >
-                            <Download className="w-4 h-4 mr-1" />
-                            {deliveringProduct === transaction.id ? 'Sending...' : 'Deliver'}
+                            {deliveringProduct === transaction.id ? (
+                              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                            ) : (
+                              <Package className="w-4 h-4 mr-1" />
+                            )}
+                            {deliveringProduct === transaction.id 
+                              ? 'Sending...' 
+                              : deliveries[transaction.id]?.delivered_at 
+                                ? 'Resend' 
+                                : 'Deliver'}
                           </Button>
                         )}
                       </div>
