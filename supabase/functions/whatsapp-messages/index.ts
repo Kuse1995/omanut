@@ -409,6 +409,48 @@ async function processAIResponse(
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
+  // Analyze customer images if present
+  let imageAnalysisContext = '';
+  if (storedMediaUrls.length > 0) {
+    console.log('[IMAGE-ANALYSIS] Analyzing customer images:', storedMediaUrls.length);
+    for (let i = 0; i < storedMediaUrls.length; i++) {
+      const mediaUrl = storedMediaUrls[i];
+      const mediaType = storedMediaTypes[i] || '';
+      
+      // Only analyze images
+      if (mediaType.startsWith('image/')) {
+        try {
+          const analysisResponse = await fetch(
+            `${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-customer-image`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ imageUrl: mediaUrl })
+            }
+          );
+          
+          if (analysisResponse.ok) {
+            const analysis = await analysisResponse.json();
+            console.log('[IMAGE-ANALYSIS] Result:', analysis);
+            
+            if (analysis.isPaymentProof && analysis.confidence > 0.7) {
+              imageAnalysisContext += `\n🔔 PAYMENT PROOF DETECTED (${Math.round(analysis.confidence * 100)}% confidence):\n`;
+              if (analysis.extractedData.amount) imageAnalysisContext += `- Amount: ${analysis.extractedData.amount}\n`;
+              if (analysis.extractedData.transactionReference) imageAnalysisContext += `- Reference: ${analysis.extractedData.transactionReference}\n`;
+              if (analysis.extractedData.senderName) imageAnalysisContext += `- Sender: ${analysis.extractedData.senderName}\n`;
+              if (analysis.extractedData.provider) imageAnalysisContext += `- Provider: ${analysis.extractedData.provider}\n`;
+              imageAnalysisContext += `Action: Acknowledge receipt and inform customer that payment proof has been received for verification.\n`;
+            } else {
+              imageAnalysisContext += `\nCustomer shared an image: ${analysis.description} (Category: ${analysis.category})\n`;
+            }
+          }
+        } catch (imgError) {
+          console.error('[IMAGE-ANALYSIS] Error:', imgError);
+        }
+      }
+    }
+  }
+
   try {
     // Fetch conversation and company data
     const { data: conversation } = await supabase
@@ -882,7 +924,11 @@ CRITICAL HANDOFF PROTOCOL:
       messages.push({ role: 'user', content: `Previous conversation:\n${recentHistory}` });
     }
 
-    messages.push({ role: 'user', content: userMessage });
+    // Add image analysis context if present
+    const fullUserMessage = imageAnalysisContext 
+      ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}` 
+      : userMessage;
+    messages.push({ role: 'user', content: fullUserMessage });
 
     // ========== SUPERVISOR AGENT LAYER ==========
     // Call supervisor ONLY for complex queries

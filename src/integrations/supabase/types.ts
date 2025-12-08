@@ -960,6 +960,76 @@ export type Database = {
           },
         ]
       }
+      digital_product_deliveries: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          customer_email: string | null
+          customer_phone: string
+          delivered_at: string | null
+          delivery_method: string | null
+          download_count: number | null
+          download_url: string | null
+          expires_at: string | null
+          id: string
+          max_downloads: number | null
+          product_id: string | null
+          transaction_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          customer_email?: string | null
+          customer_phone: string
+          delivered_at?: string | null
+          delivery_method?: string | null
+          download_count?: number | null
+          download_url?: string | null
+          expires_at?: string | null
+          id?: string
+          max_downloads?: number | null
+          product_id?: string | null
+          transaction_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          customer_email?: string | null
+          customer_phone?: string
+          delivered_at?: string | null
+          delivery_method?: string | null
+          download_count?: number | null
+          download_url?: string | null
+          expires_at?: string | null
+          id?: string
+          max_downloads?: number | null
+          product_id?: string | null
+          transaction_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digital_product_deliveries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "digital_product_deliveries_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "payment_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "digital_product_deliveries_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "payment_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_images: {
         Row: {
           company_id: string
@@ -1201,12 +1271,18 @@ export type Database = {
           company_id: string | null
           created_at: string | null
           currency: string | null
+          delivery_type: string | null
           description: string | null
+          digital_file_path: string | null
+          download_expiry_hours: number | null
+          download_limit: number | null
+          download_url: string | null
           duration_minutes: number | null
           id: string
           is_active: boolean | null
           name: string
           price: number
+          product_type: string | null
           selar_link: string | null
           updated_at: string | null
         }
@@ -1215,12 +1291,18 @@ export type Database = {
           company_id?: string | null
           created_at?: string | null
           currency?: string | null
+          delivery_type?: string | null
           description?: string | null
+          digital_file_path?: string | null
+          download_expiry_hours?: number | null
+          download_limit?: number | null
+          download_url?: string | null
           duration_minutes?: number | null
           id?: string
           is_active?: boolean | null
           name: string
           price: number
+          product_type?: string | null
           selar_link?: string | null
           updated_at?: string | null
         }
@@ -1229,12 +1311,18 @@ export type Database = {
           company_id?: string | null
           created_at?: string | null
           currency?: string | null
+          delivery_type?: string | null
           description?: string | null
+          digital_file_path?: string | null
+          download_expiry_hours?: number | null
+          download_limit?: number | null
+          download_url?: string | null
           duration_minutes?: number | null
           id?: string
           is_active?: boolean | null
           name?: string
           price?: number
+          product_type?: string | null
           selar_link?: string | null
           updated_at?: string | null
         }
