@@ -3197,15 +3197,30 @@ serve(async (req) => {
     const storedMediaTypes: string[] = [];
     
     if (mediaFiles.length > 0) {
-      console.log(`Processing ${mediaFiles.length} media files`);
+      console.log(`[MEDIA] Processing ${mediaFiles.length} media files`);
+      
+      const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+      const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
       
       for (let i = 0; i < mediaFiles.length; i++) {
         const media = mediaFiles[i];
+        console.log(`[MEDIA] Fetching media ${i}: ${media.url.substring(0, 50)}...`);
         try {
-          const mediaResponse = await fetch(media.url);
-          if (!mediaResponse.ok) continue;
+          // Twilio media URLs require authentication
+          const mediaResponse = await fetch(media.url, {
+            headers: TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)
+            } : {}
+          });
+          
+          if (!mediaResponse.ok) {
+            console.error(`[MEDIA] Fetch failed for media ${i}: ${mediaResponse.status}`);
+            continue;
+          }
           
           const mediaBlob = await mediaResponse.arrayBuffer();
+          console.log(`[MEDIA] Downloaded media ${i}: ${mediaBlob.byteLength} bytes`);
+          
           const fileExt = media.contentType.split('/')[1] || 'bin';
           const fileName = `${conversation.id}/${Date.now()}_${i}.${fileExt}`;
           
@@ -3217,7 +3232,7 @@ serve(async (req) => {
             });
           
           if (uploadError) {
-            console.error(`Upload error:`, uploadError);
+            console.error(`[MEDIA] Upload error for media ${i}:`, uploadError);
             continue;
           }
           
@@ -3227,11 +3242,12 @@ serve(async (req) => {
           
           storedMediaUrls.push(publicUrl);
           storedMediaTypes.push(media.contentType);
-          console.log(`Media ${i} stored:`, publicUrl);
+          console.log(`[MEDIA] Media ${i} stored successfully:`, publicUrl);
         } catch (error) {
-          console.error(`Media processing error:`, error);
+          console.error(`[MEDIA] Processing error for media ${i}:`, error);
         }
       }
+      console.log(`[MEDIA] Total stored: ${storedMediaUrls.length}/${mediaFiles.length}`);
     }
 
     // Insert user message immediately
