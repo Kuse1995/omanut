@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 
 const FloatingNav = () => {
   const navigate = useNavigate();
@@ -35,11 +36,12 @@ const FloatingNav = () => {
       <div className="max-w-7xl mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">O</span>
+          <div className="flex items-center gap-3">
+            <img src={omanutLogo} alt="Omanut" className="w-10 h-10 object-contain" />
+            <div className="flex flex-col">
+              <span className="font-semibold text-lg tracking-tight">Omanut</span>
+              <span className="text-[10px] text-muted-foreground -mt-1">we'll figure it out!</span>
             </div>
-            <span className="font-semibold text-lg tracking-tight">Omanut</span>
           </div>
 
           {/* Desktop Menu */}

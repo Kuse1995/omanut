@@ -1,19 +1,35 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
-import { LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { CompanyProvider } from '@/context/CompanyContext';
-import { CompanySidebar } from '@/components/admin/CompanySidebar';
-import { CompanyHeader } from '@/components/admin/CompanyHeader';
-import { CompanyTabs } from '@/components/admin/CompanyTabs';
+import { AdminIconSidebar } from '@/components/admin/AdminIconSidebar';
+import { CompanyPanel } from '@/components/admin/CompanyPanel';
+import { AdminContentTabs } from '@/components/admin/AdminContentTabs';
+import { CompanyCommandPalette } from '@/components/admin/CompanyCommandPalette';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import CompanyForm from '@/components/CompanyForm';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState('conversations');
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   useEffect(() => {
     checkAdminAccess();
+  }, []);
+
+  // Keyboard shortcut for command palette
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const checkAdminAccess = async () => {
@@ -35,36 +51,42 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/admin/login');
+  const handleCreateSuccess = () => {
+    setCreateDialogOpen(false);
+    toast.success('Company created successfully');
   };
 
   return (
     <CompanyProvider>
-      <div className="min-h-screen bg-[#0A0A0A] flex flex-col">
-        <header className="border-b border-white/10 bg-[#1A1A1A]">
-          <div className="px-6 py-4 flex justify-between items-center">
-            <h1 className="text-2xl font-semibold text-white">Omanut Assistant Admin</h1>
-            <Button 
-              variant="outline" 
-              onClick={handleLogout}
-              className="bg-transparent border-white/20 text-white hover:bg-white/10"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
-          </div>
-        </header>
-
-        <div className="flex flex-1 overflow-hidden">
-          <CompanySidebar />
-          
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <CompanyHeader />
-            <CompanyTabs />
-          </div>
+      <div className="min-h-screen bg-background flex w-full">
+        <AdminIconSidebar 
+          activeTab={activeTab} 
+          onTabChange={setActiveTab}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        />
+        
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <CompanyPanel />
+          <AdminContentTabs activeTab={activeTab} />
         </div>
+
+        <CompanyCommandPalette 
+          open={commandPaletteOpen} 
+          onOpenChange={setCommandPaletteOpen}
+          onCreateCompany={() => setCreateDialogOpen(true)}
+        />
+
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-2xl">Create New Company</DialogTitle>
+            </DialogHeader>
+            <CompanyForm 
+              onSuccess={handleCreateSuccess}
+              onCancel={() => setCreateDialogOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
       </div>
     </CompanyProvider>
   );
