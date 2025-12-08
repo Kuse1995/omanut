@@ -439,7 +439,31 @@ async function processAIResponse(
               if (analysis.extractedData.transactionReference) imageAnalysisContext += `- Reference: ${analysis.extractedData.transactionReference}\n`;
               if (analysis.extractedData.senderName) imageAnalysisContext += `- Sender: ${analysis.extractedData.senderName}\n`;
               if (analysis.extractedData.provider) imageAnalysisContext += `- Provider: ${analysis.extractedData.provider}\n`;
-              imageAnalysisContext += `Action: Acknowledge receipt and inform customer that payment proof has been received for verification.\n`;
+              
+              // Fetch pending transactions for this customer to help AI match payment
+              // customerPhone is already available from function parameter
+              const { data: pendingTxs } = await supabase
+                .from('payment_transactions')
+                .select('*, payment_products(name, price, currency)')
+                .eq('customer_phone', customerPhone)
+                .eq('payment_status', 'pending')
+                .order('created_at', { ascending: false })
+                .limit(3);
+              
+              if (pendingTxs && pendingTxs.length > 0) {
+                imageAnalysisContext += `\n📋 PENDING TRANSACTIONS FOR THIS CUSTOMER:\n`;
+                pendingTxs.forEach((tx: any, idx: number) => {
+                  const productName = tx.payment_products?.name || 'Unknown Product';
+                  const price = tx.payment_products?.price || tx.amount;
+                  const currency = tx.payment_products?.currency || tx.currency || 'ZMW';
+                  imageAnalysisContext += `${idx + 1}. ${productName} - ${currency} ${price}\n`;
+                });
+                imageAnalysisContext += `\n⚡ ACTION REQUIRED: The customer sent payment proof. Compare the detected amount with pending transactions above.\n`;
+                imageAnalysisContext += `If the amounts match (or are close), use the deliver_digital_product tool with the matching product_name.\n`;
+                imageAnalysisContext += `Example: If proof shows "ZMW 50" and pending transaction is for "ABC's for Christians - ZMW 50", call deliver_digital_product(product_name: "ABC's for Christians", reason: "Payment proof verified - ${analysis.extractedData.amount} via ${analysis.extractedData.provider}").\n`;
+              } else {
+                imageAnalysisContext += `\n⚡ ACTION: No pending transactions found for this customer. Acknowledge receipt and inform them that our team will verify the payment and get back to them shortly.\n`;
+              }
             } else {
               imageAnalysisContext += `\nCustomer shared an image: ${analysis.description} (Category: ${analysis.category})\n`;
             }
