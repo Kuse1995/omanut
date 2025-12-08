@@ -900,6 +900,14 @@ Key Guidelines:
     - NEVER ask for the same information twice
     - If unsure, send the flow with whatever info you have in prefill_data - the form handles the rest
 
+PRODUCT PURCHASES:
+When a customer wants to BUY or PURCHASE a product:
+1. Use the request_payment tool with the product name
+2. The tool will look up the correct price and create a transaction
+3. Payment instructions with mobile money numbers will be sent automatically
+4. Do NOT trigger handoff for product purchases - the tool handles everything
+Examples: "I want the ebook", "How do I buy ABC for Christians", "Can I purchase", "I want to order", "How much is the book"
+
 AUTOMATIC NOTIFICATION DETECTION:
 When you detect these scenarios, call notify_boss tool immediately:
 - High-value opportunity: 10+ guests, "corporate", "business event", "conference"
@@ -909,13 +917,12 @@ When you detect these scenarios, call notify_boss tool immediately:
 - VIP/important info: Customer mentions being a regular, celebrity, VIP treatment needed
 
 CRITICAL HANDOFF PROTOCOL:
-- If the customer AGREES TO PAYMENT or expresses clear intent to pay, append [HANDOFF_REQUIRED] at the very end of your response
-- If you encounter a COMPLEX QUESTION you cannot solve confidently, append [HANDOFF_REQUIRED] at the very end
+- Only append [HANDOFF_REQUIRED] for COMPLEX issues requiring human judgment
+- Do NOT use handoff for normal purchases - use request_payment tool instead
 - Examples requiring handoff:
-  * "Yes, I'd like to pay now"
-  * "How can I make the payment?"
   * "I have a technical issue with..."
   * Questions about custom requests, refunds, complaints requiring human judgment
+  * Already paid but having access issues
 - IMPORTANT: The customer will NOT see the [HANDOFF_REQUIRED] tag - it's for internal system use only
 - Continue to provide a helpful response to the customer, then add the tag`;
 
@@ -1191,14 +1198,14 @@ ${supervisorRecommendation.recommendedResponse}
               type: "function",
               function: {
                 name: "request_payment",
-                description: "Request payment from customer and notify management",
+                description: "Use when customer wants to BUY or PURCHASE a product. Creates a pending payment transaction in the database, sends payment instructions with mobile money numbers, and notifies management. Use this for any purchase intent - 'I want to buy', 'How much is', 'I want the ebook', 'Can I get', etc. Do NOT trigger handoff for purchases - use this tool instead.",
                 parameters: {
                   type: "object",
                   properties: {
-                    product_id: { type: "string" },
-                    product_name: { type: "string" },
-                    amount: { type: "number" },
-                    payment_method: { type: "string" },
+                    product_id: { type: "string", description: "Product UUID if known, or 'unknown' if searching by name" },
+                    product_name: { type: "string", description: "Name of the product customer wants to buy (e.g., 'ABC for Christians', 'Video Ad', etc.)" },
+                    amount: { type: "number", description: "Product price if known, or 0 if unknown (will be looked up)" },
+                    payment_method: { type: "string", description: "Preferred payment method if mentioned (MTN, Airtel, Zamtel, etc.)" },
                     customer_details: {
                       type: "object",
                       properties: {
@@ -1207,7 +1214,7 @@ ${supervisorRecommendation.recommendedResponse}
                       }
                     }
                   },
-                  required: ["product_id", "product_name", "amount", "payment_method"]
+                  required: ["product_name"]
                 }
               }
             },
@@ -1263,9 +1270,66 @@ ${supervisorRecommendation.recommendedResponse}
         for (const toolCall of toolCalls) {
           if (toolCall.function.name === 'request_payment') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[BACKGROUND] Processing payment request:', args);
+            console.log('[PAYMENT] Processing payment request:', args);
             
             try {
+              // Look up product from database to get accurate details
+              let productId = args.product_id;
+              let productName = args.product_name;
+              let amount = args.amount;
+              let currency = company.currency_prefix || 'ZMW';
+              let productType = 'service';
+              
+              // Search for product by name if product_id not provided or invalid
+              if (!productId || productId === 'unknown') {
+                const { data: foundProduct } = await supabase
+                  .from('payment_products')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .eq('is_active', true)
+                  .ilike('name', `%${productName}%`)
+                  .maybeSingle();
+                
+                if (foundProduct) {
+                  productId = foundProduct.id;
+                  productName = foundProduct.name;
+                  amount = foundProduct.price;
+                  currency = foundProduct.currency || currency;
+                  productType = foundProduct.product_type || 'service';
+                  console.log('[PAYMENT] Found matching product:', foundProduct.name, foundProduct.price);
+                }
+              }
+              
+              // Create pending transaction in database
+              const { data: transaction, error: txError } = await supabase
+                .from('payment_transactions')
+                .insert({
+                  company_id: company.id,
+                  conversation_id: conversationId,
+                  product_id: productId && productId !== 'unknown' ? productId : null,
+                  customer_phone: customerPhone,
+                  customer_name: conversation.customer_name || args.customer_details?.name || 'Customer',
+                  amount: amount,
+                  currency: currency,
+                  payment_method: args.payment_method || null,
+                  payment_status: 'pending',
+                  verification_status: 'pending',
+                  metadata: {
+                    product_name: productName,
+                    product_type: productType,
+                    requested_via: 'ai_assistant'
+                  }
+                })
+                .select()
+                .single();
+              
+              if (txError) {
+                console.error('[PAYMENT] Failed to create transaction:', txError);
+              } else {
+                console.log('[PAYMENT] Created pending transaction:', transaction.id);
+              }
+              
+              // Notify management
               await supabase.functions.invoke('send-boss-notification', {
                 body: {
                   companyId: company.id,
@@ -1274,20 +1338,35 @@ ${supervisorRecommendation.recommendedResponse}
                     customer_name: conversation.customer_name || args.customer_details?.name || 'Unknown',
                     customer_phone: `whatsapp:${customerPhone}`,
                     customer_email: args.customer_details?.email,
-                    product_name: args.product_name,
-                    amount: args.amount,
-                    currency_prefix: company.currency_prefix,
-                    payment_method: args.payment_method
+                    product_name: productName,
+                    amount: amount,
+                    currency_prefix: currency,
+                    payment_method: args.payment_method,
+                    transaction_id: transaction?.id
                   }
                 }
               });
               
+              // Build payment instructions
+              const paymentNumbers = [];
+              if (company.payment_number_mtn) paymentNumbers.push(`MTN: ${company.payment_number_mtn}`);
+              if (company.payment_number_airtel) paymentNumbers.push(`Airtel: ${company.payment_number_airtel}`);
+              if (company.payment_number_zamtel) paymentNumbers.push(`Zamtel: ${company.payment_number_zamtel}`);
+              
+              const paymentInstructions = paymentNumbers.length > 0 
+                ? `\n\n📱 *Payment Numbers:*\n${paymentNumbers.join('\n')}`
+                : '';
+              
+              const customInstructions = company.payment_instructions 
+                ? `\n\n${company.payment_instructions}`
+                : '\n\nPlease send a screenshot of your payment confirmation for verification.';
+              
               anyToolExecuted = true;
-              toolExecutionContext.push(`notified management about payment request for ${args.product_name}`);
-              assistantReply = `Thank you for your interest in *${args.product_name}*! Our team has been notified and will contact you shortly with payment instructions. 📱`;
+              toolExecutionContext.push(`created payment transaction for ${productName} (${currency}${amount})`);
+              assistantReply = `Great choice! 🎉\n\n*${productName}*\n💰 Amount: *${currency}${amount}*${paymentInstructions}${customInstructions}\n\nOnce you've paid, please send a screenshot of your payment confirmation and I'll process your order immediately! 📸`;
             } catch (error) {
-              console.error('[BACKGROUND] Payment request error:', error);
-              assistantReply += "\n\nI encountered an error processing your payment request. Please try again.";
+              console.error('[PAYMENT] Payment request error:', error);
+              assistantReply = "I encountered an error processing your payment request. Please try again or contact us directly.";
             }
           } else if (toolCall.function.name === 'send_media') {
             const args = JSON.parse(toolCall.function.arguments);
