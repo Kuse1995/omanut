@@ -270,12 +270,53 @@ serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Verify authentication
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
+    // Create authenticated client to verify the user
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const authClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid or expired token' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
     const { action, companyId, date, time, duration, reservationId, eventId, title, description, sendNotifications } = await req.json();
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    // Verify user has access to this company
+    const { data: userCompany, error: userError } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+
+    // Check if user is admin or has access to the company
+    const { data: isAdmin } = await supabase.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+    
+    if (!isAdmin && (!userCompany || userCompany.company_id !== companyId)) {
+      return new Response(
+        JSON.stringify({ error: 'Not authorized for this company' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
+
+    console.log(`[CALENDAR] Authorized user ${user.id} for action: ${action}, Company: ${companyId}`);
 
     // Get company calendar settings
     const { data: company, error: companyError } = await supabase
@@ -285,7 +326,10 @@ serve(async (req) => {
       .single();
 
     if (companyError || !company) {
-      throw new Error('Company not found');
+      return new Response(
+        JSON.stringify({ error: 'Company not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      );
     }
 
     if (!company.calendar_sync_enabled) {
@@ -309,7 +353,10 @@ serve(async (req) => {
         hasKey: !!privateKey, 
         hasCalendarId: !!calendarId 
       });
-      throw new Error('Google Calendar credentials not configured. Check: GOOGLE_CALENDAR_SERVICE_ACCOUNT_EMAIL, GOOGLE_CALENDAR_PRIVATE_KEY, and company.google_calendar_id');
+      return new Response(
+        JSON.stringify({ error: 'Calendar integration not configured' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
     }
 
     console.log(`[CALENDAR] Action: ${action}, Company: ${companyId}, Calendar: ${calendarId}, Service Account: ${serviceAccountEmail}`);
@@ -342,7 +389,10 @@ serve(async (req) => {
         .single();
 
       if (resError || !reservation) {
-        throw new Error('Reservation not found');
+        return new Response(
+          JSON.stringify({ error: 'Reservation not found' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        );
       }
 
       const result = await createEvent(
@@ -374,7 +424,10 @@ serve(async (req) => {
 
     if (action === 'update_event') {
       if (!eventId || !reservationId) {
-        throw new Error('eventId and reservationId are required for update_event');
+        return new Response(
+          JSON.stringify({ error: 'eventId and reservationId are required for update_event' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        );
       }
 
       const { data: reservation, error: resError } = await supabase
@@ -384,7 +437,10 @@ serve(async (req) => {
         .single();
 
       if (resError || !reservation) {
-        throw new Error('Reservation not found');
+        return new Response(
+          JSON.stringify({ error: 'Reservation not found' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        );
       }
 
       const result = await updateEvent(
@@ -415,7 +471,10 @@ serve(async (req) => {
 
     if (action === 'delete_event') {
       if (!eventId) {
-        throw new Error('eventId is required for delete_event');
+        return new Response(
+          JSON.stringify({ error: 'eventId is required for delete_event' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        );
       }
 
       await deleteEvent(
@@ -444,13 +503,15 @@ serve(async (req) => {
       );
     }
 
-    throw new Error(`Unknown action: ${action}`);
+    return new Response(
+      JSON.stringify({ error: `Unknown action: ${action}` }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+    );
 
   } catch (error) {
     console.error('[CALENDAR] Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: 'An error occurred processing your request' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
