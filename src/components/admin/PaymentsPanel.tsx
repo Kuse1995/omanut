@@ -362,8 +362,35 @@ export const PaymentsPanel = () => {
 
       toast.success(approved ? 'Payment verified successfully' : 'Payment rejected');
       
-      // TODO: Trigger post-payment workflow (WhatsApp confirmation, action items)
-      // This would call the existing Twilio functions and create action items
+      // Auto-deliver digital product if payment approved
+      if (approved) {
+        const transaction = transactions.find(t => t.id === transactionId);
+        if (transaction?.product_id) {
+          const product = products.find(p => p.id === transaction.product_id);
+          if (product?.product_type === 'digital' && product.delivery_type === 'auto_download') {
+            try {
+              const { error: deliveryError } = await supabase.functions.invoke('deliver-digital-product', {
+                body: {
+                  transaction_id: transactionId,
+                  product_id: product.id,
+                  company_id: selectedCompany.id,
+                  customer_phone: transaction.customer_phone,
+                  customer_email: transaction.customer_name // Using name field for now, could add email
+                }
+              });
+              
+              if (deliveryError) {
+                console.error('Digital delivery error:', deliveryError);
+                toast.error('Payment verified but digital delivery failed');
+              } else {
+                toast.success('Digital product delivered automatically');
+              }
+            } catch (deliveryErr) {
+              console.error('Error triggering digital delivery:', deliveryErr);
+            }
+          }
+        }
+      }
       
       loadTransactions();
       setIsVerifyDialogOpen(false);
