@@ -874,6 +874,14 @@ Key Guidelines:
    - Make this clear to customers: "Your request will be reviewed by our team"
    - Status starts as pending_boss_approval
 4. For payments, collect info conversationally then use request_payment tool
+5. DIGITAL PRODUCT DELIVERY:
+   When customer sends payment proof (screenshot/image showing payment):
+   - Image analysis will detect if it's a payment proof and extract details
+   - If payment proof shows valid amount matching a product, use deliver_digital_product tool
+   - The tool will automatically send the download link via WhatsApp
+   - ONLY deliver if you're confident the payment is valid (amount matches, reference visible)
+   - Example: Customer sends MTN screenshot showing K250 payment → use deliver_digital_product with product name
+   - If unsure about payment validity, acknowledge receipt and inform that "team will verify and send the product shortly"
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
@@ -1200,6 +1208,27 @@ ${supervisorRecommendation.recommendedResponse}
                     }
                   },
                   required: ["product_id", "product_name", "amount", "payment_method"]
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "deliver_digital_product",
+                description: "Deliver a digital product to a customer after payment has been verified. Use this when customer sends payment proof and you've confirmed the payment matches a pending transaction. The product file will be sent via WhatsApp.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    product_name: { 
+                      type: "string", 
+                      description: "Name of the product to deliver (must match a product in payment_products table)" 
+                    },
+                    reason: { 
+                      type: "string", 
+                      description: "Brief reason for delivery (e.g., 'Payment proof verified - K250 MTN transfer')" 
+                    }
+                  },
+                  required: ["product_name", "reason"]
                 }
               }
             }
@@ -1799,6 +1828,166 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             } catch (error) {
               console.error('[BACKGROUND] Exception in notify_boss:', error);
               toolExecutionContext.push('boss notification exception');
+            }
+          } else if (toolCall.function.name === 'deliver_digital_product') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[DELIVER-PRODUCT] Tool called with:', JSON.stringify(args));
+            
+            try {
+              // Find the product by name
+              const { data: product, error: productError } = await supabase
+                .from('payment_products')
+                .select('*')
+                .eq('company_id', company.id)
+                .eq('product_type', 'digital')
+                .eq('is_active', true)
+                .ilike('name', `%${args.product_name}%`)
+                .maybeSingle();
+              
+              if (productError || !product) {
+                console.error('[DELIVER-PRODUCT] Product not found:', args.product_name, productError);
+                toolExecutionContext.push(`product delivery failed - product not found: ${args.product_name}`);
+                
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: false,
+                    error: 'Product not found',
+                    message: `Could not find digital product matching "${args.product_name}"`
+                  })
+                });
+                
+                assistantReply = `I couldn't find a digital product matching "${args.product_name}". Please verify the product name and try again.`;
+                anyToolExecuted = true;
+                continue;
+              }
+              
+              console.log('[DELIVER-PRODUCT] Found product:', product.id, product.name);
+              
+              // Find pending transaction for this customer and product
+              const { data: transaction, error: txError } = await supabase
+                .from('payment_transactions')
+                .select('*')
+                .eq('company_id', company.id)
+                .eq('customer_phone', customerPhone)
+                .eq('product_id', product.id)
+                .in('payment_status', ['pending', 'completed'])
+                .order('created_at', { ascending: false })
+                .maybeSingle();
+              
+              // Create transaction if none exists (for verified proof of payment)
+              let transactionId = transaction?.id;
+              
+              if (!transaction) {
+                console.log('[DELIVER-PRODUCT] No existing transaction, creating new one...');
+                
+                const { data: newTx, error: newTxError } = await supabase
+                  .from('payment_transactions')
+                  .insert({
+                    company_id: company.id,
+                    customer_phone: customerPhone,
+                    customer_name: conversation.customer_name || 'Customer',
+                    product_id: product.id,
+                    amount: product.price,
+                    currency: product.currency || company.currency_prefix || 'ZMW',
+                    payment_status: 'completed',
+                    verification_status: 'verified',
+                    verified_at: new Date().toISOString(),
+                    completed_at: new Date().toISOString(),
+                    conversation_id: conversationId,
+                    metadata: {
+                      delivery_reason: args.reason,
+                      delivered_via_ai: true
+                    }
+                  })
+                  .select()
+                  .single();
+                
+                if (newTxError) {
+                  console.error('[DELIVER-PRODUCT] Failed to create transaction:', newTxError);
+                  throw new Error('Failed to create payment record');
+                }
+                
+                transactionId = newTx.id;
+                console.log('[DELIVER-PRODUCT] Created transaction:', transactionId);
+              } else {
+                // Update existing transaction to completed
+                await supabase
+                  .from('payment_transactions')
+                  .update({
+                    payment_status: 'completed',
+                    verification_status: 'verified',
+                    verified_at: new Date().toISOString(),
+                    completed_at: new Date().toISOString(),
+                    metadata: {
+                      ...(transaction.metadata || {}),
+                      delivery_reason: args.reason,
+                      delivered_via_ai: true
+                    }
+                  })
+                  .eq('id', transaction.id);
+                
+                console.log('[DELIVER-PRODUCT] Updated existing transaction:', transactionId);
+              }
+              
+              // Call deliver-digital-product function
+              const { data: deliveryResult, error: deliveryError } = await supabase.functions.invoke('deliver-digital-product', {
+                body: {
+                  transactionId: transactionId,
+                  companyId: company.id
+                }
+              });
+              
+              if (deliveryError) {
+                console.error('[DELIVER-PRODUCT] Delivery function error:', deliveryError);
+                throw new Error('Failed to deliver product');
+              }
+              
+              console.log('[DELIVER-PRODUCT] Delivery result:', deliveryResult);
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`delivered digital product: ${product.name}`);
+              
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: true,
+                  product_name: product.name,
+                  delivery_id: deliveryResult?.deliveryId,
+                  expires_at: deliveryResult?.expiresAt,
+                  message: 'Digital product delivered successfully via WhatsApp'
+                })
+              });
+              
+              // Log to boss_conversations for audit
+              await supabase
+                .from('boss_conversations')
+                .insert({
+                  company_id: company.id,
+                  message_from: 'system',
+                  message_content: `📦 Digital Product Delivered\n\nProduct: ${product.name}\nCustomer: ${conversation.customer_name || customerPhone}\nReason: ${args.reason}\nDelivery ID: ${deliveryResult?.deliveryId || 'N/A'}`,
+                  response: null
+                });
+              
+              assistantReply = `I've sent you the download link for *${product.name}*! 📦 Please check your messages - the link will expire in ${product.download_expiry_hours || 48} hours. Thank you for your purchase! 🙏`;
+              
+            } catch (error) {
+              console.error('[DELIVER-PRODUCT] Exception:', error);
+              toolExecutionContext.push('product delivery exception');
+              
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: false,
+                  error: error instanceof Error ? error.message : 'Unknown error',
+                  message: 'Failed to deliver product'
+                })
+              });
+              
+              assistantReply = "I encountered an error delivering your product. Our team has been notified and will send it to you shortly. 🙏";
             }
           }
         }
