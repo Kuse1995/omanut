@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, CheckCircle, XCircle, Upload, Eye, AlertCircle, Download, Package } from 'lucide-react';
+import { Plus, Edit, Trash2, CheckCircle, XCircle, Upload, Eye, AlertCircle, Download, Package, Loader2 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 
 interface Product {
@@ -108,6 +109,7 @@ export const PaymentsPanel = () => {
   });
   const [digitalFile, setDigitalFile] = useState<File | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -218,25 +220,55 @@ export const PaymentsPanel = () => {
     if (!selectedCompany) return;
 
     setUploadingFile(true);
+    setUploadProgress(0);
     let digitalFilePath = formData.digital_file_path;
 
-    // Upload digital file if provided
+    // Upload digital file if provided with progress tracking
     if (digitalFile && formData.product_type === 'digital') {
       try {
-        const fileExt = digitalFile.name.split('.').pop();
         const fileName = `${selectedCompany.id}/${Date.now()}_${digitalFile.name}`;
         
-        const { error: uploadError } = await supabase.storage
-          .from('digital-products')
-          .upload(fileName, digitalFile);
-
-        if (uploadError) throw uploadError;
+        // Use XMLHttpRequest for progress tracking
+        const uploadPromise = new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const percentComplete = Math.round((event.loaded / event.total) * 100);
+              setUploadProgress(percentComplete);
+            }
+          });
+          
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          });
+          
+          xhr.addEventListener('error', () => reject(new Error('Upload failed')));
+          xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+          
+          // Get the Supabase storage URL and auth token
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+          const uploadUrl = `${supabaseUrl}/storage/v1/object/digital-products/${fileName}`;
+          
+          xhr.open('POST', uploadUrl);
+          xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+          xhr.setRequestHeader('x-upsert', 'false');
+          xhr.send(digitalFile);
+        });
+        
+        await uploadPromise;
         digitalFilePath = fileName;
         toast.success('Digital file uploaded successfully');
       } catch (error) {
         console.error('Error uploading digital file:', error);
         toast.error('Failed to upload digital file');
         setUploadingFile(false);
+        setUploadProgress(0);
         return;
       }
     }
@@ -287,6 +319,7 @@ export const PaymentsPanel = () => {
       }
     }
     setUploadingFile(false);
+    setUploadProgress(0);
   };
 
   const handleDelete = async (id: string) => {
@@ -711,11 +744,28 @@ export const PaymentsPanel = () => {
                           type="file"
                           onChange={(e) => setDigitalFile(e.target.files?.[0] || null)}
                           className="bg-background border-border text-foreground"
+                          disabled={uploadingFile}
                         />
-                        {formData.digital_file_path && (
+                        {digitalFile && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Selected: {digitalFile.name} ({(digitalFile.size / 1024 / 1024).toFixed(2)} MB)
+                          </p>
+                        )}
+                        {formData.digital_file_path && !digitalFile && (
                           <p className="text-xs text-muted-foreground mt-1">
                             Current file: {formData.digital_file_path.split('/').pop()}
                           </p>
+                        )}
+                        {uploadingFile && (
+                          <div className="mt-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                              <span className="text-sm text-muted-foreground">
+                                Uploading... {uploadProgress}%
+                              </span>
+                            </div>
+                            <Progress value={uploadProgress} className="h-2" />
+                          </div>
                         )}
                       </div>
 
@@ -741,7 +791,12 @@ export const PaymentsPanel = () => {
                     Cancel
                   </Button>
                   <Button type="submit" disabled={uploadingFile}>
-                    {uploadingFile ? 'Uploading...' : editingProduct ? 'Update Product' : 'Create Product'}
+                    {uploadingFile ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Uploading... {uploadProgress}%
+                      </span>
+                    ) : editingProduct ? 'Update Product' : 'Create Product'}
                   </Button>
                 </div>
               </form>
