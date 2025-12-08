@@ -225,6 +225,14 @@ export const PaymentsPanel = () => {
 
     // Upload digital file if provided with progress tracking
     if (digitalFile && formData.product_type === 'digital') {
+      // Get the user's session token for authenticated uploads
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast.error('You must be logged in to upload files');
+        setUploadingFile(false);
+        return;
+      }
+
       try {
         const fileName = `${selectedCompany.id}/${Date.now()}_${digitalFile.name}`;
         
@@ -250,13 +258,12 @@ export const PaymentsPanel = () => {
           xhr.addEventListener('error', () => reject(new Error('Upload failed')));
           xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
           
-          // Get the Supabase storage URL and auth token
+          // Get the Supabase storage URL and use session token for auth
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
           const uploadUrl = `${supabaseUrl}/storage/v1/object/digital-products/${fileName}`;
           
           xhr.open('POST', uploadUrl);
-          xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`);
+          xhr.setRequestHeader('Authorization', `Bearer ${session.access_token}`);
           xhr.setRequestHeader('x-upsert', 'false');
           xhr.send(digitalFile);
         });
