@@ -16,6 +16,29 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Verify authentication
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
+    // Create authenticated client to verify the user
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const authClient = createClient(supabaseUrl, anonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const { data: { user }, error: authError } = await authClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid or expired token' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 401 }
+      );
+    }
+
     const {
       company_id,
       product_id,
@@ -27,12 +50,37 @@ serve(async (req) => {
       conversation_id
     } = await req.json();
 
+    // Verify user has access to this company
+    const { data: userCompany, error: userError } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', user.id)
+      .single();
+
+    if (userError || !userCompany) {
+      return new Response(
+        JSON.stringify({ error: 'User not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
+
+    // Check if user is admin or has access to the company
+    const { data: isAdmin } = await supabase.rpc('has_role', { _user_id: user.id, _role: 'admin' });
+    
+    if (!isAdmin && userCompany.company_id !== company_id) {
+      return new Response(
+        JSON.stringify({ error: 'Not authorized for this company' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 403 }
+      );
+    }
+
     console.log('Creating manual payment transaction:', {
       company_id,
       product_id,
       customer_phone,
       payment_method,
-      amount
+      amount,
+      created_by: user.id
     });
 
     // Fetch product details
@@ -44,7 +92,10 @@ serve(async (req) => {
 
     if (productError) {
       console.error('Error fetching product:', productError);
-      throw new Error('Product not found');
+      return new Response(
+        JSON.stringify({ error: 'Product not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      );
     }
 
     // Fetch company details and payment numbers
@@ -56,7 +107,10 @@ serve(async (req) => {
 
     if (companyError) {
       console.error('Error fetching company:', companyError);
-      throw new Error('Company not found');
+      return new Response(
+        JSON.stringify({ error: 'Company not found' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      );
     }
 
     // Determine designated number based on payment method
@@ -75,7 +129,10 @@ serve(async (req) => {
     }
 
     if (!designated_number) {
-      throw new Error(`${provider_name} payment number not configured for this company`);
+      return new Response(
+        JSON.stringify({ error: `${provider_name} payment number not configured for this company` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
     }
 
     // Generate unique reference
@@ -107,7 +164,10 @@ serve(async (req) => {
 
     if (txError) {
       console.error('Error creating transaction:', txError);
-      throw new Error('Failed to create transaction');
+      return new Response(
+        JSON.stringify({ error: 'Failed to create transaction' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      );
     }
 
     // Prepare payment instructions
@@ -149,12 +209,11 @@ Your order will be processed once payment is verified.
 
   } catch (error) {
     console.error('Error in create-payment-link:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: 'An error occurred processing your request' }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400 
+        status: 500 
       }
     );
   }

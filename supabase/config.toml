@@ -67,7 +67,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.create-payment-link]
-verify_jwt = false
+verify_jwt = true
 
 [functions.twilio-status-webhook]
 verify_jwt = false
@@ -79,7 +79,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.google-calendar]
-verify_jwt = false
+verify_jwt = true
 
 [functions.update-reservation]
 verify_jwt = true
