@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Shield } from "lucide-react";
-import omanutLogo from "@/assets/omanut-logo.jpg";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const AdminLogin = () => {
@@ -105,12 +105,10 @@ const AdminLogin = () => {
       </div>
       <Card className="card-glass w-full max-w-md p-8">
         <div className="flex flex-col items-center mb-8">
-          <div className="p-4 rounded-full bg-gradient-primary mb-4">
-            <Shield className="h-8 w-8 text-white" />
-          </div>
-          <img src={omanutLogo} alt="Omanut" className="h-12 w-12 rounded-lg object-cover mb-4" />
+          <img src={omanutLogo} alt="Omanut" className="w-20 h-20 object-contain mb-4" />
           <h1 className="text-2xl font-bold text-gradient">Omanut Technologies</h1>
-          <p className="text-sm text-muted-foreground">Admin Portal</p>
+          <p className="text-[11px] text-muted-foreground -mt-1">we'll figure it out!</p>
+          <p className="text-sm text-muted-foreground mt-3">Admin Portal</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">

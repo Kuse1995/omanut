@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 
 interface ClientSidebarProps {
   collapsed: boolean;
@@ -125,9 +126,7 @@ const ClientSidebar = ({ collapsed, onToggle }: ClientSidebarProps) => {
       )}>
         {!collapsed && (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">O</span>
-            </div>
+            <img src={omanutLogo} alt="Omanut" className="w-8 h-8 object-contain" />
             <div className="overflow-hidden">
               <p className="font-semibold text-sm truncate">{company?.name || "Dashboard"}</p>
               <p className="text-xs text-muted-foreground">Client Portal</p>
@@ -135,9 +134,7 @@ const ClientSidebar = ({ collapsed, onToggle }: ClientSidebarProps) => {
           </div>
         )}
         {collapsed && (
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">O</span>
-          </div>
+          <img src={omanutLogo} alt="Omanut" className="w-8 h-8 object-contain" />
         )}
       </div>
 

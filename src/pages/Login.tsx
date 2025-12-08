@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, ArrowLeft } from "lucide-react";
-import omanutLogo from "@/assets/omanut-logo.jpg";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Login = () => {
@@ -120,13 +120,14 @@ const Login = () => {
             <img 
               src={omanutLogo} 
               alt="Omanut" 
-              className="h-20 w-20 rounded-2xl object-cover mb-6 ring-2 ring-primary/20" 
+              className="w-20 h-20 object-contain mb-4" 
             />
             <CardTitle className="text-3xl font-bold tracking-tight text-center">
               <span className="text-gradient">Omanut</span>
               <span className="text-foreground"> Assistant</span>
             </CardTitle>
-            <p className="text-sm text-muted-foreground mt-2">Client Portal</p>
+            <p className="text-[11px] text-muted-foreground -mt-1">we'll figure it out!</p>
+            <p className="text-sm text-muted-foreground mt-3">Client Portal</p>
           </div>
         </CardHeader>
         

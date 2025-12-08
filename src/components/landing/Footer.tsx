@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 
 const Footer = () => {
   const navigate = useNavigate();
@@ -46,11 +47,12 @@ const Footer = () => {
         <div className="grid md:grid-cols-4 gap-8">
           {/* Brand */}
           <div className="md:col-span-1">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-sm">O</span>
+            <div className="flex items-center gap-3 mb-4">
+              <img src={omanutLogo} alt="Omanut" className="w-10 h-10 object-contain" />
+              <div className="flex flex-col">
+                <span className="font-semibold text-lg">Omanut</span>
+                <span className="text-[10px] text-muted-foreground -mt-1">we'll figure it out!</span>
               </div>
-              <span className="font-semibold text-lg">Omanut</span>
             </div>
             <p className="text-sm text-muted-foreground">
               AI-powered customer service for African businesses. 
