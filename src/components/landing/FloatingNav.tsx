@@ -71,17 +71,17 @@ const FloatingNav = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate("/login")}
+              onClick={() => navigate("/admin/login")}
               className="text-muted-foreground hover:text-foreground"
             >
-              Sign In
+              Admin
             </Button>
             <Button
               size="sm"
-              onClick={() => navigate("/admin/login")}
+              onClick={() => navigate("/login")}
               className="bg-primary hover:bg-primary/90"
             >
-              Get Started
+              Client Login
             </Button>
           </div>
 
@@ -120,11 +120,11 @@ const FloatingNav = () => {
               Pricing
             </button>
             <div className="flex gap-3 pt-4">
-              <Button variant="outline" size="sm" onClick={() => navigate("/login")} className="flex-1">
-                Sign In
+              <Button variant="outline" size="sm" onClick={() => navigate("/admin/login")} className="flex-1">
+                Admin
               </Button>
-              <Button size="sm" onClick={() => navigate("/admin/login")} className="flex-1">
-                Get Started
+              <Button size="sm" onClick={() => navigate("/login")} className="flex-1">
+                Client Login
               </Button>
             </div>
           </div>
