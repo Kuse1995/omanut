@@ -451,17 +451,28 @@ async function processAIResponse(
                 .limit(3);
               
               if (pendingTxs && pendingTxs.length > 0) {
+                console.log('[PAYMENT-PROOF] Found pending transactions:', pendingTxs.length);
                 imageAnalysisContext += `\n📋 PENDING TRANSACTIONS FOR THIS CUSTOMER:\n`;
                 pendingTxs.forEach((tx: any, idx: number) => {
                   const productName = tx.payment_products?.name || 'Unknown Product';
                   const price = tx.payment_products?.price || tx.amount;
                   const currency = tx.payment_products?.currency || tx.currency || 'ZMW';
                   imageAnalysisContext += `${idx + 1}. ${productName} - ${currency} ${price}\n`;
+                  console.log(`[PAYMENT-PROOF] Pending tx ${idx + 1}: ${productName} - ${currency} ${price}`);
                 });
-                imageAnalysisContext += `\n⚡ ACTION REQUIRED: The customer sent payment proof. Compare the detected amount with pending transactions above.\n`;
-                imageAnalysisContext += `If the amounts match (or are close), use the deliver_digital_product tool with the matching product_name.\n`;
-                imageAnalysisContext += `Example: If proof shows "ZMW 50" and pending transaction is for "ABC's for Christians - ZMW 50", call deliver_digital_product(product_name: "ABC's for Christians", reason: "Payment proof verified - ${analysis.extractedData.amount} via ${analysis.extractedData.provider}").\n`;
+                
+                // CRITICAL: Strong, explicit instructions for AI to use the tool
+                imageAnalysisContext += `\n🚨🚨🚨 CRITICAL ACTION REQUIRED 🚨🚨🚨\n`;
+                imageAnalysisContext += `The customer just sent PAYMENT PROOF. You MUST take action NOW:\n`;
+                imageAnalysisContext += `1. Compare the detected amount (${analysis.extractedData.amount || 'unknown'}) with pending transactions above\n`;
+                imageAnalysisContext += `2. If amounts match (or are close within 10%), you MUST call the deliver_digital_product tool IMMEDIATELY\n`;
+                imageAnalysisContext += `3. DO NOT say "I'll forward this to the team" - YOU deliver the product using the tool\n`;
+                imageAnalysisContext += `4. DO NOT ask the boss/manager to send the product - YOU send it\n\n`;
+                imageAnalysisContext += `TOOL CALL EXAMPLE:\n`;
+                imageAnalysisContext += `deliver_digital_product(product_name: "${pendingTxs[0].payment_products?.name || 'PRODUCT_NAME'}", reason: "Payment proof verified - ${analysis.extractedData.amount || 'amount'} via ${analysis.extractedData.provider || 'mobile money'}")\n\n`;
+                imageAnalysisContext += `⚠️ NEVER tell the customer to wait for manual verification when you can verify and deliver automatically!\n`;
               } else {
+                console.log('[PAYMENT-PROOF] No pending transactions found for customer:', customerPhone);
                 imageAnalysisContext += `\n⚡ ACTION: No pending transactions found for this customer. Acknowledge receipt and inform them that our team will verify the payment and get back to them shortly.\n`;
               }
             } else {
@@ -898,14 +909,29 @@ Key Guidelines:
    - Make this clear to customers: "Your request will be reviewed by our team"
    - Status starts as pending_boss_approval
 4. For payments, collect info conversationally then use request_payment tool
-5. DIGITAL PRODUCT DELIVERY:
+5. 🚨 DIGITAL PRODUCT DELIVERY - CRITICAL PRIORITY 🚨:
    When customer sends payment proof (screenshot/image showing payment):
-   - Image analysis will detect if it's a payment proof and extract details
-   - If payment proof shows valid amount matching a product, use deliver_digital_product tool
-   - The tool will automatically send the download link via WhatsApp
-   - ONLY deliver if you're confident the payment is valid (amount matches, reference visible)
-   - Example: Customer sends MTN screenshot showing K250 payment → use deliver_digital_product with product name
-   - If unsure about payment validity, acknowledge receipt and inform that "team will verify and send the product shortly"
+   
+   IMMEDIATE ACTION REQUIRED - DO NOT DELAY:
+   a) Image analysis will detect payment proof and extract: amount, reference, provider
+   b) You will see pending transactions listed in the context
+   c) Compare the detected amount with pending transaction amounts
+   d) If amounts match (within 10%), you MUST call deliver_digital_product tool IMMEDIATELY
+   
+   ⚠️ YOU MUST USE THE TOOL - DO NOT:
+   - Say "I'll forward this to management"
+   - Ask the boss to send the product manually
+   - Tell customer to wait for manual verification
+   - Acknowledge receipt without delivering
+   
+   ✅ YOU MUST:
+   - Call deliver_digital_product(product_name: "exact product name", reason: "Payment verified - K250 MTN")
+   - Confirm delivery to customer after tool succeeds
+   
+   EXAMPLE FLOW:
+   Customer sends MTN screenshot showing K250 → Context shows pending transaction "ABC's for Christians - ZMW 250"
+   → Call: deliver_digital_product(product_name: "ABC's for Christians", reason: "Payment proof verified - K250 MTN transfer")
+   → Product is automatically sent to customer via WhatsApp
 6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
 7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
@@ -2034,20 +2060,32 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 console.log('[DELIVER-PRODUCT] Updated existing transaction:', transactionId);
               }
               
-              // Call deliver-digital-product function
-              const { data: deliveryResult, error: deliveryError } = await supabase.functions.invoke('deliver-digital-product', {
-                body: {
-                  transactionId: transactionId,
-                  companyId: company.id
-                }
-              });
+              // Call deliver-digital-product function with proper authorization
+              console.log('[DELIVER-PRODUCT] Calling deliver-digital-product function...');
               
-              if (deliveryError) {
-                console.error('[DELIVER-PRODUCT] Delivery function error:', deliveryError);
-                throw new Error('Failed to deliver product');
+              const deliveryResponse = await fetch(
+                `${Deno.env.get('SUPABASE_URL')}/functions/v1/deliver-digital-product`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    transactionId: transactionId,
+                    companyId: company.id
+                  })
+                }
+              );
+              
+              if (!deliveryResponse.ok) {
+                const errorText = await deliveryResponse.text();
+                console.error('[DELIVER-PRODUCT] Delivery function error:', deliveryResponse.status, errorText);
+                throw new Error('Failed to deliver product: ' + errorText);
               }
               
-              console.log('[DELIVER-PRODUCT] Delivery result:', deliveryResult);
+              const deliveryResult = await deliveryResponse.json();
+              console.log('[DELIVER-PRODUCT] Delivery result:', JSON.stringify(deliveryResult));
               
               anyToolExecuted = true;
               toolExecutionContext.push(`delivered digital product: ${product.name}`);

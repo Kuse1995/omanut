@@ -94,4 +94,4 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.deliver-digital-product]
-verify_jwt = true
+verify_jwt = false

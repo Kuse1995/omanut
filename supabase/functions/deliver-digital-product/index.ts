@@ -125,18 +125,6 @@ serve(async (req) => {
     const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
     if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company?.whatsapp_number) {
-      const deliveryMessage = `🎉 Thank you for your purchase!
-
-📦 *Product:* ${product.name}
-
-Here's your download link:
-${downloadUrl}
-
-⏰ This link expires in ${expiryHours} hours
-📥 Downloads remaining: ${product.download_limit || 3}
-
-If you have any questions, feel free to reach out!`;
-
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
       const formData = new URLSearchParams();
       
@@ -146,7 +134,18 @@ If you have any questions, feel free to reach out!`;
       
       formData.append('From', fromNumber);
       formData.append('To', `whatsapp:${transaction.customer_phone}`);
-      formData.append('Body', deliveryMessage);
+      
+      // Send the actual file via MediaUrl if it's a direct URL
+      // Twilio will fetch and deliver the file directly to the customer
+      if (downloadUrl.includes('supabase.co') || downloadUrl.startsWith('http')) {
+        console.log('[DELIVER] Sending actual file via Twilio MediaUrl');
+        formData.append('MediaUrl', downloadUrl);
+        formData.append('Body', `🎉 Thank you for your purchase!\n\n📦 *Product:* ${product.name}\n\nYour file is attached above! 📎\n\n⏰ Download expires in ${expiryHours} hours\n📥 Downloads remaining: ${product.download_limit || 3}\n\nIf you have any questions, feel free to reach out!`);
+      } else {
+        // Fallback to link if URL is not directly accessible
+        const deliveryMessage = `🎉 Thank you for your purchase!\n\n📦 *Product:* ${product.name}\n\nHere's your download link:\n${downloadUrl}\n\n⏰ This link expires in ${expiryHours} hours\n📥 Downloads remaining: ${product.download_limit || 3}\n\nIf you have any questions, feel free to reach out!`;
+        formData.append('Body', deliveryMessage);
+      }
 
       const twilioResponse = await fetch(twilioUrl, {
         method: 'POST',
