@@ -1,10 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompany } from '@/context/CompanyContext';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { format } from 'date-fns';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { 
+  Search, Send, MessageCircle, Bot, UserCog, 
+  Headset, TrendingUp, UserCircle, Loader2
+} from 'lucide-react';
+import { format, formatDistanceToNow } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { ChatBubble } from '@/components/conversations/ChatBubble';
+import { DateDivider } from '@/components/conversations/DateDivider';
+import { useToast } from '@/hooks/use-toast';
 
 interface Message {
   id: string;
@@ -12,6 +23,7 @@ interface Message {
   role: string;
   content: string;
   created_at: string;
+  message_metadata?: any;
 }
 
 interface Conversation {
@@ -19,22 +31,23 @@ interface Conversation {
   customer_name: string | null;
   phone: string | null;
   started_at: string;
+  human_takeover: boolean;
+  active_agent: string | null;
+  unread_count: number;
   messages: Message[];
-}
-
-interface GroupedConversation {
-  phone: string;
-  customer_name: string | null;
-  conversations: Conversation[];
-  totalMessages: number;
-  lastMessageAt: string;
 }
 
 export const ConversationsPanel = () => {
   const { selectedCompany } = useCompany();
+  const { toast } = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedPhones, setExpandedPhones] = useState<Set<string>>(new Set());
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover'>('all');
+  const [messageInput, setMessageInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!selectedCompany?.id) return;
@@ -42,24 +55,19 @@ export const ConversationsPanel = () => {
     fetchConversations();
     
     const channel = supabase
-      .channel('messages-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages',
-        },
-        () => {
-          fetchConversations();
-        }
-      )
+      .channel('admin-messages-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => fetchConversations())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => fetchConversations())
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [selectedCompany?.id]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [selectedConversationId, conversations]);
 
   const fetchConversations = async () => {
     if (!selectedCompany?.id) return;
@@ -68,7 +76,7 @@ export const ConversationsPanel = () => {
     
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at')
+      .select('id, customer_name, phone, started_at, human_takeover, active_agent, unread_count')
       .eq('company_id', selectedCompany.id)
       .order('started_at', { ascending: false })
       .limit(50);
@@ -105,140 +113,257 @@ export const ConversationsPanel = () => {
     }));
 
     setConversations(conversationsWithMessages);
+    
+    // Auto-select first conversation if none selected
+    if (!selectedConversationId && conversationsWithMessages.length > 0) {
+      setSelectedConversationId(conversationsWithMessages[0].id);
+    }
+    
     setLoading(false);
+  };
+
+  const selectedConversation = conversations.find(c => c.id === selectedConversationId);
+
+  const filteredConversations = conversations.filter(conv => {
+    const matchesSearch = 
+      conv.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+      conv.phone?.includes(search);
+    
+    const matchesFilter = 
+      filter === 'all' ? true :
+      filter === 'unread' ? (conv.unread_count > 0) :
+      filter === 'takeover' ? conv.human_takeover : true;
+    
+    return matchesSearch && matchesFilter;
+  });
+
+  const sendMessage = async () => {
+    if (!selectedConversation || !messageInput.trim()) return;
+
+    setSending(true);
+
+    try {
+      const { error } = await supabase.functions.invoke('send-whatsapp-message', {
+        body: {
+          phone: selectedConversation.phone,
+          message: messageInput.trim(),
+          conversationId: selectedConversation.id
+        }
+      });
+
+      if (error) throw error;
+
+      setMessageInput('');
+      toast({ title: "Message sent" });
+      fetchConversations();
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      toast({ title: "Error", description: error.message || "Failed to send message", variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const getInitials = (conv: Conversation) => {
+    if (conv.customer_name) {
+      return conv.customer_name.substring(0, 2).toUpperCase();
+    }
+    return conv.phone?.substring(0, 2) || '??';
+  };
+
+  const getAgentBadge = (conv: Conversation) => {
+    if (conv.human_takeover) {
+      return <Badge variant="secondary" className="h-5 text-[10px] gap-1"><UserCog className="h-3 w-3" />Human</Badge>;
+    }
+    switch (conv.active_agent) {
+      case 'support':
+        return <Badge className="h-5 text-[10px] gap-1 bg-blue-500/10 text-blue-400 border-blue-500/20"><Headset className="h-3 w-3" />Support</Badge>;
+      case 'sales':
+        return <Badge className="h-5 text-[10px] gap-1 bg-emerald-500/10 text-emerald-400 border-emerald-500/20"><TrendingUp className="h-3 w-3" />Sales</Badge>;
+      case 'boss':
+        return <Badge className="h-5 text-[10px] gap-1 bg-amber-500/10 text-amber-400 border-amber-500/20"><UserCircle className="h-3 w-3" />Boss</Badge>;
+      default:
+        return <Badge variant="outline" className="h-5 text-[10px] gap-1"><Bot className="h-3 w-3" />AI</Badge>;
+    }
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <p className="text-white/60">Loading conversations...</p>
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   if (conversations.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-white/60">No conversations yet</p>
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+        <MessageCircle className="h-16 w-16 mb-4 opacity-30" />
+        <p>No conversations yet</p>
       </div>
     );
   }
 
-  // Group conversations by phone number
-  const groupedConversations: GroupedConversation[] = Object.values(
-    conversations.reduce((acc, conv) => {
-      const phone = conv.phone || 'Unknown';
-      if (!acc[phone]) {
-        acc[phone] = {
-          phone,
-          customer_name: conv.customer_name,
-          conversations: [],
-          totalMessages: 0,
-          lastMessageAt: conv.started_at
-        };
-      }
-      acc[phone].conversations.push(conv);
-      acc[phone].totalMessages += conv.messages.length;
-      if (new Date(conv.started_at) > new Date(acc[phone].lastMessageAt)) {
-        acc[phone].lastMessageAt = conv.started_at;
-      }
-      if (conv.customer_name) {
-        acc[phone].customer_name = conv.customer_name;
-      }
-      return acc;
-    }, {} as Record<string, GroupedConversation>)
-  ).sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
-
-  const togglePhone = (phone: string) => {
-    setExpandedPhones(prev => {
-      const next = new Set(prev);
-      if (next.has(phone)) {
-        next.delete(phone);
-      } else {
-        next.add(phone);
-      }
-      return next;
-    });
-  };
-
   return (
-    <ScrollArea className="h-full">
-      <div className="p-6 space-y-4">
-        {groupedConversations.map((group) => (
-          <Collapsible
-            key={group.phone}
-            open={expandedPhones.has(group.phone)}
-            onOpenChange={() => togglePhone(group.phone)}
-          >
-            <div className="border border-white/10 rounded-lg overflow-hidden bg-[#1A1A1A]">
-              <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-                <div className="flex items-center gap-3">
-                  {expandedPhones.has(group.phone) ? (
-                    <ChevronDown className="w-5 h-5 text-[#84CC16]" />
-                  ) : (
-                    <ChevronRight className="w-5 h-5 text-white/40" />
+    <ResizablePanelGroup direction="horizontal" className="h-full">
+      {/* Left Panel - Conversation List */}
+      <ResizablePanel defaultSize={35} minSize={25} maxSize={45}>
+        <div className="flex flex-col h-full border-r border-border">
+          {/* Search */}
+          <div className="p-4 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 bg-secondary/50 border-0"
+              />
+            </div>
+          </div>
+
+          {/* Filters */}
+          <div className="flex gap-1 p-2 border-b border-border bg-secondary/30">
+            {(['all', 'unread', 'takeover'] as const).map((f) => (
+              <Button
+                key={f}
+                variant="ghost"
+                size="sm"
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "flex-1 h-7 text-xs capitalize",
+                  filter === f && "bg-primary text-primary-foreground hover:bg-primary/90"
+                )}
+              >
+                {f === 'takeover' ? 'Human' : f}
+              </Button>
+            ))}
+          </div>
+
+          {/* List */}
+          <ScrollArea className="flex-1">
+            <div className="divide-y divide-border/50">
+              {filteredConversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  onClick={() => setSelectedConversationId(conv.id)}
+                  className={cn(
+                    "p-3 cursor-pointer transition-all hover:bg-accent/50",
+                    selectedConversationId === conv.id && "bg-accent border-l-2 border-l-primary"
                   )}
-                  <div className="text-left">
-                    <h3 className="text-white font-semibold">
-                      {group.customer_name || 'Unknown'}
-                    </h3>
-                    <p className="text-sm text-white/60">{group.phone}</p>
+                >
+                  <div className="flex gap-3">
+                    <Avatar className="h-10 w-10 shrink-0">
+                      <AvatarFallback className={cn(
+                        "text-sm font-semibold",
+                        selectedConversationId === conv.id 
+                          ? "bg-primary text-primary-foreground" 
+                          : "bg-primary/10 text-primary"
+                      )}>
+                        {getInitials(conv)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-0.5">
+                        <span className="font-medium text-sm truncate">
+                          {conv.customer_name || conv.phone || 'Unknown'}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {formatDistanceToNow(new Date(conv.started_at), { addSuffix: false })}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate mb-1">
+                        {conv.messages[conv.messages.length - 1]?.content?.substring(0, 40) || 'No messages'}...
+                      </p>
+                      <div className="flex items-center justify-between">
+                        {getAgentBadge(conv)}
+                        {conv.unread_count > 0 && (
+                          <Badge className="h-5 min-w-5 px-1.5 rounded-full text-[10px]">
+                            {conv.unread_count}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-xs px-2 py-1 bg-[#84CC16]/10 border border-[#84CC16]/20 rounded text-[#84CC16]">
-                    {group.totalMessages} messages
-                  </span>
-                  <span className="text-xs text-white/40">
-                    {format(new Date(group.lastMessageAt), 'MMM d, HH:mm')}
-                  </span>
-                </div>
-              </CollapsibleTrigger>
-              
-              <CollapsibleContent>
-                <div className="border-t border-white/10">
-                  {group.conversations.map((conversation) => (
-                    <div key={conversation.id} className="p-4 space-y-3 border-b border-white/10 last:border-b-0 bg-[#0D1117]">
-                      <div className="text-xs text-center text-white/30 mb-3">
-                        {format(new Date(conversation.started_at), 'MMMM d, yyyy • HH:mm')}
-                      </div>
-                      {conversation.messages.map((message, idx) => {
-                        const isInbound = message.role === 'user';
-                        return (
-                          <div
-                            key={message.id}
-                            className={`flex ${isInbound ? 'justify-start' : 'justify-end'} mb-2`}
-                          >
-                            <div
-                              className={`max-w-[75%] rounded-lg px-3 py-2 ${
-                                isInbound 
-                                  ? 'bg-[#2A2A2A] text-white rounded-tl-none' 
-                                  : 'bg-[#005C4B] text-white rounded-tr-none'
-                              }`}
-                            >
-                              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-                              <div className="flex items-center justify-end gap-1 mt-1">
-                                <span className="text-[10px] text-white/50">
-                                  {format(new Date(message.created_at), 'HH:mm')}
-                                </span>
-                                {!isInbound && (
-                                  <svg className="w-4 h-4 text-blue-400" viewBox="0 0 16 15" fill="none">
-                                    <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.879a.32.32 0 0 1-.484.033l-.358-.325a.319.319 0 0 0-.484.032l-.378.483a.418.418 0 0 0 .036.541l1.32 1.266c.143.14.361.125.484-.033l6.272-8.048a.366.366 0 0 0-.064-.512zm-4.1 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.879a.32.32 0 0 1-.484.033L1.891 7.769a.366.366 0 0 0-.515.006l-.423.433a.364.364 0 0 0 .006.514l3.258 3.185c.143.14.361.125.484-.033l6.272-8.048a.365.365 0 0 0-.063-.51z" fill="currentColor"/>
-                                  </svg>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </CollapsibleContent>
+              ))}
             </div>
-          </Collapsible>
-        ))}
-      </div>
-    </ScrollArea>
+          </ScrollArea>
+        </div>
+      </ResizablePanel>
+
+      <ResizableHandle withHandle />
+
+      {/* Right Panel - Chat View */}
+      <ResizablePanel defaultSize={65}>
+        {selectedConversation ? (
+          <div className="flex flex-col h-full">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-border bg-card/50">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-10 w-10">
+                  <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+                    {getInitials(selectedConversation)}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <h3 className="font-semibold text-sm">
+                    {selectedConversation.customer_name || selectedConversation.phone}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">{selectedConversation.phone}</p>
+                </div>
+              </div>
+              {getAgentBadge(selectedConversation)}
+            </div>
+
+            {/* Messages */}
+            <ScrollArea className="flex-1 p-4">
+              <div className="space-y-1 max-w-3xl mx-auto">
+                {selectedConversation.messages.map((message, idx) => {
+                  const showDateDivider = idx === 0 || 
+                    format(new Date(message.created_at), 'yyyy-MM-dd') !== 
+                    format(new Date(selectedConversation.messages[idx - 1].created_at), 'yyyy-MM-dd');
+
+                  return (
+                    <div key={message.id}>
+                      {showDateDivider && <DateDivider date={message.created_at} />}
+                      <ChatBubble
+                        content={message.content}
+                        role={message.role as 'user' | 'assistant'}
+                        timestamp={message.created_at}
+                        metadata={message.message_metadata}
+                      />
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+            </ScrollArea>
+
+            {/* Input */}
+            <div className="p-4 border-t border-border bg-card/50">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Type a message..."
+                  value={messageInput}
+                  onChange={(e) => setMessageInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+                  className="flex-1"
+                  disabled={sending}
+                />
+                <Button onClick={sendMessage} disabled={sending || !messageInput.trim()}>
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <MessageCircle className="h-16 w-16 mb-4 opacity-30" />
+            <p>Select a conversation to view messages</p>
+          </div>
+        )}
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 };
