@@ -41,86 +41,111 @@ export const ConversationItem = ({ conversation, isSelected, onClick }: Conversa
     return 'No messages yet';
   };
 
+  const getAgentBadge = () => {
+    if (conversation.human_takeover) {
+      return (
+        <Badge variant="secondary" className="gap-1 h-5 text-[10px] px-1.5">
+          <UserCog className="h-3 w-3" />
+          Human
+        </Badge>
+      );
+    }
+    
+    switch (conversation.active_agent) {
+      case 'support':
+        return (
+          <Badge className="gap-1 h-5 text-[10px] px-1.5 bg-blue-500/10 text-blue-500 border-blue-500/20 hover:bg-blue-500/20">
+            <Headset className="h-3 w-3" />
+            Support
+          </Badge>
+        );
+      case 'sales':
+        return (
+          <Badge className="gap-1 h-5 text-[10px] px-1.5 bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20">
+            <TrendingUp className="h-3 w-3" />
+            Sales
+          </Badge>
+        );
+      case 'boss':
+        return (
+          <Badge className="gap-1 h-5 text-[10px] px-1.5 bg-amber-500/10 text-amber-500 border-amber-500/20 hover:bg-amber-500/20">
+            <UserCircle className="h-3 w-3" />
+            Boss
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline" className="gap-1 h-5 text-[10px] px-1.5">
+            <Bot className="h-3 w-3" />
+            AI
+          </Badge>
+        );
+    }
+  };
+
   return (
     <div
       onClick={onClick}
       className={cn(
-        "p-4 cursor-pointer hover:bg-accent/50 transition-colors relative",
-        isSelected && "bg-accent"
+        "p-3 cursor-pointer transition-all duration-200 relative group",
+        "hover:bg-accent/50",
+        isSelected && "bg-accent border-l-2 border-l-primary"
       )}
     >
       <div className="flex gap-3">
-        {/* Avatar */}
-        <Avatar className="h-12 w-12 shrink-0">
-          <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-            {getInitials()}
-          </AvatarFallback>
-        </Avatar>
+        {/* Avatar with online indicator */}
+        <div className="relative shrink-0">
+          <Avatar className="h-11 w-11">
+            <AvatarFallback className={cn(
+              "font-semibold text-sm",
+              isSelected ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary"
+            )}>
+              {getInitials()}
+            </AvatarFallback>
+          </Avatar>
+          {/* Online status dot */}
+          <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full border-2 border-card" />
+        </div>
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <h4 className="font-semibold text-sm truncate">
+          <div className="flex items-start justify-between gap-2 mb-0.5">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <h4 className={cn(
+                "font-semibold text-sm truncate",
+                conversation.unread_count > 0 && "text-foreground"
+              )}>
                 {conversation.customer_name || conversation.phone || 'Unknown'}
               </h4>
               {conversation.pinned && (
                 <Pin className="h-3 w-3 text-primary shrink-0" />
               )}
             </div>
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              {formatDistanceToNow(new Date(conversation.started_at), { addSuffix: true })}
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+              {formatDistanceToNow(new Date(conversation.started_at), { addSuffix: false })}
             </span>
           </div>
 
-          <p className="text-sm text-muted-foreground truncate mb-2">
+          <p className={cn(
+            "text-xs truncate mb-1.5",
+            conversation.unread_count > 0 
+              ? "text-foreground font-medium" 
+              : "text-muted-foreground"
+          )}>
             {getLastMessage()}
           </p>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {conversation.active_agent === 'support' && (
-              <Badge variant="outline" className="gap-1 bg-green-50 text-green-700 border-green-200">
-                <Headset className="h-3 w-3" />
-                <span className="text-xs">Support</span>
-              </Badge>
-            )}
-            {conversation.active_agent === 'sales' && (
-              <Badge variant="outline" className="gap-1 bg-blue-50 text-blue-700 border-blue-200">
-                <TrendingUp className="h-3 w-3" />
-                <span className="text-xs">Sales</span>
-              </Badge>
-            )}
-            {conversation.active_agent === 'boss' && (
-              <Badge variant="outline" className="gap-1 bg-purple-50 text-purple-700 border-purple-200">
-                <UserCircle className="h-3 w-3" />
-                <span className="text-xs">Boss</span>
-              </Badge>
-            )}
-            {conversation.human_takeover ? (
-              <Badge variant="secondary" className="gap-1">
-                <UserCog className="h-3 w-3" />
-                <span className="text-xs">Human</span>
-              </Badge>
-            ) : !conversation.active_agent && (
-              <Badge variant="outline" className="gap-1">
-                <Bot className="h-3 w-3" />
-                <span className="text-xs">AI</span>
-              </Badge>
-            )}
+          <div className="flex items-center justify-between">
+            {getAgentBadge()}
             
             {conversation.unread_count > 0 && (
-              <Badge variant="default" className="h-5 min-w-5 px-1.5 rounded-full">
+              <Badge className="h-5 min-w-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
                 {conversation.unread_count}
               </Badge>
             )}
           </div>
         </div>
       </div>
-
-      {/* Unread indicator dot */}
-      {conversation.unread_count > 0 && (
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 h-2 w-2 bg-primary rounded-full" />
-      )}
     </div>
   );
 };

@@ -1,13 +1,16 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { UserCog, Bot, Send, Sparkles, Paperclip, X, Image as ImageIcon, Video, FileText, MessageSquare } from 'lucide-react';
+import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { QuickReplySelector } from './QuickReplySelector';
+import { ChatBubble } from './ChatBubble';
+import { DateDivider } from './DateDivider';
+import { AgentSwitchIndicator } from './AgentSwitchIndicator';
 
 interface Message {
   id: string;
@@ -62,7 +65,9 @@ export const ChatView = ({
   agentSwitches = []
 }: ChatViewProps) => {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const getInitials = () => {
@@ -77,103 +82,48 @@ export const ChatView = ({
     setShowQuickReplies(false);
   };
 
-  const getAgentLabel = (agentType: string) => {
-    switch (agentType) {
-      case 'support': return { label: 'Support Agent', color: 'bg-blue-500/20 text-blue-400' };
-      case 'sales': return { label: 'Sales Agent', color: 'bg-green-500/20 text-green-400' };
-      case 'boss': return { label: 'Human Handoff', color: 'bg-amber-500/20 text-amber-400' };
-      default: return { label: agentType, color: 'bg-muted text-muted-foreground' };
-    }
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const renderAgentSwitch = (agentSwitch: AgentSwitch) => {
-    const agentInfo = getAgentLabel(agentSwitch.agent_type);
-    const isSwitch = agentSwitch.notes.includes('Agent switch:');
-    
-    return (
-      <div key={agentSwitch.id} className="flex justify-center my-4">
-        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 text-xs text-muted-foreground">
-          <div className={cn("w-2 h-2 rounded-full", agentInfo.color)} />
-          {isSwitch ? (
-            <span>🔄 Switched to <span className="font-semibold">{agentInfo.label}</span></span>
-          ) : (
-            <span>Routed to <span className="font-semibold">{agentInfo.label}</span></span>
-          )}
-        </div>
-      </div>
-    );
-  };
+  useEffect(() => {
+    scrollToBottom();
+  }, [conversation.messages.length]);
 
-  const renderMessageContent = (message: Message) => {
-    const metadata = message.message_metadata;
-
-    if (metadata?.media_url) {
-      const mediaType = metadata.media_type || 'image';
-      const fileName = metadata.file_name || 'file';
-
-      if (mediaType.startsWith('image')) {
-        return (
-          <div 
-            className="cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => onMediaClick(metadata.media_url, 'image', fileName)}
-          >
-            <img src={metadata.media_url} alt="Shared" className="max-w-xs rounded-lg" />
-          </div>
-        );
-      } else if (mediaType.startsWith('video')) {
-        return (
-          <div 
-            className="cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => onMediaClick(metadata.media_url, 'video', fileName)}
-          >
-            <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
-              <Video className="h-5 w-5" />
-              <span className="text-sm">{fileName}</span>
-            </div>
-          </div>
-        );
-      } else if (mediaType === 'application/pdf') {
-        return (
-          <div 
-            className="cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => onMediaClick(metadata.media_url, 'pdf', fileName)}
-          >
-            <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
-              <FileText className="h-5 w-5" />
-              <span className="text-sm">{fileName}</span>
-            </div>
-          </div>
-        );
-      }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSendMessage();
     }
-
-    return <p className="whitespace-pre-wrap break-words">{message.content}</p>;
   };
 
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border bg-card">
+      <div className="flex items-center justify-between p-4 border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
-            <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-              {getInitials()}
-            </AvatarFallback>
-          </Avatar>
+          <div className="relative">
+            <Avatar className="h-10 w-10 ring-2 ring-primary/20">
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                {getInitials()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full border-2 border-card" />
+          </div>
           <div>
-            <h3 className="font-semibold">
+            <h3 className="font-semibold text-sm">
               {conversation.customer_name || conversation.phone || 'Unknown'}
             </h3>
             <div className="flex items-center gap-2">
               {conversation.human_takeover ? (
-                <Badge variant="secondary" className="gap-1">
+                <Badge variant="secondary" className="gap-1 h-5 text-[10px]">
                   <UserCog className="h-3 w-3" />
-                  <span className="text-xs">Human Control</span>
+                  Human Control
                 </Badge>
               ) : (
-                <Badge variant="outline" className="gap-1">
+                <Badge variant="outline" className="gap-1 h-5 text-[10px]">
                   <Bot className="h-3 w-3" />
-                  <span className="text-xs">AI Handling</span>
+                  AI Handling
                 </Badge>
               )}
             </div>
@@ -183,21 +133,20 @@ export const ChatView = ({
           variant={conversation.human_takeover ? "destructive" : "default"}
           size="sm"
           onClick={onToggleTakeover}
+          className="font-medium"
         >
           {conversation.human_takeover ? "Release to AI" : "Take Over"}
         </Button>
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-4">
+      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
+        <div className="space-y-1 max-w-3xl mx-auto">
           {conversation.messages.map((message, idx) => {
-            const isUser = message.role === 'user';
             const showDateDivider = idx === 0 || 
               format(new Date(message.created_at), 'yyyy-MM-dd') !== 
               format(new Date(conversation.messages[idx - 1].created_at), 'yyyy-MM-dd');
 
-            // Find agent switches that occurred just before this message
             const relevantSwitches = agentSwitches.filter(sw => {
               const switchTime = new Date(sw.routed_at).getTime();
               const messageTime = new Date(message.created_at).getTime();
@@ -207,30 +156,23 @@ export const ChatView = ({
 
             return (
               <div key={message.id}>
-                {showDateDivider && (
-                  <div className="flex items-center justify-center my-4">
-                    <div className="text-xs text-muted-foreground bg-muted px-3 py-1 rounded-full">
-                      {format(new Date(message.created_at), 'MMMM d, yyyy')}
-                    </div>
-                  </div>
-                )}
+                {showDateDivider && <DateDivider date={message.created_at} />}
                 
-                {/* Show agent switches that occurred before this message */}
-                {relevantSwitches.map(sw => renderAgentSwitch(sw))}
+                {relevantSwitches.map(sw => (
+                  <AgentSwitchIndicator 
+                    key={sw.id} 
+                    agentType={sw.agent_type} 
+                    notes={sw.notes} 
+                  />
+                ))}
                 
-                <div className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
-                  <div className={cn(
-                    "max-w-[70%] rounded-lg p-3",
-                    isUser 
-                      ? "bg-primary text-primary-foreground" 
-                      : "bg-muted"
-                  )}>
-                    {renderMessageContent(message)}
-                    <p className="text-xs mt-1 opacity-70">
-                      {format(new Date(message.created_at), 'HH:mm')}
-                    </p>
-                  </div>
-                </div>
+                <ChatBubble
+                  content={message.content}
+                  role={message.role as 'user' | 'assistant'}
+                  timestamp={message.created_at}
+                  metadata={message.message_metadata}
+                  onMediaClick={onMediaClick}
+                />
               </div>
             );
           })}
@@ -238,23 +180,36 @@ export const ChatView = ({
         </div>
       </ScrollArea>
 
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <Button
+          size="icon"
+          variant="secondary"
+          className="absolute bottom-24 right-8 rounded-full shadow-lg h-8 w-8"
+          onClick={scrollToBottom}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </Button>
+      )}
+
       {/* Quick Reply Selector */}
       {showQuickReplies && conversation.human_takeover && (
-        <div className="border-t border-border">
+        <div className="border-t border-border animate-fade-in">
           <QuickReplySelector onSelect={handleQuickReplySelect} />
         </div>
       )}
 
       {/* Input Area */}
       {conversation.human_takeover && (
-        <div className="p-4 border-t border-border bg-card">
+        <div className="p-4 border-t border-border bg-card/80 backdrop-blur-sm">
           {attachedFile && (
-            <div className="flex items-center gap-2 mb-2 p-2 bg-muted rounded-lg">
-              <FileText className="h-4 w-4" />
+            <div className="flex items-center gap-2 mb-3 p-2 bg-secondary rounded-lg">
+              <FileText className="h-4 w-4 text-primary" />
               <span className="text-sm flex-1 truncate">{attachedFile.name}</span>
               <Button
                 variant="ghost"
                 size="sm"
+                className="h-6 w-6 p-0"
                 onClick={() => onAttachFile(null)}
               >
                 <X className="h-4 w-4" />
@@ -262,42 +217,48 @@ export const ChatView = ({
             </div>
           )}
 
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setShowQuickReplies(!showQuickReplies)}
-              title="Quick Replies"
-            >
-              <MessageSquare className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach File"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
+          <div className="flex gap-2 items-end">
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => setShowQuickReplies(!showQuickReplies)}
+                title="Quick Replies"
+              >
+                <MessageSquare className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach File"
+              >
+                <Paperclip className="h-5 w-5" />
+              </Button>
+            </div>
             <Input
               placeholder="Type a message..."
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && onSendMessage()}
-              className="flex-1"
+              onKeyDown={handleKeyDown}
+              className="flex-1 min-h-10"
             />
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
+              className="h-10 w-10 shrink-0"
               onClick={onGenerateImage}
               disabled={generatingImage || !messageInput.trim()}
               title="Generate Image"
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-5 w-5" />
             </Button>
             <Button
               onClick={onSendMessage}
               disabled={sendingMessage || (!messageInput.trim() && !attachedFile)}
+              className="h-10 px-4"
             >
               <Send className="h-4 w-4" />
             </Button>
@@ -317,10 +278,13 @@ export const ChatView = ({
       )}
 
       {!conversation.human_takeover && (
-        <div className="p-4 border-t border-border bg-muted/50 text-center">
-          <p className="text-sm text-muted-foreground">
-            AI is currently handling this conversation. Take over to send messages.
-          </p>
+        <div className="p-4 border-t border-border bg-secondary/50 text-center">
+          <div className="flex items-center justify-center gap-2">
+            <Bot className="h-4 w-4 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              AI is handling this conversation. Take over to send messages.
+            </p>
+          </div>
         </div>
       )}
     </div>
