@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.deliver-digital-product]
 verify_jwt = false
+
+[functions.meta-webhook]
+verify_jwt = false
