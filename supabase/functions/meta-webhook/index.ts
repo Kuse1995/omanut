@@ -95,7 +95,7 @@ serve(async (req) => {
     // Always return 200 OK to Facebook to acknowledge receipt
     return new Response('EVENT_RECEIVED', {
       status: 200,
-      headers: { 'Content-Type': 'text/plain' },
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
     });
   }
 
