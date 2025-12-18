@@ -1030,6 +1030,33 @@ export type Database = {
           },
         ]
       }
+      facebook_messages: {
+        Row: {
+          created_at: string
+          id: string
+          is_processed: boolean
+          message_text: string | null
+          page_id: string
+          sender_psid: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_processed?: boolean
+          message_text?: string | null
+          page_id: string
+          sender_psid: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_processed?: boolean
+          message_text?: string | null
+          page_id?: string
+          sender_psid?: string
+        }
+        Relationships: []
+      }
       generated_images: {
         Row: {
           company_id: string
