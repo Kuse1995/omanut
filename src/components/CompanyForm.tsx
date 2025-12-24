@@ -135,6 +135,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     whatsapp_number: "",
     boss_phone: "",
     meta_phone_number_id: "",
+    meta_business_account_id: "",
     whatsapp_voice_enabled: false,
     test_mode: true,
     credit_balance: 1000,
@@ -210,6 +211,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           whatsapp_number: data.whatsapp_number || "",
           boss_phone: data.boss_phone || "",
           meta_phone_number_id: data.meta_phone_number_id || "",
+          meta_business_account_id: data.meta_business_account_id || "",
           whatsapp_voice_enabled: data.whatsapp_voice_enabled || false,
           test_mode: data.test_mode ?? true,
           credit_balance: data.credit_balance || 1000,
@@ -268,6 +270,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             whatsapp_number: formData.whatsapp_number,
             boss_phone: formData.boss_phone,
             meta_phone_number_id: formData.meta_phone_number_id || null,
+            meta_business_account_id: formData.meta_business_account_id || null,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             test_mode: formData.test_mode,
             quick_reference_info: formData.quick_reference_info,
@@ -675,6 +678,19 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               />
               <p className="text-xs text-muted-foreground mt-1">
                 Phone Number ID from Meta Business Suite for WhatsApp Cloud API
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="meta_business_account_id">Meta Business Account ID</Label>
+              <Input
+                id="meta_business_account_id"
+                value={formData.meta_business_account_id}
+                onChange={(e) => setFormData({ ...formData, meta_business_account_id: e.target.value })}
+                placeholder="123456789012345"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                WhatsApp Business Account ID from Meta Business Suite
               </p>
             </div>
 
