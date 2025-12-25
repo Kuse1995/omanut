@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Search, Loader2, Sparkles, Check, X } from "lucide-react";
+import { ArrowLeft, Search, Loader2, Sparkles, Check, X, Wifi, WifiOff } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
@@ -151,6 +151,15 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [isResearching, setIsResearching] = useState(false);
   const [researchResults, setResearchResults] = useState<any>(null);
   const [showResearchPreview, setShowResearchPreview] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{
+    success: boolean;
+    phoneNumberValid: boolean;
+    businessAccountValid: boolean;
+    phoneNumberName?: string;
+    businessAccountName?: string;
+    error?: string;
+  } | null>(null);
 
   const [aiInstructions, setAiInstructions] = useState({
     system_instructions: "",
@@ -467,6 +476,66 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
     });
   };
 
+  const handleTestConnection = async () => {
+    if (!companyId && !formData.meta_phone_number_id && !formData.meta_business_account_id) {
+      toast({
+        title: "Missing credentials",
+        description: "Please enter Meta Phone Number ID and Business Account ID first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/test-whatsapp-connection`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            companyId: companyId || 'test',
+            metaPhoneNumberId: formData.meta_phone_number_id,
+            metaBusinessAccountId: formData.meta_business_account_id
+          }),
+        }
+      );
+
+      const result = await response.json();
+      setConnectionTestResult(result);
+
+      if (result.success) {
+        toast({
+          title: "Connection successful!",
+          description: `Phone: ${result.phoneNumberName || 'Valid'} | Business: ${result.businessAccountName || 'Valid'}`,
+        });
+      } else {
+        toast({
+          title: "Connection failed",
+          description: result.error || "Failed to validate credentials",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error('Test connection error:', error);
+      toast({
+        title: "Test failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
   return (
     <Card className="card-glass">
       <CardHeader>
@@ -692,6 +761,83 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               <p className="text-xs text-muted-foreground mt-1">
                 WhatsApp Business Account ID from Meta Business Suite
               </p>
+            </div>
+
+            {/* Test Connection Button */}
+            <div className="space-y-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleTestConnection}
+                disabled={isTestingConnection || (!formData.meta_phone_number_id && !formData.meta_business_account_id)}
+                className="w-full"
+              >
+                {isTestingConnection ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Testing Connection...
+                  </>
+                ) : connectionTestResult?.success ? (
+                  <>
+                    <Wifi className="mr-2 h-4 w-4 text-green-500" />
+                    Connection Verified
+                  </>
+                ) : connectionTestResult ? (
+                  <>
+                    <WifiOff className="mr-2 h-4 w-4 text-red-500" />
+                    Retry Connection Test
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="mr-2 h-4 w-4" />
+                    Test WhatsApp Connection
+                  </>
+                )}
+              </Button>
+              
+              {connectionTestResult && (
+                <div className={`p-3 rounded-lg text-sm ${
+                  connectionTestResult.success 
+                    ? 'bg-green-500/10 border border-green-500/20' 
+                    : 'bg-red-500/10 border border-red-500/20'
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {connectionTestResult.success ? (
+                      <Check className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <X className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className="font-medium">
+                      {connectionTestResult.success ? 'All credentials valid' : 'Credential issues found'}
+                    </span>
+                  </div>
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      {connectionTestResult.phoneNumberValid ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <X className="h-3 w-3 text-red-500" />
+                      )}
+                      <span>
+                        Phone Number ID: {connectionTestResult.phoneNumberName || (connectionTestResult.phoneNumberValid ? 'Valid' : 'Invalid')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {connectionTestResult.businessAccountValid ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <X className="h-3 w-3 text-red-500" />
+                      )}
+                      <span>
+                        Business Account ID: {connectionTestResult.businessAccountName || (connectionTestResult.businessAccountValid ? 'Valid' : 'Invalid')}
+                      </span>
+                    </div>
+                  </div>
+                  {connectionTestResult.error && (
+                    <p className="mt-2 text-xs text-red-400">{connectionTestResult.error}</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">
