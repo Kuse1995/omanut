@@ -434,8 +434,6 @@ export type Database = {
           google_calendar_id: string | null
           hours: string | null
           id: string
-          meta_business_account_id: string | null
-          meta_phone_number_id: string | null
           metadata: Json | null
           name: string
           payment_instructions: string | null
@@ -469,8 +467,6 @@ export type Database = {
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
-          meta_business_account_id?: string | null
-          meta_phone_number_id?: string | null
           metadata?: Json | null
           name: string
           payment_instructions?: string | null
@@ -504,8 +500,6 @@ export type Database = {
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
-          meta_business_account_id?: string | null
-          meta_phone_number_id?: string | null
           metadata?: Json | null
           name?: string
           payment_instructions?: string | null
@@ -1684,81 +1678,6 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      whatsapp_messages: {
-        Row: {
-          company_id: string | null
-          content: string | null
-          conversation_id: string | null
-          created_at: string | null
-          customer_name: string | null
-          customer_phone: string
-          direction: string
-          error_code: string | null
-          error_message: string | null
-          id: string
-          media_type: string | null
-          media_url: string | null
-          message_type: string | null
-          metadata: Json | null
-          status: string | null
-          updated_at: string | null
-          whatsapp_message_id: string | null
-        }
-        Insert: {
-          company_id?: string | null
-          content?: string | null
-          conversation_id?: string | null
-          created_at?: string | null
-          customer_name?: string | null
-          customer_phone: string
-          direction: string
-          error_code?: string | null
-          error_message?: string | null
-          id?: string
-          media_type?: string | null
-          media_url?: string | null
-          message_type?: string | null
-          metadata?: Json | null
-          status?: string | null
-          updated_at?: string | null
-          whatsapp_message_id?: string | null
-        }
-        Update: {
-          company_id?: string | null
-          content?: string | null
-          conversation_id?: string | null
-          created_at?: string | null
-          customer_name?: string | null
-          customer_phone?: string
-          direction?: string
-          error_code?: string | null
-          error_message?: string | null
-          id?: string
-          media_type?: string | null
-          media_url?: string | null
-          message_type?: string | null
-          metadata?: Json | null
-          status?: string | null
-          updated_at?: string | null
-          whatsapp_message_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "whatsapp_messages_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "whatsapp_messages_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
