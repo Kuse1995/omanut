@@ -234,7 +234,7 @@ const Conversations = () => {
       </div>
 
       {/* Main Content - Split Pane */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <ResizablePanelGroup direction="horizontal">
           {/* Left Panel - Conversations List */}
           <ResizablePanel defaultSize={30} minSize={25} maxSize={40}>

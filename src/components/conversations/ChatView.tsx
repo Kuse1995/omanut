@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown, Image } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -99,9 +99,35 @@ export const ChatView = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Auto-scroll when switching conversations or new messages arrive
+  const lastConversationIdRef = useRef<string | null>(null);
+  const isNearBottomRef = useRef(true);
+
   useEffect(() => {
-    scrollToBottom();
-  }, [conversation.messages.length]);
+    // Always scroll to bottom when switching to a different conversation
+    if (lastConversationIdRef.current !== conversation.id) {
+      lastConversationIdRef.current = conversation.id;
+      // Use setTimeout to ensure DOM is updated
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 0);
+    } else if (isNearBottomRef.current) {
+      // Only auto-scroll for new messages if already near bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [conversation.id, conversation.messages.length]);
+
+  // Handle scroll to detect if user is near bottom
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const scrollTop = target.scrollTop;
+    const scrollHeight = target.scrollHeight;
+    const clientHeight = target.clientHeight;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    isNearBottomRef.current = distanceFromBottom < 100;
+    setShowScrollButton(distanceFromBottom > 200);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -111,7 +137,7 @@ export const ChatView = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex flex-col h-full min-h-0 bg-background relative">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
         <div className="flex items-center gap-2">
@@ -177,7 +203,11 @@ export const ChatView = ({
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-3" ref={scrollAreaRef}>
+      <div 
+        className="flex-1 min-h-0 overflow-y-auto p-3" 
+        ref={scrollAreaRef}
+        onScroll={handleScroll}
+      >
         <div className="space-y-0 max-w-3xl mx-auto">
           {conversation.messages.map((message, idx) => {
             const showDateDivider = idx === 0 || 
@@ -233,7 +263,7 @@ export const ChatView = ({
           })}
           <div ref={messagesEndRef} />
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Scroll to bottom button */}
       {showScrollButton && (
