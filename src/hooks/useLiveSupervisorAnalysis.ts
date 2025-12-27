@@ -22,9 +22,29 @@ export function useLiveSupervisorAnalysis(
   const [liveInsight, setLiveInsight] = useState<LiveInsight | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalyzedMessageId, setLastAnalyzedMessageId] = useState<string | null>(null);
+  const [isEnabled, setIsEnabled] = useState(true);
+
+  // Fetch company setting for live analysis
+  useEffect(() => {
+    if (!companyId) return;
+
+    const fetchSetting = async () => {
+      const { data } = await supabase
+        .from('company_ai_overrides')
+        .select('supervisor_live_analysis_enabled, supervisor_enabled')
+        .eq('company_id', companyId)
+        .maybeSingle();
+
+      if (data) {
+        setIsEnabled(data.supervisor_enabled !== false && data.supervisor_live_analysis_enabled !== false);
+      }
+    };
+
+    fetchSetting();
+  }, [companyId]);
 
   const analyzeLatestMessage = useCallback(async () => {
-    if (!companyId || messages.length === 0) return;
+    if (!companyId || messages.length === 0 || !isEnabled) return;
 
     const latestUserMessage = [...messages]
       .reverse()
@@ -98,10 +118,12 @@ export function useLiveSupervisorAnalysis(
     } finally {
       setIsAnalyzing(false);
     }
-  }, [companyId, conversationId, messages, lastAnalyzedMessageId]);
+  }, [companyId, conversationId, messages, lastAnalyzedMessageId, isEnabled]);
 
   // Trigger analysis when new user messages arrive
   useEffect(() => {
+    if (!isEnabled) return;
+    
     const latestMessage = messages[messages.length - 1];
     if (latestMessage?.role === 'user' && latestMessage.id !== lastAnalyzedMessageId) {
       // Debounce to avoid too frequent calls
@@ -110,11 +132,11 @@ export function useLiveSupervisorAnalysis(
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [messages, lastAnalyzedMessageId, analyzeLatestMessage]);
+  }, [messages, lastAnalyzedMessageId, analyzeLatestMessage, isEnabled]);
 
   // Listen for real-time supervisor updates
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || !isEnabled) return;
 
     const channel = supabase
       .channel(`live-supervisor-${conversationId}`)
@@ -149,11 +171,12 @@ export function useLiveSupervisorAnalysis(
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId]);
+  }, [conversationId, isEnabled]);
 
   return {
-    liveInsight,
-    isAnalyzing,
+    liveInsight: isEnabled ? liveInsight : null,
+    isAnalyzing: isEnabled && isAnalyzing,
+    isEnabled,
     triggerAnalysis: analyzeLatestMessage
   };
 }
