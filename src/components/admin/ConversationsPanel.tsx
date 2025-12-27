@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { 
   Search, Send, MessageCircle, Bot, UserCog, 
-  Headset, TrendingUp, UserCircle, Loader2
+  Headset, TrendingUp, UserCircle, Loader2, ChevronDown
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -47,7 +47,11 @@ export const ConversationsPanel = () => {
   const [filter, setFilter] = useState<'all' | 'unread' | 'takeover'>('all');
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const lastConversationIdRef = useRef<string | null>(null);
+  const isNearBottomRef = useRef(true);
 
   useEffect(() => {
     if (!selectedCompany?.id) return;
@@ -65,9 +69,37 @@ export const ConversationsPanel = () => {
     };
   }, [selectedCompany?.id]);
 
+  // Auto-scroll when switching conversations or new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!selectedConversationId) return;
+    
+    // Always scroll to bottom when switching to a different conversation
+    if (lastConversationIdRef.current !== selectedConversationId) {
+      lastConversationIdRef.current = selectedConversationId;
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 0);
+    } else if (isNearBottomRef.current) {
+      // Only auto-scroll for new messages if already near bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [selectedConversationId, conversations]);
+
+  // Handle scroll to detect if user is near bottom
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const scrollTop = target.scrollTop;
+    const scrollHeight = target.scrollHeight;
+    const clientHeight = target.clientHeight;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    isNearBottomRef.current = distanceFromBottom < 100;
+    setShowScrollButton(distanceFromBottom > 200);
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   const fetchConversations = async () => {
     if (!selectedCompany?.id) return;
@@ -208,7 +240,7 @@ export const ConversationsPanel = () => {
     <ResizablePanelGroup direction="horizontal" className="h-full">
       {/* Left Panel - Conversation List */}
       <ResizablePanel defaultSize={35} minSize={25} maxSize={45}>
-        <div className="flex flex-col h-full border-r border-border">
+        <div className="flex flex-col h-full min-h-0 border-r border-border">
           {/* Search */}
           <div className="p-4 border-b border-border">
             <div className="relative">
@@ -297,7 +329,7 @@ export const ConversationsPanel = () => {
       {/* Right Panel - Chat View */}
       <ResizablePanel defaultSize={65}>
         {selectedConversation ? (
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col h-full min-h-0 relative">
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-border bg-card/50">
               <div className="flex items-center gap-3">
@@ -317,12 +349,31 @@ export const ConversationsPanel = () => {
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
-              <div className="space-y-1 max-w-3xl mx-auto">
+            <div 
+              className="flex-1 min-h-0 overflow-y-auto p-4"
+              ref={scrollAreaRef}
+              onScroll={handleScroll}
+            >
+              <div className="space-y-0 max-w-3xl mx-auto">
                 {selectedConversation.messages.map((message, idx) => {
                   const showDateDivider = idx === 0 || 
                     format(new Date(message.created_at), 'yyyy-MM-dd') !== 
                     format(new Date(selectedConversation.messages[idx - 1].created_at), 'yyyy-MM-dd');
+
+                  // Message grouping logic
+                  const prevMsg = idx > 0 ? selectedConversation.messages[idx - 1] : null;
+                  const nextMsg = idx < selectedConversation.messages.length - 1 ? selectedConversation.messages[idx + 1] : null;
+                  
+                  const timeDiffFromPrev = prevMsg 
+                    ? (new Date(message.created_at).getTime() - new Date(prevMsg.created_at).getTime()) / 1000 / 60 
+                    : Infinity;
+                  const timeDiffToNext = nextMsg 
+                    ? (new Date(nextMsg.created_at).getTime() - new Date(message.created_at).getTime()) / 1000 / 60 
+                    : Infinity;
+                  
+                  const isFirstInGroup = showDateDivider || !prevMsg || prevMsg.role !== message.role || timeDiffFromPrev > 2;
+                  const isLastInGroup = !nextMsg || nextMsg.role !== message.role || timeDiffToNext > 2 || 
+                    (nextMsg && format(new Date(nextMsg.created_at), 'yyyy-MM-dd') !== format(new Date(message.created_at), 'yyyy-MM-dd'));
 
                   return (
                     <div key={message.id}>
@@ -332,13 +383,28 @@ export const ConversationsPanel = () => {
                         role={message.role as 'user' | 'assistant'}
                         timestamp={message.created_at}
                         metadata={message.message_metadata}
+                        isFirstInGroup={isFirstInGroup}
+                        isLastInGroup={isLastInGroup}
+                        showTimestamp={true}
                       />
                     </div>
                   );
                 })}
                 <div ref={messagesEndRef} />
               </div>
-            </ScrollArea>
+            </div>
+
+            {/* Scroll to bottom button */}
+            {showScrollButton && (
+              <Button
+                size="icon"
+                variant="secondary"
+                className="absolute bottom-24 right-6 h-10 w-10 rounded-full shadow-lg z-10"
+                onClick={scrollToBottom}
+              >
+                <ChevronDown className="h-5 w-5" />
+              </Button>
+            )}
 
             {/* Input */}
             <div className="p-4 border-t border-border bg-card/50">
