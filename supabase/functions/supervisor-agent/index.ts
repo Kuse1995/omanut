@@ -24,10 +24,12 @@ Deno.serve(async (req) => {
       customerMessage,
       conversationHistory,
       companyData,
-      customerData
+      customerData,
+      conversationId,
+      realTimeAnalysis = false
     } = await req.json();
 
-    console.log('[Supervisor] Analyzing interaction for:', customerPhone);
+    console.log('[Supervisor] Analyzing interaction for:', customerPhone || conversationId, realTimeAnalysis ? '(real-time)' : '');
 
     // Fetch supervisor configuration
     const { data: aiConfig } = await supabase
