@@ -83,13 +83,13 @@ export const ChatBubble = ({
   };
 
   return (
-    <div className={cn("flex mb-3", isUser ? "justify-start" : "justify-end")}>
+    <div className={cn("flex mb-1.5", isUser ? "justify-start" : "justify-end")}>
       <div
         className={cn(
-          "max-w-[75%] rounded-2xl px-4 py-2 relative shadow-sm",
+          "max-w-[80%] rounded-xl px-3 py-1.5 relative shadow-sm",
           isUser 
-            ? "bg-secondary text-secondary-foreground rounded-bl-md" 
-            : "bg-primary text-primary-foreground rounded-br-md"
+            ? "bg-secondary text-secondary-foreground rounded-bl-sm" 
+            : "bg-primary text-primary-foreground rounded-br-sm"
         )}
       >
         {/* WhatsApp-style tail */}

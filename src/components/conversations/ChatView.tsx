@@ -111,30 +111,30 @@ export const ChatView = ({
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border bg-card/80 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
           <div className="relative">
-            <Avatar className="h-10 w-10 ring-2 ring-primary/20">
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+            <Avatar className="h-8 w-8 ring-2 ring-primary/20">
+              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
                 {getInitials()}
               </AvatarFallback>
             </Avatar>
-            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full border-2 border-card" />
+            <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 bg-emerald-500 rounded-full border-2 border-card" />
           </div>
           <div>
-            <h3 className="font-semibold text-sm">
+            <h3 className="font-semibold text-xs">
               {conversation.customer_name || conversation.phone || 'Unknown'}
             </h3>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {conversation.human_takeover ? (
-                <Badge variant="secondary" className="gap-1 h-5 text-[10px]">
-                  <UserCog className="h-3 w-3" />
-                  Human Control
+                <Badge variant="secondary" className="gap-0.5 h-4 text-[9px] px-1.5">
+                  <UserCog className="h-2.5 w-2.5" />
+                  Human
                 </Badge>
               ) : (
-                <Badge variant="outline" className="gap-1 h-5 text-[10px]">
-                  <Bot className="h-3 w-3" />
-                  AI Handling
+                <Badge variant="outline" className="gap-0.5 h-4 text-[9px] px-1.5">
+                  <Bot className="h-2.5 w-2.5" />
+                  AI
                 </Badge>
               )}
             </div>
@@ -144,9 +144,9 @@ export const ChatView = ({
           variant={conversation.human_takeover ? "destructive" : "default"}
           size="sm"
           onClick={onToggleTakeover}
-          className="font-medium"
+          className="font-medium h-7 text-xs px-2"
         >
-          {conversation.human_takeover ? "Release to AI" : "Take Over"}
+          {conversation.human_takeover ? "Release" : "Take Over"}
         </Button>
       </div>
 
@@ -156,8 +156,8 @@ export const ChatView = ({
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-        <div className="space-y-1 max-w-3xl mx-auto">
+      <ScrollArea className="flex-1 p-3" ref={scrollAreaRef}>
+        <div className="space-y-0.5 max-w-3xl mx-auto">
           {conversation.messages.map((message, idx) => {
             const showDateDivider = idx === 0 || 
               format(new Date(message.created_at), 'yyyy-MM-dd') !== 
@@ -217,41 +217,41 @@ export const ChatView = ({
 
       {/* Input Area */}
       {conversation.human_takeover && (
-        <div className="p-4 border-t border-border bg-card/80 backdrop-blur-sm">
+        <div className="px-3 py-2 border-t border-border bg-card/80 backdrop-blur-sm">
           {attachedFile && (
-            <div className="flex items-center gap-2 mb-3 p-2 bg-secondary rounded-lg">
-              <FileText className="h-4 w-4 text-primary" />
-              <span className="text-sm flex-1 truncate">{attachedFile.name}</span>
+            <div className="flex items-center gap-2 mb-2 p-1.5 bg-secondary rounded-lg">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+              <span className="text-xs flex-1 truncate">{attachedFile.name}</span>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-6 w-6 p-0"
+                className="h-5 w-5 p-0"
                 onClick={() => onAttachFile(null)}
               >
-                <X className="h-4 w-4" />
+                <X className="h-3 w-3" />
               </Button>
             </div>
           )}
 
-          <div className="flex gap-2 items-end">
-            <div className="flex gap-1">
+          <div className="flex gap-1.5 items-end">
+            <div className="flex gap-0.5">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 shrink-0"
+                className="h-8 w-8 shrink-0"
                 onClick={() => setShowQuickReplies(!showQuickReplies)}
                 title="Quick Replies"
               >
-                <MessageSquare className="h-5 w-5" />
+                <MessageSquare className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 shrink-0"
+                className="h-8 w-8 shrink-0"
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach File"
               >
-                <Paperclip className="h-5 w-5" />
+                <Paperclip className="h-4 w-4" />
               </Button>
             </div>
             <Input
@@ -259,24 +259,24 @@ export const ChatView = ({
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="flex-1 min-h-10"
+              className="flex-1 h-8 text-sm"
             />
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 shrink-0"
+              className="h-8 w-8 shrink-0"
               onClick={onGenerateImage}
               disabled={generatingImage || !messageInput.trim()}
               title="Generate Image"
             >
-              <Sparkles className="h-5 w-5" />
+              <Sparkles className="h-4 w-4" />
             </Button>
             <Button
               onClick={onSendMessage}
               disabled={sendingMessage || (!messageInput.trim() && !attachedFile)}
-              className="h-10 px-4"
+              className="h-8 px-3"
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-3.5 w-3.5" />
             </Button>
           </div>
 
@@ -294,10 +294,10 @@ export const ChatView = ({
       )}
 
       {!conversation.human_takeover && (
-        <div className="p-4 border-t border-border bg-secondary/50 text-center">
-          <div className="flex items-center justify-center gap-2">
-            <Bot className="h-4 w-4 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
+        <div className="px-3 py-2 border-t border-border bg-secondary/50 text-center">
+          <div className="flex items-center justify-center gap-1.5">
+            <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">
               AI is handling this conversation. Take over to send messages.
             </p>
           </div>
