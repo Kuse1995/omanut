@@ -568,7 +568,15 @@ export type Database = {
           routing_model: string | null
           routing_temperature: number | null
           sales_agent_prompt: string | null
+          supervisor_analysis_depth: string | null
+          supervisor_context_window: number | null
           supervisor_enabled: boolean | null
+          supervisor_focus_areas: string[] | null
+          supervisor_output_format: string | null
+          supervisor_pattern_detection: string[] | null
+          supervisor_recommendation_style: string | null
+          supervisor_research_enabled: boolean | null
+          supervisor_urgency_triggers: Json | null
           support_agent_prompt: string | null
           system_instructions: string
           updated_at: string | null
@@ -615,7 +623,15 @@ export type Database = {
           routing_model?: string | null
           routing_temperature?: number | null
           sales_agent_prompt?: string | null
+          supervisor_analysis_depth?: string | null
+          supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
+          supervisor_focus_areas?: string[] | null
+          supervisor_output_format?: string | null
+          supervisor_pattern_detection?: string[] | null
+          supervisor_recommendation_style?: string | null
+          supervisor_research_enabled?: boolean | null
+          supervisor_urgency_triggers?: Json | null
           support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
@@ -662,7 +678,15 @@ export type Database = {
           routing_model?: string | null
           routing_temperature?: number | null
           sales_agent_prompt?: string | null
+          supervisor_analysis_depth?: string | null
+          supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
+          supervisor_focus_areas?: string[] | null
+          supervisor_output_format?: string | null
+          supervisor_pattern_detection?: string[] | null
+          supervisor_recommendation_style?: string | null
+          supervisor_research_enabled?: boolean | null
+          supervisor_urgency_triggers?: Json | null
           support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
