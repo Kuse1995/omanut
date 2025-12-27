@@ -11,7 +11,8 @@ import { QuickReplySelector } from './QuickReplySelector';
 import { ChatBubble } from './ChatBubble';
 import { DateDivider } from './DateDivider';
 import { AgentSwitchIndicator } from './AgentSwitchIndicator';
-
+import { LiveInsightsBar } from './LiveInsightsBar';
+import { useLiveSupervisorAnalysis } from '@/hooks/useLiveSupervisorAnalysis';
 interface Message {
   id: string;
   content: string;
@@ -36,6 +37,7 @@ interface ChatViewProps {
     human_takeover: boolean;
     messages: Message[];
     active_agent?: string;
+    company_id?: string | null;
   };
   messageInput: string;
   onMessageInputChange: (value: string) => void;
@@ -48,6 +50,7 @@ interface ChatViewProps {
   generatingImage: boolean;
   onMediaClick: (url: string, type: string, fileName?: string) => void;
   agentSwitches?: AgentSwitch[];
+  showLiveInsights?: boolean;
 }
 
 export const ChatView = ({
@@ -62,13 +65,21 @@ export const ChatView = ({
   sendingMessage,
   generatingImage,
   onMediaClick,
-  agentSwitches = []
+  agentSwitches = [],
+  showLiveInsights = true
 }: ChatViewProps) => {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Live supervisor analysis
+  const { liveInsight, isAnalyzing } = useLiveSupervisorAnalysis(
+    conversation.id,
+    conversation.company_id || null,
+    conversation.messages
+  );
 
   const getInitials = () => {
     if (conversation.customer_name) {
@@ -138,6 +149,11 @@ export const ChatView = ({
           {conversation.human_takeover ? "Release to AI" : "Take Over"}
         </Button>
       </div>
+
+      {/* Live Insights Bar */}
+      {showLiveInsights && (
+        <LiveInsightsBar insight={liveInsight} isAnalyzing={isAnalyzing} />
+      )}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
