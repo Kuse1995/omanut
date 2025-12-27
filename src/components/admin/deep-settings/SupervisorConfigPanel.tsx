@@ -8,6 +8,7 @@ import { Brain, Eye, Target, Zap, AlertTriangle, FileText } from "lucide-react";
 
 interface SupervisorConfig {
   supervisor_enabled: boolean;
+  supervisor_live_analysis_enabled: boolean;
   supervisor_analysis_depth: string;
   supervisor_focus_areas: string[];
   supervisor_recommendation_style: string;
@@ -101,6 +102,25 @@ export function SupervisorConfigPanel({ config, onConfigChange }: SupervisorConf
             Enable the supervisor agent to analyze conversations and provide strategic recommendations
           </CardDescription>
         </CardHeader>
+        {config.supervisor_enabled && (
+          <CardContent className="pt-0">
+            <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+              <div className="space-y-0.5">
+                <Label className="font-medium flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-amber-500" />
+                  Live Analysis in Chat
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Show real-time insights bar in the conversation view as messages arrive
+                </p>
+              </div>
+              <Switch
+                checked={config.supervisor_live_analysis_enabled}
+                onCheckedChange={(checked) => onConfigChange({ supervisor_live_analysis_enabled: checked })}
+              />
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {config.supervisor_enabled && (

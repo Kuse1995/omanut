@@ -572,6 +572,7 @@ export type Database = {
           supervisor_context_window: number | null
           supervisor_enabled: boolean | null
           supervisor_focus_areas: string[] | null
+          supervisor_live_analysis_enabled: boolean | null
           supervisor_output_format: string | null
           supervisor_pattern_detection: string[] | null
           supervisor_recommendation_style: string | null
@@ -627,6 +628,7 @@ export type Database = {
           supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
           supervisor_focus_areas?: string[] | null
+          supervisor_live_analysis_enabled?: boolean | null
           supervisor_output_format?: string | null
           supervisor_pattern_detection?: string[] | null
           supervisor_recommendation_style?: string | null
@@ -682,6 +684,7 @@ export type Database = {
           supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
           supervisor_focus_areas?: string[] | null
+          supervisor_live_analysis_enabled?: boolean | null
           supervisor_output_format?: string | null
           supervisor_pattern_detection?: string[] | null
           supervisor_recommendation_style?: string | null

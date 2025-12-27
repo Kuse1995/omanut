@@ -274,6 +274,7 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
                   <SupervisorConfigPanel 
                     config={{
                       supervisor_enabled: config.supervisor_enabled,
+                      supervisor_live_analysis_enabled: config.supervisor_live_analysis_enabled,
                       supervisor_analysis_depth: config.supervisor_analysis_depth,
                       supervisor_focus_areas: config.supervisor_focus_areas,
                       supervisor_recommendation_style: config.supervisor_recommendation_style,

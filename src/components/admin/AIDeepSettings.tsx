@@ -88,6 +88,7 @@ export interface AIConfig {
   supervisor_recommendation_style: string;
   supervisor_context_window: number;
   supervisor_research_enabled: boolean;
+  supervisor_live_analysis_enabled: boolean;
   supervisor_pattern_detection: string[];
   supervisor_urgency_triggers: {
     high_value_customer: boolean;
@@ -156,6 +157,7 @@ const defaultConfig: AIConfig = {
   supervisor_recommendation_style: 'actionable',
   supervisor_context_window: 10,
   supervisor_research_enabled: true,
+  supervisor_live_analysis_enabled: true,
   supervisor_pattern_detection: ['buying_signals', 'objections', 'sentiment_shifts'],
   supervisor_urgency_triggers: {
     high_value_customer: true,
@@ -243,6 +245,7 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
           supervisor_recommendation_style: data.supervisor_recommendation_style || defaultConfig.supervisor_recommendation_style,
           supervisor_context_window: data.supervisor_context_window ?? defaultConfig.supervisor_context_window,
           supervisor_research_enabled: data.supervisor_research_enabled ?? defaultConfig.supervisor_research_enabled,
+          supervisor_live_analysis_enabled: data.supervisor_live_analysis_enabled ?? defaultConfig.supervisor_live_analysis_enabled,
           supervisor_pattern_detection: data.supervisor_pattern_detection || defaultConfig.supervisor_pattern_detection,
           supervisor_urgency_triggers: (data.supervisor_urgency_triggers as AIConfig['supervisor_urgency_triggers']) || defaultConfig.supervisor_urgency_triggers,
           supervisor_output_format: data.supervisor_output_format || defaultConfig.supervisor_output_format,
