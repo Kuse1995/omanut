@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown } from 'lucide-react';
+import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown, Image } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { QuickReplySelector } from './QuickReplySelector';
@@ -12,6 +12,7 @@ import { ChatBubble } from './ChatBubble';
 import { DateDivider } from './DateDivider';
 import { AgentSwitchIndicator } from './AgentSwitchIndicator';
 import { LiveInsightsBar } from './LiveInsightsBar';
+import { MediaGallery } from './MediaGallery';
 import { useLiveSupervisorAnalysis } from '@/hooks/useLiveSupervisorAnalysis';
 interface Message {
   id: string;
@@ -70,6 +71,7 @@ export const ChatView = ({
 }: ChatViewProps) => {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [showMediaGallery, setShowMediaGallery] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -140,15 +142,34 @@ export const ChatView = ({
             </div>
           </div>
         </div>
-        <Button
-          variant={conversation.human_takeover ? "destructive" : "default"}
-          size="sm"
-          onClick={onToggleTakeover}
-          className="font-medium h-7 text-xs px-2"
-        >
-          {conversation.human_takeover ? "Release" : "Take Over"}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setShowMediaGallery(true)}
+            title="Media Gallery"
+          >
+            <Image className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={conversation.human_takeover ? "destructive" : "default"}
+            size="sm"
+            onClick={onToggleTakeover}
+            className="font-medium h-7 text-xs px-2"
+          >
+            {conversation.human_takeover ? "Release" : "Take Over"}
+          </Button>
+        </div>
       </div>
+
+      {/* Media Gallery Dialog */}
+      <MediaGallery
+        open={showMediaGallery}
+        onOpenChange={setShowMediaGallery}
+        messages={conversation.messages}
+        onMediaClick={onMediaClick}
+      />
 
       {/* Live Insights Bar */}
       {showLiveInsights && (
