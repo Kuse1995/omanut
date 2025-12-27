@@ -8,8 +8,10 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AIConfig } from "../AIDeepSettings";
-import { Users, HeadphonesIcon, TrendingUp, Crown, X, Plus, Router, AlertTriangle } from "lucide-react";
+import { BossReportingPanel } from "./BossReportingPanel";
+import { Users, HeadphonesIcon, TrendingUp, Crown, X, Plus, Router, AlertTriangle, ChevronDown, Settings } from "lucide-react";
 
 interface AgentConfigPanelProps {
   config: AIConfig;
@@ -19,6 +21,7 @@ interface AgentConfigPanelProps {
 export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps) => {
   const [newTrigger, setNewTrigger] = useState('');
   const [agentTab, setAgentTab] = useState('routing');
+  const [bossReportingOpen, setBossReportingOpen] = useState(false);
 
   const addHandoffTrigger = () => {
     if (newTrigger.trim() && !config.auto_handoff_triggers.includes(newTrigger.trim())) {
@@ -221,6 +224,22 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
                   rows={6}
                 />
               </div>
+              
+              {/* Boss Reporting Configuration */}
+              <Collapsible open={bossReportingOpen} onOpenChange={setBossReportingOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between mt-4">
+                    <div className="flex items-center gap-2">
+                      <Settings className="h-4 w-4" />
+                      Advanced Boss Reporting Configuration
+                    </div>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${bossReportingOpen ? 'rotate-180' : ''}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-4">
+                  <BossReportingPanel config={config} updateConfig={updateConfig} />
+                </CollapsibleContent>
+              </Collapsible>
             </TabsContent>
           </Tabs>
         </CardContent>
