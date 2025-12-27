@@ -14,6 +14,10 @@ interface ChatBubbleProps {
   onMediaClick?: (url: string, type: string, fileName?: string) => void;
   showReadReceipt?: boolean;
   isDelivered?: boolean;
+  // Grouping props
+  isFirstInGroup?: boolean;
+  isLastInGroup?: boolean;
+  showTimestamp?: boolean;
 }
 
 export const ChatBubble = ({
@@ -23,7 +27,10 @@ export const ChatBubble = ({
   metadata,
   onMediaClick,
   showReadReceipt = true,
-  isDelivered = true
+  isDelivered = true,
+  isFirstInGroup = true,
+  isLastInGroup = true,
+  showTimestamp = true
 }: ChatBubbleProps) => {
   const isUser = role === 'user';
 
@@ -82,52 +89,79 @@ export const ChatBubble = ({
     return null;
   };
 
+  // Dynamic border radius based on grouping
+  const getBorderRadius = () => {
+    if (isUser) {
+      // User messages (left side)
+      if (isFirstInGroup && isLastInGroup) return 'rounded-xl rounded-bl-sm';
+      if (isFirstInGroup) return 'rounded-xl rounded-bl-md';
+      if (isLastInGroup) return 'rounded-xl rounded-tl-md rounded-bl-sm';
+      return 'rounded-xl rounded-l-md';
+    } else {
+      // Assistant messages (right side)
+      if (isFirstInGroup && isLastInGroup) return 'rounded-xl rounded-br-sm';
+      if (isFirstInGroup) return 'rounded-xl rounded-br-md';
+      if (isLastInGroup) return 'rounded-xl rounded-tr-md rounded-br-sm';
+      return 'rounded-xl rounded-r-md';
+    }
+  };
+
   return (
-    <div className={cn("flex mb-1.5", isUser ? "justify-start" : "justify-end")}>
+    <div className={cn(
+      "flex", 
+      isUser ? "justify-start" : "justify-end",
+      isLastInGroup ? "mb-1.5" : "mb-0.5"
+    )}>
       <div
         className={cn(
-          "max-w-[80%] rounded-xl px-3 py-1.5 relative shadow-sm",
+          "max-w-[80%] px-3 py-1.5 relative shadow-sm",
+          getBorderRadius(),
           isUser 
-            ? "bg-secondary text-secondary-foreground rounded-bl-sm" 
-            : "bg-primary text-primary-foreground rounded-br-sm"
+            ? "bg-secondary text-secondary-foreground" 
+            : "bg-primary text-primary-foreground"
         )}
       >
-        {/* WhatsApp-style tail */}
-        <div
-          className={cn(
-            "absolute top-0 w-3 h-3",
-            isUser 
-              ? "-left-1.5 border-l-8 border-l-transparent border-t-8 border-t-secondary" 
-              : "-right-1.5 border-r-8 border-r-transparent border-t-8 border-t-primary"
-          )}
-        />
+        {/* WhatsApp-style tail - only show on first message in group */}
+        {isFirstInGroup && (
+          <div
+            className={cn(
+              "absolute top-0 w-3 h-3",
+              isUser 
+                ? "-left-1.5 border-l-8 border-l-transparent border-t-8 border-t-secondary" 
+                : "-right-1.5 border-r-8 border-r-transparent border-t-8 border-t-primary"
+            )}
+          />
+        )}
         
         {renderMedia()}
         
         {content && (
-          <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+          <p className="text-sm whitespace-pre-wrap break-words leading-snug">
             {content}
           </p>
         )}
         
-        <div className={cn(
-          "flex items-center gap-1 mt-1",
-          isUser ? "justify-start" : "justify-end"
-        )}>
-          <span className={cn(
-            "text-[10px]",
-            isUser ? "text-muted-foreground" : "text-primary-foreground/70"
+        {/* Only show timestamp on last message of group */}
+        {showTimestamp && isLastInGroup && (
+          <div className={cn(
+            "flex items-center gap-1 mt-0.5",
+            isUser ? "justify-start" : "justify-end"
           )}>
-            {format(new Date(timestamp), 'HH:mm')}
-          </span>
-          {!isUser && showReadReceipt && (
-            isDelivered ? (
-              <CheckCheck className="h-3.5 w-3.5 text-primary-foreground/70" />
-            ) : (
-              <Check className="h-3.5 w-3.5 text-primary-foreground/70" />
-            )
-          )}
-        </div>
+            <span className={cn(
+              "text-[10px]",
+              isUser ? "text-muted-foreground" : "text-primary-foreground/70"
+            )}>
+              {format(new Date(timestamp), 'HH:mm')}
+            </span>
+            {!isUser && showReadReceipt && (
+              isDelivered ? (
+                <CheckCheck className="h-3.5 w-3.5 text-primary-foreground/70" />
+              ) : (
+                <Check className="h-3.5 w-3.5 text-primary-foreground/70" />
+              )
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

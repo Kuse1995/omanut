@@ -737,7 +737,20 @@ async function processAIResponse(
       promptLength: agentPersonality.length
     });
 
-    // Build AI instructions
+    // Build AI instructions with current date/time awareness
+    const now = new Date();
+    const currentDate = now.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    const currentTime = now.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true 
+    });
+    
     let instructions = `You are a friendly AI assistant for ${company.name}`;
     
     if (company.industry) {
@@ -745,6 +758,11 @@ async function processAIResponse(
     }
     
     instructions += `.${agentPersonality}
+
+=== CURRENT DATE & TIME ===
+Today is ${currentDate}
+Current time: ${currentTime}
+Use this information to provide time-relevant responses (e.g., greet appropriately, understand booking dates, know if business is open).
 
 Business Information:
 - Business Name: ${company.name}
