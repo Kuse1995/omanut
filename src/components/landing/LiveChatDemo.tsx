@@ -73,20 +73,20 @@ const LiveChatDemo = () => {
         <div className="bg-card border border-border rounded-[2.5rem] p-2 shadow-2xl shadow-primary/10">
           <div className="bg-background rounded-[2rem] overflow-hidden">
             {/* Chat Header */}
-            <div className="bg-primary/10 px-4 py-3 border-b border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-primary" />
+            <div className="bg-primary/10 px-3 py-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-primary" />
                 </div>
                 <div>
-                  <p className="font-medium text-sm">Omanut AI</p>
-                  <p className="text-xs text-muted-foreground">Online • Typically replies instantly</p>
+                  <p className="font-medium text-xs">Omanut AI</p>
+                  <p className="text-[10px] text-muted-foreground">Online • Replies instantly</p>
                 </div>
               </div>
             </div>
 
             {/* Messages */}
-            <div className="h-80 overflow-y-auto p-4 space-y-3">
+            <div className="h-64 overflow-y-auto p-3 space-y-2">
               {messages.map((message, index) => (
                 <div
                   key={index}
@@ -118,21 +118,21 @@ const LiveChatDemo = () => {
             </div>
 
             {/* Input */}
-            <div className="p-3 border-t border-border">
+            <div className="p-2 border-t border-border">
               <div className="flex gap-2">
                 <Input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSend()}
                   placeholder="Type a message..."
-                  className="flex-1 rounded-full bg-muted border-0 text-sm"
+                  className="flex-1 rounded-full bg-muted border-0 text-xs h-8"
                 />
                 <Button
                   size="icon"
                   onClick={handleSend}
-                  className="rounded-full shrink-0"
+                  className="rounded-full shrink-0 h-8 w-8"
                 >
-                  <Send className="w-4 h-4" />
+                  <Send className="w-3 h-3" />
                 </Button>
               </div>
             </div>
