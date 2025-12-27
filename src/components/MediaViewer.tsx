@@ -27,7 +27,13 @@ export const MediaViewer = ({
   };
 
   const renderMedia = () => {
-    if (mediaType.startsWith('image/')) {
+    // Normalize media type check
+    const isImage = mediaType.startsWith('image') || mediaType === 'image';
+    const isVideo = mediaType.startsWith('video') || mediaType === 'video';
+    const isAudio = mediaType.startsWith('audio') || mediaType === 'audio';
+    const isPdf = mediaType === 'application/pdf' || mediaType === 'pdf';
+
+    if (isImage) {
       return (
         <img 
           src={mediaUrl} 
@@ -37,25 +43,42 @@ export const MediaViewer = ({
       );
     }
     
-    if (mediaType.startsWith('video/')) {
+    if (isVideo) {
       return (
         <video 
           controls 
+          autoPlay
           className="max-h-[80vh] max-w-full"
           src={mediaUrl}
         />
       );
     }
     
-    if (mediaType.startsWith('audio/')) {
+    if (isAudio) {
       return (
         <div className="flex flex-col items-center gap-4 p-8">
-          <audio controls className="w-full max-w-md">
+          <audio controls autoPlay className="w-full max-w-md">
             <source src={mediaUrl} type={mediaType} />
           </audio>
           <Button onClick={handleDownload} variant="outline">
             <Download className="h-4 w-4 mr-2" />
             Download Audio
+          </Button>
+        </div>
+      );
+    }
+
+    if (isPdf) {
+      return (
+        <div className="flex flex-col items-center gap-4 p-8 w-full h-[80vh]">
+          <iframe 
+            src={mediaUrl} 
+            className="w-full h-full rounded-lg border border-border"
+            title="PDF Viewer"
+          />
+          <Button onClick={handleDownload} variant="outline">
+            <Download className="h-4 w-4 mr-2" />
+            Download PDF
           </Button>
         </div>
       );
@@ -84,7 +107,7 @@ export const MediaViewer = ({
           >
             <X className="h-4 w-4" />
           </Button>
-          {mediaType.startsWith('image/') && (
+          {(mediaType.startsWith('image') || mediaType === 'image') && (
             <Button
               variant="ghost"
               size="icon"

@@ -37,51 +37,59 @@ export const ChatBubble = ({
   const renderMedia = () => {
     if (!metadata?.media_url) return null;
 
-    const mediaType = metadata.media_type || 'image';
+    const mediaType = metadata.media_type || 'image/jpeg';
     const fileName = metadata.file_name || 'file';
 
     if (mediaType.startsWith('image')) {
       return (
         <div 
-          className="cursor-pointer hover:opacity-90 transition-opacity mb-2"
-          onClick={() => onMediaClick?.(metadata.media_url!, 'image', fileName)}
+          className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5 group relative"
+          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'image/jpeg', fileName)}
         >
           <img 
             src={metadata.media_url} 
             alt="Shared" 
-            className="max-w-full rounded-lg max-h-64 object-cover" 
+            className="max-w-full rounded-lg max-h-48 object-cover" 
           />
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 rounded-lg transition-colors flex items-center justify-center">
+            <ImageIcon className="h-6 w-6 text-white opacity-0 group-hover:opacity-80 transition-opacity drop-shadow-lg" />
+          </div>
         </div>
       );
     } else if (mediaType.startsWith('video')) {
       return (
         <div 
-          className="cursor-pointer hover:opacity-90 transition-opacity mb-2"
-          onClick={() => onMediaClick?.(metadata.media_url!, 'video', fileName)}
+          className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
+          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'video/mp4', fileName)}
         >
-          <div className="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg">
-            <Video className="h-5 w-5 text-primary" />
-            <span className="text-sm truncate max-w-48">{fileName}</span>
+          <div className="flex items-center gap-2 p-2 bg-black/10 rounded-lg">
+            <Video className="h-4 w-4 text-primary" />
+            <span className="text-xs truncate max-w-40">{fileName}</span>
           </div>
         </div>
       );
-    } else if (mediaType === 'application/pdf') {
+    } else if (mediaType === 'application/pdf' || mediaType === 'pdf') {
       return (
         <div 
-          className="cursor-pointer hover:opacity-90 transition-opacity mb-2"
-          onClick={() => onMediaClick?.(metadata.media_url!, 'pdf', fileName)}
+          className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
+          onClick={() => onMediaClick?.(metadata.media_url!, 'application/pdf', fileName)}
         >
-          <div className="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg">
-            <FileText className="h-5 w-5 text-destructive" />
-            <span className="text-sm truncate max-w-48">{fileName}</span>
+          <div className="flex items-center gap-2 p-2 bg-black/10 rounded-lg">
+            <FileText className="h-4 w-4 text-destructive" />
+            <span className="text-xs truncate max-w-40">{fileName}</span>
           </div>
         </div>
       );
     } else if (mediaType.startsWith('audio')) {
       return (
-        <div className="flex items-center gap-2 p-3 bg-secondary/50 rounded-lg mb-2">
-          <Music className="h-5 w-5 text-accent" />
-          <span className="text-sm truncate max-w-48">{fileName}</span>
+        <div 
+          className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
+          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'audio/mpeg', fileName)}
+        >
+          <div className="flex items-center gap-2 p-2 bg-black/10 rounded-lg">
+            <Music className="h-4 w-4 text-accent" />
+            <span className="text-xs truncate max-w-40">{fileName}</span>
+          </div>
         </div>
       );
     }
