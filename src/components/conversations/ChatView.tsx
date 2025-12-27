@@ -157,7 +157,7 @@ export const ChatView = ({
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-3" ref={scrollAreaRef}>
-        <div className="space-y-0.5 max-w-3xl mx-auto">
+        <div className="space-y-0 max-w-3xl mx-auto">
           {conversation.messages.map((message, idx) => {
             const showDateDivider = idx === 0 || 
               format(new Date(message.created_at), 'yyyy-MM-dd') !== 
@@ -169,6 +169,21 @@ export const ChatView = ({
               const prevMessageTime = idx > 0 ? new Date(conversation.messages[idx - 1].created_at).getTime() : 0;
               return switchTime > prevMessageTime && switchTime <= messageTime;
             });
+
+            // Determine grouping - messages from same sender within 2 minutes are grouped
+            const prevMessage = idx > 0 ? conversation.messages[idx - 1] : null;
+            const nextMessage = idx < conversation.messages.length - 1 ? conversation.messages[idx + 1] : null;
+            
+            const isSameAsPrev = prevMessage && 
+              prevMessage.role === message.role &&
+              (new Date(message.created_at).getTime() - new Date(prevMessage.created_at).getTime()) < 120000;
+            
+            const isSameAsNext = nextMessage && 
+              nextMessage.role === message.role &&
+              (new Date(nextMessage.created_at).getTime() - new Date(message.created_at).getTime()) < 120000;
+            
+            const isFirstInGroup = !isSameAsPrev || showDateDivider || relevantSwitches.length > 0;
+            const isLastInGroup = !isSameAsNext;
 
             return (
               <div key={message.id}>
@@ -188,6 +203,9 @@ export const ChatView = ({
                   timestamp={message.created_at}
                   metadata={message.message_metadata}
                   onMediaClick={onMediaClick}
+                  isFirstInGroup={isFirstInGroup}
+                  isLastInGroup={isLastInGroup}
+                  showTimestamp={true}
                 />
               </div>
             );
