@@ -81,6 +81,22 @@ export interface AIConfig {
   boss_preferred_language: string;
   boss_report_frequency: string;
   boss_comparison_period: string;
+
+  // Supervisor Agent Configuration
+  supervisor_analysis_depth: string;
+  supervisor_focus_areas: string[];
+  supervisor_recommendation_style: string;
+  supervisor_context_window: number;
+  supervisor_research_enabled: boolean;
+  supervisor_pattern_detection: string[];
+  supervisor_urgency_triggers: {
+    high_value_customer: boolean;
+    complaint: boolean;
+    churn_risk: boolean;
+    escalation_needed: boolean;
+    competitor_mention: boolean;
+  };
+  supervisor_output_format: string;
 }
 
 const defaultConfig: AIConfig = {
@@ -134,6 +150,21 @@ const defaultConfig: AIConfig = {
   boss_preferred_language: 'en',
   boss_report_frequency: 'on_request',
   boss_comparison_period: 'last_week',
+  // Supervisor Agent defaults
+  supervisor_analysis_depth: 'balanced',
+  supervisor_focus_areas: ['conversion_optimization', 'customer_satisfaction'],
+  supervisor_recommendation_style: 'actionable',
+  supervisor_context_window: 10,
+  supervisor_research_enabled: true,
+  supervisor_pattern_detection: ['buying_signals', 'objections', 'sentiment_shifts'],
+  supervisor_urgency_triggers: {
+    high_value_customer: true,
+    complaint: true,
+    churn_risk: true,
+    escalation_needed: false,
+    competitor_mention: false,
+  },
+  supervisor_output_format: 'structured_json',
 };
 
 export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
@@ -206,6 +237,15 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
           boss_preferred_language: data.boss_preferred_language || defaultConfig.boss_preferred_language,
           boss_report_frequency: data.boss_report_frequency || defaultConfig.boss_report_frequency,
           boss_comparison_period: data.boss_comparison_period || defaultConfig.boss_comparison_period,
+          // Supervisor Agent config
+          supervisor_analysis_depth: data.supervisor_analysis_depth || defaultConfig.supervisor_analysis_depth,
+          supervisor_focus_areas: data.supervisor_focus_areas || defaultConfig.supervisor_focus_areas,
+          supervisor_recommendation_style: data.supervisor_recommendation_style || defaultConfig.supervisor_recommendation_style,
+          supervisor_context_window: data.supervisor_context_window ?? defaultConfig.supervisor_context_window,
+          supervisor_research_enabled: data.supervisor_research_enabled ?? defaultConfig.supervisor_research_enabled,
+          supervisor_pattern_detection: data.supervisor_pattern_detection || defaultConfig.supervisor_pattern_detection,
+          supervisor_urgency_triggers: (data.supervisor_urgency_triggers as AIConfig['supervisor_urgency_triggers']) || defaultConfig.supervisor_urgency_triggers,
+          supervisor_output_format: data.supervisor_output_format || defaultConfig.supervisor_output_format,
         };
         setConfig(loadedConfig);
         setOriginalConfig(loadedConfig);

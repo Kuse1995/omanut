@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AIConfig } from "../AIDeepSettings";
 import { BossReportingPanel } from "./BossReportingPanel";
-import { Users, HeadphonesIcon, TrendingUp, Crown, X, Plus, Router, AlertTriangle, ChevronDown, Settings } from "lucide-react";
+import { SupervisorConfigPanel } from "./SupervisorConfigPanel";
+import { Users, HeadphonesIcon, TrendingUp, Crown, X, Plus, Router, AlertTriangle, ChevronDown, Settings, Brain } from "lucide-react";
 
 interface AgentConfigPanelProps {
   config: AIConfig;
@@ -22,6 +23,7 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
   const [newTrigger, setNewTrigger] = useState('');
   const [agentTab, setAgentTab] = useState('routing');
   const [bossReportingOpen, setBossReportingOpen] = useState(false);
+  const [supervisorConfigOpen, setSupervisorConfigOpen] = useState(false);
 
   const addHandoffTrigger = () => {
     if (newTrigger.trim() && !config.auto_handoff_triggers.includes(newTrigger.trim())) {
@@ -114,7 +116,7 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
         </CardHeader>
         <CardContent>
           <Tabs value={agentTab} onValueChange={setAgentTab}>
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="routing" className="flex items-center gap-1">
                 <Router className="h-3 w-3" />
                 <span className="hidden sm:inline">General</span>
@@ -130,6 +132,10 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
               <TabsTrigger value="boss" className="flex items-center gap-1">
                 <Crown className="h-3 w-3" />
                 <span className="hidden sm:inline">Boss</span>
+              </TabsTrigger>
+              <TabsTrigger value="supervisor" className="flex items-center gap-1">
+                <Brain className="h-3 w-3" />
+                <span className="hidden sm:inline">Supervisor</span>
               </TabsTrigger>
             </TabsList>
 
@@ -238,6 +244,47 @@ export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps
                 </CollapsibleTrigger>
                 <CollapsibleContent className="mt-4">
                   <BossReportingPanel config={config} updateConfig={updateConfig} />
+                </CollapsibleContent>
+              </Collapsible>
+            </TabsContent>
+
+            <TabsContent value="supervisor" className="mt-4 space-y-4">
+              <div className="p-3 bg-purple-500/10 rounded-lg border border-purple-500/20">
+                <div className="flex items-center gap-2 text-sm font-medium text-purple-700 dark:text-purple-400">
+                  <Brain className="h-4 w-4" />
+                  Supervisor Agent Focus
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Strategic analysis, pattern detection, and conversation optimization
+                </p>
+              </div>
+              
+              {/* Supervisor Configuration */}
+              <Collapsible open={supervisorConfigOpen} onOpenChange={setSupervisorConfigOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <div className="flex items-center gap-2">
+                      <Settings className="h-4 w-4" />
+                      Supervisor Analysis Configuration
+                    </div>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${supervisorConfigOpen ? 'rotate-180' : ''}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-4">
+                  <SupervisorConfigPanel 
+                    config={{
+                      supervisor_enabled: config.supervisor_enabled,
+                      supervisor_analysis_depth: config.supervisor_analysis_depth,
+                      supervisor_focus_areas: config.supervisor_focus_areas,
+                      supervisor_recommendation_style: config.supervisor_recommendation_style,
+                      supervisor_context_window: config.supervisor_context_window,
+                      supervisor_research_enabled: config.supervisor_research_enabled,
+                      supervisor_pattern_detection: config.supervisor_pattern_detection,
+                      supervisor_urgency_triggers: config.supervisor_urgency_triggers,
+                      supervisor_output_format: config.supervisor_output_format,
+                    }}
+                    onConfigChange={updateConfig}
+                  />
                 </CollapsibleContent>
               </Collapsible>
             </TabsContent>
