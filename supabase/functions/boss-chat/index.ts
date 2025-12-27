@@ -154,6 +154,58 @@ serve(async (req) => {
       .join('\n\n') || '';
 
     const aiOverrides = company.company_ai_overrides?.[0];
+    
+    // ========== BOSS REPORTING CONFIGURATION ==========
+    const bossReportingStyle = aiOverrides?.boss_reporting_style || 'concise';
+    const bossDataFocus = aiOverrides?.boss_data_focus || ['revenue', 'conversations', 'reservations'];
+    const bossAlertTriggers = aiOverrides?.boss_alert_triggers || { low_engagement: true, missed_opportunities: true, negative_feedback: true };
+    const bossDailyBriefingTemplate = aiOverrides?.boss_daily_briefing_template || '';
+    const bossMetricGoals = aiOverrides?.boss_metric_goals || { daily_revenue: 0, weekly_conversations: 0, conversion_rate: 0 };
+    const bossPreferredLanguage = aiOverrides?.boss_preferred_language || 'en';
+    const bossComparisonPeriod = aiOverrides?.boss_comparison_period || 'last_week';
+    
+    // Build reporting style instructions
+    let reportingStyleInstructions = '';
+    switch (bossReportingStyle) {
+      case 'concise':
+        reportingStyleInstructions = 'Keep responses brief and use bullet points. Focus on key metrics and actionable insights.';
+        break;
+      case 'detailed':
+        reportingStyleInstructions = 'Provide detailed narrative explanations with context and analysis. Explain trends and patterns.';
+        break;
+      case 'data_heavy':
+        reportingStyleInstructions = 'Lead with numbers and metrics. Include percentages, comparisons, and data visualizations in text form.';
+        break;
+      case 'executive':
+        reportingStyleInstructions = 'Provide executive-level summaries focusing on strategic implications and high-level trends.';
+        break;
+    }
+    
+    // Build data focus instructions
+    const dataFocusInstructions = `PRIORITIZE DATA IN REPORTS:\n${bossDataFocus.map((f: string) => `- ${f.replace(/_/g, ' ').toUpperCase()}`).join('\n')}`;
+    
+    // Build goal comparison instructions
+    let goalInstructions = '';
+    if (bossMetricGoals.daily_revenue > 0 || bossMetricGoals.weekly_conversations > 0 || bossMetricGoals.conversion_rate > 0) {
+      goalInstructions = `\n\nGOALS TO COMPARE AGAINST:
+${bossMetricGoals.daily_revenue > 0 ? `- Daily Revenue Target: ${company.currency_prefix}${bossMetricGoals.daily_revenue}` : ''}
+${bossMetricGoals.weekly_conversations > 0 ? `- Weekly Conversation Target: ${bossMetricGoals.weekly_conversations}` : ''}
+${bossMetricGoals.conversion_rate > 0 ? `- Conversion Rate Target: ${bossMetricGoals.conversion_rate}%` : ''}
+Always compare actual performance against these goals when providing updates.`;
+    }
+    
+    // Build language instruction
+    const languageInstruction = bossPreferredLanguage !== 'en' 
+      ? `\n\nIMPORTANT: Respond in ${bossPreferredLanguage === 'es' ? 'Spanish' : bossPreferredLanguage === 'fr' ? 'French' : bossPreferredLanguage === 'pt' ? 'Portuguese' : bossPreferredLanguage === 'sw' ? 'Swahili' : bossPreferredLanguage === 'zu' ? 'Zulu' : 'English'}.` 
+      : '';
+    
+    // Build comparison period instruction
+    const comparisonInstruction = `\n\nDEFAULT COMPARISON: When comparing data, use ${bossComparisonPeriod.replace(/_/g, ' ')} as the default comparison period.`;
+    
+    // Build daily briefing template instruction
+    const briefingInstruction = bossDailyBriefingTemplate 
+      ? `\n\nDAILY BRIEFING FORMAT:\n${bossDailyBriefingTemplate}` 
+      : '';
 
     // Format data concisely for AI with actual conversation content
     const conversationsSummary = conversationsWithMessages?.length 
@@ -218,6 +270,14 @@ serve(async (req) => {
 
 Your role is to analyze customer interactions, identify sales opportunities, and provide strategic marketing recommendations to drive revenue growth.
 
+=== REPORTING STYLE ===
+${reportingStyleInstructions}
+${dataFocusInstructions}
+${goalInstructions}
+${comparisonInstruction}
+${briefingInstruction}
+${languageInstruction}
+
 BUSINESS INFO:
 Type: ${company.business_type}
 Hours: ${company.hours}
@@ -233,17 +293,17 @@ BUSINESS STATISTICS:
 🔄 Conversion Rate: ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%
 
 CURRENT OPERATIONAL DATA:
-${conversationsSummary}
+${bossDataFocus.includes('conversations') ? conversationsSummary : '(Conversations data not prioritized)'}
 
 ${demoBookingsSummary}
 
-${reservationsSummary}
+${bossDataFocus.includes('reservations') ? reservationsSummary : '(Reservations data not prioritized)'}
 
-${actionItemsSummary}
+${bossDataFocus.includes('action_items') ? actionItemsSummary : '(Action items data not prioritized)'}
 
-${clientInsightsSummary}
+${bossDataFocus.includes('customer_insights') ? clientInsightsSummary : '(Client insights data not prioritized)'}
 
-${paymentSummary}
+${bossDataFocus.includes('revenue') ? paymentSummary : '(Payment data not prioritized)'}
 
 ${segmentsSummary}
 

@@ -61,6 +61,26 @@ export interface AIConfig {
   ab_test_enabled: boolean;
   ab_test_variant: string;
   ab_test_model: string;
+
+  // Boss Reporting Configuration
+  boss_reporting_style: string;
+  boss_data_focus: string[];
+  boss_alert_triggers: {
+    low_engagement: boolean;
+    missed_opportunities: boolean;
+    negative_feedback: boolean;
+    high_value_customers: boolean;
+    unusual_patterns: boolean;
+  };
+  boss_daily_briefing_template: string;
+  boss_metric_goals: {
+    daily_revenue: number;
+    weekly_conversations: number;
+    conversion_rate: number;
+  };
+  boss_preferred_language: string;
+  boss_report_frequency: string;
+  boss_comparison_period: string;
 }
 
 const defaultConfig: AIConfig = {
@@ -95,6 +115,25 @@ const defaultConfig: AIConfig = {
   ab_test_enabled: false,
   ab_test_variant: '',
   ab_test_model: '',
+  // Boss Reporting defaults
+  boss_reporting_style: 'concise',
+  boss_data_focus: ['revenue', 'conversations', 'reservations'],
+  boss_alert_triggers: {
+    low_engagement: true,
+    missed_opportunities: true,
+    negative_feedback: true,
+    high_value_customers: false,
+    unusual_patterns: false,
+  },
+  boss_daily_briefing_template: '',
+  boss_metric_goals: {
+    daily_revenue: 0,
+    weekly_conversations: 0,
+    conversion_rate: 0,
+  },
+  boss_preferred_language: 'en',
+  boss_report_frequency: 'on_request',
+  boss_comparison_period: 'last_week',
 };
 
 export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
@@ -158,6 +197,15 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
           ab_test_enabled: data.ab_test_enabled ?? defaultConfig.ab_test_enabled,
           ab_test_variant: data.ab_test_variant || '',
           ab_test_model: data.ab_test_model || '',
+          // Boss Reporting config
+          boss_reporting_style: data.boss_reporting_style || defaultConfig.boss_reporting_style,
+          boss_data_focus: data.boss_data_focus || defaultConfig.boss_data_focus,
+          boss_alert_triggers: (data.boss_alert_triggers as AIConfig['boss_alert_triggers']) || defaultConfig.boss_alert_triggers,
+          boss_daily_briefing_template: data.boss_daily_briefing_template || '',
+          boss_metric_goals: (data.boss_metric_goals as AIConfig['boss_metric_goals']) || defaultConfig.boss_metric_goals,
+          boss_preferred_language: data.boss_preferred_language || defaultConfig.boss_preferred_language,
+          boss_report_frequency: data.boss_report_frequency || defaultConfig.boss_report_frequency,
+          boss_comparison_period: data.boss_comparison_period || defaultConfig.boss_comparison_period,
         };
         setConfig(loadedConfig);
         setOriginalConfig(loadedConfig);

@@ -537,6 +537,14 @@ export type Database = {
           auto_handoff_triggers: string[] | null
           banned_topics: string
           boss_agent_prompt: string | null
+          boss_alert_triggers: Json | null
+          boss_comparison_period: string | null
+          boss_daily_briefing_template: string | null
+          boss_data_focus: string[] | null
+          boss_metric_goals: Json | null
+          boss_preferred_language: string | null
+          boss_report_frequency: string | null
+          boss_reporting_style: string | null
           company_id: string
           complexity_threshold: number | null
           content_filtering_level: string | null
@@ -576,6 +584,14 @@ export type Database = {
           auto_handoff_triggers?: string[] | null
           banned_topics?: string
           boss_agent_prompt?: string | null
+          boss_alert_triggers?: Json | null
+          boss_comparison_period?: string | null
+          boss_daily_briefing_template?: string | null
+          boss_data_focus?: string[] | null
+          boss_metric_goals?: Json | null
+          boss_preferred_language?: string | null
+          boss_report_frequency?: string | null
+          boss_reporting_style?: string | null
           company_id: string
           complexity_threshold?: number | null
           content_filtering_level?: string | null
@@ -615,6 +631,14 @@ export type Database = {
           auto_handoff_triggers?: string[] | null
           banned_topics?: string
           boss_agent_prompt?: string | null
+          boss_alert_triggers?: Json | null
+          boss_comparison_period?: string | null
+          boss_daily_briefing_template?: string | null
+          boss_data_focus?: string[] | null
+          boss_metric_goals?: Json | null
+          boss_preferred_language?: string | null
+          boss_report_frequency?: string | null
+          boss_reporting_style?: string | null
           company_id?: string
           complexity_threshold?: number | null
           content_filtering_level?: string | null
