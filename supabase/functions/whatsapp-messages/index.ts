@@ -474,6 +474,37 @@ async function processAIResponse(
   if (imageGenCommand.isImageCommand) {
     console.log(`[IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
     
+    // For edit commands, check if user sent an image with this message or recently
+    let sourceImageUrl: string | undefined;
+    
+    if (imageGenCommand.type === 'edit') {
+      // First priority: image sent with this message
+      if (storedMediaUrls.length > 0 && storedMediaTypes.some(t => t?.includes('image'))) {
+        const imageIndex = storedMediaTypes.findIndex(t => t?.includes('image'));
+        if (imageIndex !== -1) {
+          sourceImageUrl = storedMediaUrls[imageIndex];
+          console.log('[IMAGE-EDIT] Using image from current message:', sourceImageUrl?.substring(0, 50));
+        }
+      }
+      
+      // Second priority: check for recently received images in conversation
+      if (!sourceImageUrl) {
+        const { data: recentMedia } = await supabase
+          .from('whatsapp_messages')
+          .select('media_url, media_type')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'inbound')
+          .ilike('media_type', '%image%')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        
+        if (recentMedia?.[0]?.media_url) {
+          sourceImageUrl = recentMedia[0].media_url;
+          console.log('[IMAGE-EDIT] Using recent user-uploaded image:', sourceImageUrl?.substring(0, 50));
+        }
+      }
+    }
+    
     try {
       // Call the image generation agent
       const imageGenResponse = await fetch(
@@ -487,7 +518,8 @@ async function processAIResponse(
             conversationId,
             prompt: imageGenCommand.prompt,
             messageType: imageGenCommand.type,
-            feedbackData: imageGenCommand.feedbackData
+            feedbackData: imageGenCommand.feedbackData,
+            editData: sourceImageUrl ? { sourceImageUrl } : undefined
           })
         }
       );

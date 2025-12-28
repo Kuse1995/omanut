@@ -601,9 +601,10 @@ serve(async (req) => {
       }
       
       case 'edit': {
-        // Get source image - from editData or most recent generated image
+        // Get source image - priority: 1) editData (user-uploaded), 2) recent generated image
         let sourceImageUrl = editData?.sourceImageUrl;
         let sourceImageId: string | null = null;
+        let isUserUpload = !!editData?.sourceImageUrl;
         
         if (!sourceImageUrl) {
           const recentImage = await getRecentImage(supabase, companyId, conversationId);
@@ -614,9 +615,11 @@ serve(async (req) => {
         }
         
         if (!sourceImageUrl) {
-          responseMessage = "No image found to edit. Please generate an image first using 'Generate: [description]' 🎨";
+          responseMessage = "📷 No image found to edit!\n\nYou can:\n• Send me an image + edit command (e.g., send photo with 'make it brighter')\n• Generate an image first: 'Generate: [description]'\n\nThen I can edit it for you! ✏️";
           break;
         }
+        
+        console.log(`[IMAGE-EDIT] Editing ${isUserUpload ? 'user-uploaded' : 'generated'} image`);
         
         const editResult = await editImage(sourceImageUrl, prompt, context, company.name);
         imageUrl = editResult.imageUrl;
@@ -627,7 +630,7 @@ serve(async (req) => {
           .insert({
             company_id: companyId,
             conversation_id: conversationId,
-            prompt: `[Edit] ${prompt}`,
+            prompt: `[Edit${isUserUpload ? ' - User Upload' : ''}] ${prompt}`,
             image_url: imageUrl
           })
           .select()
@@ -639,10 +642,13 @@ serve(async (req) => {
           generated_image_id: savedEditedImage?.id,
           prompt: `[Edit] ${prompt}`,
           image_url: imageUrl,
-          feedback_notes: `Edited from image ${sourceImageId || 'external'}`
+          feedback_notes: isUserUpload 
+            ? 'Edited from user-uploaded image' 
+            : `Edited from generated image ${sourceImageId || 'unknown'}`
         });
         
-        responseMessage = `✏️ Here's your edited image!\n\nEdit applied: ${prompt}\n\nWant more changes? Just describe what you'd like!\n• "make it brighter"\n• "add text: Sale 50% off"\n• "remove background"\n\nReply 👍 if you like it!`;
+        const sourceLabel = isUserUpload ? 'your uploaded image' : 'your image';
+        responseMessage = `✏️ Here's ${sourceLabel} with your edit!\n\nEdit applied: ${prompt}\n\nWant more changes? Just describe what you'd like!\n• "make it brighter"\n• "add text: Sale 50% off"\n• "remove background"\n• "crop to square"\n\nReply 👍 if you like it!`;
         
         // Send image via WhatsApp
         if (customerPhone) {
