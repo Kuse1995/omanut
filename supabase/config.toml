@@ -102,3 +102,6 @@ verify_jwt = false
 [functions.whatsapp-image-gen]
 verify_jwt = false
 timeout = 60
+
+[functions.analyze-reference-image]
+verify_jwt = true

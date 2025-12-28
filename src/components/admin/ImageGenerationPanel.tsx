@@ -27,9 +27,21 @@ import {
   Upload,
   Trash2,
   ImagePlus,
-  Loader2
+  Loader2,
+  Wand2,
+  Check,
+  Palette
 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+
+interface ImageAnalysis {
+  style_description: string;
+  business_context: string;
+  color_palette: string[];
+  mood_keywords: string[];
+  suggested_prompts: string[];
+  confidence: number;
+}
 
 interface ReferenceImage {
   id: string;
@@ -88,6 +100,11 @@ export const ImageGenerationPanel = () => {
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // AI Analysis state
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<ImageAnalysis | null>(null);
+  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -257,6 +274,66 @@ export const ImageGenerationPanel = () => {
       .from('company-media')
       .getPublicUrl(filePath);
     return data.publicUrl;
+  };
+
+  const analyzeReferenceImages = async () => {
+    if (!selectedCompany || referenceImages.length === 0) {
+      toast.error('Upload at least one reference image first');
+      return;
+    }
+    
+    setAnalyzing(true);
+    
+    try {
+      // Get public URLs for all reference images
+      const imageUrls = referenceImages.map(img => getImageUrl(img.file_path));
+      
+      const { data, error } = await supabase.functions.invoke('analyze-reference-image', {
+        body: {
+          imageUrls,
+          companyName: selectedCompany.name
+        }
+      });
+      
+      if (error) throw error;
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      if (data.analysis) {
+        setAnalysisResult(data.analysis);
+        setShowAnalysisDialog(true);
+        toast.success('Analysis complete!');
+      }
+    } catch (error) {
+      console.error('Error analyzing images:', error);
+      toast.error('Failed to analyze images');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const applyAnalysis = () => {
+    if (!analysisResult) return;
+    
+    // Apply the analysis results to the form
+    if (analysisResult.style_description) {
+      setStyleDescription(analysisResult.style_description);
+    }
+    if (analysisResult.business_context) {
+      setBusinessContext(analysisResult.business_context);
+    }
+    if (analysisResult.suggested_prompts && analysisResult.suggested_prompts.length > 0) {
+      setSamplePrompts(prev => {
+        const existing = prev.trim();
+        const newPrompts = analysisResult.suggested_prompts.join('\n');
+        return existing ? `${existing}\n${newPrompts}` : newPrompts;
+      });
+    }
+    
+    setShowAnalysisDialog(false);
+    toast.success('Analysis applied to settings');
   };
 
   const saveSettings = async () => {
@@ -629,29 +706,46 @@ export const ImageGenerationPanel = () => {
                       Upload brand/product images as visual context for AI generation
                     </p>
                   </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) uploadReferenceImage(file);
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingRef}
-                  >
-                    {uploadingRef ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4 mr-2" />
+                  <div className="flex gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadReferenceImage(file);
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingRef}
+                    >
+                      {uploadingRef ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      {uploadingRef ? 'Uploading...' : 'Upload'}
+                    </Button>
+                    {referenceImages.length > 0 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={analyzeReferenceImages}
+                        disabled={analyzing}
+                      >
+                        {analyzing ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-4 w-4 mr-2" />
+                        )}
+                        {analyzing ? 'Analyzing...' : 'AI Analyze'}
+                      </Button>
                     )}
-                    {uploadingRef ? 'Uploading...' : 'Upload Image'}
-                  </Button>
+                  </div>
                 </div>
 
                 {referenceImages.length === 0 ? (
@@ -756,6 +850,100 @@ export const ImageGenerationPanel = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Analysis Results Dialog */}
+      <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Wand2 className="h-5 w-5 text-primary" />
+              AI Style Analysis
+            </DialogTitle>
+            <DialogDescription>
+              Based on your reference images, here's what the AI detected
+            </DialogDescription>
+          </DialogHeader>
+          
+          {analysisResult && (
+            <div className="space-y-4">
+              {/* Confidence Badge */}
+              <div className="flex items-center gap-2">
+                <Badge variant={analysisResult.confidence > 0.7 ? "default" : "secondary"}>
+                  {Math.round(analysisResult.confidence * 100)}% confidence
+                </Badge>
+              </div>
+
+              {/* Style Description */}
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Style Description</Label>
+                <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
+                  {analysisResult.style_description}
+                </p>
+              </div>
+
+              {/* Business Context */}
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Business Context</Label>
+                <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
+                  {analysisResult.business_context}
+                </p>
+              </div>
+
+              {/* Color Palette */}
+              {analysisResult.color_palette && analysisResult.color_palette.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium flex items-center gap-1">
+                    <Palette className="h-4 w-4" />
+                    Color Palette
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    {analysisResult.color_palette.map((color, i) => (
+                      <Badge key={i} variant="outline">{color}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Mood Keywords */}
+              {analysisResult.mood_keywords && analysisResult.mood_keywords.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Mood & Keywords</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {analysisResult.mood_keywords.map((keyword, i) => (
+                      <Badge key={i} variant="secondary">{keyword}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Suggested Prompts */}
+              {analysisResult.suggested_prompts && analysisResult.suggested_prompts.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Suggested Prompts</Label>
+                  <ul className="text-sm text-muted-foreground space-y-1">
+                    {analysisResult.suggested_prompts.map((prompt, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span className="text-primary">•</span>
+                        {prompt}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowAnalysisDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={applyAnalysis}>
+              <Check className="h-4 w-4 mr-2" />
+              Apply to Settings
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
