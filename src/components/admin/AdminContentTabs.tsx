@@ -6,6 +6,7 @@ import { CompanySettingsPanel } from './CompanySettingsPanel';
 import { BillingPanel } from './BillingPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 import { AIControlPanel } from './AIControlPanel';
+import { ImageGenerationPanel } from './ImageGenerationPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
@@ -32,6 +33,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
             Select a company to access AI Control
           </div>
         );
+      case 'image-gen':
+        return <ImageGenerationPanel />;
       case 'settings':
         return <CompanySettingsPanel />;
       case 'billing':
