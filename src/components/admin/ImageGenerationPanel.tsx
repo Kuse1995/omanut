@@ -188,6 +188,13 @@ export const ImageGenerationPanel = () => {
   const uploadReferenceImages = async (files: FileList | File[]) => {
     if (!selectedCompany) return;
     
+    // Check authentication first
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error('Please log in to upload images');
+      return;
+    }
+    
     const fileArray = Array.from(files);
     const validFiles = fileArray.filter(file => {
       if (!file.type.startsWith('image/')) {
@@ -214,13 +221,14 @@ export const ImageGenerationPanel = () => {
         const ext = file.name.split('.').pop() || 'jpg';
         const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
         
-        // Upload to storage
+        // Upload to storage with upsert to handle potential conflicts
         const { error: uploadError } = await supabase.storage
           .from('company-media')
-          .upload(filePath, file);
+          .upload(filePath, file, { upsert: true });
         
         if (uploadError) {
           console.error(`Failed to upload ${file.name}:`, uploadError);
+          toast.error(`Failed to upload ${file.name}: ${uploadError.message}`);
           continue;
         }
         
