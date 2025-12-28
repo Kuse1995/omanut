@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useCompany } from '@/context/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,9 +23,21 @@ import {
   ExternalLink,
   RefreshCw,
   Download,
-  Eye
+  Eye,
+  Upload,
+  Trash2,
+  ImagePlus,
+  Loader2
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+interface ReferenceImage {
+  id: string;
+  file_name: string;
+  file_path: string;
+  description: string | null;
+  created_at: string;
+}
 
 interface GeneratedImage {
   id: string;
@@ -71,6 +83,11 @@ export const ImageGenerationPanel = () => {
   const [businessContext, setBusinessContext] = useState('');
   const [styleDescription, setStyleDescription] = useState('');
   const [samplePrompts, setSamplePrompts] = useState('');
+  
+  // Reference images state
+  const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
+  const [uploadingRef, setUploadingRef] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -102,6 +119,17 @@ export const ImageGenerationPanel = () => {
         .limit(100);
       
       setFeedback(feedbackData || []);
+
+      // Load reference images from company_media
+      const { data: refImages } = await supabase
+        .from('company_media')
+        .select('id, file_name, file_path, description, created_at')
+        .eq('company_id', selectedCompany.id)
+        .in('category', ['promotional', 'products', 'logo'])
+        .order('created_at', { ascending: false })
+        .limit(20);
+      
+      setReferenceImages(refImages || []);
 
       // Load settings
       const { data: settingsData } = await supabase
@@ -137,6 +165,98 @@ export const ImageGenerationPanel = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const uploadReferenceImage = async (file: File) => {
+    if (!selectedCompany) return;
+    
+    // Validate file
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File size must be less than 10MB');
+      return;
+    }
+    
+    setUploadingRef(true);
+    
+    try {
+      const timestamp = Date.now();
+      const ext = file.name.split('.').pop() || 'jpg';
+      const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
+      
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('company-media')
+        .upload(filePath, file);
+      
+      if (uploadError) throw uploadError;
+      
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('company-media')
+        .getPublicUrl(filePath);
+      
+      // Create record in company_media
+      const { error: dbError } = await supabase
+        .from('company_media')
+        .insert({
+          company_id: selectedCompany.id,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+          media_type: 'image',
+          category: 'promotional',
+          description: 'Reference image for AI generation'
+        });
+      
+      if (dbError) throw dbError;
+      
+      toast.success('Reference image uploaded');
+      loadData();
+    } catch (error) {
+      console.error('Error uploading reference image:', error);
+      toast.error('Failed to upload image');
+    } finally {
+      setUploadingRef(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const deleteReferenceImage = async (image: ReferenceImage) => {
+    if (!selectedCompany) return;
+    
+    try {
+      // Delete from storage
+      await supabase.storage
+        .from('company-media')
+        .remove([image.file_path]);
+      
+      // Delete from database
+      await supabase
+        .from('company_media')
+        .delete()
+        .eq('id', image.id);
+      
+      toast.success('Image deleted');
+      setReferenceImages(prev => prev.filter(img => img.id !== image.id));
+    } catch (error) {
+      console.error('Error deleting image:', error);
+      toast.error('Failed to delete image');
+    }
+  };
+
+  const getImageUrl = (filePath: string) => {
+    const { data } = supabase.storage
+      .from('company-media')
+      .getPublicUrl(filePath);
+    return data.publicUrl;
   };
 
   const saveSettings = async () => {
@@ -498,6 +618,87 @@ export const ImageGenerationPanel = () => {
                 <p className="text-xs text-muted-foreground">
                   Example prompts to guide the AI style. These will be suggested to users.
                 </p>
+              </div>
+
+              {/* Reference Images Section */}
+              <div className="space-y-3 pt-4 border-t">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-base font-medium">Reference Images</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Upload brand/product images as visual context for AI generation
+                    </p>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadReferenceImage(file);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingRef}
+                  >
+                    {uploadingRef ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4 mr-2" />
+                    )}
+                    {uploadingRef ? 'Uploading...' : 'Upload Image'}
+                  </Button>
+                </div>
+
+                {referenceImages.length === 0 ? (
+                  <div 
+                    className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <ImagePlus className="h-10 w-10 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Click to upload reference images
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      PNG, JPG up to 10MB
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 gap-3">
+                    {referenceImages.map((img) => (
+                      <div
+                        key={img.id}
+                        className="group relative aspect-square rounded-lg overflow-hidden border bg-muted"
+                      >
+                        <img
+                          src={getImageUrl(img.file_path)}
+                          alt={img.file_name}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => deleteReferenceImage(img)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    <div 
+                      className="aspect-square rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer hover:border-primary/50 transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Button onClick={saveSettings} disabled={saving} className="w-full">
