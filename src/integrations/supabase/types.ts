@@ -1156,35 +1156,122 @@ export type Database = {
           },
         ]
       }
+      image_generation_feedback: {
+        Row: {
+          caption_suggestion: string | null
+          caption_used: boolean | null
+          company_id: string
+          created_at: string
+          engagement_score: number | null
+          enhanced_prompt: string | null
+          feedback_notes: string | null
+          feedback_type: string | null
+          generated_image_id: string | null
+          id: string
+          image_url: string
+          learned_preferences: Json | null
+          posted_at: string | null
+          posting_time_suggestion: string | null
+          prompt: string
+          rating: number | null
+          updated_at: string
+          was_posted: boolean | null
+        }
+        Insert: {
+          caption_suggestion?: string | null
+          caption_used?: boolean | null
+          company_id: string
+          created_at?: string
+          engagement_score?: number | null
+          enhanced_prompt?: string | null
+          feedback_notes?: string | null
+          feedback_type?: string | null
+          generated_image_id?: string | null
+          id?: string
+          image_url: string
+          learned_preferences?: Json | null
+          posted_at?: string | null
+          posting_time_suggestion?: string | null
+          prompt: string
+          rating?: number | null
+          updated_at?: string
+          was_posted?: boolean | null
+        }
+        Update: {
+          caption_suggestion?: string | null
+          caption_used?: boolean | null
+          company_id?: string
+          created_at?: string
+          engagement_score?: number | null
+          enhanced_prompt?: string | null
+          feedback_notes?: string | null
+          feedback_type?: string | null
+          generated_image_id?: string | null
+          id?: string
+          image_url?: string
+          learned_preferences?: Json | null
+          posted_at?: string | null
+          posting_time_suggestion?: string | null
+          prompt?: string
+          rating?: number | null
+          updated_at?: string
+          was_posted?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "image_generation_feedback_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "image_generation_feedback_generated_image_id_fkey"
+            columns: ["generated_image_id"]
+            isOneToOne: false
+            referencedRelation: "generated_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       image_generation_settings: {
         Row: {
+          best_posting_times: string[] | null
           business_context: string | null
           company_id: string
           created_at: string
           enabled: boolean
           id: string
+          learned_style_preferences: Json | null
           sample_prompts: string[] | null
           style_description: string | null
+          top_performing_prompts: string[] | null
           updated_at: string
         }
         Insert: {
+          best_posting_times?: string[] | null
           business_context?: string | null
           company_id: string
           created_at?: string
           enabled?: boolean
           id?: string
+          learned_style_preferences?: Json | null
           sample_prompts?: string[] | null
           style_description?: string | null
+          top_performing_prompts?: string[] | null
           updated_at?: string
         }
         Update: {
+          best_posting_times?: string[] | null
           business_context?: string | null
           company_id?: string
           created_at?: string
           enabled?: boolean
           id?: string
+          learned_style_preferences?: Json | null
           sample_prompts?: string[] | null
           style_description?: string | null
+          top_performing_prompts?: string[] | null
           updated_at?: string
         }
         Relationships: [

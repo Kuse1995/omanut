@@ -43,6 +43,55 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   return 'complex';
 }
 
+// Detect image generation commands from WhatsApp messages
+function detectImageGenCommand(message: string): { 
+  isImageCommand: boolean; 
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | null;
+  prompt: string;
+  feedbackData?: { feedbackType?: string };
+} {
+  const lowerMsg = message.toLowerCase().trim();
+  
+  // Generate image commands
+  const generatePatterns = [
+    /^(generate|create|make|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
+    /^image:\s*(.+)/i,
+    /^img:\s*(.+)/i,
+    /^🎨\s*(.+)/i,
+  ];
+  
+  for (const pattern of generatePatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const prompt = match[match.length - 1]?.trim() || match[1]?.trim();
+      if (prompt && prompt.length > 3) {
+        return { isImageCommand: true, type: 'generate', prompt };
+      }
+    }
+  }
+  
+  // Caption request
+  if (lowerMsg.includes('caption for') || lowerMsg.includes('what to post') || lowerMsg.includes('suggest text for')) {
+    return { isImageCommand: true, type: 'caption', prompt: message };
+  }
+  
+  // Suggestion request
+  if (lowerMsg.includes('what should i post') || lowerMsg.includes('post idea') || lowerMsg.includes('content idea') || lowerMsg.includes('suggest a post')) {
+    return { isImageCommand: true, type: 'suggest', prompt: message };
+  }
+  
+  // Feedback patterns - only after recent image generation
+  if (lowerMsg.includes('👍') || lowerMsg === 'love it' || lowerMsg === 'perfect' || lowerMsg === 'great image') {
+    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_up' } };
+  }
+  
+  if (lowerMsg.includes('👎') || lowerMsg === 'not good' || lowerMsg === 'try again' || lowerMsg === 'different style') {
+    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_down' } };
+  }
+  
+  return { isImageCommand: false, type: null, prompt: '' };
+}
+
 // Agent routing function with configurable model from database
 async function routeToAgent(
   userMessage: string,
@@ -387,6 +436,51 @@ async function processAIResponse(
 ) {
   console.log('[BACKGROUND] Starting AI processing for conversation:', conversationId);
   
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  );
+
+  // ========== IMAGE GENERATION COMMAND DETECTION ==========
+  const imageGenCommand = detectImageGenCommand(userMessage);
+  
+  if (imageGenCommand.isImageCommand) {
+    console.log(`[IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
+    
+    try {
+      // Call the image generation agent
+      const imageGenResponse = await fetch(
+        `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-image-gen`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            companyId,
+            customerPhone,
+            conversationId,
+            prompt: imageGenCommand.prompt,
+            messageType: imageGenCommand.type,
+            feedbackData: imageGenCommand.feedbackData
+          })
+        }
+      );
+      
+      if (imageGenResponse.ok) {
+        const result = await imageGenResponse.json();
+        console.log('[IMAGE-GEN] Success:', result.success);
+        // Response already sent by image-gen agent via WhatsApp
+        return;
+      } else {
+        console.error('[IMAGE-GEN] Agent error:', await imageGenResponse.text());
+        // Fall through to regular processing
+      }
+    } catch (imageGenError) {
+      console.error('[IMAGE-GEN] Error calling agent:', imageGenError);
+      // Fall through to regular processing
+    }
+  }
+  
   // Classify message complexity
   const messageComplexity = classifyMessageComplexity(userMessage);
   console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
@@ -402,12 +496,6 @@ async function processAIResponse(
     hasGuests,
     messagePreview: userMessage.substring(0, 100)
   });
-  
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
 
   // Analyze customer images if present
   let imageAnalysisContext = '';
