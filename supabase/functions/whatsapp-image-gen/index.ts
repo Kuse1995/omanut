@@ -11,7 +11,7 @@ interface ImageGenRequest {
   customerPhone: string;
   conversationId: string;
   prompt: string;
-  messageType: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit';
+  messageType: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history';
   feedbackData?: {
     imageId?: string;
     rating?: number;
@@ -25,7 +25,7 @@ interface ImageGenRequest {
 // Detect image generation commands from WhatsApp messages
 export function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
-  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | null;
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
   prompt: string;
   feedbackData?: any;
 } {
@@ -75,6 +75,25 @@ export function detectImageGenCommand(message: string): {
       if (prompt && prompt.length > 3) {
         return { isImageCommand: true, type: 'generate', prompt };
       }
+    }
+  }
+  
+  // History commands - view recent images
+  const historyPatterns = [
+    /^show\s+(my\s+)?images?$/i,
+    /^my\s+images?$/i,
+    /^image\s+history$/i,
+    /^recent\s+images?$/i,
+    /^view\s+(my\s+)?images?$/i,
+    /^list\s+(my\s+)?images?$/i,
+    /^gallery$/i,
+    /^📸$/,
+    /^history$/i,
+  ];
+  
+  for (const pattern of historyPatterns) {
+    if (pattern.test(lowerMsg)) {
+      return { isImageCommand: true, type: 'history', prompt: '' };
     }
   }
   
@@ -664,6 +683,44 @@ serve(async (req) => {
           feedbackData?.feedbackType || 'thumbs_up',
           feedbackData?.imageId
         );
+        break;
+      }
+      
+      case 'history': {
+        // Fetch recent images for this company/conversation
+        let historyQuery = supabase
+          .from('generated_images')
+          .select('id, prompt, image_url, created_at')
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        
+        if (conversationId) {
+          historyQuery = historyQuery.eq('conversation_id', conversationId);
+        }
+        
+        const { data: recentImages } = await historyQuery;
+        
+        if (!recentImages || recentImages.length === 0) {
+          responseMessage = "📸 No images yet!\n\nYou haven't generated any images. Try:\n• 'Generate: a promotional image for [product]'\n• 'Create image of [your idea]'\n• 🎨 [description]\n\nI'll create professional images for your social media!";
+        } else {
+          // Send first image with gallery info
+          const firstImage = recentImages[0];
+          const totalCount = recentImages.length;
+          
+          const galleryList = recentImages.map((img: any, i: number) => {
+            const date = new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const shortPrompt = img.prompt.replace(/^\[Edit.*?\]\s*/i, '').substring(0, 40);
+            return `${i + 1}. ${shortPrompt}${shortPrompt.length >= 40 ? '...' : ''} (${date})`;
+          }).join('\n');
+          
+          responseMessage = `📸 *Your Recent Images (${totalCount}):*\n\n${galleryList}\n\n👆 Here's your most recent image!\n\nTo edit any image, just describe what you want:\n• "make it brighter"\n• "add text: 50% OFF"\n• "edit: change the background"`;
+          
+          // Send the most recent image
+          if (customerPhone && firstImage.image_url) {
+            await sendWhatsAppImage(customerPhone, firstImage.image_url, responseMessage, company);
+          }
+        }
         break;
       }
     }

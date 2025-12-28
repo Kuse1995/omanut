@@ -46,13 +46,32 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
 // Detect image generation commands from WhatsApp messages
 function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
-  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | null;
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
   prompt: string;
   feedbackData?: { feedbackType?: string };
 } {
   const lowerMsg = message.toLowerCase().trim();
   
-  // Edit image commands - check these first for priority
+  // History commands - view recent images (check first for priority)
+  const historyPatterns = [
+    /^show\s+(my\s+)?images?$/i,
+    /^my\s+images?$/i,
+    /^image\s+history$/i,
+    /^recent\s+images?$/i,
+    /^view\s+(my\s+)?images?$/i,
+    /^list\s+(my\s+)?images?$/i,
+    /^gallery$/i,
+    /^📸$/,
+    /^history$/i,
+  ];
+  
+  for (const pattern of historyPatterns) {
+    if (pattern.test(lowerMsg)) {
+      return { isImageCommand: true, type: 'history', prompt: '' };
+    }
+  }
+  
+  // Edit image commands
   const editPatterns = [
     /^edit:\s*(.+)/i,
     /^✏️\s*(.+)/i,
