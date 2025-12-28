@@ -99,6 +99,7 @@ export const ImageGenerationPanel = () => {
   // Reference images state
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; fileName: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // AI Analysis state
@@ -206,7 +207,9 @@ export const ImageGenerationPanel = () => {
     let successCount = 0;
     
     try {
-      for (const file of validFiles) {
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        setUploadProgress({ current: i + 1, total: validFiles.length, fileName: file.name });
         const timestamp = Date.now() + Math.random().toString(36).slice(2);
         const ext = file.name.split('.').pop() || 'jpg';
         const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
@@ -257,6 +260,7 @@ export const ImageGenerationPanel = () => {
       toast.error('Failed to upload images');
     } finally {
       setUploadingRef(false);
+      setUploadProgress(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -791,7 +795,9 @@ export const ImageGenerationPanel = () => {
                       ) : (
                         <Upload className="h-4 w-4 mr-2" />
                       )}
-                      {uploadingRef ? 'Uploading...' : 'Upload Images'}
+                      {uploadingRef && uploadProgress 
+                        ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` 
+                        : 'Upload Images'}
                     </Button>
                     {referenceImages.length > 0 && (
                       <Button
@@ -811,7 +817,28 @@ export const ImageGenerationPanel = () => {
                   </div>
                 </div>
 
-                {referenceImages.length === 0 ? (
+                {/* Upload Progress Indicator */}
+                {uploadingRef && uploadProgress && (
+                  <div className="p-4 rounded-lg border bg-muted/50 space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium">Uploading...</span>
+                      <span className="text-muted-foreground">
+                        {uploadProgress.current} of {uploadProgress.total}
+                      </span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-primary transition-all duration-300"
+                        style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {uploadProgress.fileName}
+                    </p>
+                  </div>
+                )}
+
+                {referenceImages.length === 0 && !uploadingRef ? (
                   <div 
                     className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
                     onClick={() => fileInputRef.current?.click()}
@@ -824,7 +851,7 @@ export const ImageGenerationPanel = () => {
                       PNG, JPG up to 10MB
                     </p>
                   </div>
-                ) : (
+                ) : referenceImages.length > 0 ? (
                   <div className="grid grid-cols-4 gap-3">
                     {referenceImages.map((img) => (
                       <div
@@ -855,7 +882,7 @@ export const ImageGenerationPanel = () => {
                       <ImagePlus className="h-6 w-6 text-muted-foreground" />
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
 
               <Button onClick={saveSettings} disabled={saving} className="w-full">
