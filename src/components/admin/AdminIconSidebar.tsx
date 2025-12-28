@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Moon,
   Sun,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ const navItems = [
   { id: 'insights', icon: Users, label: 'Client Insights' },
   { id: 'reservations', icon: Calendar, label: 'Reservations' },
   { id: 'ai-control', icon: Bot, label: 'AI Control' },
+  { id: 'image-gen', icon: Sparkles, label: 'Image Generation' },
   { id: 'settings', icon: Settings, label: 'Company Settings' },
   { id: 'billing', icon: CreditCard, label: 'Billing & Credits' },
   { id: 'payments', icon: DollarSign, label: 'Products & Payments' },
