@@ -46,11 +46,37 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
 // Detect image generation commands from WhatsApp messages
 function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
-  type: 'generate' | 'feedback' | 'caption' | 'suggest' | null;
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | null;
   prompt: string;
   feedbackData?: { feedbackType?: string };
 } {
   const lowerMsg = message.toLowerCase().trim();
+  
+  // Edit image commands - check these first for priority
+  const editPatterns = [
+    /^edit:\s*(.+)/i,
+    /^✏️\s*(.+)/i,
+    /^(make it|make the image|make this)\s+(.+)/i,
+    /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
+    /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
+    /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
+    /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
+  ];
+  
+  for (const pattern of editPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      let prompt = message;
+      if (match.length > 2) {
+        prompt = `${match[1]} ${match[2]}`.trim();
+      } else if (match.length > 1) {
+        prompt = match[1]?.trim() || message;
+      }
+      if (prompt && prompt.length > 2) {
+        return { isImageCommand: true, type: 'edit', prompt };
+      }
+    }
+  }
   
   // Generate image commands
   const generatePatterns = [

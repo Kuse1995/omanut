@@ -11,22 +11,52 @@ interface ImageGenRequest {
   customerPhone: string;
   conversationId: string;
   prompt: string;
-  messageType: 'generate' | 'feedback' | 'caption' | 'suggest';
+  messageType: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit';
   feedbackData?: {
     imageId?: string;
     rating?: number;
     feedbackType?: 'thumbs_up' | 'thumbs_down' | 'used' | 'shared';
+  };
+  editData?: {
+    sourceImageUrl?: string;
   };
 }
 
 // Detect image generation commands from WhatsApp messages
 export function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
-  type: 'generate' | 'feedback' | 'caption' | 'suggest' | null;
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | null;
   prompt: string;
   feedbackData?: any;
 } {
   const lowerMsg = message.toLowerCase().trim();
+  
+  // Edit image commands - check these first for priority
+  const editPatterns = [
+    /^edit:\s*(.+)/i,
+    /^✏️\s*(.+)/i,
+    /^(make it|make the image|make this)\s+(.+)/i,
+    /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
+    /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
+    /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
+    /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
+  ];
+  
+  for (const pattern of editPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      // For patterns with multiple groups, get the full edit instruction
+      let prompt = message;
+      if (match.length > 2) {
+        prompt = `${match[1]} ${match[2]}`.trim();
+      } else if (match.length > 1) {
+        prompt = match[1]?.trim() || message;
+      }
+      if (prompt && prompt.length > 2) {
+        return { isImageCommand: true, type: 'edit', prompt };
+      }
+    }
+  }
   
   // Generate image commands
   const generatePatterns = [
@@ -178,6 +208,94 @@ async function generateImage(
   }
   
   return { imageUrl, enhancedPrompt };
+}
+
+// Edit image using Lovable AI (Gemini)
+async function editImage(
+  sourceImageUrl: string,
+  editPrompt: string,
+  context: string,
+  companyName: string
+): Promise<{ imageUrl: string; editDescription: string }> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  
+  if (!LOVABLE_API_KEY) {
+    throw new Error('LOVABLE_API_KEY not configured');
+  }
+  
+  const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
+  
+  console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
+  
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash-image-preview',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: editInstruction },
+            { type: 'image_url', image_url: { url: sourceImageUrl } }
+          ]
+        }
+      ],
+      modalities: ['image', 'text']
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[IMAGE-EDIT] Error:', response.status, errorText);
+    
+    if (response.status === 429) {
+      throw new Error('Rate limit exceeded. Please try again in a moment.');
+    }
+    if (response.status === 402) {
+      throw new Error('AI credits exhausted. Please contact support.');
+    }
+    throw new Error('Failed to edit image');
+  }
+  
+  const data = await response.json();
+  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  const textResponse = data.choices?.[0]?.message?.content || '';
+  
+  if (!imageUrl) {
+    throw new Error('No edited image generated');
+  }
+  
+  return { imageUrl, editDescription: textResponse || editPrompt };
+}
+
+// Get the most recent generated image for a company/conversation
+async function getRecentImage(
+  supabase: any,
+  companyId: string,
+  conversationId?: string
+): Promise<{ id: string; imageUrl: string; prompt: string } | null> {
+  let query = supabase
+    .from('generated_images')
+    .select('id, image_url, prompt')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  
+  if (conversationId) {
+    query = query.eq('conversation_id', conversationId);
+  }
+  
+  const { data } = await query.single();
+  
+  if (data) {
+    return { id: data.id, imageUrl: data.image_url, prompt: data.prompt };
+  }
+  
+  return null;
 }
 
 // Generate caption suggestion
@@ -393,7 +511,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData } = await req.json() as ImageGenRequest;
+    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData, editData } = await req.json() as ImageGenRequest;
 
     console.log(`[IMAGE-GEN] Request: type=${messageType}, company=${companyId}, prompt="${prompt?.substring(0, 50)}..."`);
 
@@ -479,6 +597,57 @@ serve(async (req) => {
       case 'suggest': {
         const suggestions = await generateSuggestions(context, company.name, company.business_type || 'business');
         responseMessage = `💡 *Content Ideas for Today:*\n\n${suggestions.suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n\n')}\n\nWant me to create any of these? Just say "Generate: [idea]" 🎨`;
+        break;
+      }
+      
+      case 'edit': {
+        // Get source image - from editData or most recent generated image
+        let sourceImageUrl = editData?.sourceImageUrl;
+        let sourceImageId: string | null = null;
+        
+        if (!sourceImageUrl) {
+          const recentImage = await getRecentImage(supabase, companyId, conversationId);
+          if (recentImage) {
+            sourceImageUrl = recentImage.imageUrl;
+            sourceImageId = recentImage.id;
+          }
+        }
+        
+        if (!sourceImageUrl) {
+          responseMessage = "No image found to edit. Please generate an image first using 'Generate: [description]' 🎨";
+          break;
+        }
+        
+        const editResult = await editImage(sourceImageUrl, prompt, context, company.name);
+        imageUrl = editResult.imageUrl;
+        
+        // Save edited image
+        const { data: savedEditedImage } = await supabase
+          .from('generated_images')
+          .insert({
+            company_id: companyId,
+            conversation_id: conversationId,
+            prompt: `[Edit] ${prompt}`,
+            image_url: imageUrl
+          })
+          .select()
+          .single();
+        
+        // Record edit for learning
+        await supabase.from('image_generation_feedback').insert({
+          company_id: companyId,
+          generated_image_id: savedEditedImage?.id,
+          prompt: `[Edit] ${prompt}`,
+          image_url: imageUrl,
+          feedback_notes: `Edited from image ${sourceImageId || 'external'}`
+        });
+        
+        responseMessage = `✏️ Here's your edited image!\n\nEdit applied: ${prompt}\n\nWant more changes? Just describe what you'd like!\n• "make it brighter"\n• "add text: Sale 50% off"\n• "remove background"\n\nReply 👍 if you like it!`;
+        
+        // Send image via WhatsApp
+        if (customerPhone) {
+          await sendWhatsAppImage(customerPhone, imageUrl, responseMessage, company);
+        }
         break;
       }
       
