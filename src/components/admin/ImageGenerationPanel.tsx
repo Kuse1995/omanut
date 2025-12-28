@@ -233,8 +233,13 @@ export const ImageGenerationPanel = () => {
       
       if (dbError) throw dbError;
       
-      toast.success('Reference image uploaded');
-      loadData();
+      toast.success('Reference image uploaded - analyzing...');
+      await loadData();
+      
+      // Auto-analyze after upload
+      setTimeout(() => {
+        analyzeReferenceImagesAuto();
+      }, 500);
     } catch (error) {
       console.error('Error uploading reference image:', error);
       toast.error('Failed to upload image');
@@ -274,6 +279,51 @@ export const ImageGenerationPanel = () => {
       .from('company-media')
       .getPublicUrl(filePath);
     return data.publicUrl;
+  };
+
+  const analyzeReferenceImagesAuto = async () => {
+    if (!selectedCompany) return;
+    
+    // Re-fetch reference images to get latest
+    const { data: refImages } = await supabase
+      .from('company_media')
+      .select('id, file_name, file_path, description, created_at')
+      .eq('company_id', selectedCompany.id)
+      .in('category', ['promotional', 'products', 'logo'])
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    const currentRefImages = refImages || [];
+    if (currentRefImages.length === 0) return;
+    
+    setAnalyzing(true);
+    
+    try {
+      const imageUrls = currentRefImages.map(img => getImageUrl(img.file_path));
+      
+      const { data, error } = await supabase.functions.invoke('analyze-reference-image', {
+        body: {
+          imageUrls,
+          companyName: selectedCompany.name
+        }
+      });
+      
+      if (error) throw error;
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      if (data.analysis) {
+        setAnalysisResult(data.analysis);
+        setShowAnalysisDialog(true);
+        toast.success('AI analysis complete!');
+      }
+    } catch (error) {
+      console.error('Error auto-analyzing images:', error);
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const analyzeReferenceImages = async () => {
