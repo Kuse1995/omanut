@@ -184,65 +184,77 @@ export const ImageGenerationPanel = () => {
     }
   };
 
-  const uploadReferenceImage = async (file: File) => {
+  const uploadReferenceImages = async (files: FileList | File[]) => {
     if (!selectedCompany) return;
     
-    // Validate file
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
-      return;
-    }
+    const fileArray = Array.from(files);
+    const validFiles = fileArray.filter(file => {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`${file.name} is not an image`);
+        return false;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`${file.name} exceeds 10MB limit`);
+        return false;
+      }
+      return true;
+    });
     
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File size must be less than 10MB');
-      return;
-    }
+    if (validFiles.length === 0) return;
     
     setUploadingRef(true);
+    let successCount = 0;
     
     try {
-      const timestamp = Date.now();
-      const ext = file.name.split('.').pop() || 'jpg';
-      const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
+      for (const file of validFiles) {
+        const timestamp = Date.now() + Math.random().toString(36).slice(2);
+        const ext = file.name.split('.').pop() || 'jpg';
+        const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
+        
+        // Upload to storage
+        const { error: uploadError } = await supabase.storage
+          .from('company-media')
+          .upload(filePath, file);
+        
+        if (uploadError) {
+          console.error(`Failed to upload ${file.name}:`, uploadError);
+          continue;
+        }
+        
+        // Create record in company_media
+        const { error: dbError } = await supabase
+          .from('company_media')
+          .insert({
+            company_id: selectedCompany.id,
+            file_name: file.name,
+            file_path: filePath,
+            file_type: file.type,
+            file_size: file.size,
+            media_type: 'image',
+            category: 'promotional',
+            description: 'Reference image for AI generation'
+          });
+        
+        if (dbError) {
+          console.error(`Failed to save ${file.name}:`, dbError);
+          continue;
+        }
+        
+        successCount++;
+      }
       
-      // Upload to storage
-      const { error: uploadError } = await supabase.storage
-        .from('company-media')
-        .upload(filePath, file);
-      
-      if (uploadError) throw uploadError;
-      
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('company-media')
-        .getPublicUrl(filePath);
-      
-      // Create record in company_media
-      const { error: dbError } = await supabase
-        .from('company_media')
-        .insert({
-          company_id: selectedCompany.id,
-          file_name: file.name,
-          file_path: filePath,
-          file_type: file.type,
-          file_size: file.size,
-          media_type: 'image',
-          category: 'promotional',
-          description: 'Reference image for AI generation'
-        });
-      
-      if (dbError) throw dbError;
-      
-      toast.success('Reference image uploaded - analyzing...');
-      await loadData();
-      
-      // Auto-analyze after upload
-      setTimeout(() => {
-        analyzeReferenceImagesAuto();
-      }, 500);
+      if (successCount > 0) {
+        toast.success(`${successCount} image${successCount > 1 ? 's' : ''} uploaded`);
+        await loadData();
+        
+        // Auto-analyze after bulk upload
+        setTimeout(() => {
+          analyzeReferenceImagesAuto();
+        }, 500);
+      }
     } catch (error) {
-      console.error('Error uploading reference image:', error);
-      toast.error('Failed to upload image');
+      console.error('Error uploading reference images:', error);
+      toast.error('Failed to upload images');
     } finally {
       setUploadingRef(false);
       if (fileInputRef.current) {
@@ -761,10 +773,11 @@ export const ImageGenerationPanel = () => {
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
+                      multiple
                       className="hidden"
                       onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) uploadReferenceImage(file);
+                        const files = e.target.files;
+                        if (files && files.length > 0) uploadReferenceImages(files);
                       }}
                     />
                     <Button
@@ -778,7 +791,7 @@ export const ImageGenerationPanel = () => {
                       ) : (
                         <Upload className="h-4 w-4 mr-2" />
                       )}
-                      {uploadingRef ? 'Uploading...' : 'Upload'}
+                      {uploadingRef ? 'Uploading...' : 'Upload Images'}
                     </Button>
                     {referenceImages.length > 0 && (
                       <Button
