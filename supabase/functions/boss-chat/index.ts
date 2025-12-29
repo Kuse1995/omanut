@@ -71,11 +71,7 @@ function detectImageGenCommand(message: string): {
       prompt = editMatch[1]?.trim() || rawMsg;
     }
 
-    // If we matched against normalized message, prefer that for cleanliness
-    if (normalizedMsg && normalizedMsg.length > 2) {
-      const normalizedMatch = normalizedMsg.match(editMatch[0] instanceof RegExp ? editMatch[0] : /.*/);
-      // (no-op, we just keep prompt from match)
-    }
+    // Keep the extracted prompt from the match
 
     if (prompt && prompt.length > 2) {
       return { isImageCommand: true, type: 'edit', prompt };
