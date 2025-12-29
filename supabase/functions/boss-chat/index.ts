@@ -214,7 +214,7 @@ Tip: The AI learns your style preferences from feedback!`;
         },
         body: JSON.stringify({
           companyId: company.id,
-          customerPhone: From,
+          customerPhone: '', // Empty to prevent whatsapp-image-gen from sending directly - boss-chat returns response for caller to send
           conversationId: null, // Boss doesn't have a conversation context
           prompt: imageGenCommand.prompt,
           messageType: imageGenCommand.type,
