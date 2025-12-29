@@ -7,14 +7,29 @@ const corsHeaders = {
 };
 
 // Detect image generation commands from WhatsApp messages
-function detectImageGenCommand(message: string): { 
-  isImageCommand: boolean; 
+function detectImageGenCommand(message: string): {
+  isImageCommand: boolean;
   type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
   prompt: string;
   feedbackData?: { feedbackType?: string };
 } {
-  const lowerMsg = message.toLowerCase().trim();
-  
+  const rawMsg = (message || '').trim();
+  const lowerMsg = rawMsg.toLowerCase().trim();
+
+  // Normalize polite prefixes so commands like "Can you make the image smaller" are detected
+  const normalizedMsg = rawMsg
+    .replace(/^(can you|could you|please|pls|kindly)\s+/i, '')
+    .trim();
+  const normalizedLower = normalizedMsg.toLowerCase();
+
+  const tryMatch = (patterns: RegExp[]) => {
+    for (const pattern of patterns) {
+      const match = normalizedMsg.match(pattern) || rawMsg.match(pattern);
+      if (match) return match;
+    }
+    return null;
+  };
+
   // History commands - view recent images (check first for priority)
   const historyPatterns = [
     /^show\s+(my\s+)?images?$/i,
@@ -25,78 +40,101 @@ function detectImageGenCommand(message: string): {
     /^list\s+(my\s+)?images?$/i,
     /^gallery$/i,
     /^📸$/,
+    /^history$/i,
   ];
-  
+
   for (const pattern of historyPatterns) {
-    if (pattern.test(lowerMsg)) {
+    if (pattern.test(normalizedLower) || pattern.test(lowerMsg)) {
       return { isImageCommand: true, type: 'history', prompt: '' };
     }
   }
-  
+
   // Edit image commands
   const editPatterns = [
     /^edit:\s*(.+)/i,
     /^✏️\s*(.+)/i,
     /^(make it|make the image|make this)\s+(.+)/i,
+    // Handles: "make the image smaller", "make it bigger", etc.
+    /^(make)\s+(the\s+)?(image|picture|photo|it)\s+(.+)/i,
     /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
     /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
     /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
     /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
   ];
-  
-  for (const pattern of editPatterns) {
-    const match = message.match(pattern);
-    if (match) {
-      let prompt = message;
-      if (match.length > 2) {
-        prompt = `${match[1]} ${match[2]}`.trim();
-      } else if (match.length > 1) {
-        prompt = match[1]?.trim() || message;
-      }
-      if (prompt && prompt.length > 2) {
-        return { isImageCommand: true, type: 'edit', prompt };
-      }
+
+  const editMatch = tryMatch(editPatterns);
+  if (editMatch) {
+    let prompt = rawMsg;
+    if (editMatch.length > 2) {
+      prompt = `${editMatch[1]} ${editMatch[2]}`.trim();
+    } else if (editMatch.length > 1) {
+      prompt = editMatch[1]?.trim() || rawMsg;
+    }
+
+    // If we matched against normalized message, prefer that for cleanliness
+    if (normalizedMsg && normalizedMsg.length > 2) {
+      const normalizedMatch = normalizedMsg.match(editMatch[0] instanceof RegExp ? editMatch[0] : /.*/);
+      // (no-op, we just keep prompt from match)
+    }
+
+    if (prompt && prompt.length > 2) {
+      return { isImageCommand: true, type: 'edit', prompt };
     }
   }
-  
+
   // Generate image commands
   const generatePatterns = [
     /^(generate|create|make|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
     /^image:\s*(.+)/i,
     /^img:\s*(.+)/i,
     /^🎨\s*(.+)/i,
+    /^create\s*(.+)/i,
     /^generate\s+(.+)/i,
   ];
-  
-  for (const pattern of generatePatterns) {
-    const match = message.match(pattern);
-    if (match) {
-      const prompt = match[match.length - 1]?.trim() || match[1]?.trim();
-      if (prompt && prompt.length > 3) {
-        return { isImageCommand: true, type: 'generate', prompt };
-      }
+
+  const genMatch = tryMatch(generatePatterns);
+  if (genMatch) {
+    const prompt = genMatch[genMatch.length - 1]?.trim() || genMatch[1]?.trim();
+    if (prompt && prompt.length > 3) {
+      return { isImageCommand: true, type: 'generate', prompt };
     }
   }
-  
+
   // Caption request
-  if (lowerMsg.includes('caption for') || lowerMsg.includes('what to post') || lowerMsg.includes('suggest text for')) {
-    return { isImageCommand: true, type: 'caption', prompt: message };
+  if (
+    normalizedLower.includes('caption') ||
+    normalizedLower.includes('what to post') ||
+    normalizedLower.includes('suggest text') ||
+    lowerMsg.includes('caption') ||
+    lowerMsg.includes('what to post') ||
+    lowerMsg.includes('suggest text')
+  ) {
+    return { isImageCommand: true, type: 'caption', prompt: rawMsg };
   }
-  
+
   // Suggestion request
-  if (lowerMsg.includes('what should i post') || lowerMsg.includes('post idea') || lowerMsg.includes('content idea') || lowerMsg.includes('suggest a post')) {
-    return { isImageCommand: true, type: 'suggest', prompt: message };
+  if (
+    normalizedLower.includes('what should i post') ||
+    normalizedLower.includes('post idea') ||
+    normalizedLower.includes('content idea') ||
+    normalizedLower.includes('suggest a post') ||
+    lowerMsg.includes('what should i post') ||
+    lowerMsg.includes('post idea') ||
+    lowerMsg.includes('content idea') ||
+    lowerMsg.includes('suggest a post')
+  ) {
+    return { isImageCommand: true, type: 'suggest', prompt: rawMsg };
   }
-  
+
   // Feedback patterns
-  if (lowerMsg.includes('👍') || lowerMsg === 'love it' || lowerMsg === 'perfect' || lowerMsg === 'great image') {
-    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_up' } };
+  if (normalizedLower.includes('👍') || normalizedLower.includes('love it') || normalizedLower.includes('great') || normalizedLower.includes('perfect') || lowerMsg.includes('👍') || lowerMsg.includes('love it') || lowerMsg.includes('great') || lowerMsg.includes('perfect')) {
+    return { isImageCommand: true, type: 'feedback', prompt: rawMsg, feedbackData: { feedbackType: 'thumbs_up' } };
   }
-  
-  if (lowerMsg.includes('👎') || lowerMsg === 'not good' || lowerMsg === 'try again' || lowerMsg === 'different style') {
-    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_down' } };
+
+  if (normalizedLower.includes('👎') || normalizedLower.includes('not good') || normalizedLower.includes('try again') || normalizedLower.includes('different') || lowerMsg.includes('👎') || lowerMsg.includes('not good') || lowerMsg.includes('try again') || lowerMsg.includes('different')) {
+    return { isImageCommand: true, type: 'feedback', prompt: rawMsg, feedbackData: { feedbackType: 'thumbs_down' } };
   }
-  
+
   return { isImageCommand: false, type: null, prompt: '' };
 }
 
