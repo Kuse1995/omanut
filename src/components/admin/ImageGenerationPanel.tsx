@@ -48,6 +48,8 @@ interface ReferenceImage {
   file_name: string;
   file_path: string;
   description: string | null;
+  tags?: string[] | null;
+  category?: string;
   created_at: string;
 }
 
@@ -147,7 +149,7 @@ export const ImageGenerationPanel = () => {
       // Load reference images from company_media
       const { data: refImages } = await supabase
         .from('company_media')
-        .select('id, file_name, file_path, description, created_at')
+        .select('id, file_name, file_path, description, tags, category, created_at')
         .eq('company_id', selectedCompany.id)
         .in('category', ['promotional', 'products', 'logo'])
         .order('created_at', { ascending: false })
@@ -345,7 +347,7 @@ export const ImageGenerationPanel = () => {
     // Re-fetch reference images to get latest
     const { data: refImages } = await supabase
       .from('company_media')
-      .select('id, file_name, file_path, description, created_at')
+      .select('id, file_name, file_path, description, tags, category, created_at')
       .eq('company_id', selectedCompany.id)
       .in('category', ['promotional', 'products', 'logo'])
       .order('created_at', { ascending: false })
