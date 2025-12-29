@@ -213,44 +213,72 @@ export const ImageGenerationPanel = () => {
     setUploadingRef(true);
     let successCount = 0;
     
+    console.log('[ImageUpload] Starting upload for', validFiles.length, 'files');
+    console.log('[ImageUpload] Company ID:', selectedCompany.id);
+    console.log('[ImageUpload] User ID:', session.user.id);
+    
     try {
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
         setUploadProgress({ current: i + 1, total: validFiles.length, fileName: file.name });
         const timestamp = Date.now() + Math.random().toString(36).slice(2);
         const ext = file.name.split('.').pop() || 'jpg';
-        const filePath = `${selectedCompany.id}/reference/${timestamp}.${ext}`;
+        // Use 'promotional' folder to match the category used in database insert
+        const filePath = `${selectedCompany.id}/promotional/${timestamp}.${ext}`;
+        
+        console.log('[ImageUpload] Uploading file:', file.name, 'to path:', filePath);
         
         // Upload to storage with upsert to handle potential conflicts
-        const { error: uploadError } = await supabase.storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
           .from('company-media')
           .upload(filePath, file, { upsert: true });
         
         if (uploadError) {
-          console.error(`Failed to upload ${file.name}:`, uploadError);
+          console.error('[ImageUpload] Storage upload failed:', {
+            fileName: file.name,
+            filePath,
+            error: uploadError,
+            errorMessage: uploadError.message,
+            errorDetails: JSON.stringify(uploadError)
+          });
           toast.error(`Failed to upload ${file.name}: ${uploadError.message}`);
           continue;
         }
         
+        console.log('[ImageUpload] Storage upload successful:', uploadData);
+        
         // Create record in company_media
-        const { error: dbError } = await supabase
+        const insertData = {
+          company_id: selectedCompany.id,
+          file_name: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+          media_type: 'image',
+          category: 'promotional' as const,
+          description: 'Reference image for AI generation'
+        };
+        
+        console.log('[ImageUpload] Inserting to database:', insertData);
+        
+        const { data: dbData, error: dbError } = await supabase
           .from('company_media')
-          .insert({
-            company_id: selectedCompany.id,
-            file_name: file.name,
-            file_path: filePath,
-            file_type: file.type,
-            file_size: file.size,
-            media_type: 'image',
-            category: 'promotional',
-            description: 'Reference image for AI generation'
-          });
+          .insert(insertData)
+          .select();
         
         if (dbError) {
-          console.error(`Failed to save ${file.name}:`, dbError);
+          console.error('[ImageUpload] Database insert failed:', {
+            fileName: file.name,
+            error: dbError,
+            errorMessage: dbError.message,
+            errorCode: dbError.code,
+            errorDetails: dbError.details
+          });
+          toast.error(`Failed to save ${file.name}: ${dbError.message}`);
           continue;
         }
         
+        console.log('[ImageUpload] Database insert successful:', dbData);
         successCount++;
       }
       
