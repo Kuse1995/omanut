@@ -138,12 +138,55 @@ serve(async (req) => {
 
     console.log('Management company found:', company.name);
 
+    const messageBody = (Body || '').trim().toLowerCase();
+
+    // ========== HELP COMMAND DETECTION ==========
+    if (messageBody === 'image help' || messageBody === 'img help' || messageBody === '🎨 help') {
+      const helpText = `🎨 IMAGE GENERATION COMMANDS
+
+Generate Images:
+• "Generate an image of [description]"
+• "Create a picture of [description]"
+• "🎨 [description]"
+
+Edit Last Image:
+• "Edit: make it brighter"
+• "Make it more colorful"
+• "Add text overlay"
+
+Get Captions:
+• "Caption for [topic]"
+• "What to post about [topic]"
+
+Content Ideas:
+• "What should I post?"
+• "Suggest a post"
+• "Content idea for [topic]"
+
+View History:
+• "Show my images"
+• "Gallery"
+• "📸"
+
+Give Feedback:
+• 👍 or "Love it" - Save style preferences
+• 👎 or "Try again" - Request different style
+
+Tip: The AI learns your style preferences from feedback!`;
+
+      return new Response(JSON.stringify({
+        response: helpText
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // ========== IMAGE GENERATION COMMAND DETECTION ==========
     const imageGenCommand = detectImageGenCommand(Body || '');
     
     if (imageGenCommand.isImageCommand) {
       console.log(`[BOSS-IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
-      
+
       // Check if image generation is enabled for this company
       const imageSettings = company.image_generation_settings?.[0];
       
