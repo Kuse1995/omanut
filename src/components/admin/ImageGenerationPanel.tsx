@@ -106,6 +106,12 @@ export const ImageGenerationPanel = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<ImageAnalysis | null>(null);
   const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
+  
+  // Test generation state
+  const [testPrompt, setTestPrompt] = useState('');
+  const [testGenerating, setTestGenerating] = useState(false);
+  const [testResult, setTestResult] = useState<{ image_url: string; image_id?: string; enhanced_prompt?: string } | null>(null);
+  const [showTestResultDialog, setShowTestResultDialog] = useState(false);
 
   useEffect(() => {
     if (selectedCompany) {
@@ -463,6 +469,46 @@ export const ImageGenerationPanel = () => {
       toast.error('Failed to save settings');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const testImageGeneration = async () => {
+    if (!selectedCompany) return;
+    
+    const promptToUse = testPrompt.trim() || (samplePrompts.split('\n').find(p => p.trim()) || 'A professional business image');
+    
+    setTestGenerating(true);
+    setTestResult(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('test-image-generation', {
+        body: {
+          companyId: selectedCompany.id,
+          prompt: promptToUse
+        }
+      });
+      
+      if (error) throw error;
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      
+      setTestResult({
+        image_url: data.image_url,
+        image_id: data.image_id,
+        enhanced_prompt: data.enhanced_prompt
+      });
+      setShowTestResultDialog(true);
+      toast.success('Test image generated!');
+      
+      // Refresh gallery to show new image
+      loadData();
+    } catch (error) {
+      console.error('Error generating test image:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to generate test image');
+    } finally {
+      setTestGenerating(false);
     }
   };
 
@@ -923,6 +969,49 @@ export const ImageGenerationPanel = () => {
                 ) : null}
               </div>
 
+              {/* Test Image Generation Section */}
+              <div className="space-y-3 pt-4 border-t">
+                <div>
+                  <Label className="text-base font-medium flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    Test Image Generation
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    Generate a sample image to test your settings without using WhatsApp
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="testPrompt">Test Prompt</Label>
+                  <Textarea
+                    id="testPrompt"
+                    placeholder="Enter a test prompt or leave empty to use the first sample prompt..."
+                    value={testPrompt}
+                    onChange={(e) => setTestPrompt(e.target.value)}
+                    rows={2}
+                  />
+                </div>
+
+                <Button 
+                  variant="secondary" 
+                  onClick={testImageGeneration} 
+                  disabled={testGenerating}
+                  className="w-full"
+                >
+                  {testGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Generate Test Image
+                    </>
+                  )}
+                </Button>
+              </div>
+
               <Button onClick={saveSettings} disabled={saving} className="w-full">
                 {saving ? 'Saving...' : 'Save Settings'}
               </Button>
@@ -1071,6 +1160,67 @@ export const ImageGenerationPanel = () => {
               <Check className="h-4 w-4 mr-2" />
               Apply to Settings
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Image Result Dialog */}
+      <Dialog open={showTestResultDialog} onOpenChange={setShowTestResultDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Test Image Generated
+            </DialogTitle>
+            <DialogDescription>
+              Your test image has been generated and saved to the gallery
+            </DialogDescription>
+          </DialogHeader>
+          
+          {testResult && (
+            <div className="space-y-4">
+              <div className="aspect-video rounded-lg overflow-hidden bg-muted">
+                {testResult.image_url.startsWith('data:') ? (
+                  <img
+                    src={testResult.image_url}
+                    alt="Generated test image"
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <Image className="h-16 w-16 text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+              
+              {testResult.enhanced_prompt && (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Enhanced Prompt (with settings)</Label>
+                  <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
+                    {testResult.enhanced_prompt}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowTestResultDialog(false)}>
+              Close
+            </Button>
+            {testResult?.image_url?.startsWith('data:') && (
+              <Button
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = testResult.image_url;
+                  link.download = `test-image-${testResult.image_id || Date.now()}.png`;
+                  link.click();
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
