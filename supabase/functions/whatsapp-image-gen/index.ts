@@ -22,6 +22,14 @@ interface ImageGenRequest {
   };
 }
 
+interface ProductImage {
+  id: string;
+  file_path: string;
+  file_name: string;
+  description: string | null;
+  tags: string[] | null;
+}
+
 // Detect image generation commands from WhatsApp messages
 export function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
@@ -175,7 +183,74 @@ async function buildMediaContext(supabase: any, companyId: string): Promise<stri
   return context;
 }
 
-// Generate image using Lovable AI
+// Select the best product image based on prompt keywords
+async function selectProductImageForPrompt(
+  supabase: any, 
+  companyId: string, 
+  prompt: string
+): Promise<ProductImage | null> {
+  // Fetch all product images
+  const { data: productImages, error } = await supabase
+    .from('company_media')
+    .select('id, file_path, file_name, description, tags')
+    .eq('company_id', companyId)
+    .eq('category', 'products')
+    .eq('media_type', 'image')
+    .order('created_at', { ascending: false });
+  
+  if (error || !productImages || productImages.length === 0) {
+    console.log('[PRODUCT-SELECT] No product images found');
+    return null;
+  }
+  
+  console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images`);
+  
+  const promptLower = prompt.toLowerCase();
+  const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
+  
+  // Score each product image based on keyword matches
+  let bestMatch: ProductImage | null = null;
+  let bestScore = 0;
+  
+  for (const img of productImages) {
+    let score = 0;
+    const searchText = [
+      img.file_name || '',
+      img.description || '',
+      ...(img.tags || [])
+    ].join(' ').toLowerCase();
+    
+    for (const word of promptWords) {
+      if (searchText.includes(word)) {
+        score += 1;
+      }
+    }
+    
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = img;
+    }
+  }
+  
+  // If no keyword match, return the most recent product image as default
+  if (!bestMatch && productImages.length > 0) {
+    bestMatch = productImages[0];
+    console.log('[PRODUCT-SELECT] No keyword match, using most recent product');
+  }
+  
+  if (bestMatch) {
+    console.log(`[PRODUCT-SELECT] Selected product: ${bestMatch.file_name} (score: ${bestScore})`);
+  }
+  
+  return bestMatch;
+}
+
+// Get public URL for a storage file
+function getMediaPublicUrl(supabaseUrl: string, filePath: string): string {
+  return `${supabaseUrl}/storage/v1/object/public/company-media/${filePath}`;
+}
+
+// Generate image using Lovable AI (text-only, fallback mode)
 async function generateImage(
   prompt: string, 
   context: string,
@@ -217,6 +292,94 @@ async function generateImage(
       throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to generate image');
+  }
+  
+  const data = await response.json();
+  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  
+  if (!imageUrl) {
+    throw new Error('No image generated');
+  }
+  
+  return { imageUrl, enhancedPrompt };
+}
+
+// Product-anchored image generation - edit the product into a new environment
+async function generateProductAnchoredImage(
+  productImageUrl: string,
+  prompt: string,
+  context: string,
+  companyName: string,
+  productInfo: ProductImage
+): Promise<{ imageUrl: string; enhancedPrompt: string }> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  
+  if (!LOVABLE_API_KEY) {
+    throw new Error('LOVABLE_API_KEY not configured');
+  }
+  
+  // Create a strict product-anchored instruction
+  const productDescription = productInfo.description || productInfo.file_name || 'this product';
+  const productTags = productInfo.tags?.join(', ') || '';
+  
+  const enhancedPrompt = `CRITICAL BRANDING INSTRUCTIONS:
+You are placing an EXACT product into a new environment. The product shown in the image MUST remain UNCHANGED.
+
+PRODUCT DETAILS:
+- Product: ${productDescription}
+- Tags: ${productTags}
+- Company: ${companyName}
+
+STRICT RULES:
+1. Do NOT change the product's label, text, logo, or branding
+2. Do NOT alter the product's colors, shape, or proportions
+3. Do NOT substitute with a different or generic product
+4. ONLY change the background, lighting, shadows, and environment
+5. Keep the product as the clear focal point
+6. Maintain professional quality suitable for social media
+
+ENVIRONMENT REQUEST:
+${prompt}
+
+${context}
+
+Place THIS EXACT product into the requested environment while preserving ALL branding elements.`;
+
+  console.log('[PRODUCT-ANCHORED] Generating with product image from:', productImageUrl.substring(0, 80));
+  console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
+  
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash-image-preview',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: enhancedPrompt },
+            { type: 'image_url', image_url: { url: productImageUrl } }
+          ]
+        }
+      ],
+      modalities: ['image', 'text']
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[PRODUCT-ANCHORED] Error:', response.status, errorText);
+    
+    if (response.status === 429) {
+      throw new Error('Rate limit exceeded. Please try again in a moment.');
+    }
+    if (response.status === 402) {
+      throw new Error('AI credits exhausted. Please contact support.');
+    }
+    throw new Error('Failed to generate product image');
   }
   
   const data = await response.json();
@@ -569,7 +732,31 @@ serve(async (req) => {
 
     switch (messageType) {
       case 'generate': {
-        const result = await generateImage(prompt, context, company.name, company.business_type || 'business');
+        // PRODUCT-ANCHORED MODE: Try to find a product image to use as source
+        const productImage = await selectProductImageForPrompt(supabase, companyId, prompt);
+        
+        let result: { imageUrl: string; enhancedPrompt: string };
+        let isProductAnchored = false;
+        
+        if (productImage) {
+          // Use product-anchored generation
+          const productImageUrl = getMediaPublicUrl(supabaseUrl, productImage.file_path);
+          console.log(`[IMAGE-GEN] Using product-anchored mode with product: ${productImage.file_name}`);
+          
+          result = await generateProductAnchoredImage(
+            productImageUrl,
+            prompt,
+            context,
+            company.name,
+            productImage
+          );
+          isProductAnchored = true;
+        } else {
+          // Fallback to text-only generation
+          console.log('[IMAGE-GEN] No product images found, using text-only generation');
+          result = await generateImage(prompt, context, company.name, company.business_type || 'business');
+        }
+        
         imageUrl = result.imageUrl;
         
         // Save to generated_images
@@ -578,7 +765,7 @@ serve(async (req) => {
           .insert({
             company_id: companyId,
             conversation_id: conversationId,
-            prompt,
+            prompt: isProductAnchored ? `[Product: ${productImage?.file_name}] ${prompt}` : prompt,
             image_url: imageUrl
           })
           .select()
@@ -595,10 +782,15 @@ serve(async (req) => {
           enhanced_prompt: result.enhancedPrompt,
           image_url: imageUrl,
           caption_suggestion: captionResult.caption,
-          posting_time_suggestion: null // Will be updated if they use it
+          posting_time_suggestion: null,
+          feedback_notes: isProductAnchored ? `Product-anchored: ${productImage?.file_name}` : null
         });
         
-        responseMessage = `🎨 Here's your image!\n\n📝 *Suggested Caption:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map(h => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}\n\nReply 👍 if you like it or 👎 for a different style!`;
+        const modeNote = isProductAnchored 
+          ? `\n\n📦 *Product used:* ${productImage?.description || productImage?.file_name}`
+          : '\n\n💡 *Tip:* Upload product images in the admin panel to enable product-locked mode!';
+        
+        responseMessage = `🎨 Here's your image!${modeNote}\n\n📝 *Suggested Caption:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map(h => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}\n\nReply 👍 if you like it or 👎 for a different style!`;
         
         // Send image via WhatsApp
         if (customerPhone) {
@@ -710,7 +902,7 @@ serve(async (req) => {
           
           const galleryList = recentImages.map((img: any, i: number) => {
             const date = new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const shortPrompt = img.prompt.replace(/^\[Edit.*?\]\s*/i, '').substring(0, 40);
+            const shortPrompt = img.prompt.replace(/^\[Edit.*?\]\s*/i, '').replace(/^\[Product:.*?\]\s*/i, '').substring(0, 40);
             return `${i + 1}. ${shortPrompt}${shortPrompt.length >= 40 ? '...' : ''} (${date})`;
           }).join('\n');
           

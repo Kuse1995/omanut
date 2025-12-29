@@ -6,13 +6,21 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface ProductImage {
+  id: string;
+  file_path: string;
+  file_name: string;
+  description: string | null;
+  tags: string[] | null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { companyId, prompt } = await req.json();
+    const { companyId, prompt, productImageId, useProductMode } = await req.json();
 
     if (!companyId || !prompt) {
       return new Response(
@@ -80,27 +88,58 @@ serve(async (req) => {
       .eq("company_id", companyId)
       .single();
 
-    // Build enhanced prompt with company context
-    let enhancedPrompt = prompt;
-    
+    // Build context
+    let contextParts: string[] = [];
     if (settings) {
-      const contextParts: string[] = [];
-      
       if (settings.business_context) {
         contextParts.push(`Business context: ${settings.business_context}`);
       }
       if (settings.style_description) {
         contextParts.push(`Style: ${settings.style_description}`);
       }
+    }
+    const context = contextParts.join(". ");
+
+    // Check if we should use product-anchored mode
+    let productImage: ProductImage | null = null;
+    let productImageUrl: string | null = null;
+    
+    if (productImageId) {
+      // Specific product selected
+      const { data: product } = await supabase
+        .from("company_media")
+        .select("id, file_path, file_name, description, tags")
+        .eq("id", productImageId)
+        .eq("company_id", companyId)
+        .single();
       
-      if (contextParts.length > 0) {
-        enhancedPrompt = `${contextParts.join(". ")}. User request: ${prompt}`;
+      if (product) {
+        productImage = product;
+        productImageUrl = `${supabaseUrl}/storage/v1/object/public/company-media/${product.file_path}`;
+      }
+    } else if (useProductMode) {
+      // Auto-select a product image
+      const { data: products } = await supabase
+        .from("company_media")
+        .select("id, file_path, file_name, description, tags")
+        .eq("company_id", companyId)
+        .eq("category", "products")
+        .eq("media_type", "image")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      
+      if (products && products.length > 0) {
+        productImage = products[0];
+        productImageUrl = `${supabaseUrl}/storage/v1/object/public/company-media/${products[0].file_path}`;
       }
     }
 
     console.log(`[test-image-generation] Generating image for company ${company.name}`);
     console.log(`[test-image-generation] Original prompt: ${prompt}`);
-    console.log(`[test-image-generation] Enhanced prompt: ${enhancedPrompt}`);
+    console.log(`[test-image-generation] Product mode: ${!!productImage}`);
+    if (productImage) {
+      console.log(`[test-image-generation] Using product: ${productImage.file_name}`);
+    }
 
     // Call Lovable AI Gateway for image generation
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
@@ -111,13 +150,57 @@ serve(async (req) => {
       );
     }
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    let enhancedPrompt: string;
+    let aiRequestBody: any;
+
+    if (productImage && productImageUrl) {
+      // PRODUCT-ANCHORED MODE
+      const productDescription = productImage.description || productImage.file_name || 'this product';
+      const productTags = productImage.tags?.join(', ') || '';
+      
+      enhancedPrompt = `CRITICAL BRANDING INSTRUCTIONS:
+You are placing an EXACT product into a new environment. The product shown in the image MUST remain UNCHANGED.
+
+PRODUCT DETAILS:
+- Product: ${productDescription}
+- Tags: ${productTags}
+- Company: ${company.name}
+
+STRICT RULES:
+1. Do NOT change the product's label, text, logo, or branding
+2. Do NOT alter the product's colors, shape, or proportions
+3. Do NOT substitute with a different or generic product
+4. ONLY change the background, lighting, shadows, and environment
+5. Keep the product as the clear focal point
+6. Maintain professional quality suitable for social media
+
+ENVIRONMENT REQUEST:
+${prompt}
+
+${context}
+
+Place THIS EXACT product into the requested environment while preserving ALL branding elements.`;
+
+      aiRequestBody = {
+        model: "google/gemini-2.5-flash-image-preview",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: enhancedPrompt },
+              { type: "image_url", image_url: { url: productImageUrl } }
+            ]
+          }
+        ],
+        modalities: ["image", "text"]
+      };
+    } else {
+      // TEXT-ONLY MODE
+      enhancedPrompt = context 
+        ? `${context}. User request: ${prompt}` 
+        : prompt;
+      
+      aiRequestBody = {
         model: "google/gemini-2.5-flash-image-preview",
         messages: [
           {
@@ -126,7 +209,18 @@ serve(async (req) => {
           }
         ],
         modalities: ["image", "text"]
-      }),
+      };
+    }
+
+    console.log(`[test-image-generation] Enhanced prompt (first 300 chars): ${enhancedPrompt.substring(0, 300)}`);
+
+    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(aiRequestBody),
     });
 
     if (!aiResponse.ok) {
@@ -166,11 +260,15 @@ serve(async (req) => {
     console.log("[test-image-generation] Image generated successfully");
 
     // Save the generated image to the database
+    const savedPrompt = productImage 
+      ? `[Product: ${productImage.file_name}] ${prompt}`
+      : prompt;
+    
     const { data: savedImage, error: saveError } = await supabase
       .from("generated_images")
       .insert({
         company_id: companyId,
-        prompt: prompt,
+        prompt: savedPrompt,
         image_url: imageUrl,
       })
       .select()
@@ -187,7 +285,13 @@ serve(async (req) => {
         image_url: imageUrl,
         image_id: savedImage?.id,
         prompt: prompt,
-        enhanced_prompt: enhancedPrompt
+        enhanced_prompt: enhancedPrompt,
+        product_mode: !!productImage,
+        product_used: productImage ? {
+          id: productImage.id,
+          name: productImage.file_name,
+          description: productImage.description
+        } : null
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
