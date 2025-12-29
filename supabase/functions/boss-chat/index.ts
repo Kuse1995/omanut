@@ -6,6 +6,100 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Detect image generation commands from WhatsApp messages
+function detectImageGenCommand(message: string): { 
+  isImageCommand: boolean; 
+  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
+  prompt: string;
+  feedbackData?: { feedbackType?: string };
+} {
+  const lowerMsg = message.toLowerCase().trim();
+  
+  // History commands - view recent images (check first for priority)
+  const historyPatterns = [
+    /^show\s+(my\s+)?images?$/i,
+    /^my\s+images?$/i,
+    /^image\s+history$/i,
+    /^recent\s+images?$/i,
+    /^view\s+(my\s+)?images?$/i,
+    /^list\s+(my\s+)?images?$/i,
+    /^gallery$/i,
+    /^📸$/,
+  ];
+  
+  for (const pattern of historyPatterns) {
+    if (pattern.test(lowerMsg)) {
+      return { isImageCommand: true, type: 'history', prompt: '' };
+    }
+  }
+  
+  // Edit image commands
+  const editPatterns = [
+    /^edit:\s*(.+)/i,
+    /^✏️\s*(.+)/i,
+    /^(make it|make the image|make this)\s+(.+)/i,
+    /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
+    /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
+    /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
+    /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
+  ];
+  
+  for (const pattern of editPatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      let prompt = message;
+      if (match.length > 2) {
+        prompt = `${match[1]} ${match[2]}`.trim();
+      } else if (match.length > 1) {
+        prompt = match[1]?.trim() || message;
+      }
+      if (prompt && prompt.length > 2) {
+        return { isImageCommand: true, type: 'edit', prompt };
+      }
+    }
+  }
+  
+  // Generate image commands
+  const generatePatterns = [
+    /^(generate|create|make|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
+    /^image:\s*(.+)/i,
+    /^img:\s*(.+)/i,
+    /^🎨\s*(.+)/i,
+    /^generate\s+(.+)/i,
+  ];
+  
+  for (const pattern of generatePatterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const prompt = match[match.length - 1]?.trim() || match[1]?.trim();
+      if (prompt && prompt.length > 3) {
+        return { isImageCommand: true, type: 'generate', prompt };
+      }
+    }
+  }
+  
+  // Caption request
+  if (lowerMsg.includes('caption for') || lowerMsg.includes('what to post') || lowerMsg.includes('suggest text for')) {
+    return { isImageCommand: true, type: 'caption', prompt: message };
+  }
+  
+  // Suggestion request
+  if (lowerMsg.includes('what should i post') || lowerMsg.includes('post idea') || lowerMsg.includes('content idea') || lowerMsg.includes('suggest a post')) {
+    return { isImageCommand: true, type: 'suggest', prompt: message };
+  }
+  
+  // Feedback patterns
+  if (lowerMsg.includes('👍') || lowerMsg === 'love it' || lowerMsg === 'perfect' || lowerMsg === 'great image') {
+    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_up' } };
+  }
+  
+  if (lowerMsg.includes('👎') || lowerMsg === 'not good' || lowerMsg === 'try again' || lowerMsg === 'different style') {
+    return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_down' } };
+  }
+  
+  return { isImageCommand: false, type: null, prompt: '' };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -31,7 +125,7 @@ serve(async (req) => {
     // Find company by management phone
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('*, company_ai_overrides(*), company_documents(*)')
+      .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
       .ilike('boss_phone', `%${normalizedFrom}%`)
       .single();
 
@@ -43,6 +137,66 @@ serve(async (req) => {
     }
 
     console.log('Management company found:', company.name);
+
+    // ========== IMAGE GENERATION COMMAND DETECTION ==========
+    const imageGenCommand = detectImageGenCommand(Body || '');
+    
+    if (imageGenCommand.isImageCommand) {
+      console.log(`[BOSS-IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
+      
+      // Check if image generation is enabled for this company
+      const imageSettings = company.image_generation_settings?.[0];
+      
+      if (!imageSettings?.enabled) {
+        console.log('[BOSS-IMAGE-GEN] Image generation not enabled for company');
+        return new Response(JSON.stringify({
+          response: "Image generation is not enabled for your company. Please enable it in the admin settings first."
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // Call whatsapp-image-gen function
+      const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+      const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      
+      const imageGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          companyId: company.id,
+          customerPhone: From,
+          conversationId: null, // Boss doesn't have a conversation context
+          prompt: imageGenCommand.prompt,
+          messageType: imageGenCommand.type,
+          feedbackData: imageGenCommand.feedbackData,
+        }),
+      });
+      
+      if (!imageGenResponse.ok) {
+        const errorText = await imageGenResponse.text();
+        console.error('[BOSS-IMAGE-GEN] Error from whatsapp-image-gen:', errorText);
+        return new Response(JSON.stringify({
+          response: "Sorry, there was an error generating the image. Please try again."
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      const imageGenResult = await imageGenResponse.json();
+      console.log('[BOSS-IMAGE-GEN] Image generation result:', imageGenResult.success ? 'success' : 'failed');
+      
+      return new Response(JSON.stringify({
+        response: imageGenResult.message || "Image generation complete!",
+        imageUrl: imageGenResult.imageUrl,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    // ========== END IMAGE GENERATION DETECTION ==========
 
     // Get recent conversation stats with messages
     const { data: recentConvs } = await supabase
