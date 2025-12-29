@@ -554,6 +554,23 @@ async function generateCaption(
 ): Promise<{ caption: string; hashtags: string[]; bestTime: string }> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
+  // Get current time context
+  const now = new Date();
+  const zambiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Lusaka' }));
+  const hour = zambiaTime.getHours();
+  const dayOfWeek = zambiaTime.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Africa/Lusaka' });
+  const dayOfMonth = zambiaTime.getDate();
+  const month = zambiaTime.toLocaleDateString('en-US', { month: 'long', timeZone: 'Africa/Lusaka' });
+  const year = zambiaTime.getFullYear();
+  
+  let timeOfDay = 'morning';
+  if (hour >= 12 && hour < 17) timeOfDay = 'afternoon';
+  else if (hour >= 17 && hour < 21) timeOfDay = 'evening';
+  else if (hour >= 21 || hour < 5) timeOfDay = 'night';
+  
+  const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
+  const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
+  
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -565,11 +582,11 @@ async function generateCaption(
       messages: [
         {
           role: 'system',
-          content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Respond in JSON format only.`
+          content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Consider the time of day, day of week, and current date when crafting captions (e.g., weekend vibes, morning energy, end-of-week celebrations, seasonal themes). Respond in JSON format only.`
         },
         {
           role: 'user',
-          content: `${context}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
+          content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nMake the caption time-appropriate (e.g., "Good morning" for morning, "Happy Friday" for Friday, weekend references on weekends, etc.).\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
         }
       ],
       temperature: 0.7
@@ -603,6 +620,23 @@ async function generateSuggestions(
 ): Promise<{ suggestions: string[] }> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
+  // Get current time context
+  const now = new Date();
+  const zambiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Africa/Lusaka' }));
+  const hour = zambiaTime.getHours();
+  const dayOfWeek = zambiaTime.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Africa/Lusaka' });
+  const dayOfMonth = zambiaTime.getDate();
+  const month = zambiaTime.toLocaleDateString('en-US', { month: 'long', timeZone: 'Africa/Lusaka' });
+  const year = zambiaTime.getFullYear();
+  
+  let timeOfDay = 'morning';
+  if (hour >= 12 && hour < 17) timeOfDay = 'afternoon';
+  else if (hour >= 17 && hour < 21) timeOfDay = 'evening';
+  else if (hour >= 21 || hour < 5) timeOfDay = 'night';
+  
+  const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
+  const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
+  
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -614,11 +648,11 @@ async function generateSuggestions(
       messages: [
         {
           role: 'system',
-          content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas.`
+          content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas that are timely and relevant to the current day/time.`
         },
         {
           role: 'user',
-          content: `${context}\n\nSuggest 3 creative image ideas I should create for social media. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
+          content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Consider the current time of day, day of week, and any upcoming events/seasons. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
         }
       ],
       temperature: 0.8
