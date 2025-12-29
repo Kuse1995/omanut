@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
+import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -28,6 +29,53 @@ interface ProductImage {
   file_name: string;
   description: string | null;
   tags: string[] | null;
+}
+
+// Upload base64 image to Supabase storage and return public URL
+async function uploadBase64ToStorage(
+  supabase: any,
+  supabaseUrl: string,
+  base64Data: string,
+  companyId: string
+): Promise<string> {
+  // Extract the base64 content and mime type
+  const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!matches) {
+    console.error('[UPLOAD] Invalid base64 format');
+    throw new Error('Invalid base64 image format');
+  }
+  
+  const imageType = matches[1]; // png, jpeg, etc.
+  const base64Content = matches[2];
+  
+  // Decode base64 to binary
+  const binaryData = base64Decode(base64Content);
+  
+  // Generate unique filename
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).substring(2, 10);
+  const fileName = `generated/${companyId}/${timestamp}_${randomId}.${imageType}`;
+  
+  console.log(`[UPLOAD] Uploading to company-media/${fileName}`);
+  
+  // Upload to storage
+  const { error: uploadError } = await supabase.storage
+    .from('company-media')
+    .upload(fileName, binaryData, {
+      contentType: `image/${imageType}`,
+      upsert: false
+    });
+  
+  if (uploadError) {
+    console.error('[UPLOAD] Storage upload error:', uploadError);
+    throw new Error(`Failed to upload image: ${uploadError.message}`);
+  }
+  
+  // Return public URL
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/company-media/${fileName}`;
+  console.log(`[UPLOAD] Success! Public URL: ${publicUrl.substring(0, 80)}...`);
+  
+  return publicUrl;
 }
 
 // Detect image generation commands from WhatsApp messages
@@ -255,7 +303,10 @@ async function generateImage(
   prompt: string, 
   context: string,
   companyName: string,
-  businessType: string
+  businessType: string,
+  supabase: any,
+  supabaseUrl: string,
+  companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -295,11 +346,14 @@ async function generateImage(
   }
   
   const data = await response.json();
-  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
   
-  if (!imageUrl) {
+  if (!base64ImageUrl) {
     throw new Error('No image generated');
   }
+  
+  // Upload base64 to storage and get public URL
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
   
   return { imageUrl, enhancedPrompt };
 }
@@ -310,7 +364,10 @@ async function generateProductAnchoredImage(
   prompt: string,
   context: string,
   companyName: string,
-  productInfo: ProductImage
+  productInfo: ProductImage,
+  supabase: any,
+  supabaseUrl: string,
+  companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -383,11 +440,14 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   }
   
   const data = await response.json();
-  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
   
-  if (!imageUrl) {
+  if (!base64ImageUrl) {
     throw new Error('No image generated');
   }
+  
+  // Upload base64 to storage and get public URL
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
   
   return { imageUrl, enhancedPrompt };
 }
@@ -397,7 +457,10 @@ async function editImage(
   sourceImageUrl: string,
   editPrompt: string,
   context: string,
-  companyName: string
+  companyName: string,
+  supabase: any,
+  supabaseUrl: string,
+  companyId: string
 ): Promise<{ imageUrl: string; editDescription: string }> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -444,12 +507,15 @@ async function editImage(
   }
   
   const data = await response.json();
-  const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
   const textResponse = data.choices?.[0]?.message?.content || '';
   
-  if (!imageUrl) {
+  if (!base64ImageUrl) {
     throw new Error('No edited image generated');
   }
+  
+  // Upload base64 to storage and get public URL
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
   
   return { imageUrl, editDescription: textResponse || editPrompt };
 }
@@ -748,13 +814,16 @@ serve(async (req) => {
             prompt,
             context,
             company.name,
-            productImage
+            productImage,
+            supabase,
+            supabaseUrl,
+            companyId
           );
           isProductAnchored = true;
         } else {
           // Fallback to text-only generation
           console.log('[IMAGE-GEN] No product images found, using text-only generation');
-          result = await generateImage(prompt, context, company.name, company.business_type || 'business');
+          result = await generateImage(prompt, context, company.name, company.business_type || 'business', supabase, supabaseUrl, companyId);
         }
         
         imageUrl = result.imageUrl;
@@ -832,7 +901,7 @@ serve(async (req) => {
         
         console.log(`[IMAGE-EDIT] Editing ${isUserUpload ? 'user-uploaded' : 'generated'} image`);
         
-        const editResult = await editImage(sourceImageUrl, prompt, context, company.name);
+        const editResult = await editImage(sourceImageUrl, prompt, context, company.name, supabase, supabaseUrl, companyId);
         imageUrl = editResult.imageUrl;
         
         // Save edited image

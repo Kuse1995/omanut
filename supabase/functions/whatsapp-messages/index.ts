@@ -3329,6 +3329,7 @@ serve(async (req) => {
             const cleanedResponse = cleanFormatting(bossData.response);
             const responseChunks = splitMessage(cleanedResponse);
             console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
+            console.log(`[BOSS] Has imageUrl: ${!!bossData.imageUrl}`);
             
             // Send each chunk sequentially
             for (let i = 0; i < responseChunks.length; i++) {
@@ -3337,6 +3338,12 @@ serve(async (req) => {
               twilioFormData.append('From', To);
               twilioFormData.append('To', From);
               twilioFormData.append('Body', responseChunks[i]);
+              
+              // Add MediaUrl for the first chunk if an image was generated
+              if (i === 0 && bossData.imageUrl) {
+                console.log(`[BOSS] Attaching image URL to first chunk: ${bossData.imageUrl.substring(0, 80)}...`);
+                twilioFormData.append('MediaUrl', bossData.imageUrl);
+              }
               
               const twilioResponse = await fetch(twilioUrl, {
                 method: 'POST',

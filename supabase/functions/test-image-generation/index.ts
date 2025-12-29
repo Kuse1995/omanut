@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -12,6 +13,53 @@ interface ProductImage {
   file_name: string;
   description: string | null;
   tags: string[] | null;
+}
+
+// Upload base64 image to Supabase storage and return public URL
+async function uploadBase64ToStorage(
+  supabase: any,
+  supabaseUrl: string,
+  base64Data: string,
+  companyId: string
+): Promise<string> {
+  // Extract the base64 content and mime type
+  const matches = base64Data.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!matches) {
+    console.error('[UPLOAD] Invalid base64 format');
+    throw new Error('Invalid base64 image format');
+  }
+  
+  const imageType = matches[1]; // png, jpeg, etc.
+  const base64Content = matches[2];
+  
+  // Decode base64 to binary
+  const binaryData = base64Decode(base64Content);
+  
+  // Generate unique filename
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).substring(2, 10);
+  const fileName = `generated/${companyId}/${timestamp}_${randomId}.${imageType}`;
+  
+  console.log(`[UPLOAD] Uploading to company-media/${fileName}`);
+  
+  // Upload to storage
+  const { error: uploadError } = await supabase.storage
+    .from('company-media')
+    .upload(fileName, binaryData, {
+      contentType: `image/${imageType}`,
+      upsert: false
+    });
+  
+  if (uploadError) {
+    console.error('[UPLOAD] Storage upload error:', uploadError);
+    throw new Error(`Failed to upload image: ${uploadError.message}`);
+  }
+  
+  // Return public URL
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/company-media/${fileName}`;
+  console.log(`[UPLOAD] Success! Public URL: ${publicUrl.substring(0, 80)}...`);
+  
+  return publicUrl;
 }
 
 serve(async (req) => {
@@ -247,9 +295,9 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
     }
 
     const aiData = await aiResponse.json();
-    const imageUrl = aiData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    const base64ImageUrl = aiData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
-    if (!imageUrl) {
+    if (!base64ImageUrl) {
       console.error("[test-image-generation] No image in response:", aiData);
       return new Response(
         JSON.stringify({ error: "No image generated" }),
@@ -257,7 +305,12 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
       );
     }
 
-    console.log("[test-image-generation] Image generated successfully");
+    console.log("[test-image-generation] Image generated, uploading to storage...");
+    
+    // Upload base64 to storage and get public URL
+    const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+    
+    console.log("[test-image-generation] Image uploaded successfully:", imageUrl.substring(0, 80));
 
     // Save the generated image to the database
     const savedPrompt = productImage 
