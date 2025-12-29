@@ -1107,17 +1107,18 @@ export const ImageGenerationPanel = () => {
           {selectedImage && (
             <div className="space-y-4">
               <div className="aspect-video rounded-lg overflow-hidden bg-muted">
-                {selectedImage.image_url.startsWith('data:') ? (
-                  <img
-                    src={selectedImage.image_url}
-                    alt={selectedImage.prompt}
-                    className="w-full h-full object-contain"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Image className="h-16 w-16 text-muted-foreground" />
-                  </div>
-                )}
+                <img
+                  src={selectedImage.image_url}
+                  alt={selectedImage.prompt}
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                  }}
+                />
+                <div className="hidden w-full h-full flex items-center justify-center">
+                  <Image className="h-16 w-16 text-muted-foreground" />
+                </div>
               </div>
               <div className="space-y-2">
                 <p className="text-sm font-medium">Prompt</p>
@@ -1127,21 +1128,23 @@ export const ImageGenerationPanel = () => {
               </div>
               <div className="flex items-center justify-between text-sm text-muted-foreground">
                 <span>Created: {new Date(selectedImage.created_at).toLocaleString()}</span>
-                {selectedImage.image_url.startsWith('data:') && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedImage.image_url.startsWith('data:')) {
                       const link = document.createElement('a');
                       link.href = selectedImage.image_url;
                       link.download = `image-${selectedImage.id}.png`;
                       link.click();
-                    }}
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download
-                  </Button>
-                )}
+                    } else {
+                      window.open(selectedImage.image_url, '_blank');
+                    }
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {selectedImage.image_url.startsWith('data:') ? 'Download' : 'Open'}
+                </Button>
               </div>
             </div>
           )}
@@ -1271,25 +1274,26 @@ export const ImageGenerationPanel = () => {
                 </div>
               )}
               
-              <div className="aspect-video rounded-lg overflow-hidden bg-muted">
-                {testResult.image_url.startsWith('data:') ? (
-                  <img
-                    src={testResult.image_url}
-                    alt="Generated test image"
-                    className="w-full h-full object-contain"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Image className="h-16 w-16 text-muted-foreground" />
-                  </div>
-                )}
+              <div className="aspect-video rounded-lg overflow-hidden bg-muted max-h-64">
+                <img
+                  src={testResult.image_url}
+                  alt="Generated test image"
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                  }}
+                />
+                <div className="hidden w-full h-full flex items-center justify-center">
+                  <Image className="h-16 w-16 text-muted-foreground" />
+                </div>
               </div>
               
               {testResult.enhanced_prompt && (
                 <div className="space-y-1">
                   <Label className="text-sm font-medium">Enhanced Prompt (with settings)</Label>
-                  <ScrollArea className="h-32">
-                    <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg whitespace-pre-wrap">
+                  <ScrollArea className="max-h-24">
+                    <p className="text-xs text-muted-foreground bg-muted p-2 rounded-lg whitespace-pre-wrap">
                       {testResult.enhanced_prompt}
                     </p>
                   </ScrollArea>
@@ -1302,19 +1306,21 @@ export const ImageGenerationPanel = () => {
             <Button variant="outline" onClick={() => setShowTestResultDialog(false)}>
               Close
             </Button>
-            {testResult?.image_url?.startsWith('data:') && (
-              <Button
-                onClick={() => {
+            <Button
+              onClick={() => {
+                if (testResult?.image_url?.startsWith('data:')) {
                   const link = document.createElement('a');
                   link.href = testResult.image_url;
                   link.download = `test-image-${testResult.image_id || Date.now()}.png`;
                   link.click();
-                }}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Download
-              </Button>
-            )}
+                } else if (testResult?.image_url) {
+                  window.open(testResult.image_url, '_blank');
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {testResult?.image_url?.startsWith('data:') ? 'Download' : 'Open'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
