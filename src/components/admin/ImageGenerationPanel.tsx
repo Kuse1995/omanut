@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -102,6 +103,7 @@ export const ImageGenerationPanel = () => {
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
   const [uploadingRef, setUploadingRef] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; fileName: string } | null>(null);
+  const [uploadCategory, setUploadCategory] = useState<'products' | 'promotional' | 'logo'>('products');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // AI Analysis state
@@ -232,7 +234,7 @@ export const ImageGenerationPanel = () => {
         const timestamp = Date.now() + Math.random().toString(36).slice(2);
         const ext = file.name.split('.').pop() || 'jpg';
         // Use 'promotional' folder to match the category used in database insert
-        const filePath = `${selectedCompany.id}/promotional/${timestamp}.${ext}`;
+        const filePath = `${selectedCompany.id}/${uploadCategory}/${timestamp}.${ext}`;
         
         console.log('[ImageUpload] Uploading file:', file.name, 'to path:', filePath);
         
@@ -263,8 +265,10 @@ export const ImageGenerationPanel = () => {
           file_type: file.type,
           file_size: file.size,
           media_type: 'image',
-          category: 'promotional' as const,
-          description: 'Reference image for AI generation'
+          category: uploadCategory as 'products' | 'promotional' | 'logo',
+          description: uploadCategory === 'products' ? 'Product image for AI generation' : 
+                       uploadCategory === 'logo' ? 'Logo/branding image' : 
+                       'Reference image for AI generation'
         };
         
         console.log('[ImageUpload] Inserting to database:', insertData);
@@ -858,7 +862,17 @@ export const ImageGenerationPanel = () => {
                       Upload brand/product images as visual context for AI generation
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
+                    <Select value={uploadCategory} onValueChange={(v) => setUploadCategory(v as 'products' | 'promotional' | 'logo')}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="products">Products</SelectItem>
+                        <SelectItem value="promotional">Promotional</SelectItem>
+                        <SelectItem value="logo">Logo</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -883,7 +897,7 @@ export const ImageGenerationPanel = () => {
                       )}
                       {uploadingRef && uploadProgress 
                         ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` 
-                        : 'Upload Images'}
+                        : 'Upload'}
                     </Button>
                     {referenceImages.length > 0 && (
                       <Button
@@ -949,6 +963,12 @@ export const ImageGenerationPanel = () => {
                           alt={img.file_name}
                           className="w-full h-full object-cover"
                         />
+                        <Badge 
+                          variant="secondary" 
+                          className="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 capitalize bg-background/80 backdrop-blur-sm"
+                        >
+                          {img.category || 'other'}
+                        </Badge>
                         <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                           <Button
                             variant="destructive"
