@@ -734,7 +734,7 @@ export const ImageGenerationPanel = () => {
         </TabsContent>
 
         {/* Settings Tab */}
-        <TabsContent value="settings">
+        <TabsContent value="settings" className="max-h-[calc(100vh-300px)] overflow-auto">
           <Card>
             <CardHeader>
               <CardTitle>Image Generation Settings</CardTitle>
