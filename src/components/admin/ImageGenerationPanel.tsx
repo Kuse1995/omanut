@@ -677,17 +677,19 @@ export const ImageGenerationPanel = () => {
                       className="group relative aspect-square rounded-lg overflow-hidden border bg-muted cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                       onClick={() => setSelectedImage(image)}
                     >
-                      {image.image_url.startsWith('data:') ? (
-                        <img
-                          src={image.image_url}
-                          alt={image.prompt}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Image className="h-8 w-8 text-muted-foreground" />
-                        </div>
-                      )}
+                      <img
+                        src={image.image_url}
+                        alt={image.prompt}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // Hide broken image and show placeholder
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.parentElement?.querySelector('.placeholder-icon')?.classList.remove('hidden');
+                        }}
+                      />
+                      <div className="placeholder-icon hidden w-full h-full flex items-center justify-center absolute inset-0">
+                        <Image className="h-8 w-8 text-muted-foreground" />
+                      </div>
                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
                         <p className="text-white text-xs line-clamp-2">{image.prompt}</p>
                       </div>
