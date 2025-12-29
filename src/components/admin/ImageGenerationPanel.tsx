@@ -439,19 +439,21 @@ export const ImageGenerationPanel = () => {
   };
 
   const saveSettings = async () => {
-    if (!selectedCompany || !settings) return;
+    if (!selectedCompany) return;
     setSaving(true);
 
     try {
       const { error } = await supabase
         .from('image_generation_settings')
-        .update({
+        .upsert({
+          company_id: selectedCompany.id,
           enabled,
           business_context: businessContext || null,
           style_description: styleDescription || null,
           sample_prompts: samplePrompts.split('\n').filter(p => p.trim())
-        })
-        .eq('company_id', selectedCompany.id);
+        }, {
+          onConflict: 'company_id'
+        });
 
       if (error) throw error;
       toast.success('Settings saved successfully');
