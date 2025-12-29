@@ -31,6 +31,7 @@ import {
   Loader2,
   Wand2,
   Check,
+  CheckCircle,
   Palette
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -114,8 +115,12 @@ export const ImageGenerationPanel = () => {
   // Test generation state
   const [testPrompt, setTestPrompt] = useState('');
   const [testGenerating, setTestGenerating] = useState(false);
-  const [testResult, setTestResult] = useState<{ image_url: string; image_id?: string; enhanced_prompt?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ image_url: string; image_id?: string; enhanced_prompt?: string; product_mode?: boolean; product_used?: { id: string; name: string } | null } | null>(null);
   const [showTestResultDialog, setShowTestResultDialog] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<string>('auto');
+  
+  // Get product images for selector
+  const productImages = referenceImages.filter(img => img.category === 'products');
 
   useEffect(() => {
     if (selectedCompany) {
@@ -487,10 +492,16 @@ export const ImageGenerationPanel = () => {
     setTestResult(null);
     
     try {
+      // Determine product mode parameters
+      const useProductMode = selectedProductId === 'auto' && productImages.length > 0;
+      const productImageId = selectedProductId !== 'auto' && selectedProductId !== 'none' ? selectedProductId : undefined;
+      
       const { data, error } = await supabase.functions.invoke('test-image-generation', {
         body: {
           companyId: selectedCompany.id,
-          prompt: promptToUse
+          prompt: promptToUse,
+          useProductMode,
+          productImageId
         }
       });
       
@@ -503,10 +514,12 @@ export const ImageGenerationPanel = () => {
       setTestResult({
         image_url: data.image_url,
         image_id: data.image_id,
-        enhanced_prompt: data.enhanced_prompt
+        enhanced_prompt: data.enhanced_prompt,
+        product_mode: data.product_mode,
+        product_used: data.product_used
       });
       setShowTestResultDialog(true);
-      toast.success('Test image generated!');
+      toast.success(data.product_mode ? 'Product-anchored image generated!' : 'Test image generated!');
       
       // Refresh gallery to show new image
       loadData();
@@ -1007,11 +1020,45 @@ export const ImageGenerationPanel = () => {
                   <Label htmlFor="testPrompt">Test Prompt</Label>
                   <Textarea
                     id="testPrompt"
-                    placeholder="Enter a test prompt or leave empty to use the first sample prompt..."
+                    placeholder="e.g., Place the product on a wooden kitchen counter with fresh vegetables..."
                     value={testPrompt}
                     onChange={(e) => setTestPrompt(e.target.value)}
                     rows={2}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="productSelect">Product Image</Label>
+                  <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a product image" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">
+                        <span className="flex items-center gap-2">
+                          <Wand2 className="h-3.5 w-3.5" />
+                          Auto-detect from prompt
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="none">
+                        <span className="flex items-center gap-2">
+                          <Image className="h-3.5 w-3.5" />
+                          Text-only (no product)
+                        </span>
+                      </SelectItem>
+                      {productImages.map(img => (
+                        <SelectItem key={img.id} value={img.id}>
+                          <span className="truncate">{img.file_name}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {productImages.length === 0 
+                      ? "Upload product images above to enable product-anchored generation"
+                      : "Select a specific product or let AI auto-detect from prompt keywords"
+                    }
+                  </p>
                 </div>
 
                 <Button 
@@ -1032,6 +1079,13 @@ export const ImageGenerationPanel = () => {
                     </>
                   )}
                 </Button>
+
+                {productImages.length > 0 && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 p-2 rounded-lg">
+                    <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                    <span>Product-anchored mode available ({productImages.length} product{productImages.length !== 1 ? 's' : ''})</span>
+                  </div>
+                )}
               </div>
 
               <Button onClick={saveSettings} disabled={saving} className="w-full">
@@ -1201,6 +1255,20 @@ export const ImageGenerationPanel = () => {
           
           {testResult && (
             <div className="space-y-4">
+              {/* Product mode indicator */}
+              {testResult.product_mode && (
+                <div className="flex items-center gap-2 text-sm bg-green-500/10 text-green-700 dark:text-green-400 p-2 rounded-lg">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Product-anchored mode: Used "{testResult.product_used?.name || 'product image'}"</span>
+                </div>
+              )}
+              {testResult.product_mode === false && (
+                <div className="flex items-center gap-2 text-sm bg-muted text-muted-foreground p-2 rounded-lg">
+                  <Image className="h-4 w-4" />
+                  <span>Text-only mode (no product image used)</span>
+                </div>
+              )}
+              
               <div className="aspect-video rounded-lg overflow-hidden bg-muted">
                 {testResult.image_url.startsWith('data:') ? (
                   <img
@@ -1218,9 +1286,11 @@ export const ImageGenerationPanel = () => {
               {testResult.enhanced_prompt && (
                 <div className="space-y-1">
                   <Label className="text-sm font-medium">Enhanced Prompt (with settings)</Label>
-                  <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
-                    {testResult.enhanced_prompt}
-                  </p>
+                  <ScrollArea className="h-32">
+                    <p className="text-sm text-muted-foreground bg-muted p-3 rounded-lg whitespace-pre-wrap">
+                      {testResult.enhanced_prompt}
+                    </p>
+                  </ScrollArea>
                 </div>
               )}
             </div>
