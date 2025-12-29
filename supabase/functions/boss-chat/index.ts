@@ -188,8 +188,11 @@ Tip: The AI learns your style preferences from feedback!`;
       console.log(`[BOSS-IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
 
       // Check if image generation is enabled for this company
-      const imageSettings = company.image_generation_settings?.[0];
-      
+      const imageSettings = Array.isArray(company.image_generation_settings)
+        ? company.image_generation_settings[0]
+        : company.image_generation_settings;
+
+      console.log('[BOSS-IMAGE-GEN] Company image settings enabled:', imageSettings?.enabled);
       if (!imageSettings?.enabled) {
         console.log('[BOSS-IMAGE-GEN] Image generation not enabled for company');
         return new Response(JSON.stringify({
