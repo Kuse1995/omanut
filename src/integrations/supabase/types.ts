@@ -812,6 +812,53 @@ export type Database = {
           },
         ]
       }
+      company_users: {
+        Row: {
+          accepted_at: string | null
+          company_id: string
+          created_at: string | null
+          id: string
+          invited_at: string | null
+          invited_by: string | null
+          is_default: boolean | null
+          role: Database["public"]["Enums"]["company_role"]
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          company_id: string
+          created_at?: string | null
+          id?: string
+          invited_at?: string | null
+          invited_by?: string | null
+          is_default?: boolean | null
+          role?: Database["public"]["Enums"]["company_role"]
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          company_id?: string
+          created_at?: string | null
+          id?: string
+          invited_at?: string | null
+          invited_by?: string | null
+          is_default?: boolean | null
+          role?: Database["public"]["Enums"]["company_role"]
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_users_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           active_agent: string | null
@@ -1914,6 +1961,10 @@ export type Database = {
         Args: { new_password: string; target_user_id: string }
         Returns: Json
       }
+      can_manage_company_users: {
+        Args: { company_uuid: string }
+        Returns: boolean
+      }
       deduct_credits: {
         Args: {
           p_amount: number
@@ -1924,6 +1975,26 @@ export type Database = {
         Returns: undefined
       }
       delete_company: { Args: { p_company_id: string }; Returns: Json }
+      get_user_companies: {
+        Args: never
+        Returns: {
+          company_id: string
+          company_name: string
+          is_default: boolean
+          role: Database["public"]["Enums"]["company_role"]
+        }[]
+      }
+      get_user_company_role: {
+        Args: { company_uuid: string }
+        Returns: Database["public"]["Enums"]["company_role"]
+      }
+      has_company_role: {
+        Args: {
+          company_uuid: string
+          required_role: Database["public"]["Enums"]["company_role"]
+        }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1935,9 +2006,14 @@ export type Database = {
         Args: { company_uuid: string }
         Returns: boolean
       }
+      user_has_company_access_v2: {
+        Args: { company_uuid: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "admin" | "user" | "client"
+      company_role: "owner" | "manager" | "contributor" | "viewer"
       media_category:
         | "menu"
         | "interior"
@@ -2077,6 +2153,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user", "client"],
+      company_role: ["owner", "manager", "contributor", "viewer"],
       media_category: [
         "menu",
         "interior",

@@ -109,3 +109,6 @@ verify_jwt = true
 [functions.test-image-generation]
 verify_jwt = true
 timeout = 60
+
+[functions.invite-company-user]
+verify_jwt = true
