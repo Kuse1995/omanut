@@ -109,7 +109,7 @@ serve(async (req) => {
 
     if (companyError) throw companyError;
 
-    // Link user to company
+    // Link user to company (legacy table)
     const { error: userError2 } = await supabaseAdmin
       .from('users')
       .insert({
@@ -120,6 +120,19 @@ serve(async (req) => {
       });
 
     if (userError2) throw userError2;
+
+    // Add user to company_users as owner (new multi-tenant table)
+    const { error: companyUserError } = await supabaseAdmin
+      .from('company_users')
+      .insert({
+        user_id: authData.user.id,
+        company_id: company.id,
+        role: 'owner',
+        is_default: true,
+        accepted_at: new Date().toISOString(),
+      });
+
+    if (companyUserError) throw companyUserError;
 
     // Give user client role for RLS
     const { error: roleError } = await supabaseAdmin
