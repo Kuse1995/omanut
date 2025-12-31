@@ -312,10 +312,20 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
     
     console.log("[test-image-generation] Image uploaded successfully:", imageUrl.substring(0, 80));
 
-    // Save the generated image to the database
+    // Save the generated image to the database as a draft
     const savedPrompt = productImage 
       ? `[Product: ${productImage.file_name}] ${prompt}`
       : prompt;
+    
+    const brandAssetsUsed = productImage ? [productImage.id] : [];
+    const generationParams = {
+      original_prompt: prompt,
+      enhanced_prompt: enhancedPrompt,
+      product_mode: !!productImage,
+      product_id: productImage?.id || null,
+      model: "google/gemini-2.5-flash-image-preview",
+      context: context || null
+    };
     
     const { data: savedImage, error: saveError } = await supabase
       .from("generated_images")
@@ -323,6 +333,9 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
         company_id: companyId,
         prompt: savedPrompt,
         image_url: imageUrl,
+        status: 'draft', // Always save as draft
+        brand_assets_used: brandAssetsUsed,
+        generation_params: generationParams
       })
       .select()
       .single();
