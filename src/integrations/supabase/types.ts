@@ -1451,6 +1451,65 @@ export type Database = {
           },
         ]
       }
+      message_reply_drafts: {
+        Row: {
+          ai_reply: string
+          approved_at: string | null
+          approved_by: string | null
+          company_id: string
+          created_at: string | null
+          id: string
+          prompt_context: Json | null
+          rejected_at: string | null
+          rejection_reason: string | null
+          sent_at: string | null
+          source_id: string
+          source_type: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          ai_reply: string
+          approved_at?: string | null
+          approved_by?: string | null
+          company_id: string
+          created_at?: string | null
+          id?: string
+          prompt_context?: Json | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          sent_at?: string | null
+          source_id: string
+          source_type: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          ai_reply?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          company_id?: string
+          created_at?: string | null
+          id?: string
+          prompt_context?: Json | null
+          rejected_at?: string | null
+          rejection_reason?: string | null
+          sent_at?: string | null
+          source_id?: string
+          source_type?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reply_drafts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           content: string

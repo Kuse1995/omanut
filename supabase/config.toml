@@ -118,3 +118,12 @@ verify_jwt = true
 
 [functions.process-scheduled-posts]
 verify_jwt = false
+
+[functions.generate-reply-draft]
+verify_jwt = true
+
+[functions.send-facebook-message-reply]
+verify_jwt = true
+
+[functions.send-facebook-comment-reply]
+verify_jwt = true
