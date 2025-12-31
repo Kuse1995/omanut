@@ -1163,28 +1163,55 @@ export type Database = {
       }
       generated_images: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
+          brand_assets_used: string[] | null
           company_id: string
           conversation_id: string | null
           created_at: string
+          generation_params: Json | null
           id: string
           image_url: string
           prompt: string
+          rejected_at: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
+          status: string
+          updated_at: string | null
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          brand_assets_used?: string[] | null
           company_id: string
           conversation_id?: string | null
           created_at?: string
+          generation_params?: Json | null
           id?: string
           image_url: string
           prompt: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          status?: string
+          updated_at?: string | null
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          brand_assets_used?: string[] | null
           company_id?: string
           conversation_id?: string | null
           created_at?: string
+          generation_params?: Json | null
           id?: string
           image_url?: string
           prompt?: string
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          status?: string
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -1284,42 +1311,57 @@ export type Database = {
       image_generation_settings: {
         Row: {
           best_posting_times: string[] | null
+          brand_colors: Json | null
+          brand_fonts: Json | null
+          brand_tone: string | null
           business_context: string | null
           company_id: string
           created_at: string
           enabled: boolean
           id: string
           learned_style_preferences: Json | null
+          reference_asset_ids: string[] | null
           sample_prompts: string[] | null
           style_description: string | null
           top_performing_prompts: string[] | null
           updated_at: string
+          visual_guidelines: string | null
         }
         Insert: {
           best_posting_times?: string[] | null
+          brand_colors?: Json | null
+          brand_fonts?: Json | null
+          brand_tone?: string | null
           business_context?: string | null
           company_id: string
           created_at?: string
           enabled?: boolean
           id?: string
           learned_style_preferences?: Json | null
+          reference_asset_ids?: string[] | null
           sample_prompts?: string[] | null
           style_description?: string | null
           top_performing_prompts?: string[] | null
           updated_at?: string
+          visual_guidelines?: string | null
         }
         Update: {
           best_posting_times?: string[] | null
+          brand_colors?: Json | null
+          brand_fonts?: Json | null
+          brand_tone?: string | null
           business_context?: string | null
           company_id?: string
           created_at?: string
           enabled?: boolean
           id?: string
           learned_style_preferences?: Json | null
+          reference_asset_ids?: string[] | null
           sample_prompts?: string[] | null
           style_description?: string | null
           top_performing_prompts?: string[] | null
           updated_at?: string
+          visual_guidelines?: string | null
         }
         Relationships: [
           {
