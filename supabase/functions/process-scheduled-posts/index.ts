@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +14,7 @@ const corsHeaders = {
  * - Company context is ALWAYS derived from the database record
  * - NEVER accepts company_id from external input
  * - Uses loadTenantFromRecord pattern for tenant isolation
+ * - Logs all tenant violations to security_events table
  */
 
 // Tenant isolation utilities (inline to avoid import issues in edge functions)
@@ -32,6 +33,28 @@ function assertTenantContext(
     throw new TenantContextError(
       `Tenant isolation violation in ${context}: No company_id found on record.`
     );
+  }
+}
+
+// Security event logging
+async function logSecurityEvent(
+  supabase: SupabaseClient,
+  eventType: string,
+  severity: string,
+  source: string,
+  message: string,
+  details?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await supabase.from('security_events').insert({
+      event_type: eventType,
+      severity,
+      source,
+      message,
+      details: details || {},
+    });
+  } catch (err) {
+    console.error('Failed to log security event:', err);
   }
 }
 
@@ -136,7 +159,23 @@ serve(async (req) => {
 
         // Verify tenant consistency between post and page
         if (facebookPage.company_id !== companyId) {
-          console.error(`Tenant isolation violation: Post company_id (${companyId}) does not match page company_id (${facebookPage.company_id})`);
+          const violationMessage = `Post company_id (${companyId}) does not match page company_id (${facebookPage.company_id})`;
+          console.error(`SECURITY: Tenant isolation violation: ${violationMessage}`);
+          
+          // Log to security_events table
+          await logSecurityEvent(
+            supabase,
+            'tenant_mismatch',
+            'critical',
+            'process-scheduled-posts',
+            violationMessage,
+            {
+              post_id: post.id,
+              post_company_id: companyId,
+              page_company_id: facebookPage.company_id,
+            }
+          );
+          
           await supabase
             .from('facebook_scheduled_posts')
             .update({
@@ -212,8 +251,15 @@ serve(async (req) => {
         console.error(`Error processing post ${post.id}:`, error);
         
         if (error instanceof TenantContextError) {
-          // Log tenant isolation violations prominently
-          console.error('SECURITY: Tenant isolation violation detected');
+          // Log tenant isolation violations to security_events
+          await logSecurityEvent(
+            supabase,
+            'tenant_violation',
+            'critical',
+            'process-scheduled-posts',
+            error.message,
+            { post_id: post.id }
+          );
         }
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
