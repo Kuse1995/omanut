@@ -112,3 +112,9 @@ timeout = 60
 
 [functions.invite-company-user]
 verify_jwt = true
+
+[functions.publish-facebook-post]
+verify_jwt = true
+
+[functions.process-scheduled-posts]
+verify_jwt = false
