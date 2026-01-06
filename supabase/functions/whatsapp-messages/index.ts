@@ -916,13 +916,73 @@ async function processAIResponse(
       hour12: true 
     });
     
+    // ========== BUILD BUSINESS IDENTITY SECTION ==========
+    const businessType = (company.business_type || '').toLowerCase();
+    const isSchool = businessType.includes('school') || businessType.includes('education') || 
+                     businessType.includes('institution') || businessType.includes('academy') ||
+                     businessType.includes('college') || businessType.includes('university');
+    const isRestaurant = businessType.includes('restaurant') || businessType.includes('cafe') || 
+                         businessType.includes('bar') || businessType.includes('food');
+    const isDigitalProducts = businessType.includes('digital') || businessType.includes('ebook') || 
+                              businessType.includes('product') || businessType.includes('store');
+    
     let instructions = `You are a friendly AI assistant for ${company.name}`;
+    
+    if (company.business_type) {
+      instructions += ` - a ${company.business_type.toUpperCase()} business`;
+    }
     
     if (company.industry) {
       instructions += ` (${company.industry})`;
     }
     
     instructions += `.${agentPersonality}
+
+=== YOUR BUSINESS IDENTITY ===
+You represent: ${company.name}
+Business Type: ${company.business_type || 'General Business'}
+${company.industry ? `Industry: ${company.industry}` : ''}
+
+CRITICAL: Your responses, tone, and behavior MUST align with this business type.
+You are NOT a generic chatbot - you are the voice of ${company.name}.`;
+
+    // Add business-type-specific behavioral rules
+    if (isSchool) {
+      instructions += `
+
+=== SCHOOL/EDUCATION BUSINESS RULES ===
+You represent an EDUCATIONAL INSTITUTION. Follow these rules STRICTLY:
+- When parents ask about fees, ANSWER with fee information from your knowledge base
+- Do NOT create payment transactions for fee inquiries - schools handle payments in-person
+- For enrollment inquiries, direct parents to visit the school office
+- Provide bank account details from knowledge base when asked about payments
+- Be warm, professional, and parent-friendly in your communication
+- Focus on educational value, student welfare, and school community
+- You do NOT have access to the request_payment tool for digital products`;
+    } else if (isRestaurant) {
+      instructions += `
+
+=== RESTAURANT/HOSPITALITY BUSINESS RULES ===
+You represent a RESTAURANT/HOSPITALITY business. Follow these rules:
+- Focus on reservations, menu inquiries, and dining experience
+- Be warm, welcoming, and create appetite appeal
+- Use food-appropriate emojis sparingly (🍽️, 🥂)
+- Proactively offer reservation assistance
+- Highlight daily specials and popular dishes when relevant`;
+    } else if (isDigitalProducts) {
+      instructions += `
+
+=== DIGITAL PRODUCTS/E-COMMERCE BUSINESS RULES ===
+You represent a DIGITAL PRODUCTS business. Follow these rules:
+- Help customers find and purchase digital products
+- Use the request_payment tool for explicit purchase requests
+- Highlight product benefits and value
+- Handle payment proof verification promptly
+- Deliver products immediately after payment verification`;
+    }
+
+    // Add date/time and business info
+    instructions += `
 
 === CURRENT DATE & TIME ===
 Today is ${currentDate}
@@ -931,13 +991,12 @@ Use this information to provide time-relevant responses (e.g., greet appropriate
 
 Business Information:
 - Business Name: ${company.name}
-- Phone: ${company.phone}
+- Phone: ${company.phone || 'Not specified'}
 - Address: ${company.address || 'Not specified'}
 ${company.business_hours ? `- Hours: ${company.business_hours}` : ''}
 ${company.services ? `- Services: ${company.services}` : ''}
 ${company.currency_prefix ? `- Currency: ${company.currency_prefix}` : ''}
 ${company.email ? `- Email: ${company.email}` : ''}`;
-
     // Add quick reference knowledge base
     if (company.quick_reference_info && company.quick_reference_info.trim()) {
       instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
@@ -1275,6 +1334,191 @@ ${supervisorRecommendation.recommendedResponse}
       hasFallbackMessage: !!aiOverrides?.fallback_message
     });
 
+    // ========== TOOL DEFINITIONS ==========
+    // Define all available tools in a map for filtering
+    const allToolDefinitions: Record<string, any> = {
+      create_reservation: {
+        type: "function",
+        function: {
+          name: "create_reservation",
+          description: "Create a new reservation in the database with pending_boss_approval status. Use this IMMEDIATELY after you have collected: name, phone, email, date, time, guests. Extract information from conversation history before calling this.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Customer's full name extracted from conversation" },
+              phone: { type: "string", description: "Customer's phone number (WhatsApp number always available)" },
+              email: { type: "string", description: "Customer's email address" },
+              date: { type: "string", description: "Reservation date (YYYY-MM-DD)" },
+              time: { type: "string", description: "Reservation time (HH:MM format, 24-hour)" },
+              guests: { type: "number", description: "Number of guests" },
+              occasion: { type: "string", description: "Special occasion (optional)" },
+              area_preference: { type: "string", description: "Seating area preference (optional)" }
+            },
+            required: ["customer_name", "phone", "email", "date", "time", "guests"]
+          }
+        }
+      },
+      get_date_info: {
+        type: "function",
+        function: {
+          name: "get_date_info",
+          description: "Get information about dates. Use this to convert relative dates like 'tomorrow', 'next Monday', 'this weekend' into actual YYYY-MM-DD format, or to validate if a date is in the future.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Date query like 'tomorrow', 'next Monday', 'this Friday', or specific date to validate like '2025-11-20'" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      notify_boss: {
+        type: "function",
+        function: {
+          name: "notify_boss",
+          description: "Send an immediate notification to the boss for important situations: high-value opportunities (10+ guests, corporate events), complaints, reservation changes/cancellations, VIP information.",
+          parameters: {
+            type: "object",
+            properties: {
+              notification_type: { type: "string", enum: ["high_value", "complaint", "reservation_change", "cancellation", "vip_info"] },
+              priority: { type: "string", enum: ["high", "urgent"] },
+              summary: { type: "string", description: "Brief summary of the situation" },
+              details: { type: "string", description: "Additional context" }
+            },
+            required: ["notification_type", "priority", "summary"]
+          }
+        }
+      },
+      send_media: {
+        type: "function",
+        function: {
+          name: "send_media",
+          description: "Send media files to customer via WhatsApp. Use when customer asks for samples, photos, videos, or examples.",
+          parameters: {
+            type: "object",
+            properties: {
+              media_urls: { type: "array", items: { type: "string" }, description: "Array of media file URLs from the library" },
+              caption: { type: "string", description: "Caption for the media" },
+              category: { type: "string", description: "Category of media" }
+            },
+            required: ["media_urls", "category"]
+          }
+        }
+      },
+      check_calendar_availability: {
+        type: "function",
+        function: {
+          name: "check_calendar_availability",
+          description: "Check reservation database for scheduling conflicts. Always call BEFORE creating a reservation.",
+          parameters: {
+            type: "object",
+            properties: {
+              date: { type: "string", description: "Date in YYYY-MM-DD format" },
+              time: { type: "string", description: "Time in HH:MM format" },
+              duration_minutes: { type: "number", description: "Expected duration in minutes (default 120)" }
+            },
+            required: ["date", "time"]
+          }
+        }
+      },
+      create_calendar_event: {
+        type: "function",
+        function: {
+          name: "create_calendar_event",
+          description: "Notify boss about pending reservation for approval.",
+          parameters: {
+            type: "object",
+            properties: {
+              reservation_id: { type: "string", description: "Reservation UUID from database" },
+              title: { type: "string", description: "Reservation title" },
+              description: { type: "string", description: "Additional reservation details" },
+              send_notifications: { type: "boolean", description: "Deprecated - kept for compatibility" }
+            },
+            required: ["reservation_id", "title"]
+          }
+        }
+      },
+      request_payment: {
+        type: "function",
+        function: {
+          name: "request_payment",
+          description: `Use ONLY when customer EXPLICITLY says they want to BUY, PURCHASE, or ORDER a specific product.
+CRITICAL: Only for explicit purchase intent like "I want to buy", "I'll take the...", "Can I order"
+DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
+          parameters: {
+            type: "object",
+            properties: {
+              product_id: { type: "string", description: "Product UUID if known" },
+              product_name: { type: "string", description: "Name of the product customer wants to buy" },
+              amount: { type: "number", description: "Product price if known" },
+              payment_method: { type: "string", description: "Preferred payment method if mentioned" },
+              customer_details: {
+                type: "object",
+                properties: { name: { type: "string" }, email: { type: "string" } }
+              }
+            },
+            required: ["product_name"]
+          }
+        }
+      },
+      deliver_digital_product: {
+        type: "function",
+        function: {
+          name: "deliver_digital_product",
+          description: "Deliver a digital product to a customer after payment has been verified. Use when customer sends payment proof and payment matches a pending transaction.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name of the product to deliver" },
+              reason: { type: "string", description: "Brief reason for delivery (e.g., 'Payment proof verified - K250 MTN transfer')" }
+            },
+            required: ["product_name", "reason"]
+          }
+        }
+      }
+    };
+
+    // ========== TOOL FILTERING BY BUSINESS TYPE AND ENABLED_TOOLS ==========
+    // Determine which tools to include based on business type and database configuration
+    let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
+    
+    // Business-type-based tool restrictions
+    if (isSchool) {
+      // Schools should NOT have payment/product tools
+      const schoolExcludedTools = ['request_payment', 'deliver_digital_product'];
+      enabledToolNames = enabledToolNames.filter(t => !schoolExcludedTools.includes(t));
+      console.log('[TOOLS] School business - excluded payment tools:', schoolExcludedTools);
+    }
+    
+    // Filter tools array based on enabled tools
+    const filteredTools = enabledToolNames
+      .filter(toolName => allToolDefinitions[toolName])
+      .map(toolName => allToolDefinitions[toolName]);
+    
+    console.log('[TOOLS] Enabled tools for this company:', enabledToolNames);
+    console.log('[TOOLS] Filtered tools count:', filteredTools.length);
+
+    // ========== ADD TOOL AVAILABILITY TO SYSTEM PROMPT ==========
+    // Tell the AI explicitly which tools it has access to
+    const toolAvailabilitySection = `
+
+=== YOUR AVAILABLE TOOLS ===
+You have access to these tools ONLY:
+${enabledToolNames.map(t => `- ${t}`).join('\n')}
+
+CRITICAL TOOL USAGE RULES:
+1. Only use tools from the list above - do NOT attempt to use any other tools
+2. If a customer request would require a tool you don't have, provide information conversationally instead
+3. Never hallucinate tool capabilities - stick to what's available
+${isSchool ? '\n⚠️ SCHOOL BUSINESS: You do NOT have payment processing tools. For fees and payments, provide information from your knowledge base and direct parents to visit the school office.' : ''}
+`;
+
+    // Append tool availability to instructions
+    instructions += toolAvailabilitySection;
+    
+    // Update the messages array with final instructions
+    messages[0] = { role: 'system', content: instructions };
+
     // Call Lovable AI Gateway with configurable timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), responseTimeout);
@@ -1298,201 +1542,7 @@ ${supervisorRecommendation.recommendedResponse}
           messages,
           temperature,
           max_tokens: maxTokens,
-          tools: [
-            {
-              type: "function",
-              function: {
-                name: "create_reservation",
-                description: "Create a new reservation in the database with pending_boss_approval status. Use this IMMEDIATELY after you have collected: name, phone, email, date, time, guests. Extract information from conversation history before calling this.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    customer_name: { type: "string", description: "Customer's full name extracted from conversation" },
-                    phone: { type: "string", description: "Customer's phone number (WhatsApp number always available)" },
-                    email: { type: "string", description: "Customer's email address" },
-                    date: { type: "string", description: "Reservation date (YYYY-MM-DD)" },
-                    time: { type: "string", description: "Reservation time (HH:MM format, 24-hour)" },
-                    guests: { type: "number", description: "Number of guests" },
-                    occasion: { type: "string", description: "Special occasion (optional)" },
-                    area_preference: { type: "string", description: "Seating area preference (optional)" }
-                  },
-                  required: ["customer_name", "phone", "email", "date", "time", "guests"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "get_date_info",
-                description: "Get information about dates. Use this to convert relative dates like 'tomorrow', 'next Monday', 'this weekend' into actual YYYY-MM-DD format, or to validate if a date is in the future.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    query: { 
-                      type: "string", 
-                      description: "Date query like 'tomorrow', 'next Monday', 'this Friday', or specific date to validate like '2025-11-20'" 
-                    }
-                  },
-                  required: ["query"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "notify_boss",
-                description: "Send an immediate notification to the boss for important situations: high-value opportunities (10+ guests, corporate events), complaints, reservation changes/cancellations, VIP information. Use when customer situation requires owner attention.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    notification_type: { 
-                      type: "string", 
-                      enum: ["high_value", "complaint", "reservation_change", "cancellation", "vip_info"],
-                      description: "Type of notification to send"
-                    },
-                    priority: {
-                      type: "string",
-                      enum: ["high", "urgent"],
-                      description: "Priority level - use urgent for complaints or cancellations"
-                    },
-                    summary: { 
-                      type: "string", 
-                      description: "Brief summary of the situation (1-2 sentences)"
-                    },
-                    details: {
-                      type: "string",
-                      description: "Additional context or customer message"
-                    }
-                  },
-                  required: ["notification_type", "priority", "summary"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "send_media",
-                description: "Send media files to customer via WhatsApp. Use when customer asks for samples, photos, videos, or examples.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    media_urls: {
-                      type: "array",
-                      items: { type: "string" },
-                      description: "Array of media file URLs from the library"
-                    },
-                    caption: {
-                      type: "string",
-                      description: "Caption for the media"
-                    },
-                    category: {
-                      type: "string",
-                      description: "Category of media (menu, interior, exterior, logo, products, etc.)"
-                    }
-                  },
-                  required: ["media_urls", "category"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "check_calendar_availability",
-                description: "Check reservation database for scheduling conflicts. Always call BEFORE sending reservation form to customer. Returns conflict status and suggests alternatives if busy.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    date: { type: "string", description: "Date in YYYY-MM-DD format" },
-                    time: { type: "string", description: "Time in HH:MM format" },
-                    duration_minutes: { type: "number", description: "Expected duration in minutes (default 120)" }
-                  },
-                  required: ["date", "time"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "create_calendar_event",
-                description: "Notify boss about pending reservation for approval. Automatically called after customer completes reservation form. Boss will receive context about the day's schedule and approve/reject.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    reservation_id: { type: "string", description: "Reservation UUID from database to notify boss about" },
-                    title: { type: "string", description: "Reservation title (e.g., 'Reservation: John Doe - 4 guests')" },
-                    description: { type: "string", description: "Additional reservation details or notes" },
-                    send_notifications: { type: "boolean", description: "Deprecated - kept for compatibility" }
-                  },
-                  required: ["reservation_id", "title"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "request_payment",
-                description: `Use ONLY when customer EXPLICITLY says they want to BUY, PURCHASE, or ORDER a specific product.
-
-CRITICAL RULES - WHEN TO USE:
-✅ "I want to buy the ebook" → USE this tool
-✅ "I want to order ABC for Christians" → USE this tool
-✅ "Can I purchase the video ad package?" → USE this tool
-✅ "I'll take the premium package" → USE this tool
-
-WHEN NOT TO USE:
-❌ "How much are school fees?" → Just ANSWER with fee info from knowledge base
-❌ "What is the cost for Grade 2?" → Just ANSWER with fee info from knowledge base  
-❌ "What are your prices?" → Just ANSWER with pricing info
-❌ "Tell me about your services" → Just provide information
-❌ "How much is it?" (without purchase intent) → Provide pricing info
-
-FOR SCHOOLS/EDUCATION BUSINESSES:
-- Do NOT use this for fee inquiries - just provide fee information
-- For actual enrollment payments, direct parents to visit the school office
-- Provide bank account details from knowledge base if available
-
-This tool is for DIGITAL PRODUCTS and explicit purchase requests, NOT for general pricing inquiries.`,
-                parameters: {
-                  type: "object",
-                  properties: {
-                    product_id: { type: "string", description: "Product UUID if known, or 'unknown' if searching by name" },
-                    product_name: { type: "string", description: "Name of the product customer wants to buy (e.g., 'ABC for Christians', 'Video Ad', etc.)" },
-                    amount: { type: "number", description: "Product price if known, or 0 if unknown (will be looked up)" },
-                    payment_method: { type: "string", description: "Preferred payment method if mentioned (MTN, Airtel, Zamtel, etc.)" },
-                    customer_details: {
-                      type: "object",
-                      properties: {
-                        name: { type: "string" },
-                        email: { type: "string" }
-                      }
-                    }
-                  },
-                  required: ["product_name"]
-                }
-              }
-            },
-            {
-              type: "function",
-              function: {
-                name: "deliver_digital_product",
-                description: "Deliver a digital product to a customer after payment has been verified. Use this when customer sends payment proof and you've confirmed the payment matches a pending transaction. The product file will be sent via WhatsApp.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    product_name: { 
-                      type: "string", 
-                      description: "Name of the product to deliver (must match a product in payment_products table)" 
-                    },
-                    reason: { 
-                      type: "string", 
-                      description: "Brief reason for delivery (e.g., 'Payment proof verified - K250 MTN transfer')" 
-                    }
-                  },
-                  required: ["product_name", "reason"]
-                }
-              }
-            }
-          ],
+          tools: filteredTools,
           tool_choice: "auto"
         }),
       });
