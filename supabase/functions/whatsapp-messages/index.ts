@@ -1431,7 +1431,27 @@ ${supervisorRecommendation.recommendedResponse}
               type: "function",
               function: {
                 name: "request_payment",
-                description: "Use when customer wants to BUY or PURCHASE a product. Creates a pending payment transaction in the database, sends payment instructions with mobile money numbers, and notifies management. Use this for any purchase intent - 'I want to buy', 'How much is', 'I want the ebook', 'Can I get', etc. Do NOT trigger handoff for purchases - use this tool instead.",
+                description: `Use ONLY when customer EXPLICITLY says they want to BUY, PURCHASE, or ORDER a specific product.
+
+CRITICAL RULES - WHEN TO USE:
+✅ "I want to buy the ebook" → USE this tool
+✅ "I want to order ABC for Christians" → USE this tool
+✅ "Can I purchase the video ad package?" → USE this tool
+✅ "I'll take the premium package" → USE this tool
+
+WHEN NOT TO USE:
+❌ "How much are school fees?" → Just ANSWER with fee info from knowledge base
+❌ "What is the cost for Grade 2?" → Just ANSWER with fee info from knowledge base  
+❌ "What are your prices?" → Just ANSWER with pricing info
+❌ "Tell me about your services" → Just provide information
+❌ "How much is it?" (without purchase intent) → Provide pricing info
+
+FOR SCHOOLS/EDUCATION BUSINESSES:
+- Do NOT use this for fee inquiries - just provide fee information
+- For actual enrollment payments, direct parents to visit the school office
+- Provide bank account details from knowledge base if available
+
+This tool is for DIGITAL PRODUCTS and explicit purchase requests, NOT for general pricing inquiries.`,
                 parameters: {
                   type: "object",
                   properties: {
@@ -1506,6 +1526,79 @@ ${supervisorRecommendation.recommendedResponse}
             console.log('[PAYMENT] Processing payment request:', args);
             
             try {
+              // ========== BUSINESS TYPE CHECK ==========
+              // Check if this is a school/education business - don't process as digital product
+              const businessType = (company.business_type || '').toLowerCase();
+              const isSchool = businessType.includes('school') || 
+                               businessType.includes('education') || 
+                               businessType.includes('institution') ||
+                               businessType.includes('academy') ||
+                               businessType.includes('college') ||
+                               businessType.includes('university');
+              
+              if (isSchool) {
+                console.log('[PAYMENT] Business is school/education - providing info instead of payment transaction');
+                anyToolExecuted = true;
+                toolExecutionContext.push('school business - provided fee information instead of payment transaction');
+                
+                // Extract fee info from knowledge base if available
+                const feeInfo = company.quick_reference_info || '';
+                const hasPaymentInstructions = company.payment_instructions && company.payment_instructions.trim().length > 0;
+                
+                if (hasPaymentInstructions) {
+                  assistantReply = `Here's the information you requested:\n\n${company.payment_instructions}\n\nFor enrollment and fee payments, please visit our school office where our staff will assist you with the registration process. 🏫`;
+                } else {
+                  assistantReply = `Thank you for your interest! For detailed fee information and enrollment, please visit our school office or contact us directly. Our staff will be happy to assist you with the registration process and payment details. 🏫`;
+                }
+                
+                // Store tool result for AI context
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: true,
+                    business_type: 'school',
+                    action: 'provided_info_only',
+                    message: 'School business - provided fee information. No payment transaction created.'
+                  })
+                });
+                
+                continue; // Skip rest of payment processing
+              }
+              
+              // ========== CHECK FOR PAYMENT PRODUCTS ==========
+              // Verify company has payment products configured
+              const { data: availableProducts, error: productsError } = await supabase
+                .from('payment_products')
+                .select('id, name, price, currency')
+                .eq('company_id', company.id)
+                .eq('is_active', true)
+                .limit(5);
+              
+              const hasPaymentProducts = availableProducts && availableProducts.length > 0;
+              const hasPaymentNumbers = company.payment_number_mtn || company.payment_number_airtel || company.payment_number_zamtel;
+              
+              if (!hasPaymentProducts && !hasPaymentNumbers) {
+                console.log('[PAYMENT] Company has no payment products or mobile money configured');
+                anyToolExecuted = true;
+                toolExecutionContext.push('no payment products configured - provided contact info');
+                
+                assistantReply = `Thank you for your interest! For pricing and payment details, please contact us directly or visit our location. We'll be happy to assist you with your purchase. 🙏`;
+                
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: false,
+                    reason: 'no_payment_config',
+                    message: 'Company has no payment products or mobile money numbers configured'
+                  })
+                });
+                
+                continue; // Skip rest of payment processing
+              }
+              
+              // ========== STANDARD PAYMENT PROCESSING ==========
               // Look up product from database to get accurate details
               let productId = args.product_id;
               let productName = args.product_name;
@@ -1530,6 +1623,26 @@ ${supervisorRecommendation.recommendedResponse}
                   currency = foundProduct.currency || currency;
                   productType = foundProduct.product_type || 'service';
                   console.log('[PAYMENT] Found matching product:', foundProduct.name, foundProduct.price);
+                } else if (!hasPaymentProducts) {
+                  // No product found and no products configured
+                  console.log('[PAYMENT] Product not found and no products configured');
+                  anyToolExecuted = true;
+                  toolExecutionContext.push('product not found - provided contact info');
+                  
+                  assistantReply = `I couldn't find "${productName}" in our product catalog. Please contact us directly for pricing and availability. We'll be happy to help! 🙏`;
+                  
+                  toolResults.push({
+                    tool_call_id: toolCall.id,
+                    role: "tool",
+                    content: JSON.stringify({
+                      success: false,
+                      reason: 'product_not_found',
+                      searched_for: productName,
+                      message: 'Product not found in catalog'
+                    })
+                  });
+                  
+                  continue;
                 }
               }
               
@@ -1596,6 +1709,21 @@ ${supervisorRecommendation.recommendedResponse}
               
               anyToolExecuted = true;
               toolExecutionContext.push(`created payment transaction for ${productName} (${currency}${amount})`);
+              
+              // Store tool result for AI context
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: true,
+                  transaction_id: transaction?.id,
+                  product_name: productName,
+                  amount: amount,
+                  currency: currency,
+                  message: 'Payment transaction created and management notified'
+                })
+              });
+              
               assistantReply = `Great choice! 🎉\n\n*${productName}*\n💰 Amount: *${currency}${amount}*${paymentInstructions}${customInstructions}\n\nOnce you've paid, please send a screenshot of your payment confirmation and I'll process your order immediately! 📸`;
             } catch (error) {
               console.error('[PAYMENT] Payment request error:', error);
