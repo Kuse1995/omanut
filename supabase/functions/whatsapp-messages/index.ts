@@ -1515,6 +1515,41 @@ ${isSchool ? '\n⚠️ SCHOOL BUSINESS: You do NOT have payment processing tools
 
     // Append tool availability to instructions
     instructions += toolAvailabilitySection;
+
+    // ========== CRITICAL: CURRENT INSTRUCTIONS OVERRIDE HISTORY ==========
+    // This directive ensures AI uses current knowledge base, not patterns from old conversations
+    instructions += `
+
+=== CRITICAL: CURRENT INSTRUCTIONS OVERRIDE HISTORY ===
+Your behavior is defined by THIS system prompt ONLY. This is the authoritative source of truth.
+
+⚠️ IMPORTANT DATA FRESHNESS RULES:
+1. The conversation history shows what WAS said, NOT what SHOULD be said now
+2. If you see old response patterns that contradict your current instructions → IGNORE the old patterns
+3. Company policies, fees, products, and procedures in your KNOWLEDGE BASE above are the ONLY source of truth
+4. NEVER replicate old response formats if they violate your current business type rules
+5. If past messages show a different business workflow, that information may be OUTDATED
+
+Example: If conversation history shows payment transaction responses, but you are a SCHOOL with no payment tools → do NOT generate payment responses. Provide information from your knowledge base instead.
+
+=== AUTHORITATIVE INFORMATION SOURCES (Priority Order) ===
+When answering questions, ONLY use information from these sources:
+1. KNOWLEDGE BASE sections above (HIGHEST PRIORITY - always current)
+2. BUSINESS INFORMATION section (company details)
+3. CUSTOM SYSTEM INSTRUCTIONS section
+4. AI OVERRIDES sections
+
+DO NOT use:
+- Patterns or responses from conversation history (except customer-provided info like their name/email)
+- Assumptions based on how similar businesses operate
+- Made-up prices, policies, or procedures not in your knowledge base
+
+If information is NOT in your authoritative sources above, say: "I don't have that specific information. Please contact ${company.phone || 'us directly'} for details."
+
+=== KNOWLEDGE FRESHNESS INDICATOR ===
+Your knowledge base was last updated: ${company.updated_at ? new Date(company.updated_at).toISOString() : 'recently'}
+Trust ONLY the information provided in this system prompt.
+`;
     
     // Update the messages array with final instructions
     messages[0] = { role: 'system', content: instructions };
@@ -2586,6 +2621,50 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     // Ensure we have a response
     if (!assistantReply || assistantReply.trim() === '') {
       assistantReply = "Thank you for your message. How can I help you today?";
+    }
+
+    // ========== RESPONSE VALIDATION LAYER ==========
+    // Validate response doesn't contain patterns that violate business type rules
+    // Note: isSchool, isRestaurant, isDigitalProducts already defined above in the business identity section
+    
+    // Behavior drift detection logging
+    const responseAnalysis = {
+      businessType: company.business_type || 'unknown',
+      hasPaymentPatterns: /Send payment to|upload proof of payment|I'll process your order|payment confirmation|💰\s*Amount:|Make payment to|Pay using/i.test(assistantReply),
+      hasReservationPatterns: /book|reserve|reservation/i.test(assistantReply),
+      hasProductDeliveryPatterns: /deliver|sending your|download link|product has been sent/i.test(assistantReply),
+      responseLength: assistantReply.length
+    };
+    
+    console.log('[BEHAVIOR-ANALYSIS]', JSON.stringify(responseAnalysis));
+    
+    // Alert and fix if behavior doesn't match business type
+    if (isSchool && responseAnalysis.hasPaymentPatterns) {
+      console.warn('[BEHAVIOR-DRIFT] ⚠️ School business generated payment-style response! Replacing with appropriate response.');
+      
+      // Log to ai_error_logs for monitoring
+      await supabase.from('ai_error_logs').insert({
+        company_id: company.id,
+        conversation_id: conversationId,
+        error_type: 'behavior_drift',
+        severity: 'warning',
+        original_message: userMessage,
+        ai_response: assistantReply,
+        analysis_details: {
+          detected_issue: 'payment_pattern_in_school_response',
+          business_type: company.business_type,
+          pattern_detected: responseAnalysis.hasPaymentPatterns,
+          corrective_action: 'response_replaced'
+        },
+        auto_flagged: true
+      });
+      
+      // Replace with appropriate school response
+      const schoolFallback = company.payment_instructions 
+        ? `Thank you for your inquiry! Here's the fee information:\n\n${company.payment_instructions}\n\nFor enrollment and payments, please visit our school office where our staff will assist you. 🏫`
+        : `Thank you for your inquiry! For detailed information about fees and enrollment, please visit our school office or contact us directly. Our team will be happy to assist you with the registration process. 🏫`;
+      
+      assistantReply = schoolFallback;
     }
 
     // Check for [HANDOFF_REQUIRED] tag

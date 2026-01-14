@@ -62,7 +62,21 @@ Deno.serve(async (req) => {
       researchEnabled: supervisorConfig.researchEnabled
     });
 
+    // ========== TIMESTAMP-BASED DATA FRESHNESS ==========
+    // Only learn from conversations created AFTER the company's last configuration update
+    // This prevents the supervisor from learning outdated patterns from before business rules changed
+    const { data: companyDetails } = await supabase
+      .from('companies')
+      .select('updated_at')
+      .eq('id', companyId)
+      .single();
+    
+    const companyLastUpdated = companyDetails?.updated_at || '2000-01-01';
+    console.log('[Supervisor] Company last updated:', companyLastUpdated, '- Only learning from conversations after this date');
+    
     // Fetch pattern analysis data with configurable context window
+    // CRITICAL: Only fetch conversations created AFTER the company was last updated
+    // This ensures we don't learn from conversations that used outdated business rules
     const { data: pastConversations } = await supabase
       .from('conversations')
       .select(`
@@ -70,8 +84,11 @@ Deno.serve(async (req) => {
         messages(content, role, created_at)
       `)
       .eq('company_id', companyId)
+      .gt('created_at', companyLastUpdated) // Only conversations after company update
       .order('created_at', { ascending: false })
       .limit(supervisorConfig.contextWindow * 2);
+    
+    console.log('[Supervisor] Filtered conversations (post-update only):', pastConversations?.length || 0);
 
     const { data: customerSegment } = await supabase
       .from('customer_segments')
