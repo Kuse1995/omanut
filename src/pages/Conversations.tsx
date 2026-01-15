@@ -8,7 +8,8 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { ConversationsList } from '@/components/conversations/ConversationsList';
 import { ChatView } from '@/components/conversations/ChatView';
 import SupervisorAnalysisPanel from '@/components/conversations/SupervisorAnalysisPanel';
-import { Brain } from 'lucide-react';
+import { Brain, Send, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const Conversations = () => {
   const { toast } = useToast();
@@ -27,6 +28,8 @@ const Conversations = () => {
     type: string;
     fileName?: string;
   }>({ open: false, url: '', type: '' });
+  const [sendingFollowUps, setSendingFollowUps] = useState(false);
+  const [followUpProgress, setFollowUpProgress] = useState<{ current: number; total: number } | null>(null);
 
   useEffect(() => {
     fetchConversations();
@@ -222,6 +225,92 @@ const Conversations = () => {
     }
   };
 
+  const triggerAutoFollowUp = async () => {
+    // Get current user's company
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({ title: "Authentication Required", description: "Please log in first.", variant: "destructive" });
+      return;
+    }
+
+    const { data: userData } = await supabase
+      .from('users')
+      .select('company_id')
+      .eq('id', session.user.id)
+      .single();
+
+    if (!userData?.company_id) {
+      toast({ title: "Error", description: "Company not found.", variant: "destructive" });
+      return;
+    }
+
+    setSendingFollowUps(true);
+    setFollowUpProgress(null);
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-and-followup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          companyId: userData.company_id,
+          hoursBack: 23, // 23 hours
+          stream: true
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to start follow-up process');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'start') {
+                setFollowUpProgress({ current: 0, total: data.total });
+                toast({ title: "Follow-up Started", description: `Processing ${data.total} conversations...` });
+              } else if (data.type === 'progress') {
+                setFollowUpProgress({ current: data.current, total: data.total });
+              } else if (data.type === 'complete') {
+                toast({ title: "Follow-ups Sent! 🎉", description: "AI-powered follow-up messages sent to all recent clients." });
+              } else if (data.type === 'error') {
+                toast({ title: "Error", description: data.message, variant: "destructive" });
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+      fetchConversations();
+    } catch (error: any) {
+      console.error('Error triggering follow-ups:', error);
+      toast({ title: "Error", description: error.message || "Failed to send follow-ups", variant: "destructive" });
+    } finally {
+      setSendingFollowUps(false);
+      setFollowUpProgress(null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -230,7 +319,29 @@ const Conversations = () => {
           <BackButton />
           <h1 className="text-2xl font-bold">Conversations</h1>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={triggerAutoFollowUp}
+            disabled={sendingFollowUps}
+            variant="outline"
+            className="gap-2"
+          >
+            {sendingFollowUps ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {followUpProgress 
+                  ? `Sending ${followUpProgress.current}/${followUpProgress.total}...`
+                  : 'Starting...'}
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                Auto Follow-up (23h)
+              </>
+            )}
+          </Button>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Main Content - Split Pane */}

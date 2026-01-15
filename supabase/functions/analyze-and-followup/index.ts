@@ -17,7 +17,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const body = await req.json().catch(() => ({}));
-    const { companyId, time, stream } = body;
+    const { companyId, time, stream, hoursBack = 168 } = body; // Default 7 days (168 hours), can be overridden
 
     // If no companyId provided (cron job), process all active companies
     let companyIds: string[] = [];
@@ -46,7 +46,7 @@ serve(async (req) => {
 
           try {
             for (const currentCompanyId of companyIds) {
-              await processCompany(currentCompanyId, supabase, supabaseUrl, supabaseKey, sendEvent);
+              await processCompany(currentCompanyId, supabase, supabaseUrl, supabaseKey, sendEvent, hoursBack);
             }
             
             sendEvent({ type: 'complete' });
@@ -72,7 +72,7 @@ serve(async (req) => {
     const allResults = [];
 
     for (const currentCompanyId of companyIds) {
-      const results = await processCompany(currentCompanyId, supabase, supabaseUrl, supabaseKey);
+      const results = await processCompany(currentCompanyId, supabase, supabaseUrl, supabaseKey, undefined, hoursBack);
       allResults.push(...results);
     }
 
@@ -98,7 +98,8 @@ async function processCompany(
   supabase: any,
   supabaseUrl: string,
   supabaseKey: string,
-  sendEvent?: (data: any) => void
+  sendEvent?: (data: any) => void,
+  hoursBack: number = 168
 ) {
   const results: Array<{
     conversationId: string;
@@ -120,17 +121,17 @@ async function processCompany(
     }
 
     // Fetch active/recent conversations that need follow-up
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const cutoffTime = new Date();
+    cutoffTime.setHours(cutoffTime.getHours() - hoursBack);
 
-    console.log(`Fetching conversations for company ${currentCompanyId} since ${sevenDaysAgo.toISOString()}`);
+    console.log(`Fetching conversations for company ${currentCompanyId} since ${cutoffTime.toISOString()} (${hoursBack} hours back)`);
 
     const { data: conversations, error: convError } = await supabase
       .from('conversations')
       .select('*')
       .eq('company_id', currentCompanyId)
       .eq('status', 'active')
-      .gte('started_at', sevenDaysAgo.toISOString())
+      .gte('started_at', cutoffTime.toISOString())
       .order('started_at', { ascending: false })
       .limit(10);
 
