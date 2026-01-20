@@ -8,6 +8,7 @@ import { Save, FileText, Upload, Trash2, Loader2, RefreshCw } from "lucide-react
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { SmartConfigurePanel } from "./SmartConfigurePanel";
 
 interface Document {
   id: string;
@@ -117,6 +118,9 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
 
   return (
     <div className="space-y-6">
+      {/* Smart Configure */}
+      <SmartConfigurePanel companyId={companyId} onConfigApplied={fetchData} />
+
       {/* Quick Reference Editor */}
       <Card>
         <CardHeader>
