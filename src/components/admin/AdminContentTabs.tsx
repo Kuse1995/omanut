@@ -7,6 +7,7 @@ import { BillingPanel } from './BillingPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 import { AIControlPanel } from './AIControlPanel';
 import { ImageGenerationPanel } from './ImageGenerationPanel';
+import { MediaLibraryPanel } from './MediaLibraryPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
@@ -35,6 +36,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         );
       case 'image-gen':
         return <ImageGenerationPanel />;
+      case 'media':
+        return <MediaLibraryPanel />;
       case 'settings':
         return <CompanySettingsPanel />;
       case 'billing':
