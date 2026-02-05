@@ -92,7 +92,7 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: "You are a quality assessment AI. Always respond with valid JSON only." },
           { role: "user", content: analysisPrompt }

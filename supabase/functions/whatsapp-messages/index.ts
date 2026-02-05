@@ -1315,7 +1315,7 @@ ${supervisorRecommendation.recommendedResponse}
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
     const primaryModel = aiOverrides?.primary_model || 'google/gemini-3-pro-preview';
-    const fallbackModel = 'google/gemini-2.5-flash';
+    const fallbackModel = 'google/gemini-3-flash-preview';
     
     // Select model based on complexity - use configured primary for complex, fallback for simple
     const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;

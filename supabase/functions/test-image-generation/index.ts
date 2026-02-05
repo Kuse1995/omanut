@@ -230,7 +230,7 @@ ${context}
 Place THIS EXACT product into the requested environment while preserving ALL branding elements.`;
 
       aiRequestBody = {
-        model: "google/gemini-2.5-flash-image-preview",
+        model: "google/gemini-3-pro-image-preview",
         messages: [
           {
             role: "user",
@@ -249,7 +249,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
         : prompt;
       
       aiRequestBody = {
-        model: "google/gemini-2.5-flash-image-preview",
+        model: "google/gemini-3-pro-image-preview",
         messages: [
           {
             role: "user",
