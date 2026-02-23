@@ -67,6 +67,10 @@ export const CompanySettingsPanel = () => {
 
           <Separator className="my-8" />
 
+          <ApiKeysSection />
+
+          <Separator className="my-8" />
+
           {/* Danger Zone */}
           <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-6">
             <div className="flex items-center gap-2 mb-4">
