@@ -127,3 +127,9 @@ verify_jwt = true
 
 [functions.send-facebook-comment-reply]
 verify_jwt = true
+
+[functions.manage-api-keys]
+verify_jwt = false
+
+[functions.agent-api]
+verify_jwt = false
