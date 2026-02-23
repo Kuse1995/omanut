@@ -1,112 +1,130 @@
 
-# Plan: Add Media Library Tab to Admin Dashboard
 
-## Problem
-You have a fully functional media upload component (`CompanyMedia`) that allows uploading images and videos to be sent to clients, but it's **not accessible** from the admin dashboard. The component is hidden in a legacy Settings page that isn't easily reachable.
+# Plan: API Key System for External AI Agent Access
 
-## Solution
-Add a new "Media Library" tab to the admin dashboard navigation, making it easy to upload and manage media files that the AI can send to customers during conversations.
+## Overview
+Create a secure API key system that allows external AI agents to interact with the platform programmatically. Each API key is scoped to a specific company and grants full access to that company's data and capabilities (messaging, reservations, payments, media, etc.).
+
+## What This Enables
+- An external AI agent can authenticate via an API key (in the `x-api-key` header) instead of a user JWT
+- The agent can send WhatsApp messages, manage reservations, query conversations, access customer data, and more -- all scoped to the company the key belongs to
+- Keys can be created, viewed, and revoked from the admin dashboard
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Add Media Tab to Sidebar Navigation
+### Step 1: Create `company_api_keys` Table
 
-**File:** `src/components/admin/AdminIconSidebar.tsx`
+New database table to store hashed API keys:
 
-Add a new navigation item for the media library:
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | Primary key |
+| company_id | uuid | FK to companies |
+| key_hash | text | SHA-256 hash of the key (never store plaintext) |
+| key_prefix | text | First 8 chars for display (e.g., `oai_abc1...`) |
+| name | text | Human-readable label |
+| scopes | text[] | Reserved for future granular permissions (default: `{*}`) |
+| is_active | boolean | Soft revoke |
+| last_used_at | timestamptz | Track usage |
+| created_by | uuid | Who created it |
+| created_at | timestamptz | When |
+| expires_at | timestamptz | Optional expiry |
 
-```text
-Current nav items:
-- Conversations
-- Client Insights
-- Reservations
-- AI Control
-- Image Generation
-- Company Settings
-- Billing & Credits
-- Products & Payments
+RLS: Only platform admins and company owners/managers can manage keys.
 
-New item to add:
-- Media Library (with Image icon)
-```
+### Step 2: Create Edge Function `manage-api-keys`
 
-The new item will be placed after "Image Generation" and before "Company Settings" since media is related to content management.
+Handles key lifecycle:
+- **POST** `/manage-api-keys` with `action: "create"` -- generates a random key, stores the hash, returns the plaintext key **once**
+- **POST** with `action: "list"` -- returns key metadata (prefix, name, active, last used)
+- **POST** with `action: "revoke"` -- sets `is_active = false`
 
-### Step 2: Create Media Library Panel Wrapper
+Authentication: Requires JWT from an admin/owner/manager.
 
-**File:** `src/components/admin/MediaLibraryPanel.tsx` (new)
+### Step 3: Create Edge Function `agent-api`
 
-Create a wrapper component that:
-- Uses the existing `CompanyMedia` component
-- Adds admin dashboard styling consistency
-- Shows a "Select a company" message when no company is selected
-- Wraps content in a card with proper spacing
+The main API gateway for external agents. Authenticates via `x-api-key` header, looks up the company, then routes to the requested action.
 
-### Step 3: Add Media Tab Case to Content Tabs
+Supported actions:
+- `send_message` -- Send a WhatsApp message to a customer
+- `list_conversations` -- Get recent conversations
+- `get_conversation` -- Get messages for a conversation
+- `list_reservations` -- Get reservations
+- `create_reservation` -- Create a reservation
+- `list_products` -- Get payment products
+- `list_customers` -- Get customer segments
+- `get_company_info` -- Get company details
+- `list_media` -- Get available media
+- `get_analytics` -- Get conversation/payment stats
 
-**File:** `src/components/admin/AdminContentTabs.tsx`
+Each action queries the database scoped to the API key's `company_id`.
 
-Add the new `'media'` case to the switch statement that renders `<MediaLibraryPanel />`.
+### Step 4: Admin UI -- API Keys Section
+
+Add an "API Keys" section to `CompanySettingsPanel.tsx`:
+- Button to generate a new key (shows plaintext once in a dialog with copy button)
+- Table of existing keys showing prefix, name, status, last used
+- Revoke button per key
+- Warning that keys grant full access
 
 ---
 
 ## Technical Details
 
+### Security Model
+
+```text
+External Agent Request Flow:
+
+Agent --> x-api-key: oai_abc123... --> agent-api Edge Function
+                                          |
+                                    Hash the key (SHA-256)
+                                          |
+                                    Lookup in company_api_keys
+                                          |
+                                    Verify is_active = true
+                                    Verify not expired
+                                          |
+                                    Extract company_id
+                                          |
+                                    Execute action scoped to company
+                                          |
+                                    Update last_used_at
+                                          |
+                                    Return JSON response
+```
+
+- Keys are prefixed with `oai_` for easy identification
+- Plaintext is shown only once at creation; only the hash is stored
+- `verify_jwt = false` on `agent-api` since it uses API key auth
+- `verify_jwt = false` on `manage-api-keys` with manual JWT validation in code
+- All database queries use `SUPABASE_SERVICE_ROLE_KEY` but are manually scoped to the key's `company_id`
+- Security events are logged for key creation, usage, and revocation
+
 ### Files to Create/Modify
 
 | File | Action | Description |
 |------|--------|-------------|
-| `src/components/admin/AdminIconSidebar.tsx` | Modify | Add `media` nav item with Image icon |
-| `src/components/admin/MediaLibraryPanel.tsx` | Create | Wrapper for CompanyMedia with dashboard styling |
-| `src/components/admin/AdminContentTabs.tsx` | Modify | Add case for `'media'` tab |
+| Migration SQL | Create | `company_api_keys` table with RLS |
+| `supabase/functions/manage-api-keys/index.ts` | Create | Key lifecycle management |
+| `supabase/functions/agent-api/index.ts` | Create | External agent gateway |
+| `supabase/config.toml` | Modify | Add both new functions with `verify_jwt = false` |
+| `src/components/admin/CompanySettingsPanel.tsx` | Modify | Add API Keys management UI |
 
-### UI Flow
+### API Key Format
+- Generated as: `oai_` + 48 random hex characters
+- Example: `oai_a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3`
+- Stored as: SHA-256 hash of the full key
+- Displayed as: `oai_a3f8b2c1...` (prefix only)
+
+### Example Agent Usage
 
 ```text
-Admin Dashboard
-    |
-    +-- Sidebar
-    |     +-- ... existing items ...
-    |     +-- Media Library (NEW) <-- Image icon
-    |     +-- ... existing items ...
-    |
-    +-- Content Area
-          +-- case 'media':
-                +-- MediaLibraryPanel
-                      +-- Card header: "Media Library"
-                      +-- Card description: "Upload and manage media to share with customers"
-                      +-- CompanyMedia component (existing)
+curl -X POST https://dzheddvoiauevcayifev.supabase.co/functions/v1/agent-api \
+  -H "x-api-key: oai_a3f8b2c1..." \
+  -H "Content-Type: application/json" \
+  -d '{"action": "send_message", "params": {"phone": "+260...", "message": "Hello!"}}'
 ```
-
-### Media Upload Features (Already Implemented)
-
-The existing `CompanyMedia` component provides:
-- **Multi-category uploads**: Products, Interior, Exterior, Logo, Promotional, Staff, Events, Facilities, Other
-- **AI-powered analysis**: Automatically suggests category, description, and tags for images
-- **Video support**: With automatic thumbnail generation
-- **Large file handling**: Up to 150MB with video compression
-- **Grid/list view**: For browsing uploaded media
-- **Delete functionality**: Remove unwanted media
-
-### How AI Uses This Media
-
-The WhatsApp AI already knows how to use uploaded media:
-1. Media is stored in `company_media` table with public URLs
-2. AI system prompt includes the media library with URLs
-3. AI can call `send_media` tool to deliver files to customers
-4. URLs are validated to prevent hallucinated links
-
----
-
-## Expected Result
-
-After implementation:
-1. Click "Media Library" in admin sidebar
-2. See all uploaded media with category filters
-3. Click "Upload" to add new images/videos
-4. AI automatically suggests metadata for images
-5. Uploaded media appears in AI's available library
-6. AI can send this media to customers when requested
 
