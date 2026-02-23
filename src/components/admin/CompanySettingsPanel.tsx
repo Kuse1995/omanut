@@ -17,6 +17,7 @@ import { Trash2, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import CompanyForm from '@/components/CompanyForm';
+import { ApiKeysSection } from '@/components/admin/ApiKeysSection';
 
 export const CompanySettingsPanel = () => {
   const { selectedCompany, setSelectedCompany, refreshCompanies } = useCompany();
@@ -63,6 +64,10 @@ export const CompanySettingsPanel = () => {
             onSuccess={() => window.location.reload()}
             onCancel={() => {}}
           />
+
+          <Separator className="my-8" />
+
+          <ApiKeysSection />
 
           <Separator className="my-8" />
 
