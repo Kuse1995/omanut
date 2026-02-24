@@ -94,8 +94,8 @@ Deno.serve(async (req) => {
         );
       }
 
-      // ERASE / RESET / CLEAR
-      if (['ERASE', 'RESET', 'CLEAR'].includes(upperMessage)) {
+      // ERASE / RESET / CLEAR (flexible matching)
+      if (/\b(ERASE|RESET|CLEAR)\b/.test(upperMessage)) {
         const { data: deleted } = await supabase
           .from('demo_sessions')
           .delete()
@@ -133,7 +133,7 @@ Deno.serve(async (req) => {
       }
 
       // STATUS
-      if (upperMessage === 'STATUS') {
+      if (upperMessage === 'STATUS' || upperMessage === 'STATUS?' || upperMessage.includes('STATUS')) {
         const { data: sessions } = await supabase
           .from('demo_sessions')
           .select('demo_company_name, custom_persona, created_at, expires_at')
