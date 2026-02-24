@@ -57,6 +57,14 @@ Deno.serve(async (req) => {
           return respond(`❌ Could not research "${companyName}". Please try again.`);
         }
 
+        // Close all existing demo conversations so old history isn't reused
+        await supabase
+          .from('conversations')
+          .update({ status: 'ended' })
+          .eq('company_id', company_id)
+          .eq('active_agent', 'demo')
+          .eq('status', 'active');
+
         // Delete any existing active sessions for this company
         await supabase
           .from('demo_sessions')
