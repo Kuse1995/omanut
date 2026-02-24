@@ -9,6 +9,7 @@ import { AIControlPanel } from './AIControlPanel';
 import { ImageGenerationPanel } from './ImageGenerationPanel';
 import { MediaLibraryPanel } from './MediaLibraryPanel';
 import { TicketsPanel } from './TicketsPanel';
+import { AgentWorkspace } from './AgentWorkspace';
 
 interface AdminContentTabsProps {
   activeTab: string;
@@ -41,6 +42,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         return <MediaLibraryPanel />;
       case 'tickets':
         return <TicketsPanel />;
+      case 'workspace':
+        return <AgentWorkspace />;
       case 'settings':
         return <CompanySettingsPanel />;
       case 'billing':
