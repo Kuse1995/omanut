@@ -11,9 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Headset, Clock, CheckCircle, AlertTriangle, User, Building2,
-  MessageSquare, ArrowRight, Timer, Send, StickyNote, Phone, Zap
+  MessageSquare, ArrowRight, Timer, Send, StickyNote, Phone, Zap,
+  BarChart3, TrendingUp, Target
 } from 'lucide-react';
 
 const priorityConfig: Record<string, { color: string; label: string }> = {
