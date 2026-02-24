@@ -347,45 +347,39 @@ Return ONLY valid JSON with this structure:
 }
 
 async function sendWhatsAppToBoss(message: string, companyId: string): Promise<void> {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
-  // Get the company's WhatsApp number and Meta phone number ID
-  const { data: company } = await supabase
-    .from('companies')
-    .select('meta_phone_number_id')
-    .eq('id', companyId)
-    .single();
-
-  const phoneNumberId = company?.meta_phone_number_id;
-  const META_TOKEN = Deno.env.get('META_WHATSAPP_ACCESS_TOKEN');
-
-  if (!phoneNumberId || !META_TOKEN) {
-    console.error('[DEMO] Missing Meta phone number ID or access token for boss notification');
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    console.error('[DEMO] Missing Twilio credentials for boss notification');
     return;
   }
 
-  const response = await fetch(
-    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${META_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: DEMO_BOSS_PHONE.replace('+', ''),
-        type: 'text',
-        text: { body: message },
-      }),
-    }
-  );
+  // The demo line's Twilio WhatsApp number
+  const FROM_NUMBER = 'whatsapp:+13345083612';
+  const TO_NUMBER = `whatsapp:${DEMO_BOSS_PHONE}`;
+
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+
+  const formData = new URLSearchParams();
+  formData.append('From', FROM_NUMBER);
+  formData.append('To', TO_NUMBER);
+  formData.append('Body', message);
+
+  const response = await fetch(twilioUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: formData.toString(),
+  });
 
   if (!response.ok) {
     const err = await response.text();
     console.error('[DEMO] Boss notification failed:', response.status, err);
   } else {
-    console.log('[DEMO] Boss handoff notification sent successfully');
+    console.log('[DEMO] Boss handoff notification sent successfully via Twilio');
   }
 }
 
