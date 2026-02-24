@@ -145,6 +145,25 @@ export const AgentWorkspace = () => {
     },
   });
 
+  // Send reply mutation - sends via WhatsApp through edge function
+  const sendReplyMutation = useMutation({
+    mutationFn: async ({ conversationId, message }: { conversationId: string; message: string }) => {
+      const { data, error } = await supabase.functions.invoke('send-whatsapp-message', {
+        body: { conversationId, message }
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queue-messages'] });
+      setReplyText('');
+      toast.success('Reply sent via WhatsApp');
+    },
+    onError: (err: any) => {
+      toast.error(`Failed to send: ${err.message}`);
+    }
+  });
+
   // Resolve mutation
   const resolveMutation = useMutation({
     mutationFn: async (queueId: string) => {
@@ -153,6 +172,13 @@ export const AgentWorkspace = () => {
         .update({ status: 'completed', completed_at: new Date().toISOString() })
         .eq('id', queueId);
       if (error) throw error;
+      // Also unpause the conversation
+      if (selectedItem?.conversation_id) {
+        await supabase.from('conversations').update({
+          is_paused_for_human: false,
+          human_takeover: false
+        }).eq('id', selectedItem.conversation_id);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-queue'] });
