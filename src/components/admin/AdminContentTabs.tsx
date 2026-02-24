@@ -8,6 +8,7 @@ import { PaymentsPanel } from './PaymentsPanel';
 import { AIControlPanel } from './AIControlPanel';
 import { ImageGenerationPanel } from './ImageGenerationPanel';
 import { MediaLibraryPanel } from './MediaLibraryPanel';
+import { TicketsPanel } from './TicketsPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
