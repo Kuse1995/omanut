@@ -3976,6 +3976,16 @@ serve(async (req) => {
     } else {
       console.log(`[CONVERSATION] 📝 Using existing conversation ${conversation.id}`);
       console.log(`[CONVERSATION] Current state - Paused: ${conversation.is_paused_for_human}, Handoff: ${conversation.human_takeover}, Agent: ${conversation.active_agent || 'none'}`);
+      
+      // Update customer_name if missing but ProfileName is available
+      if (!conversation.customer_name && ProfileName) {
+        await supabase
+          .from('conversations')
+          .update({ customer_name: ProfileName })
+          .eq('id', conversation.id);
+        conversation.customer_name = ProfileName;
+        console.log(`[CONVERSATION] 📛 Updated customer name to: ${ProfileName}`);
+      }
     }
 
     // Deduct credits
