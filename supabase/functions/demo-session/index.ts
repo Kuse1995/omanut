@@ -8,6 +8,7 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
+const DEMO_BOSS_PHONE = '+260972064502';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -27,8 +28,7 @@ Deno.serve(async (req) => {
       .lt('expires_at', new Date().toISOString());
 
     const senderPhone = from.replace('whatsapp:', '');
-    const bossPhone = boss_phone?.replace('whatsapp:', '');
-    const isBoss = bossPhone && senderPhone === bossPhone;
+    const isBoss = senderPhone === DEMO_BOSS_PHONE;
     const messageText = (body || '').trim();
     const upperMessage = messageText.toUpperCase();
 
@@ -193,8 +193,8 @@ IMPORTANT RULES:
 - If asked about Omanut AI itself, briefly explain it's an AI receptionist platform, then return to character.
 - Keep responses concise but helpful (max 3-4 sentences unless detail is needed).
 - Use the business information above to give realistic, specific answers.
-- If you don't know something specific, give a plausible answer based on the business type.`;
-
+- If you don't know something specific, give a plausible answer based on the business type.
+- If the customer explicitly asks to speak to a human, a manager, or has a complex issue you absolutely cannot resolve, include [HANDOFF_REQUIRED] at the very end of your response. Only use this when truly necessary.`;
     // Get conversation history for this phone in demo context
     const aiResponse = await callAI(messageText, systemPrompt);
 
@@ -202,9 +202,30 @@ IMPORTANT RULES:
       return respond("I apologize, I'm experiencing a brief technical issue. Please try again in a moment!");
     }
 
-    // aiResponse is a string here since we use a different path
-    return respond(typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse));
+    const responseText = typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse);
 
+    // Check for handoff signal
+    if (responseText.includes('[HANDOFF_REQUIRED]')) {
+      const cleanResponse = responseText.replace('[HANDOFF_REQUIRED]', '').trim();
+
+      // Notify boss via WhatsApp
+      const handoffMessage =
+        `🔔 *[DEMO HANDOFF]*\n\n` +
+        `📱 Customer: ${senderPhone}\n` +
+        `🏢 Demo company: ${activeSession.demo_company_name}\n` +
+        `💬 Last message: "${messageText.substring(0, 200)}"\n\n` +
+        `🤖 AI assessment: ${cleanResponse.substring(0, 300)}`;
+
+      try {
+        await sendWhatsAppToBoss(handoffMessage, company_id);
+      } catch (e) {
+        console.error('[DEMO] Failed to send handoff notification:', e);
+      }
+
+      return respond("I understand you'd like to speak with a real person. I'm connecting you now — someone will be in touch with you shortly! 🙏");
+    }
+
+    return respond(responseText);
   } catch (error) {
     console.error('[DEMO] Error:', error);
     return respond('Sorry, something went wrong. Please try again.');
@@ -244,6 +265,49 @@ Return ONLY valid JSON with this structure:
 }`;
 }
 
+async function sendWhatsAppToBoss(message: string, companyId: string): Promise<void> {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  // Get the company's WhatsApp number and Meta phone number ID
+  const { data: company } = await supabase
+    .from('companies')
+    .select('meta_phone_number_id')
+    .eq('id', companyId)
+    .single();
+
+  const phoneNumberId = company?.meta_phone_number_id;
+  const META_TOKEN = Deno.env.get('META_WHATSAPP_ACCESS_TOKEN');
+
+  if (!phoneNumberId || !META_TOKEN) {
+    console.error('[DEMO] Missing Meta phone number ID or access token for boss notification');
+    return;
+  }
+
+  const response = await fetch(
+    `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${META_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: DEMO_BOSS_PHONE.replace('+', ''),
+        type: 'text',
+        text: { body: message },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('[DEMO] Boss notification failed:', response.status, err);
+  } else {
+    console.log('[DEMO] Boss handoff notification sent successfully');
+  }
+}
+
 async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -270,7 +334,6 @@ async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
 
-    // If system prompt asks for JSON (research), parse it
     if (systemPrompt.includes('Return ONLY valid JSON')) {
       let clean = content.trim();
       if (clean.startsWith('```json')) clean = clean.replace(/```json\n?/g, '').replace(/```\n?/g, '');
