@@ -1,186 +1,218 @@
 
 
-# Plan: AI-Powered Support Ticket System
+# Plan: Enterprise-Ready AI-Augmented Customer Service Platform
 
 ## Overview
-Add a customer service ticketing system where the AI automatically creates support tickets during WhatsApp conversations. The AI collects the customer's name, describes their issue, recommends the appropriate department/employee, and sends personalized service recommendations -- all via tool calling within the existing multi-agent architecture.
+Transform the platform from "AI replaces humans" to "AI empowers humans" -- making it enterprise-ready for high-volume customer service operations where AI handles triage, information gathering, and routing while humans retain control of resolution and relationship management.
+
+This is NOT about adding more AI agents. It's about making the existing system work as an enterprise-grade human-AI collaboration tool.
 
 ---
 
-## What This Enables
+## Core Philosophy Change
 
-- **Automatic ticket creation**: When a customer reports an issue via WhatsApp, the AI collects their details and creates a structured ticket
-- **Smart department routing**: AI analyzes the issue and recommends which department (Billing, Technical, Sales, HR, etc.) or specific employee should handle it
-- **Service recommendations**: AI proactively suggests relevant services or solutions based on the customer's issue
-- **Ticket management dashboard**: Admins can view, assign, update, and resolve tickets from a new "Tickets" tab in the admin panel
-- **External API access**: The `agent-api` edge function gains `list_tickets`, `create_ticket`, and `update_ticket` actions
+The current system tries to resolve everything automatically. Enterprise customer service companies need the opposite: AI as a **first responder** that triages, collects information, and routes to the right human -- never replacing them.
 
 ---
 
-## Implementation Steps
+## What Changes
 
-### Step 1: Database -- Create `support_tickets` Table
+### 1. New "Human-First" Mode (Database + Edge Function)
 
-New table to store tickets:
+Add a `service_mode` column to `company_ai_overrides` with values:
+- `autonomous` (current behavior -- AI resolves everything)
+- `human_first` (new -- AI triages and routes to humans)
+- `hybrid` (AI handles simple queries, escalates complex ones)
+
+When `human_first` is active:
+- AI collects customer name, issue details, and context
+- AI creates a support ticket automatically
+- AI provides immediate acknowledgment and estimated wait time
+- AI routes ticket to the right department/employee
+- Human agent picks up from the admin dashboard
+- AI assists the human with suggested responses (not auto-sends)
+
+### 2. Live Agent Queue & Assignment System (Database)
+
+New `agent_queue` table:
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid | Primary key |
 | company_id | uuid | FK to companies |
-| conversation_id | uuid | FK to conversations (nullable) |
-| ticket_number | text | Human-readable ID (e.g., TKT-001) |
+| ticket_id | uuid | FK to support_tickets |
+| conversation_id | uuid | FK to conversations |
+| assigned_agent_id | uuid | Human agent user ID (nullable until claimed) |
+| department | text | Target department |
+| priority | text | low/medium/high/urgent |
+| status | text | waiting/assigned/active/on_hold/completed |
+| customer_phone | text | For quick reference |
 | customer_name | text | Collected by AI |
-| customer_phone | text | From WhatsApp conversation |
-| customer_email | text | Collected by AI (nullable) |
-| issue_summary | text | AI-generated summary of the issue |
-| issue_category | text | AI-classified category (billing, technical, general, etc.) |
-| recommended_department | text | AI recommendation |
-| recommended_employee | text | AI recommendation (nullable) |
-| service_recommendations | jsonb | Array of suggested services/solutions |
-| priority | text | low / medium / high / urgent |
-| status | text | open / in_progress / waiting / resolved / closed |
-| assigned_to | text | Employee/department actually assigned |
-| resolution_notes | text | How it was resolved |
-| created_at | timestamptz | When ticket was created |
-| updated_at | timestamptz | Last update |
-| resolved_at | timestamptz | When resolved |
+| ai_summary | text | AI-generated issue summary |
+| ai_suggested_responses | jsonb | Array of draft responses |
+| sla_deadline | timestamptz | Based on priority |
+| wait_time_seconds | integer | Time in queue |
+| created_at | timestamptz | When queued |
+| claimed_at | timestamptz | When agent claimed |
+| completed_at | timestamptz | When resolved |
 
-Also create a `company_departments` table for configurable departments:
+RLS: Company members can view; contributors+ can claim/update.
+
+Enable realtime on this table so the dashboard updates live.
+
+### 3. SLA Configuration (Database)
+
+New `company_sla_config` table:
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid | Primary key |
 | company_id | uuid | FK to companies |
-| name | text | Department name |
-| description | text | What this department handles |
-| contact_info | text | Email/phone for the department |
-| employees | jsonb | Array of employee names/roles |
-| is_active | boolean | Whether department is available |
+| priority | text | low/medium/high/urgent |
+| response_time_minutes | integer | Target first response time |
+| resolution_time_minutes | integer | Target resolution time |
+| escalation_after_minutes | integer | Auto-escalate if breached |
+| notification_channels | jsonb | Where to alert (WhatsApp, dashboard) |
 
-RLS: Company owners/managers can manage; contributors/viewers can read.
+### 4. Human Agent Dashboard (Frontend)
 
-### Step 2: New AI Tool -- `create_support_ticket`
+New `AgentWorkspace.tsx` component replacing the current simple ticket view:
 
-Add a new tool definition to `whatsapp-messages/index.ts`:
+**Queue View:**
+- Real-time list of waiting tickets with priority color coding
+- SLA countdown timers (green/yellow/red)
+- One-click "Claim" button to take a ticket
+- Filter by department, priority, status
+- Auto-refresh via Supabase realtime subscription
 
-```text
-Tool: create_support_ticket
-Description: Creates a support ticket when a customer reports an issue.
-             Collect the customer's name and issue details before calling.
-             AI should classify the issue and recommend a department.
-Parameters:
-  - customer_name (required): Customer's full name
-  - issue_summary (required): Clear description of the issue
-  - issue_category (required): billing | technical | account | product | 
-                                general | complaint | feature_request
-  - priority (required): low | medium | high | urgent
-  - recommended_department (optional): AI's recommendation
-  - recommended_employee (optional): Specific person if known
-  - service_recommendations (optional): Array of suggested solutions
-```
+**Active Conversation View:**
+- Full WhatsApp conversation history on the left
+- AI-suggested responses panel on the right (click to use, edit before sending)
+- Customer profile sidebar: name, phone, past tickets, segment data, conversation history count
+- Quick actions: escalate, transfer to another department, mark resolved, add internal note
+- Canned response templates (from existing `quick_reply_templates`)
 
-The tool handler will:
-1. Insert the ticket into `support_tickets`
-2. Auto-generate a ticket number (TKT-XXX)
-3. If priority is "urgent" or "high", notify the boss via the existing `notify_boss` mechanism
-4. Return the ticket number to the AI so it can confirm to the customer
+**Performance Metrics (per agent):**
+- Tickets handled today/week
+- Average response time
+- Average resolution time
+- SLA compliance percentage
+- Customer satisfaction (from follow-up)
 
-### Step 3: New AI Tool -- `recommend_services`
+### 5. AI Response Suggestions (Edge Function Update)
 
-Add a tool that looks up relevant services/products based on the customer's issue:
+Modify `whatsapp-messages` to detect `human_first` mode:
+- Instead of sending AI response directly to customer, store it as a **draft** in `agent_queue.ai_suggested_responses`
+- Generate 2-3 response options with different tones (formal, friendly, concise)
+- Human agent reviews, optionally edits, then sends
+- The send action goes through the existing WhatsApp message pipeline
 
-```text
-Tool: recommend_services
-Description: Search company products and knowledge base to find
-             relevant services for the customer's issue.
-Parameters:
-  - issue_description (required): What the customer needs help with
-  - category (optional): Filter by category
-```
+### 6. Internal Notes System (Database)
 
-The tool handler queries `payment_products`, `quick_reference_info`, and `company_documents` to find relevant matches and returns formatted recommendations.
+New `ticket_notes` table:
 
-### Step 4: Update Tool Filtering and System Prompt
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | Primary key |
+| ticket_id | uuid | FK to support_tickets |
+| author_id | uuid | User who wrote the note |
+| content | text | Note content |
+| is_internal | boolean | Never shown to customer |
+| created_at | timestamptz | When written |
 
-- Add `create_support_ticket` and `recommend_services` to the `allToolDefinitions` map in `whatsapp-messages/index.ts`
-- Add them to the `AVAILABLE_TOOLS` list in `ToolControlPanel.tsx` under a new "Support" category
-- Add them to the default `enabled_tools` array in the database for customer service companies
-- Enhance the support agent's system prompt to instruct it to:
-  1. Always collect the customer's name before creating a ticket
-  2. Classify the issue category based on conversation context
-  3. Recommend the appropriate department using available `company_departments` data
-  4. Proactively suggest relevant services using `recommend_services`
+This lets agents collaborate on complex tickets without the customer seeing internal discussions.
 
-### Step 5: Admin UI -- Tickets Panel
+### 7. Customer Satisfaction Follow-Up
 
-Create a new `TicketsPanel.tsx` component with:
+After a ticket is resolved, the AI sends a WhatsApp follow-up:
+- "Hi [Name], your issue [TKT-XXX] has been resolved. How would you rate your experience? Reply 1-5"
+- Response is stored in `support_tickets.satisfaction_score`
+- Feeds into agent performance metrics
 
-- **Ticket list**: Filterable by status, priority, department, date range
-- **Ticket detail view**: Shows full issue, conversation link, AI recommendations
-- **Assignment**: Dropdown to assign to a department/employee
-- **Status updates**: Move tickets through the workflow (open -> in_progress -> resolved -> closed)
-- **Department management**: Configure departments and employees per company
+### 8. Shift/Availability Management
 
-Add a "Tickets" tab to `AdminIconSidebar.tsx` and `AdminContentTabs.tsx`.
+New columns on `company_users`:
+- `is_available` (boolean) -- agent is online and taking tickets
+- `max_concurrent_tickets` (integer, default 5)
+- `current_ticket_count` (integer) -- auto-updated
 
-### Step 6: Update `agent-api` Gateway
-
-Add three new actions to the external agent API:
-
-- `list_tickets` -- Query tickets with filters (status, priority, date)
-- `create_ticket` -- Create a ticket programmatically
-- `update_ticket` -- Update status, assignment, resolution notes
+Queue assignment logic considers:
+1. Agent availability
+2. Current load (don't overload)
+3. Department match
+4. Round-robin within qualified agents
 
 ---
 
 ## Technical Details
 
-### Ticket Creation Flow
-
-```text
-Customer WhatsApp Message: "I have a billing problem"
-        |
-  AI classifies as support issue
-        |
-  AI asks: "I'd like to help! Could you tell me your name 
-           and describe the billing issue?"
-        |
-  Customer: "I'm John, I was charged twice for my subscription"
-        |
-  AI calls create_support_ticket:
-    - customer_name: "John"
-    - issue_summary: "Customer charged twice for subscription"
-    - issue_category: "billing"
-    - priority: "high"
-    - recommended_department: "Billing"
-        |
-  AI calls recommend_services:
-    - issue_description: "double charge on subscription"
-        |
-  AI responds: "I've created ticket TKT-042 for you, John. 
-               Our Billing team will review the double charge.
-               In the meantime, you can check your payment 
-               history at [link]. Expected resolution: 24-48hrs."
-```
-
-### Files to Create/Modify
+### Modified Files
 
 | File | Action | Description |
 |------|--------|-------------|
-| Migration SQL | Create | `support_tickets` and `company_departments` tables with RLS |
-| `supabase/functions/whatsapp-messages/index.ts` | Modify | Add `create_support_ticket` and `recommend_services` tool definitions + handlers |
-| `supabase/functions/agent-api/index.ts` | Modify | Add `list_tickets`, `create_ticket`, `update_ticket` actions |
-| `src/components/admin/TicketsPanel.tsx` | Create | Ticket management dashboard |
-| `src/components/admin/DepartmentManager.tsx` | Create | Department configuration UI |
-| `src/components/admin/AdminContentTabs.tsx` | Modify | Add "tickets" case |
-| `src/components/admin/AdminIconSidebar.tsx` | Modify | Add Ticket icon to nav |
-| `src/components/admin/deep-settings/ToolControlPanel.tsx` | Modify | Add new tools to AVAILABLE_TOOLS list |
+| Migration SQL | Create | `agent_queue`, `company_sla_config`, `ticket_notes` tables + columns on `company_users` and `support_tickets` |
+| `supabase/functions/whatsapp-messages/index.ts` | Modify | Add `human_first` mode detection -- queue instead of auto-respond |
+| `src/components/admin/TicketsPanel.tsx` | Replace | Full agent workspace with queue, conversation view, AI suggestions |
+| `src/components/admin/AdminContentTabs.tsx` | Modify | Add "Agent Workspace" tab |
+| `src/components/admin/AdminIconSidebar.tsx` | Modify | Add workspace icon |
+| `src/components/admin/CompanySettingsPanel.tsx` | Modify | Add service mode toggle and SLA configuration |
+| `src/components/admin/deep-settings/ToolControlPanel.tsx` | Modify | Add human-first mode tools |
 
-### Department Routing Logic
+### Queue Flow
 
-The AI determines the recommended department by:
-1. Loading `company_departments` for the company
-2. Matching the issue category and keywords against department descriptions
-3. If no match, defaulting to "General Support"
-4. Including the department list in the system prompt so the AI can make informed routing decisions
+```text
+Customer sends WhatsApp message
+        |
+  AI analyzes intent + collects info
+        |
+  service_mode = "human_first"?
+        |
+    YES: Create ticket + queue entry
+         Send customer: "Thanks [Name], ticket TKT-XXX created.
+         A team member will be with you shortly."
+         Store AI draft responses in queue
+        |
+    NO: Current behavior (AI responds directly)
+        |
+  Agent sees ticket in real-time dashboard
+        |
+  Agent clicks "Claim" --> status = assigned
+        |
+  Agent views conversation + AI suggestions
+        |
+  Agent sends response (via existing WhatsApp pipeline)
+        |
+  Agent resolves ticket --> follow-up survey sent
+```
+
+### SLA Escalation Logic
+
+A background check (could be a cron or realtime trigger) monitors queue entries:
+- If `wait_time > sla_config.response_time_minutes` and status is still `waiting`:
+  - Bump priority
+  - Send WhatsApp notification to boss
+  - Flag in dashboard with red SLA indicator
+
+### Realtime Updates
+
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE public.agent_queue;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.ticket_notes;
+```
+
+This enables the agent dashboard to update instantly when:
+- New tickets arrive
+- Another agent claims a ticket
+- SLA timers change state
+
+---
+
+## What This Achieves for Enterprise
+
+1. **Scalability** -- Multiple human agents can work simultaneously with load balancing
+2. **Accountability** -- Every ticket is tracked with SLA compliance metrics
+3. **Quality** -- AI assists but humans control the final message
+4. **Visibility** -- Managers see real-time queue depth, agent performance, and SLA health
+5. **Customer trust** -- Customers know a real person is handling their issue
+6. **AI leverage** -- AI still does the heavy lifting (triage, info collection, draft responses) but humans make the decisions
 
