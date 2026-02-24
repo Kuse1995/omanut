@@ -1475,6 +1475,41 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["product_name", "reason"]
           }
         }
+      },
+      create_support_ticket: {
+        type: "function",
+        function: {
+          name: "create_support_ticket",
+          description: "Creates a support ticket when a customer reports an issue or needs human assistance. ALWAYS collect the customer's name and a clear description of their issue BEFORE calling this tool. Classify the issue category and priority based on the conversation.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Customer's full name collected from conversation" },
+              issue_summary: { type: "string", description: "Clear, concise description of the customer's issue" },
+              issue_category: { type: "string", enum: ["billing", "technical", "account", "product", "general", "complaint", "feature_request"], description: "Category of the issue" },
+              priority: { type: "string", enum: ["low", "medium", "high", "urgent"], description: "Priority level based on urgency and impact" },
+              recommended_department: { type: "string", description: "AI recommendation for which department should handle this" },
+              recommended_employee: { type: "string", description: "Specific employee name if known from company departments" },
+              service_recommendations: { type: "array", items: { type: "string" }, description: "Array of suggested services or solutions for the customer" }
+            },
+            required: ["customer_name", "issue_summary", "issue_category", "priority"]
+          }
+        }
+      },
+      recommend_services: {
+        type: "function",
+        function: {
+          name: "recommend_services",
+          description: "Search company products, knowledge base, and documents to find relevant services or solutions for a customer's issue. Use proactively when a customer describes a problem to suggest helpful resources.",
+          parameters: {
+            type: "object",
+            properties: {
+              issue_description: { type: "string", description: "Description of what the customer needs help with" },
+              category: { type: "string", description: "Optional category filter for products/services" }
+            },
+            required: ["issue_description"]
+          }
+        }
       }
     };
 
@@ -2359,7 +2394,6 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log('[DELIVER-PRODUCT] Tool called with:', JSON.stringify(args));
             
             try {
-              // Find the product by name
               const { data: product, error: productError } = await supabase
                 .from('payment_products')
                 .select('*')
@@ -2372,26 +2406,14 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               if (productError || !product) {
                 console.error('[DELIVER-PRODUCT] Product not found:', args.product_name, productError);
                 toolExecutionContext.push(`product delivery failed - product not found: ${args.product_name}`);
-                
-                toolResults.push({
-                  tool_call_id: toolCall.id,
-                  role: "tool",
-                  content: JSON.stringify({
-                    success: false,
-                    error: 'Product not found',
-                    message: `Could not find digital product matching "${args.product_name}"`
-                  })
-                });
-                
+                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Product not found', message: `Could not find digital product matching "${args.product_name}"` }) });
                 assistantReply = `I couldn't find a digital product matching "${args.product_name}". Please verify the product name and try again.`;
                 anyToolExecuted = true;
                 continue;
               }
               
-              console.log('[DELIVER-PRODUCT] Found product:', product.id, product.name);
-              
-              // Find pending transaction for this customer and product
-              const { data: transaction, error: txError } = await supabase
+              let transactionId;
+              const { data: transaction } = await supabase
                 .from('payment_transactions')
                 .select('*')
                 .eq('company_id', company.id)
@@ -2401,130 +2423,188 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 .order('created_at', { ascending: false })
                 .maybeSingle();
               
-              // Create transaction if none exists (for verified proof of payment)
-              let transactionId = transaction?.id;
-              
               if (!transaction) {
-                console.log('[DELIVER-PRODUCT] No existing transaction, creating new one...');
-                
                 const { data: newTx, error: newTxError } = await supabase
                   .from('payment_transactions')
-                  .insert({
-                    company_id: company.id,
-                    customer_phone: customerPhone,
-                    customer_name: conversation.customer_name || 'Customer',
-                    product_id: product.id,
-                    amount: product.price,
-                    currency: product.currency || company.currency_prefix || 'ZMW',
-                    payment_status: 'completed',
-                    verification_status: 'verified',
-                    verified_at: new Date().toISOString(),
-                    completed_at: new Date().toISOString(),
-                    conversation_id: conversationId,
-                    metadata: {
-                      delivery_reason: args.reason,
-                      delivered_via_ai: true
-                    }
-                  })
-                  .select()
-                  .single();
-                
-                if (newTxError) {
-                  console.error('[DELIVER-PRODUCT] Failed to create transaction:', newTxError);
-                  throw new Error('Failed to create payment record');
-                }
-                
+                  .insert({ company_id: company.id, customer_phone: customerPhone, customer_name: conversation.customer_name || 'Customer', product_id: product.id, amount: product.price, currency: product.currency || company.currency_prefix || 'ZMW', payment_status: 'completed', verification_status: 'verified', verified_at: new Date().toISOString(), completed_at: new Date().toISOString(), conversation_id: conversationId, metadata: { delivery_reason: args.reason, delivered_via_ai: true } })
+                  .select().single();
+                if (newTxError) throw new Error('Failed to create payment record');
                 transactionId = newTx.id;
-                console.log('[DELIVER-PRODUCT] Created transaction:', transactionId);
               } else {
-                // Update existing transaction to completed
-                await supabase
-                  .from('payment_transactions')
-                  .update({
-                    payment_status: 'completed',
-                    verification_status: 'verified',
-                    verified_at: new Date().toISOString(),
-                    completed_at: new Date().toISOString(),
-                    metadata: {
-                      ...(transaction.metadata || {}),
-                      delivery_reason: args.reason,
-                      delivered_via_ai: true
-                    }
-                  })
-                  .eq('id', transaction.id);
-                
-                console.log('[DELIVER-PRODUCT] Updated existing transaction:', transactionId);
+                await supabase.from('payment_transactions').update({ payment_status: 'completed', verification_status: 'verified', verified_at: new Date().toISOString(), completed_at: new Date().toISOString(), metadata: { ...(transaction.metadata || {}), delivery_reason: args.reason, delivered_via_ai: true } }).eq('id', transaction.id);
+                transactionId = transaction.id;
               }
               
-              // Call deliver-digital-product function with proper authorization
-              console.log('[DELIVER-PRODUCT] Calling deliver-digital-product function...');
-              
-              const deliveryResponse = await fetch(
-                `${Deno.env.get('SUPABASE_URL')}/functions/v1/deliver-digital-product`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-                  },
-                  body: JSON.stringify({
-                    transactionId: transactionId,
-                    companyId: company.id
-                  })
-                }
-              );
-              
-              if (!deliveryResponse.ok) {
-                const errorText = await deliveryResponse.text();
-                console.error('[DELIVER-PRODUCT] Delivery function error:', deliveryResponse.status, errorText);
-                throw new Error('Failed to deliver product: ' + errorText);
-              }
-              
+              const deliveryResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/deliver-digital-product`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}` }, body: JSON.stringify({ transactionId, companyId: company.id }) });
+              if (!deliveryResponse.ok) { const errorText = await deliveryResponse.text(); throw new Error('Failed to deliver product: ' + errorText); }
               const deliveryResult = await deliveryResponse.json();
-              console.log('[DELIVER-PRODUCT] Delivery result:', JSON.stringify(deliveryResult));
               
               anyToolExecuted = true;
               toolExecutionContext.push(`delivered digital product: ${product.name}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, product_name: product.name, delivery_id: deliveryResult?.deliveryId, expires_at: deliveryResult?.expiresAt, message: 'Digital product delivered successfully via WhatsApp' }) });
               
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify({
-                  success: true,
-                  product_name: product.name,
-                  delivery_id: deliveryResult?.deliveryId,
-                  expires_at: deliveryResult?.expiresAt,
-                  message: 'Digital product delivered successfully via WhatsApp'
-                })
-              });
-              
-              // Log to boss_conversations for audit
-              await supabase
-                .from('boss_conversations')
-                .insert({
-                  company_id: company.id,
-                  message_from: 'system',
-                  message_content: `📦 Digital Product Delivered\n\nProduct: ${product.name}\nCustomer: ${conversation.customer_name || customerPhone}\nReason: ${args.reason}\nDelivery ID: ${deliveryResult?.deliveryId || 'N/A'}`,
-                  response: null
-                });
-              
+              await supabase.from('boss_conversations').insert({ company_id: company.id, message_from: 'system', message_content: `📦 Digital Product Delivered\n\nProduct: ${product.name}\nCustomer: ${conversation.customer_name || customerPhone}\nReason: ${args.reason}\nDelivery ID: ${deliveryResult?.deliveryId || 'N/A'}`, response: null });
               assistantReply = `I've sent you the download link for *${product.name}*! 📦 Please check your messages - the link will expire in ${product.download_expiry_hours || 48} hours. Thank you for your purchase! 🙏`;
               
             } catch (error) {
               console.error('[DELIVER-PRODUCT] Exception:', error);
               toolExecutionContext.push('product delivery exception');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error', message: 'Failed to deliver product' }) });
+              assistantReply = "I encountered an error delivering your product. Our team has been notified and will send it to you shortly. 🙏";
+            }
+
+          } else if (toolCall.function.name === 'create_support_ticket') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[TICKET] Creating support ticket:', JSON.stringify(args));
+            
+            try {
+              // Load company departments for routing context
+              const { data: departments } = await supabase
+                .from('company_departments')
+                .select('name, description, employees')
+                .eq('company_id', company.id)
+                .eq('is_active', true);
               
+              // Auto-recommend department if not provided
+              let recommendedDept = args.recommended_department;
+              if (!recommendedDept && departments && departments.length > 0) {
+                const category = args.issue_category?.toLowerCase() || '';
+                const matchedDept = departments.find((d: any) => 
+                  d.description?.toLowerCase().includes(category) || 
+                  d.name?.toLowerCase().includes(category)
+                );
+                recommendedDept = matchedDept?.name || departments[0]?.name || 'General Support';
+              }
+              
+              const { data: ticket, error: ticketError } = await supabase
+                .from('support_tickets')
+                .insert({
+                  company_id: company.id,
+                  conversation_id: conversationId,
+                  ticket_number: '', // trigger generates this
+                  customer_name: args.customer_name,
+                  customer_phone: customerPhone,
+                  issue_summary: args.issue_summary,
+                  issue_category: args.issue_category || 'general',
+                  recommended_department: recommendedDept || 'General Support',
+                  recommended_employee: args.recommended_employee || null,
+                  service_recommendations: args.service_recommendations || [],
+                  priority: args.priority || 'medium',
+                  status: 'open'
+                })
+                .select()
+                .single();
+              
+              if (ticketError) throw ticketError;
+              
+              console.log('[TICKET] Created ticket:', ticket.ticket_number);
+              
+              // Notify boss for high/urgent tickets
+              if (['high', 'urgent'].includes(args.priority)) {
+                const notifMsg = `🎫 ${args.priority === 'urgent' ? '🚨 URGENT' : '⚠️ HIGH PRIORITY'} TICKET\n\nTicket: ${ticket.ticket_number}\nCustomer: ${args.customer_name}\nCategory: ${args.issue_category}\nIssue: ${args.issue_summary}\nRecommended: ${recommendedDept || 'N/A'}`;
+                
+                await supabase.from('boss_conversations').insert({
+                  company_id: company.id,
+                  message_from: 'system',
+                  message_content: notifMsg,
+                  response: null
+                });
+                
+                // Send WhatsApp notification to boss if configured
+                if (company.boss_phone) {
+                  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+                  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+                  if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+                    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                    const formData = new URLSearchParams();
+                    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+                    formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+                    formData.append('Body', notifMsg);
+                    await fetch(twilioUrl, { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
+                  }
+                }
+              }
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`created support ticket: ${ticket.ticket_number}`);
               toolResults.push({
                 tool_call_id: toolCall.id,
                 role: "tool",
                 content: JSON.stringify({
-                  success: false,
-                  error: error instanceof Error ? error.message : 'Unknown error',
-                  message: 'Failed to deliver product'
+                  success: true,
+                  ticket_number: ticket.ticket_number,
+                  status: 'open',
+                  recommended_department: recommendedDept,
+                  priority: args.priority,
+                  message: `Ticket ${ticket.ticket_number} created successfully`
                 })
               });
               
-              assistantReply = "I encountered an error delivering your product. Our team has been notified and will send it to you shortly. 🙏";
+            } catch (error) {
+              console.error('[TICKET] Exception:', error);
+              toolExecutionContext.push('ticket creation exception');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
+              assistantReply = "I encountered an error creating your ticket. Please try again or contact us directly.";
+            }
+
+          } else if (toolCall.function.name === 'recommend_services') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[RECOMMEND] Searching services for:', args.issue_description);
+            
+            try {
+              // Search products
+              let productQuery = supabase
+                .from('payment_products')
+                .select('name, description, price, currency, category')
+                .eq('company_id', company.id)
+                .eq('is_active', true);
+              if (args.category) productQuery = productQuery.eq('category', args.category);
+              const { data: products } = await productQuery.limit(10);
+              
+              // Get quick reference info
+              const { data: companyData } = await supabase
+                .from('companies')
+                .select('quick_reference_info, services')
+                .eq('id', company.id)
+                .single();
+              
+              const recommendations: any[] = [];
+              
+              // Match products by keyword
+              const keywords = args.issue_description.toLowerCase().split(/\s+/);
+              if (products) {
+                for (const p of products) {
+                  const pText = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                  if (keywords.some((k: string) => k.length > 3 && pText.includes(k))) {
+                    recommendations.push({ type: 'product', name: p.name, description: p.description, price: `${p.currency || 'K'}${p.price}` });
+                  }
+                }
+              }
+              
+              // Include quick reference snippets
+              if (companyData?.quick_reference_info) {
+                const refInfo = companyData.quick_reference_info;
+                if (keywords.some((k: string) => k.length > 3 && refInfo.toLowerCase().includes(k))) {
+                  recommendations.push({ type: 'info', content: refInfo.substring(0, 300) });
+                }
+              }
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`found ${recommendations.length} service recommendations`);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: true,
+                  recommendations,
+                  total_products: products?.length || 0,
+                  message: recommendations.length > 0 ? 'Found relevant services' : 'No exact matches, but here are available services'
+                })
+              });
+              
+            } catch (error) {
+              console.error('[RECOMMEND] Exception:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
             }
           }
         }
