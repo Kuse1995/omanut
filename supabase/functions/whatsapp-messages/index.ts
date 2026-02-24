@@ -3168,6 +3168,7 @@ serve(async (req) => {
     const From = formData.get('From') as string;
     const To = formData.get('To') as string;
     const Body = formData.get('Body') as string || '';
+    const ProfileName = formData.get('ProfileName') as string || '';
     
     // Extract media information
     const NumMedia = parseInt(formData.get('NumMedia') as string || '0');
@@ -3960,7 +3961,8 @@ serve(async (req) => {
           company_id: company.id,
           phone: From,
           status: 'active',
-          transcript: `CUSTOMER PHONE: ${customerPhone}\n`
+          customer_name: ProfileName || null,
+          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`
         })
         .select()
         .single();
@@ -3974,6 +3976,16 @@ serve(async (req) => {
     } else {
       console.log(`[CONVERSATION] 📝 Using existing conversation ${conversation.id}`);
       console.log(`[CONVERSATION] Current state - Paused: ${conversation.is_paused_for_human}, Handoff: ${conversation.human_takeover}, Agent: ${conversation.active_agent || 'none'}`);
+      
+      // Update customer_name if missing but ProfileName is available
+      if (!conversation.customer_name && ProfileName) {
+        await supabase
+          .from('conversations')
+          .update({ customer_name: ProfileName })
+          .eq('id', conversation.id);
+        conversation.customer_name = ProfileName;
+        console.log(`[CONVERSATION] 📛 Updated customer name to: ${ProfileName}`);
+      }
     }
 
     // Deduct credits
