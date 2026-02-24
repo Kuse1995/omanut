@@ -36,9 +36,13 @@ Deno.serve(async (req) => {
 
     // ── Boss Commands ──
     if (isBoss) {
-      // DEMO [company name]
-      if (upperMessage.startsWith('DEMO ')) {
-        const companyName = messageText.substring(5).trim();
+      // DEMO [company name] — also accept natural language like "set the demo to X"
+      const demoMatch = upperMessage.startsWith('DEMO ')
+        ? messageText.substring(5).trim()
+        : upperMessage.match(/^(?:SET|START|ACTIVATE|LAUNCH)\s+(?:THE\s+)?DEMO\s+(?:TO|FOR|AS)\s+(.+)/i)?.[1]?.trim();
+
+      if (demoMatch !== undefined && demoMatch !== null) {
+        const companyName = demoMatch;
         if (!companyName) {
           return respond('Please provide a company name. Example: DEMO Hilton Lusaka');
         }
@@ -165,6 +169,16 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (!activeSession) {
+      if (isBoss) {
+        return respond(
+          `👋 *Boss Commands:*\n\n` +
+          `• DEMO [company name] — Start a demo\n` +
+          `  e.g. "DEMO Airtel Zambia" or "Set the demo to Airtel Zambia"\n` +
+          `• ERASE — Clear active demo\n` +
+          `• ACT AS [persona] — Change AI style\n` +
+          `• STATUS — Check current demo`
+        );
+      }
       return respond(
         `👋 Welcome to the Omanut AI demo!\n\n` +
         `This number showcases our AI receptionist technology.\n\n` +
