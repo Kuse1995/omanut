@@ -756,6 +756,50 @@ export type Database = {
           },
         ]
       }
+      company_departments: {
+        Row: {
+          company_id: string
+          contact_info: string | null
+          created_at: string
+          description: string | null
+          employees: Json | null
+          id: string
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          contact_info?: string | null
+          created_at?: string
+          description?: string | null
+          employees?: Json | null
+          id?: string
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          contact_info?: string | null
+          created_at?: string
+          description?: string | null
+          employees?: Json | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_departments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_documents: {
         Row: {
           company_id: string
@@ -1969,6 +2013,87 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_tickets: {
+        Row: {
+          assigned_to: string | null
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          customer_email: string | null
+          customer_name: string | null
+          customer_phone: string
+          id: string
+          issue_category: string
+          issue_summary: string
+          priority: string
+          recommended_department: string | null
+          recommended_employee: string | null
+          resolution_notes: string | null
+          resolved_at: string | null
+          service_recommendations: Json | null
+          status: string
+          ticket_number: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone: string
+          id?: string
+          issue_category?: string
+          issue_summary: string
+          priority?: string
+          recommended_department?: string | null
+          recommended_employee?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          service_recommendations?: Json | null
+          status?: string
+          ticket_number: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          customer_email?: string | null
+          customer_name?: string | null
+          customer_phone?: string
+          id?: string
+          issue_category?: string
+          issue_summary?: string
+          priority?: string
+          recommended_department?: string | null
+          recommended_employee?: string | null
+          resolution_notes?: string | null
+          resolved_at?: string | null
+          service_recommendations?: Json | null
+          status?: string
+          ticket_number?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_tickets_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "support_tickets_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
             referencedColumns: ["id"]
           },
         ]
