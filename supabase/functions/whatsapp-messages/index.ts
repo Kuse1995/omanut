@@ -1475,6 +1475,41 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["product_name", "reason"]
           }
         }
+      },
+      create_support_ticket: {
+        type: "function",
+        function: {
+          name: "create_support_ticket",
+          description: "Creates a support ticket when a customer reports an issue or needs human assistance. ALWAYS collect the customer's name and a clear description of their issue BEFORE calling this tool. Classify the issue category and priority based on the conversation.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Customer's full name collected from conversation" },
+              issue_summary: { type: "string", description: "Clear, concise description of the customer's issue" },
+              issue_category: { type: "string", enum: ["billing", "technical", "account", "product", "general", "complaint", "feature_request"], description: "Category of the issue" },
+              priority: { type: "string", enum: ["low", "medium", "high", "urgent"], description: "Priority level based on urgency and impact" },
+              recommended_department: { type: "string", description: "AI recommendation for which department should handle this" },
+              recommended_employee: { type: "string", description: "Specific employee name if known from company departments" },
+              service_recommendations: { type: "array", items: { type: "string" }, description: "Array of suggested services or solutions for the customer" }
+            },
+            required: ["customer_name", "issue_summary", "issue_category", "priority"]
+          }
+        }
+      },
+      recommend_services: {
+        type: "function",
+        function: {
+          name: "recommend_services",
+          description: "Search company products, knowledge base, and documents to find relevant services or solutions for a customer's issue. Use proactively when a customer describes a problem to suggest helpful resources.",
+          parameters: {
+            type: "object",
+            properties: {
+              issue_description: { type: "string", description: "Description of what the customer needs help with" },
+              category: { type: "string", description: "Optional category filter for products/services" }
+            },
+            required: ["issue_description"]
+          }
+        }
       }
     };
 
