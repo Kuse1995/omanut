@@ -9,6 +9,7 @@ import { AIControlPanel } from './AIControlPanel';
 import { ImageGenerationPanel } from './ImageGenerationPanel';
 import { MediaLibraryPanel } from './MediaLibraryPanel';
 import { TicketsPanel } from './TicketsPanel';
+import { AgentWorkspace } from './AgentWorkspace';
 
 interface AdminContentTabsProps {
   activeTab: string;
