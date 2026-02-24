@@ -176,6 +176,88 @@ export type Database = {
           },
         ]
       }
+      agent_queue: {
+        Row: {
+          ai_suggested_responses: Json | null
+          ai_summary: string | null
+          assigned_agent_id: string | null
+          claimed_at: string | null
+          company_id: string
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          customer_name: string | null
+          customer_phone: string | null
+          department: string | null
+          id: string
+          priority: string
+          sla_deadline: string | null
+          status: string
+          ticket_id: string | null
+          wait_time_seconds: number | null
+        }
+        Insert: {
+          ai_suggested_responses?: Json | null
+          ai_summary?: string | null
+          assigned_agent_id?: string | null
+          claimed_at?: string | null
+          company_id: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          department?: string | null
+          id?: string
+          priority?: string
+          sla_deadline?: string | null
+          status?: string
+          ticket_id?: string | null
+          wait_time_seconds?: number | null
+        }
+        Update: {
+          ai_suggested_responses?: Json | null
+          ai_summary?: string | null
+          assigned_agent_id?: string | null
+          claimed_at?: string | null
+          company_id?: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_name?: string | null
+          customer_phone?: string | null
+          department?: string | null
+          id?: string
+          priority?: string
+          sla_deadline?: string | null
+          status?: string
+          ticket_id?: string | null
+          wait_time_seconds?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_queue_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_queue_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_queue_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_error_logs: {
         Row: {
           ai_response: string
@@ -568,6 +650,7 @@ export type Database = {
           routing_model: string | null
           routing_temperature: number | null
           sales_agent_prompt: string | null
+          service_mode: string
           supervisor_analysis_depth: string | null
           supervisor_context_window: number | null
           supervisor_enabled: boolean | null
@@ -624,6 +707,7 @@ export type Database = {
           routing_model?: string | null
           routing_temperature?: number | null
           sales_agent_prompt?: string | null
+          service_mode?: string
           supervisor_analysis_depth?: string | null
           supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
@@ -680,6 +764,7 @@ export type Database = {
           routing_model?: string | null
           routing_temperature?: number | null
           sales_agent_prompt?: string | null
+          service_mode?: string
           supervisor_analysis_depth?: string | null
           supervisor_context_window?: number | null
           supervisor_enabled?: boolean | null
@@ -906,15 +991,62 @@ export type Database = {
           },
         ]
       }
+      company_sla_config: {
+        Row: {
+          company_id: string
+          created_at: string
+          escalation_after_minutes: number
+          id: string
+          notification_channels: Json | null
+          priority: string
+          resolution_time_minutes: number
+          response_time_minutes: number
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          escalation_after_minutes?: number
+          id?: string
+          notification_channels?: Json | null
+          priority?: string
+          resolution_time_minutes?: number
+          response_time_minutes?: number
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          escalation_after_minutes?: number
+          id?: string
+          notification_channels?: Json | null
+          priority?: string
+          resolution_time_minutes?: number
+          response_time_minutes?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_sla_config_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_users: {
         Row: {
           accepted_at: string | null
           company_id: string
           created_at: string | null
+          current_ticket_count: number | null
           id: string
           invited_at: string | null
           invited_by: string | null
+          is_available: boolean | null
           is_default: boolean | null
+          max_concurrent_tickets: number | null
           role: Database["public"]["Enums"]["company_role"]
           updated_at: string | null
           user_id: string
@@ -923,10 +1055,13 @@ export type Database = {
           accepted_at?: string | null
           company_id: string
           created_at?: string | null
+          current_ticket_count?: number | null
           id?: string
           invited_at?: string | null
           invited_by?: string | null
+          is_available?: boolean | null
           is_default?: boolean | null
+          max_concurrent_tickets?: number | null
           role?: Database["public"]["Enums"]["company_role"]
           updated_at?: string | null
           user_id: string
@@ -935,10 +1070,13 @@ export type Database = {
           accepted_at?: string | null
           company_id?: string
           created_at?: string | null
+          current_ticket_count?: number | null
           id?: string
           invited_at?: string | null
           invited_by?: string | null
+          is_available?: boolean | null
           is_default?: boolean | null
+          max_concurrent_tickets?: number | null
           role?: Database["public"]["Enums"]["company_role"]
           updated_at?: string | null
           user_id?: string
@@ -2034,6 +2172,8 @@ export type Database = {
           recommended_employee: string | null
           resolution_notes: string | null
           resolved_at: string | null
+          satisfaction_feedback: string | null
+          satisfaction_score: number | null
           service_recommendations: Json | null
           status: string
           ticket_number: string
@@ -2055,6 +2195,8 @@ export type Database = {
           recommended_employee?: string | null
           resolution_notes?: string | null
           resolved_at?: string | null
+          satisfaction_feedback?: string | null
+          satisfaction_score?: number | null
           service_recommendations?: Json | null
           status?: string
           ticket_number: string
@@ -2076,6 +2218,8 @@ export type Database = {
           recommended_employee?: string | null
           resolution_notes?: string | null
           resolved_at?: string | null
+          satisfaction_feedback?: string | null
+          satisfaction_score?: number | null
           service_recommendations?: Json | null
           status?: string
           ticket_number?: string
@@ -2139,6 +2283,41 @@ export type Database = {
             columns: ["selected_conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ticket_notes: {
+        Row: {
+          author_id: string
+          content: string
+          created_at: string
+          id: string
+          is_internal: boolean
+          ticket_id: string
+        }
+        Insert: {
+          author_id: string
+          content: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean
+          ticket_id: string
+        }
+        Update: {
+          author_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          is_internal?: boolean
+          ticket_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ticket_notes_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
             referencedColumns: ["id"]
           },
         ]
@@ -2328,6 +2507,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      ticket_company_id: { Args: { p_ticket_id: string }; Returns: string }
       user_has_company_access: {
         Args: { company_uuid: string }
         Returns: boolean
