@@ -77,6 +77,41 @@ export const AgentWorkspace = () => {
   const [noteContent, setNoteContent] = useState('');
   const [replyText, setReplyText] = useState('');
 
+  // Fetch current user's availability
+  const { data: myAvailability } = useQuery({
+    queryKey: ['my-availability', selectedCompany?.id],
+    queryFn: async () => {
+      if (!selectedCompany?.id) return null;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase
+        .from('company_users')
+        .select('is_available, max_concurrent_tickets, current_ticket_count')
+        .eq('company_id', selectedCompany.id)
+        .eq('user_id', user.id)
+        .single();
+      return data;
+    },
+    enabled: !!selectedCompany?.id,
+  });
+
+  const toggleAvailability = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('company_users')
+        .update({ is_available: !myAvailability?.is_available })
+        .eq('company_id', selectedCompany!.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-availability'] });
+      toast.success(myAvailability?.is_available ? 'You are now offline' : 'You are now available');
+    },
+  });
+
   // Fetch queue items
   const { data: queueItems, isLoading } = useQuery({
     queryKey: ['agent-queue', selectedCompany?.id, statusFilter],
