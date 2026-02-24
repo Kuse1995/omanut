@@ -340,92 +340,161 @@ export const AgentWorkspace = () => {
           </p>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-3 gap-2 p-3">
-          <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('waiting')}>
-            <div className="text-lg font-bold text-amber-500">{stats.waiting}</div>
-            <div className="text-[10px] text-muted-foreground">Waiting</div>
-          </Card>
-          <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('all')}>
-            <div className="text-lg font-bold text-blue-500">{stats.active}</div>
-            <div className="text-[10px] text-muted-foreground">Active</div>
-          </Card>
-          <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('completed')}>
-            <div className="text-lg font-bold text-green-500">{stats.completed}</div>
-            <div className="text-[10px] text-muted-foreground">Done</div>
-          </Card>
-        </div>
+        <Tabs defaultValue="queue" className="flex-1 flex flex-col">
+          <TabsList className="mx-3 mt-2 h-8">
+            <TabsTrigger value="queue" className="text-xs h-7">Queue</TabsTrigger>
+            <TabsTrigger value="metrics" className="text-xs h-7">
+              <BarChart3 className="h-3 w-3 mr-1" />
+              Metrics
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Filter */}
-        <div className="px-3 pb-2">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="waiting">Waiting</SelectItem>
-              <SelectItem value="assigned">Assigned</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+          <TabsContent value="queue" className="flex-1 flex flex-col mt-0">
+            {/* Quick Stats */}
+            <div className="grid grid-cols-3 gap-2 p-3">
+              <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('waiting')}>
+                <div className="text-lg font-bold text-amber-500">{stats.waiting}</div>
+                <div className="text-[10px] text-muted-foreground">Waiting</div>
+              </Card>
+              <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('all')}>
+                <div className="text-lg font-bold text-blue-500">{stats.active}</div>
+                <div className="text-[10px] text-muted-foreground">Active</div>
+              </Card>
+              <Card className="p-2 text-center cursor-pointer" onClick={() => setStatusFilter('completed')}>
+                <div className="text-lg font-bold text-green-500">{stats.completed}</div>
+                <div className="text-[10px] text-muted-foreground">Done</div>
+              </Card>
+            </div>
 
-        {/* Queue Items */}
-        <ScrollArea className="flex-1">
-          <div className="p-3 space-y-2">
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
-            ) : (queueItems || []).length === 0 ? (
-              <div className="text-center py-8">
-                <Headset className="h-10 w-10 mx-auto text-muted-foreground/20 mb-2" />
-                <p className="text-sm text-muted-foreground">No items in queue</p>
-              </div>
-            ) : (
-              (queueItems || []).map((item: any) => (
-                <Card
-                  key={item.id}
-                  className={`p-3 cursor-pointer transition-colors hover:border-primary/30 ${
-                    selectedItem?.id === item.id ? 'border-primary bg-primary/5' : ''
-                  }`}
-                  onClick={() => setSelectedItem(item)}
-                >
-                  <div className="flex items-start justify-between mb-1">
-                    <span className="font-medium text-sm truncate">{item.customer_name || 'Unknown'}</span>
-                    <SLACountdown deadline={item.sla_deadline} />
+            {/* Filter */}
+            <div className="px-3 pb-2">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="waiting">Waiting</SelectItem>
+                  <SelectItem value="assigned">Assigned</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Queue Items */}
+            <ScrollArea className="flex-1">
+              <div className="p-3 space-y-2">
+                {isLoading ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>
+                ) : (queueItems || []).length === 0 ? (
+                  <div className="text-center py-8">
+                    <Headset className="h-10 w-10 mx-auto text-muted-foreground/20 mb-2" />
+                    <p className="text-sm text-muted-foreground">No items in queue</p>
                   </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{item.ai_summary || 'No summary'}</p>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <Badge className={`text-[10px] ${priorityConfig[item.priority]?.color || ''}`}>
-                      {item.priority}
-                    </Badge>
-                    <Badge className={`text-[10px] ${statusConfig[item.status]?.color || ''}`}>
-                      {statusConfig[item.status]?.label || item.status}
-                    </Badge>
-                    {item.department && (
-                      <Badge variant="outline" className="text-[10px]">
-                        <Building2 className="h-2.5 w-2.5 mr-0.5" />
-                        {item.department}
-                      </Badge>
-                    )}
-                  </div>
-                  {item.status === 'waiting' && (
-                    <Button
-                      size="sm"
-                      className="w-full mt-2 h-7 text-xs gap-1"
-                      onClick={(e) => { e.stopPropagation(); claimMutation.mutate(item.id); }}
-                      disabled={claimMutation.isPending}
+                ) : (
+                  (queueItems || []).map((item: any) => (
+                    <Card
+                      key={item.id}
+                      className={`p-3 cursor-pointer transition-colors hover:border-primary/30 ${
+                        selectedItem?.id === item.id ? 'border-primary bg-primary/5' : ''
+                      }`}
+                      onClick={() => setSelectedItem(item)}
                     >
-                      <Zap className="h-3 w-3" />
-                      Claim
-                    </Button>
-                  )}
-                </Card>
-              ))
-            )}
-          </div>
-        </ScrollArea>
+                      <div className="flex items-start justify-between mb-1">
+                        <span className="font-medium text-sm truncate">{item.customer_name || 'Unknown'}</span>
+                        <SLACountdown deadline={item.sla_deadline} />
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{item.ai_summary || 'No summary'}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge className={`text-[10px] ${priorityConfig[item.priority]?.color || ''}`}>
+                          {item.priority}
+                        </Badge>
+                        <Badge className={`text-[10px] ${statusConfig[item.status]?.color || ''}`}>
+                          {statusConfig[item.status]?.label || item.status}
+                        </Badge>
+                        {item.department && (
+                          <Badge variant="outline" className="text-[10px]">
+                            <Building2 className="h-2.5 w-2.5 mr-0.5" />
+                            {item.department}
+                          </Badge>
+                        )}
+                      </div>
+                      {item.status === 'waiting' && (
+                        <Button
+                          size="sm"
+                          className="w-full mt-2 h-7 text-xs gap-1"
+                          onClick={(e) => { e.stopPropagation(); claimMutation.mutate(item.id); }}
+                          disabled={claimMutation.isPending}
+                        >
+                          <Zap className="h-3 w-3" />
+                          Claim
+                        </Button>
+                      )}
+                    </Card>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="metrics" className="flex-1 mt-0 overflow-auto">
+            <div className="p-3 space-y-3">
+              <Card className="p-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <TrendingUp className="h-3 w-3" /> Tickets Resolved
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-2xl font-bold">{performanceData?.todayCount ?? '—'}</div>
+                    <div className="text-[10px] text-muted-foreground">Today</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold">{performanceData?.weekCount ?? '—'}</div>
+                    <div className="text-[10px] text-muted-foreground">This Week</div>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Clock className="h-3 w-3" /> Response Times
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-2xl font-bold">{performanceData?.avgResponseMin ?? '—'}<span className="text-sm font-normal text-muted-foreground">m</span></div>
+                    <div className="text-[10px] text-muted-foreground">Avg First Response</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold">{performanceData?.avgResolutionMin ?? '—'}<span className="text-sm font-normal text-muted-foreground">m</span></div>
+                    <div className="text-[10px] text-muted-foreground">Avg Resolution</div>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                  <Target className="h-3 w-3" /> SLA & CSAT
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className={`text-2xl font-bold ${
+                      (performanceData?.slaCompliance ?? 100) >= 90 ? 'text-green-600' :
+                      (performanceData?.slaCompliance ?? 100) >= 70 ? 'text-amber-500' : 'text-destructive'
+                    }`}>
+                      {performanceData?.slaCompliance ?? '—'}%
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">SLA Compliance</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold">{performanceData?.avgCsat || '—'}<span className="text-sm font-normal text-muted-foreground">/5</span></div>
+                    <div className="text-[10px] text-muted-foreground">CSAT ({performanceData?.csatCount ?? 0} reviews)</div>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Right: Detail View */}
