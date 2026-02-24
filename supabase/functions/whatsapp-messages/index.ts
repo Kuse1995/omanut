@@ -3278,6 +3278,48 @@ serve(async (req) => {
       });
     }
 
+    // ── DEMO MODE INTERCEPT ──
+    const DEMO_NUMBER = '+13345083612';
+    const companyWhatsApp = (company.whatsapp_number || '').replace('whatsapp:', '');
+    if (companyWhatsApp === DEMO_NUMBER) {
+      console.log(`[DEMO-ROUTE] Demo number detected, routing to demo-session. From=${From}`);
+      try {
+        const demoResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/demo-session`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: From,
+            body: Body,
+            company_id: company.id,
+            boss_phone: company.boss_phone,
+          }),
+        });
+
+        const demoData = await demoResponse.json();
+        const demoReply = demoData.reply || 'Demo service temporarily unavailable.';
+
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[${demoReply}]]></Message>
+</Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+        });
+      } catch (demoError) {
+        console.error('[DEMO-ROUTE] Error calling demo-session:', demoError);
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Message><![CDATA[Demo service temporarily unavailable. Please try again.]]></Message>
+</Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+        });
+      }
+    }
+
     // Detect WhatsApp Flow Response
     if (Body.includes('__flow_response__')) {
       console.log('[FLOW-RESPONSE] Detected flow submission');

@@ -1296,6 +1296,50 @@ export type Database = {
           },
         ]
       }
+      demo_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          custom_persona: string | null
+          demo_company_name: string
+          expires_at: string
+          id: string
+          phone: string | null
+          researched_data: Json | null
+          status: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          custom_persona?: string | null
+          demo_company_name: string
+          expires_at?: string
+          id?: string
+          phone?: string | null
+          researched_data?: Json | null
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          custom_persona?: string | null
+          demo_company_name?: string
+          expires_at?: string
+          id?: string
+          phone?: string | null
+          researched_data?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demo_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       digital_product_deliveries: {
         Row: {
           company_id: string
