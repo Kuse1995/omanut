@@ -96,6 +96,14 @@ Deno.serve(async (req) => {
 
       // ERASE / RESET / CLEAR (flexible matching)
       if (/\b(ERASE|RESET|CLEAR)\b/.test(upperMessage)) {
+        // Close all demo conversations so old history isn't reused
+        await supabase
+          .from('conversations')
+          .update({ status: 'ended' })
+          .eq('company_id', company_id)
+          .eq('active_agent', 'demo')
+          .eq('status', 'active');
+
         const { data: deleted } = await supabase
           .from('demo_sessions')
           .delete()
@@ -106,7 +114,7 @@ Deno.serve(async (req) => {
         const count = deleted?.length || 0;
         return respond(
           count > 0
-            ? `🧹 Demo erased! ${count} session(s) cleared. Ready for next demo.`
+            ? `🧹 Demo erased! ${count} session(s) cleared and conversations reset. Ready for next demo.`
             : `ℹ️ No active demo to erase.`
         );
       }
