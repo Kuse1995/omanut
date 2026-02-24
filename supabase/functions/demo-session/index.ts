@@ -36,141 +36,8 @@ Deno.serve(async (req) => {
 
     // ── Boss Commands ──
     if (isBoss) {
-      // DEMO [company name] — also accept natural language like "set the demo to X"
-      const demoMatch = upperMessage.startsWith('DEMO ')
-        ? messageText.substring(5).trim()
-        : upperMessage.match(/^(?:SET|START|ACTIVATE|LAUNCH)\s+(?:THE\s+)?DEMO\s+(?:TO|FOR|AS)\s+(.+)/i)?.[1]?.trim();
-
-      if (demoMatch !== undefined && demoMatch !== null) {
-        const companyName = demoMatch;
-        if (!companyName) {
-          return respond('Please provide a company name. Example: DEMO Hilton Lusaka');
-        }
-
-        console.log(`[DEMO] Boss requested demo for: ${companyName}`);
-
-        // Research the company using inline AI call (same logic as research-company)
-        const researchPrompt = buildResearchPrompt(companyName);
-        const researchData = await callAI(researchPrompt, 'You are a business research assistant. Always return valid JSON only, no markdown formatting.');
-
-        if (!researchData) {
-          return respond(`❌ Could not research "${companyName}". Please try again.`);
-        }
-
-        // Close all existing demo conversations so old history isn't reused
-        await supabase
-          .from('conversations')
-          .update({ status: 'ended' })
-          .eq('company_id', company_id)
-          .eq('active_agent', 'demo')
-          .eq('status', 'active');
-
-        // Delete any existing active sessions for this company
-        await supabase
-          .from('demo_sessions')
-          .delete()
-          .eq('company_id', company_id)
-          .eq('status', 'active');
-
-        // Create new demo session
-        const { error: insertError } = await supabase
-          .from('demo_sessions')
-          .insert({
-            company_id,
-            demo_company_name: companyName,
-            researched_data: researchData,
-            status: 'active',
-          });
-
-        if (insertError) {
-          console.error('[DEMO] Insert error:', insertError);
-          return respond('❌ Failed to create demo session. Please try again.');
-        }
-
-        const confidence = researchData.confidence_score || 'N/A';
-        return respond(
-          `✅ Demo activated for *${companyName}*!\n\n` +
-          `📊 Research confidence: ${confidence}/100\n` +
-          `🏢 Type: ${researchData.business_type || 'Unknown'}\n` +
-          `🕐 Hours: ${researchData.hours || 'Not found'}\n\n` +
-          `Anyone texting this number will now interact with the AI as ${companyName}'s receptionist.\n\n` +
-          `Commands:\n` +
-          `• ERASE - Clear demo\n` +
-          `• ACT AS [persona] - Change AI style\n` +
-          `• STATUS - Check current demo\n` +
-          `• DEMO [name] - Switch company`
-        );
-      }
-
-      // ERASE / RESET / CLEAR (flexible matching)
-      if (/\b(ERASE|RESET|CLEAR)\b/.test(upperMessage)) {
-        // Close all demo conversations so old history isn't reused
-        await supabase
-          .from('conversations')
-          .update({ status: 'ended' })
-          .eq('company_id', company_id)
-          .eq('active_agent', 'demo')
-          .eq('status', 'active');
-
-        const { data: deleted } = await supabase
-          .from('demo_sessions')
-          .delete()
-          .eq('company_id', company_id)
-          .eq('status', 'active')
-          .select('demo_company_name');
-
-        const count = deleted?.length || 0;
-        return respond(
-          count > 0
-            ? `🧹 Demo erased! ${count} session(s) cleared and conversations reset. Ready for next demo.`
-            : `ℹ️ No active demo to erase.`
-        );
-      }
-
-      // ACT AS [persona]
-      if (upperMessage.startsWith('ACT AS ')) {
-        const persona = messageText.substring(7).trim();
-        if (!persona) {
-          return respond('Please provide a persona. Example: ACT AS friendly hotel concierge');
-        }
-
-        const { data: updated } = await supabase
-          .from('demo_sessions')
-          .update({ custom_persona: persona })
-          .eq('company_id', company_id)
-          .eq('status', 'active')
-          .select('demo_company_name');
-
-        if (!updated?.length) {
-          return respond('⚠️ No active demo session. Start one first with: DEMO [company name]');
-        }
-
-        return respond(`🎭 Persona updated to: "${persona}" for ${updated[0].demo_company_name}`);
-      }
-
-      // STATUS
-      if (upperMessage === 'STATUS' || upperMessage === 'STATUS?' || upperMessage.includes('STATUS')) {
-        const { data: sessions } = await supabase
-          .from('demo_sessions')
-          .select('demo_company_name, custom_persona, created_at, expires_at')
-          .eq('company_id', company_id)
-          .eq('status', 'active');
-
-        if (!sessions?.length) {
-          return respond('📊 No active demo session.\n\nStart one with: DEMO [company name]');
-        }
-
-        const s = sessions[0];
-        const expiresIn = Math.round((new Date(s.expires_at).getTime() - Date.now()) / 3600000);
-        return respond(
-          `📊 *Demo Status*\n\n` +
-          `🏢 Company: ${s.demo_company_name}\n` +
-          `🎭 Persona: ${s.custom_persona || 'Default (from research)'}\n` +
-          `⏰ Expires in: ~${expiresIn}h\n` +
-          `📱 Active sessions: ${sessions.length}`
-        );
-      }
-
+      const bossResult = await handleBossCommand(supabase, upperMessage, messageText, company_id);
+      if (bossResult) return bossResult;
       // Boss sent something else — treat as regular customer for demo
     }
 
@@ -185,30 +52,125 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (!activeSession) {
-      if (isBoss) {
-        return respond(
-          `👋 *Boss Commands:*\n\n` +
-          `• DEMO [company name] — Start a demo\n` +
-          `  e.g. "DEMO Airtel Zambia" or "Set the demo to Airtel Zambia"\n` +
-          `• ERASE — Clear active demo\n` +
-          `• ACT AS [persona] — Change AI style\n` +
-          `• STATUS — Check current demo`
-        );
-      }
-      return respond(
-        `👋 Welcome to the Omanut AI demo!\n\n` +
-        `This number showcases our AI receptionist technology.\n\n` +
-        `The demo is not currently active. Please ask the business owner to set one up, or check back soon!`
-      );
+      return isBoss
+        ? respond(`👋 *Boss Commands:*\n\n• DEMO [company name] — Start a demo\n  e.g. "DEMO Airtel Zambia"\n• ERASE — Clear active demo\n• ACT AS [persona] — Change AI style\n• STATUS — Check current demo`)
+        : respond(`👋 Welcome to the Omanut AI demo!\n\nThis number showcases our AI receptionist technology.\n\nThe demo is not currently active. Please ask the business owner to set one up, or check back soon!`);
     }
 
     // Build AI prompt from researched data
     const rd = activeSession.researched_data as Record<string, string> || {};
     const persona = activeSession.custom_persona || rd.voice_style || 'Professional and helpful';
-
     const customerName = profile_name || 'Unknown';
 
-    const systemPrompt = `You are demonstrating Omanut AI by acting as ${activeSession.demo_company_name}'s AI receptionist.
+    const systemPrompt = buildDemoSystemPrompt(activeSession.demo_company_name, rd, persona, customerName);
+
+    // Get or create conversation
+    const conversationId = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
+
+    // Save customer message
+    if (conversationId) {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: messageText,
+      });
+    }
+
+    // Get conversation history
+    const conversationHistory = await getConversationHistory(supabase, conversationId);
+
+    // Main AI response
+    const aiResponse = await callAIWithHistory(conversationHistory, systemPrompt);
+    if (!aiResponse) {
+      return respond("I apologize, I'm experiencing a brief technical issue. Please try again in a moment!");
+    }
+
+    const responseText = typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse);
+
+    // Save AI response
+    if (conversationId) {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: responseText,
+      });
+      await supabase.from('conversations').update({
+        last_message_preview: responseText.substring(0, 100),
+      }).eq('id', conversationId);
+    }
+
+    // ── Intelligent Handoff Evaluation (runs after response, doesn't block customer) ──
+    const fullHistory = [...conversationHistory, { role: 'assistant', content: responseText }];
+    evaluateAndHandoff(fullHistory, activeSession, senderPhone, profile_name, company_id).catch(e =>
+      console.error('[DEMO] Handoff evaluation error:', e)
+    );
+
+    return respond(responseText);
+  } catch (error) {
+    console.error('[DEMO] Error:', error);
+    return respond('Sorry, something went wrong. Please try again.');
+  }
+});
+
+// ─── Boss Command Handler ───
+async function handleBossCommand(supabase: any, upperMessage: string, messageText: string, company_id: string): Promise<Response | null> {
+  // DEMO [company name]
+  const demoMatch = upperMessage.startsWith('DEMO ')
+    ? messageText.substring(5).trim()
+    : upperMessage.match(/^(?:SET|START|ACTIVATE|LAUNCH)\s+(?:THE\s+)?DEMO\s+(?:TO|FOR|AS)\s+(.+)/i)?.[1]?.trim();
+
+  if (demoMatch !== undefined && demoMatch !== null) {
+    const companyName = demoMatch;
+    if (!companyName) return respond('Please provide a company name. Example: DEMO Hilton Lusaka');
+
+    console.log(`[DEMO] Boss requested demo for: ${companyName}`);
+    const researchData = await callAI(buildResearchPrompt(companyName), 'You are a business research assistant. Always return valid JSON only, no markdown formatting.');
+    if (!researchData) return respond(`❌ Could not research "${companyName}". Please try again.`);
+
+    // Close old conversations & sessions
+    await supabase.from('conversations').update({ status: 'ended' }).eq('company_id', company_id).eq('active_agent', 'demo').eq('status', 'active');
+    await supabase.from('demo_sessions').delete().eq('company_id', company_id).eq('status', 'active');
+
+    const { error: insertError } = await supabase.from('demo_sessions').insert({
+      company_id, demo_company_name: companyName, researched_data: researchData, status: 'active',
+    });
+    if (insertError) { console.error('[DEMO] Insert error:', insertError); return respond('❌ Failed to create demo session.'); }
+
+    return respond(
+      `✅ Demo activated for *${companyName}*!\n\n📊 Research confidence: ${researchData.confidence_score || 'N/A'}/100\n🏢 Type: ${researchData.business_type || 'Unknown'}\n🕐 Hours: ${researchData.hours || 'Not found'}\n\nAnyone texting this number will now interact with the AI as ${companyName}'s receptionist.\n\nCommands:\n• ERASE - Clear demo\n• ACT AS [persona] - Change AI style\n• STATUS - Check current demo\n• DEMO [name] - Switch company`
+    );
+  }
+
+  // ERASE / RESET / CLEAR
+  if (/\b(ERASE|RESET|CLEAR)\b/.test(upperMessage)) {
+    await supabase.from('conversations').update({ status: 'ended' }).eq('company_id', company_id).eq('active_agent', 'demo').eq('status', 'active');
+    const { data: deleted } = await supabase.from('demo_sessions').delete().eq('company_id', company_id).eq('status', 'active').select('demo_company_name');
+    return respond(deleted?.length ? `🧹 Demo erased! ${deleted.length} session(s) cleared. Ready for next demo.` : `ℹ️ No active demo to erase.`);
+  }
+
+  // ACT AS [persona]
+  if (upperMessage.startsWith('ACT AS ')) {
+    const persona = messageText.substring(7).trim();
+    if (!persona) return respond('Please provide a persona. Example: ACT AS friendly hotel concierge');
+    const { data: updated } = await supabase.from('demo_sessions').update({ custom_persona: persona }).eq('company_id', company_id).eq('status', 'active').select('demo_company_name');
+    return updated?.length ? respond(`🎭 Persona updated to: "${persona}" for ${updated[0].demo_company_name}`) : respond('⚠️ No active demo session. Start one first with: DEMO [company name]');
+  }
+
+  // STATUS
+  if (upperMessage === 'STATUS' || upperMessage.includes('STATUS')) {
+    const { data: sessions } = await supabase.from('demo_sessions').select('demo_company_name, custom_persona, created_at, expires_at').eq('company_id', company_id).eq('status', 'active');
+    if (!sessions?.length) return respond('📊 No active demo session.\n\nStart one with: DEMO [company name]');
+    const s = sessions[0];
+    const expiresIn = Math.round((new Date(s.expires_at).getTime() - Date.now()) / 3600000);
+    return respond(`📊 *Demo Status*\n\n🏢 Company: ${s.demo_company_name}\n🎭 Persona: ${s.custom_persona || 'Default (from research)'}\n⏰ Expires in: ~${expiresIn}h`);
+  }
+
+  return null; // Not a boss command
+}
+
+// ─── System Prompt Builder ───
+function buildDemoSystemPrompt(companyName: string, rd: Record<string, string>, persona: string, customerName: string): string {
+  return `You are demonstrating Omanut AI by acting as ${companyName}'s AI receptionist.
 
 Business type: ${rd.business_type || 'General business'}
 Services: ${rd.services || 'Various services'}
@@ -224,123 +186,217 @@ FIRST CONTACT GREETING:
 - If you've already greeted them (there are prior messages in the conversation), do NOT repeat the name confirmation. Just continue the conversation naturally.
 
 IMPORTANT RULES:
-- Stay in character as ${activeSession.demo_company_name}'s receptionist at all times.
+- Stay in character as ${companyName}'s receptionist at all times.
 - Be impressive and natural. Show the full range of AI capabilities.
 - Handle bookings, pricing inquiries, FAQs, and recommendations naturally.
 - If asked about Omanut AI itself, briefly explain it's an AI receptionist platform, then return to character.
 - Keep responses concise but helpful (max 3-4 sentences unless detail is needed).
 - Use the business information above to give realistic, specific answers.
 - If you don't know something specific, give a plausible answer based on the business type.
-- If the customer explicitly asks to speak to a human, a manager, or has a complex issue you absolutely cannot resolve, include [HANDOFF_REQUIRED] at the very end of your response. Only use this when truly necessary.`;
+- When a customer completes an order or booking, confirm the details back to them and let them know the team will follow up shortly.
+- Do NOT include any special tags or markers in your response. Just respond naturally.`;
+}
 
-    // Get or create conversation for this phone in demo context
-    let conversationId: string;
-    const { data: existingConv } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('company_id', company_id)
-      .eq('phone', `whatsapp:${senderPhone}`)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+// ─── Intelligent Handoff Evaluation Agent ───
+async function evaluateAndHandoff(
+  conversationHistory: { role: string; content: string }[],
+  session: any,
+  senderPhone: string,
+  profileName: string | null,
+  companyId: string,
+): Promise<void> {
+  const evaluationPrompt = `You are a handoff evaluation agent. Analyze this conversation between a customer and an AI receptionist for "${session.demo_company_name}" and determine if a handoff to a human is needed RIGHT NOW.
 
-    if (existingConv) {
-      conversationId = existingConv.id;
-      // Backfill customer name if we now have it
-      if (profile_name) {
-        await supabase.from('conversations').update({ customer_name: profile_name }).eq('id', conversationId);
-      }
-    } else {
-      const { data: newConv } = await supabase
-        .from('conversations')
-        .insert({
-          company_id,
-          phone: `whatsapp:${senderPhone}`,
-          status: 'active',
-          customer_name: profile_name || `Demo (${activeSession.demo_company_name})`,
-          active_agent: 'demo',
-        })
-        .select('id')
-        .single();
-      conversationId = newConv?.id;
-    }
+SOFT HANDOFF (return "soft_handoff") — AI handled it well, but a human needs to act on the information:
+- Customer has completed placing an order with items, quantities, and delivery/pickup details
+- Customer has provided payment or delivery information
+- Customer made a booking/reservation with all required details (date, time, guests, name)
+- Customer shared sensitive personal or financial information
+- Customer is negotiating a deal that needs human approval or final confirmation
+- Customer has a complaint that requires real-world resolution (refund, replacement, etc.)
 
-    // Save customer message
-    if (conversationId) {
-      await supabase.from('messages').insert({
-        conversation_id: conversationId,
-        role: 'user',
-        content: messageText,
-      });
-    }
+HARD HANDOFF (return "hard_handoff") — Customer needs a human to take over the conversation:
+- Customer explicitly asks for a human, manager, or real person
+- Customer expresses clear frustration or anger after multiple exchanges
+- Legal, safety, or emergency situation mentioned
+- AI has failed to resolve the same issue after 3+ back-and-forth messages
 
-    // Get conversation history for context
-    let conversationHistory: { role: string; content: string }[] = [];
-    if (conversationId) {
-      const { data: history } = await supabase
-        .from('messages')
-        .select('role, content')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-        .limit(20);
-      if (history) {
-        conversationHistory = history.map(m => ({
-          role: m.role === 'user' ? 'user' : 'assistant',
-          content: m.content,
-        }));
-      }
-    }
+NO HANDOFF (return "none") — Conversation is flowing normally:
+- General inquiries, FAQs, browsing menu/services
+- Customer is still gathering information or deciding
+- Early stage conversation (greetings, first questions)
+- AI is successfully helping without any actionable commitment yet
 
-    const aiResponse = await callAIWithHistory(conversationHistory, systemPrompt);
+CRITICAL: Only trigger a handoff when there is a CLEAR milestone or need. Do not trigger prematurely on casual browsing. An order is only complete when the customer has confirmed items AND delivery/contact details.
 
-    if (!aiResponse) {
-      return respond("I apologize, I'm experiencing a brief technical issue. Please try again in a moment!");
-    }
-
-    const responseText = typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse);
-
-    // Save AI response
-    if (conversationId) {
-      await supabase.from('messages').insert({
-        conversation_id: conversationId,
-        role: 'assistant',
-        content: responseText.replace('[HANDOFF_REQUIRED]', '').trim(),
-      });
-      // Update conversation preview
-      await supabase.from('conversations').update({
-        last_message_preview: responseText.substring(0, 100),
-      }).eq('id', conversationId);
-    }
-
-    // Check for handoff signal
-    if (responseText.includes('[HANDOFF_REQUIRED]')) {
-      const cleanResponse = responseText.replace('[HANDOFF_REQUIRED]', '').trim();
-
-      const handoffMessage =
-        `🔔 *[DEMO HANDOFF]*\n\n` +
-        `👤 Customer: ${profile_name || 'Unknown'} (${senderPhone})\n` +
-        `🏢 Demo company: ${activeSession.demo_company_name}\n` +
-        `💬 Customer said: "${messageText.substring(0, 200)}"\n\n` +
-        `📋 Summary: Customer has been chatting with the AI receptionist for ${activeSession.demo_company_name} and is requesting to speak with a human representative.\n\n` +
-        `🤖 Last AI response: "${cleanResponse.substring(0, 200)}"`;
-
-      try {
-        await sendWhatsAppToBoss(handoffMessage, company_id);
-      } catch (e) {
-        console.error('[DEMO] Failed to send handoff notification:', e);
-      }
-
-      return respond("I understand you'd like to speak with a real person. I'm connecting you now — someone will be in touch with you shortly! 🙏");
-    }
-
-    return respond(responseText);
-  } catch (error) {
-    console.error('[DEMO] Error:', error);
-    return respond('Sorry, something went wrong. Please try again.');
+Return ONLY valid JSON:
+{
+  "decision": "none" | "soft_handoff" | "hard_handoff",
+  "reason": "1-2 sentence explanation",
+  "summary": "structured summary for the business owner (only if handoff)",
+  "extracted_data": {
+    "customer_name": "if known",
+    "order_items": "list of items if applicable",
+    "delivery_address": "if provided",
+    "contact_info": "phone or email if shared",
+    "booking_details": "date/time/guests if applicable",
+    "total_estimate": "estimated cost if applicable",
+    "complaint_details": "if complaint",
+    "urgency": "low | medium | high"
   }
-});
+}`;
 
+  const result = await callAI(
+    `Conversation history:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`,
+    evaluationPrompt,
+  );
+
+  if (!result || result.decision === 'none') {
+    console.log('[DEMO] Handoff eval: none');
+    return;
+  }
+
+  console.log(`[DEMO] Handoff eval: ${result.decision} — ${result.reason}`);
+
+  const ed = result.extracted_data || {};
+  const customerLabel = profileName || ed.customer_name || 'Unknown';
+
+  let bossMessage: string;
+
+  if (result.decision === 'soft_handoff') {
+    // Build structured notification based on what data was extracted
+    const sections: string[] = [];
+    sections.push(`🔔 *[${getHandoffEmoji(ed)} ${getHandoffTitle(result, session)}]*\n`);
+    sections.push(`👤 Customer: ${customerLabel} (${senderPhone})`);
+    sections.push(`🏢 Demo: ${session.demo_company_name}\n`);
+
+    if (ed.order_items) sections.push(`📋 *Order:*\n${ed.order_items}`);
+    if (ed.booking_details) sections.push(`📅 *Booking:* ${ed.booking_details}`);
+    if (ed.delivery_address) sections.push(`📍 *Delivery:* ${ed.delivery_address}`);
+    if (ed.contact_info) sections.push(`📞 *Contact:* ${ed.contact_info}`);
+    if (ed.total_estimate) sections.push(`💰 *Est. Total:* ${ed.total_estimate}`);
+    if (ed.complaint_details) sections.push(`⚠️ *Issue:* ${ed.complaint_details}`);
+    if (result.summary) sections.push(`\n📝 ${result.summary}`);
+    sections.push(`\n🤖 AI handled the full conversation. Customer expects follow-up.`);
+
+    bossMessage = sections.join('\n');
+  } else {
+    // Hard handoff — urgent
+    bossMessage =
+      `🚨 *[URGENT HANDOFF]*\n\n` +
+      `👤 Customer: ${customerLabel} (${senderPhone})\n` +
+      `🏢 Demo: ${session.demo_company_name}\n\n` +
+      `⚠️ *Reason:* ${result.reason}\n` +
+      (ed.complaint_details ? `💬 *Details:* ${ed.complaint_details}\n` : '') +
+      (result.summary ? `\n📝 ${result.summary}\n` : '') +
+      `\n🔴 Customer has been told someone will follow up. Please respond ASAP.`;
+  }
+
+  try {
+    await sendWhatsAppToBoss(bossMessage, companyId);
+    console.log(`[DEMO] ${result.decision} notification sent to boss`);
+  } catch (e) {
+    console.error('[DEMO] Failed to send handoff notification:', e);
+  }
+}
+
+function getHandoffEmoji(ed: any): string {
+  if (ed.order_items) return '🛒';
+  if (ed.booking_details) return '📅';
+  if (ed.complaint_details) return '⚠️';
+  return '📋';
+}
+
+function getHandoffTitle(result: any, session: any): string {
+  const ed = result.extracted_data || {};
+  if (ed.order_items) return 'ORDER RECEIVED';
+  if (ed.booking_details) return 'BOOKING REQUEST';
+  if (ed.complaint_details) return 'COMPLAINT';
+  return 'ACTION NEEDED';
+}
+
+// ─── Conversation Management ───
+async function getOrCreateConversation(supabase: any, companyId: string, senderPhone: string, profileName: string | null, demoCompanyName: string): Promise<string | null> {
+  const { data: existingConv } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('phone', `whatsapp:${senderPhone}`)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingConv) {
+    if (profileName) {
+      await supabase.from('conversations').update({ customer_name: profileName }).eq('id', existingConv.id);
+    }
+    return existingConv.id;
+  }
+
+  const { data: newConv } = await supabase
+    .from('conversations')
+    .insert({
+      company_id: companyId,
+      phone: `whatsapp:${senderPhone}`,
+      status: 'active',
+      customer_name: profileName || `Demo (${demoCompanyName})`,
+      active_agent: 'demo',
+    })
+    .select('id')
+    .single();
+
+  return newConv?.id || null;
+}
+
+async function getConversationHistory(supabase: any, conversationId: string | null): Promise<{ role: string; content: string }[]> {
+  if (!conversationId) return [];
+  const { data: history } = await supabase
+    .from('messages')
+    .select('role, content')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true })
+    .limit(20);
+
+  return (history || []).map((m: any) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    content: m.content,
+  }));
+}
+
+// ─── WhatsApp / Twilio ───
+async function sendWhatsAppToBoss(message: string, companyId: string): Promise<void> {
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) { console.error('[DEMO] Missing Twilio credentials'); return; }
+
+  const FROM_NUMBER = 'whatsapp:+13345083612';
+  const TO_NUMBER = `whatsapp:${DEMO_BOSS_PHONE}`;
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+
+  const formData = new URLSearchParams();
+  formData.append('From', FROM_NUMBER);
+  formData.append('To', TO_NUMBER);
+  formData.append('Body', message);
+
+  const response = await fetch(twilioUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: formData.toString(),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('[DEMO] Boss notification failed:', response.status, err);
+  } else {
+    console.log('[DEMO] Boss notification sent via Twilio');
+  }
+}
+
+// ─── AI Helpers ───
 function respond(message: string) {
   return new Response(JSON.stringify({ reply: message }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -374,49 +430,16 @@ Return ONLY valid JSON with this structure:
 }`;
 }
 
-async function sendWhatsAppToBoss(message: string, companyId: string): Promise<void> {
-  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    console.error('[DEMO] Missing Twilio credentials for boss notification');
-    return;
-  }
-
-  // The demo line's Twilio WhatsApp number
-  const FROM_NUMBER = 'whatsapp:+13345083612';
-  const TO_NUMBER = `whatsapp:${DEMO_BOSS_PHONE}`;
-
-  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-
-  const formData = new URLSearchParams();
-  formData.append('From', FROM_NUMBER);
-  formData.append('To', TO_NUMBER);
-  formData.append('Body', message);
-
-  const response = await fetch(twilioUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: formData.toString(),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    console.error('[DEMO] Boss notification failed:', response.status, err);
-  } else {
-    console.log('[DEMO] Boss handoff notification sent successfully via Twilio');
-  }
-}
-
 async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
   return callAIWithHistory([{ role: 'user', content: userMessage }], systemPrompt);
 }
 
 async function callAIWithHistory(messages: { role: string; content: string }[], systemPrompt: string): Promise<any> {
   try {
+    // Use flash-lite for evaluation prompts (cheap/fast), flash for main responses
+    const isEvaluation = systemPrompt.includes('handoff evaluation agent');
+    const model = isEvaluation ? 'google/gemini-2.5-flash-lite' : 'google/gemini-3-flash-preview';
+
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -424,12 +447,12 @@ async function callAIWithHistory(messages: { role: string; content: string }[], 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           ...messages,
         ],
-        temperature: 0.7,
+        temperature: isEvaluation ? 0.3 : 0.7,
       }),
     });
 
@@ -448,7 +471,7 @@ async function callAIWithHistory(messages: { role: string; content: string }[], 
       try {
         return JSON.parse(clean);
       } catch {
-        console.error('[DEMO] Failed to parse research JSON');
+        console.error('[DEMO] Failed to parse JSON:', clean.substring(0, 200));
         return null;
       }
     }
