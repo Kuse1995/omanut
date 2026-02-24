@@ -191,7 +191,6 @@ Deno.serve(async (req) => {
     const persona = activeSession.custom_persona || rd.voice_style || 'Professional and helpful';
 
     const customerName = profile_name || 'Unknown';
-    const isFirstMessage = conversationHistory.length <= 1;
 
     const systemPrompt = `You are demonstrating Omanut AI by acting as ${activeSession.demo_company_name}'s AI receptionist.
 
@@ -205,8 +204,8 @@ Service areas: ${rd.service_locations || 'Main area'}
 
 FIRST CONTACT GREETING:
 - The customer's WhatsApp name is: "${customerName}"
-- If this is the first message in the conversation (${isFirstMessage ? 'YES, this is the first message' : 'No, conversation already started'}), warmly greet them, mention you noticed their name is ${customerName}, and ask if that's what they prefer to be called — then naturally transition into how you can help them.
-- If you've already greeted them, do NOT repeat the name confirmation. Just continue the conversation naturally.
+- On the very first message of the conversation, warmly greet them, mention you noticed their name is ${customerName}, and ask if that's what they prefer to be called — then naturally transition into how you can help them.
+- If you've already greeted them (there are prior messages in the conversation), do NOT repeat the name confirmation. Just continue the conversation naturally.
 
 IMPORTANT RULES:
 - Stay in character as ${activeSession.demo_company_name}'s receptionist at all times.
