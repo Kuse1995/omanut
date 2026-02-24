@@ -1,130 +1,186 @@
 
 
-# Plan: API Key System for External AI Agent Access
+# Plan: AI-Powered Support Ticket System
 
 ## Overview
-Create a secure API key system that allows external AI agents to interact with the platform programmatically. Each API key is scoped to a specific company and grants full access to that company's data and capabilities (messaging, reservations, payments, media, etc.).
+Add a customer service ticketing system where the AI automatically creates support tickets during WhatsApp conversations. The AI collects the customer's name, describes their issue, recommends the appropriate department/employee, and sends personalized service recommendations -- all via tool calling within the existing multi-agent architecture.
+
+---
 
 ## What This Enables
-- An external AI agent can authenticate via an API key (in the `x-api-key` header) instead of a user JWT
-- The agent can send WhatsApp messages, manage reservations, query conversations, access customer data, and more -- all scoped to the company the key belongs to
-- Keys can be created, viewed, and revoked from the admin dashboard
+
+- **Automatic ticket creation**: When a customer reports an issue via WhatsApp, the AI collects their details and creates a structured ticket
+- **Smart department routing**: AI analyzes the issue and recommends which department (Billing, Technical, Sales, HR, etc.) or specific employee should handle it
+- **Service recommendations**: AI proactively suggests relevant services or solutions based on the customer's issue
+- **Ticket management dashboard**: Admins can view, assign, update, and resolve tickets from a new "Tickets" tab in the admin panel
+- **External API access**: The `agent-api` edge function gains `list_tickets`, `create_ticket`, and `update_ticket` actions
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Create `company_api_keys` Table
+### Step 1: Database -- Create `support_tickets` Table
 
-New database table to store hashed API keys:
+New table to store tickets:
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid | Primary key |
 | company_id | uuid | FK to companies |
-| key_hash | text | SHA-256 hash of the key (never store plaintext) |
-| key_prefix | text | First 8 chars for display (e.g., `oai_abc1...`) |
-| name | text | Human-readable label |
-| scopes | text[] | Reserved for future granular permissions (default: `{*}`) |
-| is_active | boolean | Soft revoke |
-| last_used_at | timestamptz | Track usage |
-| created_by | uuid | Who created it |
-| created_at | timestamptz | When |
-| expires_at | timestamptz | Optional expiry |
+| conversation_id | uuid | FK to conversations (nullable) |
+| ticket_number | text | Human-readable ID (e.g., TKT-001) |
+| customer_name | text | Collected by AI |
+| customer_phone | text | From WhatsApp conversation |
+| customer_email | text | Collected by AI (nullable) |
+| issue_summary | text | AI-generated summary of the issue |
+| issue_category | text | AI-classified category (billing, technical, general, etc.) |
+| recommended_department | text | AI recommendation |
+| recommended_employee | text | AI recommendation (nullable) |
+| service_recommendations | jsonb | Array of suggested services/solutions |
+| priority | text | low / medium / high / urgent |
+| status | text | open / in_progress / waiting / resolved / closed |
+| assigned_to | text | Employee/department actually assigned |
+| resolution_notes | text | How it was resolved |
+| created_at | timestamptz | When ticket was created |
+| updated_at | timestamptz | Last update |
+| resolved_at | timestamptz | When resolved |
 
-RLS: Only platform admins and company owners/managers can manage keys.
+Also create a `company_departments` table for configurable departments:
 
-### Step 2: Create Edge Function `manage-api-keys`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | Primary key |
+| company_id | uuid | FK to companies |
+| name | text | Department name |
+| description | text | What this department handles |
+| contact_info | text | Email/phone for the department |
+| employees | jsonb | Array of employee names/roles |
+| is_active | boolean | Whether department is available |
 
-Handles key lifecycle:
-- **POST** `/manage-api-keys` with `action: "create"` -- generates a random key, stores the hash, returns the plaintext key **once**
-- **POST** with `action: "list"` -- returns key metadata (prefix, name, active, last used)
-- **POST** with `action: "revoke"` -- sets `is_active = false`
+RLS: Company owners/managers can manage; contributors/viewers can read.
 
-Authentication: Requires JWT from an admin/owner/manager.
+### Step 2: New AI Tool -- `create_support_ticket`
 
-### Step 3: Create Edge Function `agent-api`
+Add a new tool definition to `whatsapp-messages/index.ts`:
 
-The main API gateway for external agents. Authenticates via `x-api-key` header, looks up the company, then routes to the requested action.
+```text
+Tool: create_support_ticket
+Description: Creates a support ticket when a customer reports an issue.
+             Collect the customer's name and issue details before calling.
+             AI should classify the issue and recommend a department.
+Parameters:
+  - customer_name (required): Customer's full name
+  - issue_summary (required): Clear description of the issue
+  - issue_category (required): billing | technical | account | product | 
+                                general | complaint | feature_request
+  - priority (required): low | medium | high | urgent
+  - recommended_department (optional): AI's recommendation
+  - recommended_employee (optional): Specific person if known
+  - service_recommendations (optional): Array of suggested solutions
+```
 
-Supported actions:
-- `send_message` -- Send a WhatsApp message to a customer
-- `list_conversations` -- Get recent conversations
-- `get_conversation` -- Get messages for a conversation
-- `list_reservations` -- Get reservations
-- `create_reservation` -- Create a reservation
-- `list_products` -- Get payment products
-- `list_customers` -- Get customer segments
-- `get_company_info` -- Get company details
-- `list_media` -- Get available media
-- `get_analytics` -- Get conversation/payment stats
+The tool handler will:
+1. Insert the ticket into `support_tickets`
+2. Auto-generate a ticket number (TKT-XXX)
+3. If priority is "urgent" or "high", notify the boss via the existing `notify_boss` mechanism
+4. Return the ticket number to the AI so it can confirm to the customer
 
-Each action queries the database scoped to the API key's `company_id`.
+### Step 3: New AI Tool -- `recommend_services`
 
-### Step 4: Admin UI -- API Keys Section
+Add a tool that looks up relevant services/products based on the customer's issue:
 
-Add an "API Keys" section to `CompanySettingsPanel.tsx`:
-- Button to generate a new key (shows plaintext once in a dialog with copy button)
-- Table of existing keys showing prefix, name, status, last used
-- Revoke button per key
-- Warning that keys grant full access
+```text
+Tool: recommend_services
+Description: Search company products and knowledge base to find
+             relevant services for the customer's issue.
+Parameters:
+  - issue_description (required): What the customer needs help with
+  - category (optional): Filter by category
+```
+
+The tool handler queries `payment_products`, `quick_reference_info`, and `company_documents` to find relevant matches and returns formatted recommendations.
+
+### Step 4: Update Tool Filtering and System Prompt
+
+- Add `create_support_ticket` and `recommend_services` to the `allToolDefinitions` map in `whatsapp-messages/index.ts`
+- Add them to the `AVAILABLE_TOOLS` list in `ToolControlPanel.tsx` under a new "Support" category
+- Add them to the default `enabled_tools` array in the database for customer service companies
+- Enhance the support agent's system prompt to instruct it to:
+  1. Always collect the customer's name before creating a ticket
+  2. Classify the issue category based on conversation context
+  3. Recommend the appropriate department using available `company_departments` data
+  4. Proactively suggest relevant services using `recommend_services`
+
+### Step 5: Admin UI -- Tickets Panel
+
+Create a new `TicketsPanel.tsx` component with:
+
+- **Ticket list**: Filterable by status, priority, department, date range
+- **Ticket detail view**: Shows full issue, conversation link, AI recommendations
+- **Assignment**: Dropdown to assign to a department/employee
+- **Status updates**: Move tickets through the workflow (open -> in_progress -> resolved -> closed)
+- **Department management**: Configure departments and employees per company
+
+Add a "Tickets" tab to `AdminIconSidebar.tsx` and `AdminContentTabs.tsx`.
+
+### Step 6: Update `agent-api` Gateway
+
+Add three new actions to the external agent API:
+
+- `list_tickets` -- Query tickets with filters (status, priority, date)
+- `create_ticket` -- Create a ticket programmatically
+- `update_ticket` -- Update status, assignment, resolution notes
 
 ---
 
 ## Technical Details
 
-### Security Model
+### Ticket Creation Flow
 
 ```text
-External Agent Request Flow:
-
-Agent --> x-api-key: oai_abc123... --> agent-api Edge Function
-                                          |
-                                    Hash the key (SHA-256)
-                                          |
-                                    Lookup in company_api_keys
-                                          |
-                                    Verify is_active = true
-                                    Verify not expired
-                                          |
-                                    Extract company_id
-                                          |
-                                    Execute action scoped to company
-                                          |
-                                    Update last_used_at
-                                          |
-                                    Return JSON response
+Customer WhatsApp Message: "I have a billing problem"
+        |
+  AI classifies as support issue
+        |
+  AI asks: "I'd like to help! Could you tell me your name 
+           and describe the billing issue?"
+        |
+  Customer: "I'm John, I was charged twice for my subscription"
+        |
+  AI calls create_support_ticket:
+    - customer_name: "John"
+    - issue_summary: "Customer charged twice for subscription"
+    - issue_category: "billing"
+    - priority: "high"
+    - recommended_department: "Billing"
+        |
+  AI calls recommend_services:
+    - issue_description: "double charge on subscription"
+        |
+  AI responds: "I've created ticket TKT-042 for you, John. 
+               Our Billing team will review the double charge.
+               In the meantime, you can check your payment 
+               history at [link]. Expected resolution: 24-48hrs."
 ```
-
-- Keys are prefixed with `oai_` for easy identification
-- Plaintext is shown only once at creation; only the hash is stored
-- `verify_jwt = false` on `agent-api` since it uses API key auth
-- `verify_jwt = false` on `manage-api-keys` with manual JWT validation in code
-- All database queries use `SUPABASE_SERVICE_ROLE_KEY` but are manually scoped to the key's `company_id`
-- Security events are logged for key creation, usage, and revocation
 
 ### Files to Create/Modify
 
 | File | Action | Description |
 |------|--------|-------------|
-| Migration SQL | Create | `company_api_keys` table with RLS |
-| `supabase/functions/manage-api-keys/index.ts` | Create | Key lifecycle management |
-| `supabase/functions/agent-api/index.ts` | Create | External agent gateway |
-| `supabase/config.toml` | Modify | Add both new functions with `verify_jwt = false` |
-| `src/components/admin/CompanySettingsPanel.tsx` | Modify | Add API Keys management UI |
+| Migration SQL | Create | `support_tickets` and `company_departments` tables with RLS |
+| `supabase/functions/whatsapp-messages/index.ts` | Modify | Add `create_support_ticket` and `recommend_services` tool definitions + handlers |
+| `supabase/functions/agent-api/index.ts` | Modify | Add `list_tickets`, `create_ticket`, `update_ticket` actions |
+| `src/components/admin/TicketsPanel.tsx` | Create | Ticket management dashboard |
+| `src/components/admin/DepartmentManager.tsx` | Create | Department configuration UI |
+| `src/components/admin/AdminContentTabs.tsx` | Modify | Add "tickets" case |
+| `src/components/admin/AdminIconSidebar.tsx` | Modify | Add Ticket icon to nav |
+| `src/components/admin/deep-settings/ToolControlPanel.tsx` | Modify | Add new tools to AVAILABLE_TOOLS list |
 
-### API Key Format
-- Generated as: `oai_` + 48 random hex characters
-- Example: `oai_a3f8b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3`
-- Stored as: SHA-256 hash of the full key
-- Displayed as: `oai_a3f8b2c1...` (prefix only)
+### Department Routing Logic
 
-### Example Agent Usage
-
-```text
-curl -X POST https://dzheddvoiauevcayifev.supabase.co/functions/v1/agent-api \
-  -H "x-api-key: oai_a3f8b2c1..." \
-  -H "Content-Type: application/json" \
-  -d '{"action": "send_message", "params": {"phone": "+260...", "message": "Hello!"}}'
-```
+The AI determines the recommended department by:
+1. Loading `company_departments` for the company
+2. Matching the issue category and keywords against department descriptions
+3. If no match, defaulting to "General Support"
+4. Including the department list in the system prompt so the AI can make informed routing decisions
 
