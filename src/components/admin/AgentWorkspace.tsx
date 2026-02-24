@@ -222,6 +222,96 @@ export const AgentWorkspace = () => {
     return () => { supabase.removeChannel(channel); };
   }, [selectedCompany?.id, queryClient]);
 
+  // Performance metrics query
+  const { data: performanceData } = useQuery({
+    queryKey: ['agent-performance-metrics', selectedCompany?.id],
+    queryFn: async () => {
+      if (!selectedCompany?.id) return null;
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      // Tickets completed today
+      const { count: todayCount } = await supabase
+        .from('agent_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', selectedCompany.id)
+        .eq('status', 'completed')
+        .gte('completed_at', todayStart);
+
+      // Tickets completed this week
+      const { count: weekCount } = await supabase
+        .from('agent_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('company_id', selectedCompany.id)
+        .eq('status', 'completed')
+        .gte('completed_at', weekStart);
+
+      // Avg wait time (completed items this week)
+      const { data: completedItems } = await supabase
+        .from('agent_queue')
+        .select('wait_time_seconds, created_at, claimed_at, completed_at')
+        .eq('company_id', selectedCompany.id)
+        .eq('status', 'completed')
+        .gte('completed_at', weekStart);
+
+      let avgResponseMin = 0;
+      let avgResolutionMin = 0;
+      if (completedItems && completedItems.length > 0) {
+        const responseTimes = completedItems
+          .filter(i => i.claimed_at && i.created_at)
+          .map(i => (new Date(i.claimed_at!).getTime() - new Date(i.created_at).getTime()) / 60000);
+        const resolutionTimes = completedItems
+          .filter(i => i.completed_at && i.created_at)
+          .map(i => (new Date(i.completed_at!).getTime() - new Date(i.created_at).getTime()) / 60000);
+        avgResponseMin = responseTimes.length > 0 ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length) : 0;
+        avgResolutionMin = resolutionTimes.length > 0 ? Math.round(resolutionTimes.reduce((a, b) => a + b, 0) / resolutionTimes.length) : 0;
+      }
+
+      // SLA compliance (items that were completed before deadline)
+      const { data: slaItems } = await supabase
+        .from('agent_queue')
+        .select('sla_deadline, claimed_at')
+        .eq('company_id', selectedCompany.id)
+        .eq('status', 'completed')
+        .not('sla_deadline', 'is', null)
+        .gte('completed_at', weekStart);
+
+      let slaCompliance = 100;
+      if (slaItems && slaItems.length > 0) {
+        const compliant = slaItems.filter(i => 
+          i.claimed_at && new Date(i.claimed_at) <= new Date(i.sla_deadline!)
+        ).length;
+        slaCompliance = Math.round((compliant / slaItems.length) * 100);
+      }
+
+      // CSAT scores
+      const { data: csatData } = await supabase
+        .from('support_tickets')
+        .select('satisfaction_score')
+        .eq('company_id', selectedCompany.id)
+        .gte('updated_at', weekStart)
+        .gt('satisfaction_score', 0);
+
+      let avgCsat = 0;
+      if (csatData && csatData.length > 0) {
+        avgCsat = +(csatData.reduce((a, b) => a + (b.satisfaction_score || 0), 0) / csatData.length).toFixed(1);
+      }
+
+      return {
+        todayCount: todayCount || 0,
+        weekCount: weekCount || 0,
+        avgResponseMin,
+        avgResolutionMin,
+        slaCompliance,
+        avgCsat,
+        csatCount: csatData?.length || 0,
+      };
+    },
+    enabled: !!selectedCompany?.id,
+    refetchInterval: 60000,
+  });
+
   const stats = {
     waiting: queueItems?.filter((i: any) => i.status === 'waiting').length || 0,
     active: queueItems?.filter((i: any) => ['assigned', 'active'].includes(i.status)).length || 0,
