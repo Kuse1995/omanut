@@ -39,6 +39,7 @@ const navItems = [
   { id: 'image-gen', icon: Sparkles, label: 'Image Generation' },
   { id: 'media', icon: Image, label: 'Media Library' },
   { id: 'tickets', icon: Ticket, label: 'Support Tickets' },
+  { id: 'workspace', icon: Headset, label: 'Agent Workspace' },
   { id: 'settings', icon: Settings, label: 'Company Settings' },
   { id: 'billing', icon: CreditCard, label: 'Billing & Credits' },
   { id: 'payments', icon: DollarSign, label: 'Products & Payments' },
