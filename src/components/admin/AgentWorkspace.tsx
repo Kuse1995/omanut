@@ -429,9 +429,19 @@ export const AgentWorkspace = () => {
                       placeholder="Type a reply..."
                       className="min-h-[60px] resize-none text-sm"
                     />
-                    <Button size="icon" className="h-[60px] w-10 flex-shrink-0" disabled={!replyText.trim()}>
-                      <Send className="h-4 w-4" />
-                    </Button>
+                    <Button 
+                      size="icon" 
+                      className="h-[60px] w-10 flex-shrink-0" 
+                      disabled={!replyText.trim() || sendReplyMutation.isPending || !selectedItem?.conversation_id}
+                      onClick={() => {
+                        if (replyText.trim() && selectedItem?.conversation_id) {
+                          sendReplyMutation.mutate({ 
+                            conversationId: selectedItem.conversation_id, 
+                            message: replyText.trim() 
+                          });
+                        }
+                      }}
+                    >
                   </div>
                 </div>
               </div>
