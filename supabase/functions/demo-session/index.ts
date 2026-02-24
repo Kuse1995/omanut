@@ -209,8 +209,63 @@ IMPORTANT RULES:
 - Use the business information above to give realistic, specific answers.
 - If you don't know something specific, give a plausible answer based on the business type.
 - If the customer explicitly asks to speak to a human, a manager, or has a complex issue you absolutely cannot resolve, include [HANDOFF_REQUIRED] at the very end of your response. Only use this when truly necessary.`;
-    // Get conversation history for this phone in demo context
-    const aiResponse = await callAI(messageText, systemPrompt);
+
+    // Get or create conversation for this phone in demo context
+    let conversationId: string;
+    const { data: existingConv } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('company_id', company_id)
+      .eq('phone', `whatsapp:${senderPhone}`)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingConv) {
+      conversationId = existingConv.id;
+    } else {
+      const { data: newConv } = await supabase
+        .from('conversations')
+        .insert({
+          company_id,
+          phone: `whatsapp:${senderPhone}`,
+          status: 'active',
+          customer_name: `Demo (${activeSession.demo_company_name})`,
+          active_agent: 'demo',
+        })
+        .select('id')
+        .single();
+      conversationId = newConv?.id;
+    }
+
+    // Save customer message
+    if (conversationId) {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'user',
+        content: messageText,
+      });
+    }
+
+    // Get conversation history for context
+    let conversationHistory: { role: string; content: string }[] = [];
+    if (conversationId) {
+      const { data: history } = await supabase
+        .from('messages')
+        .select('role, content')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true })
+        .limit(20);
+      if (history) {
+        conversationHistory = history.map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content,
+        }));
+      }
+    }
+
+    const aiResponse = await callAIWithHistory(conversationHistory, systemPrompt);
 
     if (!aiResponse) {
       return respond("I apologize, I'm experiencing a brief technical issue. Please try again in a moment!");
@@ -218,11 +273,23 @@ IMPORTANT RULES:
 
     const responseText = typeof aiResponse === 'string' ? aiResponse : JSON.stringify(aiResponse);
 
+    // Save AI response
+    if (conversationId) {
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: responseText.replace('[HANDOFF_REQUIRED]', '').trim(),
+      });
+      // Update conversation preview
+      await supabase.from('conversations').update({
+        last_message_preview: responseText.substring(0, 100),
+      }).eq('id', conversationId);
+    }
+
     // Check for handoff signal
     if (responseText.includes('[HANDOFF_REQUIRED]')) {
       const cleanResponse = responseText.replace('[HANDOFF_REQUIRED]', '').trim();
 
-      // Notify boss via WhatsApp
       const handoffMessage =
         `🔔 *[DEMO HANDOFF]*\n\n` +
         `📱 Customer: ${senderPhone}\n` +
@@ -323,6 +390,10 @@ async function sendWhatsAppToBoss(message: string, companyId: string): Promise<v
 }
 
 async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
+  return callAIWithHistory([{ role: 'user', content: userMessage }], systemPrompt);
+}
+
+async function callAIWithHistory(messages: { role: string; content: string }[], systemPrompt: string): Promise<any> {
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -334,7 +405,7 @@ async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
         model: 'google/gemini-3-flash-preview',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
+          ...messages,
         ],
         temperature: 0.7,
       }),
