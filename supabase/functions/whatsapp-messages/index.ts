@@ -3961,7 +3961,8 @@ serve(async (req) => {
           company_id: company.id,
           phone: From,
           status: 'active',
-          transcript: `CUSTOMER PHONE: ${customerPhone}\n`
+          customer_name: ProfileName || null,
+          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`
         })
         .select()
         .single();
