@@ -39,6 +39,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         return <ImageGenerationPanel />;
       case 'media':
         return <MediaLibraryPanel />;
+      case 'tickets':
+        return <TicketsPanel />;
       case 'settings':
         return <CompanySettingsPanel />;
       case 'billing':

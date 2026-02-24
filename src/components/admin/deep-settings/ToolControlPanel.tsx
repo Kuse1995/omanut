@@ -22,6 +22,8 @@ const AVAILABLE_TOOLS = [
   { id: 'request_payment', name: 'Request Payment', description: 'Initiates payment flow', category: 'Payment' },
   { id: 'notify_boss', name: 'Notify Boss', description: 'Sends notification to management', category: 'Communication' },
   { id: 'update_customer', name: 'Update Customer', description: 'Updates customer information', category: 'CRM' },
+  { id: 'create_support_ticket', name: 'Create Support Ticket', description: 'Creates support tickets with AI classification', category: 'Support' },
+  { id: 'recommend_services', name: 'Recommend Services', description: 'Suggests relevant services for customer issues', category: 'Support' },
 ];
 
 export const ToolControlPanel = ({ config, updateConfig }: ToolControlPanelProps) => {
