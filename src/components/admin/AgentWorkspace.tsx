@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useCompany } from '@/context/CompanyContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,6 +76,41 @@ export const AgentWorkspace = () => {
   const [statusFilter, setStatusFilter] = useState('waiting');
   const [noteContent, setNoteContent] = useState('');
   const [replyText, setReplyText] = useState('');
+
+  // Fetch current user's availability
+  const { data: myAvailability } = useQuery({
+    queryKey: ['my-availability', selectedCompany?.id],
+    queryFn: async () => {
+      if (!selectedCompany?.id) return null;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase
+        .from('company_users')
+        .select('is_available, max_concurrent_tickets, current_ticket_count')
+        .eq('company_id', selectedCompany.id)
+        .eq('user_id', user.id)
+        .single();
+      return data;
+    },
+    enabled: !!selectedCompany?.id,
+  });
+
+  const toggleAvailability = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('company_users')
+        .update({ is_available: !myAvailability?.is_available })
+        .eq('company_id', selectedCompany!.id)
+        .eq('user_id', user.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-availability'] });
+      toast.success(myAvailability?.is_available ? 'You are now offline' : 'You are now available');
+    },
+  });
 
   // Fetch queue items
   const { data: queueItems, isLoading } = useQuery({
@@ -331,12 +367,28 @@ export const AgentWorkspace = () => {
       {/* Left: Queue List */}
       <div className="w-[400px] border-r border-border flex flex-col">
         <div className="p-4 border-b border-border">
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            <Headset className="h-5 w-5 text-primary" />
-            Agent Workspace
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <Headset className="h-5 w-5 text-primary" />
+              Agent Workspace
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-medium ${myAvailability?.is_available ? 'text-green-600' : 'text-muted-foreground'}`}>
+                {myAvailability?.is_available ? 'Online' : 'Offline'}
+              </span>
+              <Switch
+                checked={myAvailability?.is_available ?? false}
+                onCheckedChange={() => toggleAvailability.mutate()}
+                disabled={toggleAvailability.isPending}
+                className="scale-75"
+              />
+            </div>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             {stats.waiting} waiting · {stats.active} active
+            {myAvailability?.current_ticket_count != null && (
+              <> · {myAvailability.current_ticket_count}/{myAvailability.max_concurrent_tickets ?? 5} tickets</>
+            )}
           </p>
         </div>
 

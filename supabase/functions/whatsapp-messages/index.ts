@@ -687,6 +687,66 @@ async function processAIResponse(
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
+    // ========== CSAT RESPONSE DETECTION ==========
+    // Check if customer is replying to a satisfaction survey (message is just a number 1-5)
+    const csatMatch = userMessage.trim().match(/^([1-5])$/);
+    if (csatMatch) {
+      const score = parseInt(csatMatch[1]);
+      // Find their most recent ticket with satisfaction_score = -1 (survey sent)
+      const { data: pendingCsat } = await supabase
+        .from('support_tickets')
+        .select('id, ticket_number')
+        .eq('company_id', companyId)
+        .eq('customer_phone', customerPhone)
+        .eq('satisfaction_score', -1)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (pendingCsat && pendingCsat.length > 0) {
+        const ticket = pendingCsat[0];
+        await supabase
+          .from('support_tickets')
+          .update({ 
+            satisfaction_score: score,
+            satisfaction_feedback: `Customer rated ${score}/5 via WhatsApp`
+          })
+          .eq('id', ticket.id);
+
+        // Send thank you
+        const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+          const thankYouMsg = score >= 4 
+            ? `Thank you for your feedback! We're glad we could help. ⭐️` 
+            : `Thank you for your feedback. We'll work on improving your experience. 🙏`;
+          
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('To', `whatsapp:${customerPhone}`);
+          formData.append('Body', thankYouMsg);
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+        }
+
+        // Log message
+        await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: `[CSAT] Customer rated ticket ${ticket.ticket_number}: ${score}/5`
+        });
+
+        console.log(`[CSAT] Recorded score ${score}/5 for ticket ${ticket.ticket_number}`);
+        return; // Don't process further
+      }
+    }
+
     // ========== HUMAN-FIRST / HYBRID MODE CHECK ==========
     const serviceMode = aiOverrides?.service_mode || 'autonomous';
     console.log(`[SERVICE-MODE] Mode: ${serviceMode}`);
