@@ -367,12 +367,28 @@ export const AgentWorkspace = () => {
       {/* Left: Queue List */}
       <div className="w-[400px] border-r border-border flex flex-col">
         <div className="p-4 border-b border-border">
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            <Headset className="h-5 w-5 text-primary" />
-            Agent Workspace
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <Headset className="h-5 w-5 text-primary" />
+              Agent Workspace
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-medium ${myAvailability?.is_available ? 'text-green-600' : 'text-muted-foreground'}`}>
+                {myAvailability?.is_available ? 'Online' : 'Offline'}
+              </span>
+              <Switch
+                checked={myAvailability?.is_available ?? false}
+                onCheckedChange={() => toggleAvailability.mutate()}
+                disabled={toggleAvailability.isPending}
+                className="scale-75"
+              />
+            </div>
+          </div>
           <p className="text-xs text-muted-foreground mt-1">
             {stats.waiting} waiting · {stats.active} active
+            {myAvailability?.current_ticket_count != null && (
+              <> · {myAvailability.current_ticket_count}/{myAvailability.max_concurrent_tickets ?? 5} tickets</>
+            )}
           </p>
         </div>
 
