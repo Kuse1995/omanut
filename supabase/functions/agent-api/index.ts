@@ -282,6 +282,72 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── TICKET ACTIONS ──
+
+    if (action === "list_tickets") {
+      const limit = params?.limit || 50;
+      const status = params?.status;
+      const priority = params?.priority;
+      let query = supabase
+        .from("support_tickets")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (status) query = query.eq("status", status);
+      if (priority) query = query.eq("priority", priority);
+      const { data, error } = await query;
+      if (error) throw error;
+      return respond({ tickets: data });
+    }
+
+    if (action === "create_ticket") {
+      const { customer_name, customer_phone, issue_summary, issue_category, priority, recommended_department } = params || {};
+      if (!customer_phone || !issue_summary) {
+        return respond({ error: "customer_phone and issue_summary are required" }, 400);
+      }
+      const { data, error } = await supabase
+        .from("support_tickets")
+        .insert({
+          company_id: companyId,
+          ticket_number: '',
+          customer_name: customer_name || null,
+          customer_phone,
+          issue_summary,
+          issue_category: issue_category || 'general',
+          priority: priority || 'medium',
+          recommended_department: recommended_department || null,
+          status: 'open',
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return respond({ ticket: data });
+    }
+
+    if (action === "update_ticket") {
+      const { ticket_id, status, assigned_to, resolution_notes, priority } = params || {};
+      if (!ticket_id) {
+        return respond({ error: "ticket_id is required" }, 400);
+      }
+      const updates: Record<string, any> = {};
+      if (status) updates.status = status;
+      if (assigned_to !== undefined) updates.assigned_to = assigned_to;
+      if (resolution_notes !== undefined) updates.resolution_notes = resolution_notes;
+      if (priority) updates.priority = priority;
+      if (status === 'resolved') updates.resolved_at = new Date().toISOString();
+      
+      const { data, error } = await supabase
+        .from("support_tickets")
+        .update(updates)
+        .eq("id", ticket_id)
+        .eq("company_id", companyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return respond({ ticket: data });
+    }
+
     return respond(
       {
         error: `Unknown action: ${action}`,
@@ -296,6 +362,9 @@ Deno.serve(async (req) => {
           "list_customers",
           "list_media",
           "get_analytics",
+          "list_tickets",
+          "create_ticket",
+          "update_ticket",
         ],
       },
       400
