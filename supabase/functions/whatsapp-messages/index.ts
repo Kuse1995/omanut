@@ -3295,6 +3295,7 @@ serve(async (req) => {
             body: Body,
             company_id: company.id,
             boss_phone: company.boss_phone,
+            profile_name: ProfileName,
           }),
         });
 

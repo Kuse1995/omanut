@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { from, body, company_id, boss_phone } = await req.json();
+    const { from, body, company_id, boss_phone, profile_name } = await req.json();
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Clean expired sessions
@@ -190,6 +190,9 @@ Deno.serve(async (req) => {
     const rd = activeSession.researched_data as Record<string, string> || {};
     const persona = activeSession.custom_persona || rd.voice_style || 'Professional and helpful';
 
+    const customerName = profile_name || 'Unknown';
+    const isFirstMessage = conversationHistory.length <= 1;
+
     const systemPrompt = `You are demonstrating Omanut AI by acting as ${activeSession.demo_company_name}'s AI receptionist.
 
 Business type: ${rd.business_type || 'General business'}
@@ -199,6 +202,11 @@ Communication style: ${persona}
 Key information: ${rd.quick_reference_info || 'A quality establishment'}
 Branches: ${rd.branches || 'Main location'}
 Service areas: ${rd.service_locations || 'Main area'}
+
+FIRST CONTACT GREETING:
+- The customer's WhatsApp name is: "${customerName}"
+- If this is the first message in the conversation (${isFirstMessage ? 'YES, this is the first message' : 'No, conversation already started'}), warmly greet them, mention you noticed their name is ${customerName}, and ask if that's what they prefer to be called — then naturally transition into how you can help them.
+- If you've already greeted them, do NOT repeat the name confirmation. Just continue the conversation naturally.
 
 IMPORTANT RULES:
 - Stay in character as ${activeSession.demo_company_name}'s receptionist at all times.
@@ -224,6 +232,10 @@ IMPORTANT RULES:
 
     if (existingConv) {
       conversationId = existingConv.id;
+      // Backfill customer name if we now have it
+      if (profile_name) {
+        await supabase.from('conversations').update({ customer_name: profile_name }).eq('id', conversationId);
+      }
     } else {
       const { data: newConv } = await supabase
         .from('conversations')
@@ -231,7 +243,7 @@ IMPORTANT RULES:
           company_id,
           phone: `whatsapp:${senderPhone}`,
           status: 'active',
-          customer_name: `Demo (${activeSession.demo_company_name})`,
+          customer_name: profile_name || `Demo (${activeSession.demo_company_name})`,
           active_agent: 'demo',
         })
         .select('id')
@@ -292,10 +304,11 @@ IMPORTANT RULES:
 
       const handoffMessage =
         `🔔 *[DEMO HANDOFF]*\n\n` +
-        `📱 Customer: ${senderPhone}\n` +
+        `👤 Customer: ${profile_name || 'Unknown'} (${senderPhone})\n` +
         `🏢 Demo company: ${activeSession.demo_company_name}\n` +
-        `💬 Last message: "${messageText.substring(0, 200)}"\n\n` +
-        `🤖 AI assessment: ${cleanResponse.substring(0, 300)}`;
+        `💬 Customer said: "${messageText.substring(0, 200)}"\n\n` +
+        `📋 Summary: Customer has been chatting with the AI receptionist for ${activeSession.demo_company_name} and is requesting to speak with a human representative.\n\n` +
+        `🤖 Last AI response: "${cleanResponse.substring(0, 200)}"`;
 
       try {
         await sendWhatsAppToBoss(handoffMessage, company_id);
