@@ -687,7 +687,150 @@ async function processAIResponse(
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
-    // ========== DYNAMIC AGENT ROUTING ==========
+    // ========== HUMAN-FIRST / HYBRID MODE CHECK ==========
+    const serviceMode = aiOverrides?.service_mode || 'autonomous';
+    console.log(`[SERVICE-MODE] Mode: ${serviceMode}`);
+
+    if (serviceMode === 'human_first' || (serviceMode === 'hybrid' && messageComplexity === 'complex')) {
+      console.log(`[HUMAN-FIRST] Queueing for human agent (mode=${serviceMode}, complexity=${messageComplexity})`);
+      
+      // Generate AI summary + draft suggestions in background
+      const summary = await generateConversationSummary(conversationId, supabase);
+      
+      // Generate 3 AI draft responses with different tones
+      let aiDrafts: any[] = [];
+      try {
+        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+        if (LOVABLE_API_KEY) {
+          const draftResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a customer service assistant for ${company.name}. Generate 3 response options for a human agent to use when replying to the customer. Each response should have a different tone. Return ONLY valid JSON array with objects having "tone" and "text" fields. Tones: "formal", "friendly", "concise".`
+                },
+                {
+                  role: 'user',
+                  content: `Customer message: "${userMessage}"\n\nConversation summary:\n${summary}\n\nGenerate 3 response drafts:`
+                }
+              ],
+              temperature: 0.7,
+              max_tokens: 600
+            })
+          });
+          
+          const draftData = await draftResponse.json();
+          const draftContent = draftData.choices?.[0]?.message?.content || '[]';
+          try {
+            aiDrafts = JSON.parse(draftContent.replace(/```json\n?|\n?```/g, '').trim());
+          } catch {
+            aiDrafts = [{ tone: 'friendly', text: draftContent }];
+          }
+        }
+      } catch (draftError) {
+        console.error('[HUMAN-FIRST] Error generating drafts:', draftError);
+        aiDrafts = [{ tone: 'friendly', text: `Thank you for contacting us about "${userMessage.substring(0, 50)}...". We're looking into this for you.` }];
+      }
+
+      // Create support ticket
+      const { data: ticket } = await supabase
+        .from('support_tickets')
+        .insert({
+          company_id: companyId,
+          conversation_id: conversationId,
+          customer_phone: customerPhone,
+          customer_name: conversation.customer_name || 'Unknown',
+          issue_summary: userMessage.substring(0, 500),
+          issue_category: 'general',
+          priority: messageComplexity === 'complex' ? 'high' : 'medium',
+          status: 'open'
+        })
+        .select()
+        .single();
+
+      // Fetch SLA config for priority
+      const ticketPriority = messageComplexity === 'complex' ? 'high' : 'medium';
+      const { data: slaConfig } = await supabase
+        .from('company_sla_config')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('priority', ticketPriority)
+        .maybeSingle();
+
+      const slaDeadline = slaConfig?.response_time_minutes
+        ? new Date(Date.now() + slaConfig.response_time_minutes * 60000).toISOString()
+        : null;
+
+      // Create queue entry
+      await supabase
+        .from('agent_queue')
+        .insert({
+          company_id: companyId,
+          ticket_id: ticket?.id || null,
+          conversation_id: conversationId,
+          customer_phone: customerPhone,
+          customer_name: conversation.customer_name || 'Unknown',
+          ai_summary: summary,
+          ai_suggested_responses: aiDrafts,
+          priority: ticketPriority,
+          status: 'waiting',
+          sla_deadline: slaDeadline,
+          department: null
+        });
+
+      // Send acknowledgment to customer
+      const ticketNumber = ticket?.ticket_number || 'TKT-???';
+      const fallbackMsg = aiOverrides?.fallback_message || 'Thank you for your patience. Someone will respond shortly.';
+      const ackMessage = `Thank you for reaching out! 🙏\n\nYour request has been logged as *${ticketNumber}*.\n${fallbackMsg}`;
+
+      const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+      const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+
+      if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+        const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
+          ? company.whatsapp_number 
+          : `whatsapp:${company.whatsapp_number}`;
+        const formData = new URLSearchParams();
+        formData.append('From', fromNumber);
+        formData.append('To', `whatsapp:${customerPhone}`);
+        formData.append('Body', ackMessage);
+
+        await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+      }
+
+      // Store the ack message
+      await supabase.from('messages').insert({
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: ackMessage
+      });
+
+      // Pause conversation for human
+      await supabase.from('conversations').update({
+        is_paused_for_human: true,
+        human_takeover: true,
+        active_agent: 'human_queue'
+      }).eq('id', conversationId);
+
+      console.log(`[HUMAN-FIRST] Queued successfully. Ticket: ${ticketNumber}, Drafts: ${aiDrafts.length}`);
+      return; // Exit - no AI auto-response
+    }
+
+    // ========== DYNAMIC AGENT ROUTING (autonomous mode) ==========
     let selectedAgent = 'sales';
     let routingReasoning = 'Default routing';
     const previousAgent = conversation.active_agent || 'sales';
