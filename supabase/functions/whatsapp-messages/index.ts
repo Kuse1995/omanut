@@ -3168,6 +3168,7 @@ serve(async (req) => {
     const From = formData.get('From') as string;
     const To = formData.get('To') as string;
     const Body = formData.get('Body') as string || '';
+    const ProfileName = formData.get('ProfileName') as string || '';
     
     // Extract media information
     const NumMedia = parseInt(formData.get('NumMedia') as string || '0');
