@@ -64,6 +64,22 @@ Deno.serve(async (req) => {
 
     const systemPrompt = buildDemoSystemPrompt(activeSession.demo_company_name, rd, persona, customerName);
 
+    // Check if customer is asking about ticket status
+    const statusQuery = isTicketStatusQuery(messageText);
+    if (statusQuery) {
+      const statusResponse = await lookupTicketStatus(supabase, company_id, senderPhone);
+      if (statusResponse) {
+        // Save messages and return status
+        const conversationId = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
+        if (conversationId) {
+          await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: messageText });
+          await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: statusResponse });
+          await supabase.from('conversations').update({ last_message_preview: statusResponse.substring(0, 100) }).eq('id', conversationId);
+        }
+        return respond(statusResponse);
+      }
+    }
+
     // Get or create conversation
     const conversationId = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
 
@@ -401,6 +417,57 @@ function getHandoffTitle(result: any, session: any): string {
   if (ed.booking_details) return 'BOOKING REQUEST';
   if (ed.complaint_details) return 'COMPLAINT';
   return 'ACTION NEEDED';
+}
+
+// ─── Ticket Status Lookup ───
+function isTicketStatusQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+  const patterns = [
+    'status', 'my ticket', 'my issue', 'my complaint', 'my case',
+    'update on my', 'what happened', 'any update', 'is my issue',
+    'have you resolved', 'has my', 'been resolved', 'been fixed',
+    'tracking', 'follow up', 'following up', 'check on my',
+  ];
+  return patterns.some(p => lower.includes(p));
+}
+
+async function lookupTicketStatus(supabase: any, companyId: string, senderPhone: string): Promise<string | null> {
+  const { data: tickets } = await supabase
+    .from('support_tickets')
+    .select('ticket_number, issue_summary, status, priority, created_at, resolved_at')
+    .eq('company_id', companyId)
+    .eq('customer_phone', senderPhone)
+    .order('created_at', { ascending: false })
+    .limit(3);
+
+  if (!tickets || tickets.length === 0) return null;
+
+  const statusLabels: Record<string, string> = {
+    open: '🟡 Open — Awaiting agent',
+    in_progress: '🔵 In Progress — An agent is working on this',
+    resolved: '✅ Resolved',
+    closed: '✅ Closed',
+  };
+
+  if (tickets.length === 1) {
+    const t = tickets[0];
+    return `📋 *Ticket Status Update*\n\n` +
+      `🔖 Ticket: ${t.ticket_number}\n` +
+      `📝 Issue: ${t.issue_summary}\n` +
+      `📊 Status: ${statusLabels[t.status] || t.status}\n` +
+      `⏰ Opened: ${new Date(t.created_at).toLocaleDateString()}\n` +
+      (t.resolved_at ? `✅ Resolved: ${new Date(t.resolved_at).toLocaleDateString()}\n` : '') +
+      `\nIf you need further help, just let me know!`;
+  }
+
+  let response = `📋 *Your Tickets*\n\n`;
+  for (const t of tickets) {
+    response += `🔖 *${t.ticket_number}*\n`;
+    response += `   ${t.issue_summary}\n`;
+    response += `   ${statusLabels[t.status] || t.status}\n\n`;
+  }
+  response += `Need details on a specific ticket? Just ask!`;
+  return response;
 }
 
 // ─── Conversation Management ───

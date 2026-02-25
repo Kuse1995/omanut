@@ -183,6 +183,26 @@ export const AgentWorkspace = () => {
     },
   });
 
+  // Set In Progress mutation
+  const inProgressMutation = useMutation({
+    mutationFn: async (queueId: string) => {
+      const { error } = await supabase
+        .from('agent_queue')
+        .update({ status: 'active' })
+        .eq('id', queueId);
+      if (error) throw error;
+      // Also update linked support ticket
+      const item = queueItems?.find((i: any) => i.id === queueId);
+      if (item?.ticket_id) {
+        await supabase.from('support_tickets').update({ status: 'in_progress' }).eq('id', item.ticket_id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agent-queue'] });
+      toast.success('Ticket marked as In Progress');
+    },
+  });
+
   // Send reply mutation - sends via WhatsApp through edge function
   const sendReplyMutation = useMutation({
     mutationFn: async ({ conversationId, message }: { conversationId: string; message: string }) => {
@@ -210,12 +230,20 @@ export const AgentWorkspace = () => {
         .update({ status: 'completed', completed_at: new Date().toISOString() })
         .eq('id', queueId);
       if (error) throw error;
+      // Also update linked support ticket
+      const item = selectedItem || queueItems?.find((i: any) => i.id === queueId);
+      if (item?.ticket_id) {
+        await supabase.from('support_tickets').update({ 
+          status: 'resolved', 
+          resolved_at: new Date().toISOString() 
+        }).eq('id', item.ticket_id);
+      }
       // Also unpause the conversation
-      if (selectedItem?.conversation_id) {
+      if (item?.conversation_id) {
         await supabase.from('conversations').update({
           is_paused_for_human: false,
           human_takeover: false
-        }).eq('id', selectedItem.conversation_id);
+        }).eq('id', item.conversation_id);
       }
     },
     onSuccess: () => {
@@ -483,6 +511,30 @@ export const AgentWorkspace = () => {
                           Claim
                         </Button>
                       )}
+                      {(item.status === 'assigned') && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full mt-2 h-7 text-xs gap-1"
+                          onClick={(e) => { e.stopPropagation(); inProgressMutation.mutate(item.id); }}
+                          disabled={inProgressMutation.isPending}
+                        >
+                          <ArrowRight className="h-3 w-3" />
+                          Start Working
+                        </Button>
+                      )}
+                      {(item.status === 'active' || item.status === 'assigned') && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="w-full mt-1 h-7 text-xs gap-1"
+                          onClick={(e) => { e.stopPropagation(); resolveMutation.mutate(item.id); }}
+                          disabled={resolveMutation.isPending}
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          Mark Resolved
+                        </Button>
+                      )}
                     </Card>
                   ))
                 )}
@@ -583,6 +635,18 @@ export const AgentWorkspace = () => {
                 </div>
               </div>
               <div className="flex gap-2">
+                {selectedItem.status === 'assigned' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    onClick={() => inProgressMutation.mutate(selectedItem.id)}
+                    disabled={inProgressMutation.isPending}
+                  >
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    In Progress
+                  </Button>
+                )}
                 {selectedItem.status !== 'completed' && (
                   <Button
                     variant="default"
