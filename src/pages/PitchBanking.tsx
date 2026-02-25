@@ -262,11 +262,25 @@ const PitchBanking = () => {
             See It In Action
           </h2>
           <p className="text-xl text-muted-foreground mb-10">
-            Try a live demo right now. Text our WhatsApp number and experience
-            the AI banking assistant yourself.
+            Scan the QR code below to start a WhatsApp conversation with our AI banking assistant — right now.
           </p>
-          <Button size="lg" className="hover-glow text-lg px-10 h-14 animate-pulse-glow">
-            Try Live Demo <Send className="ml-2 w-5 h-5" />
+
+          <div className="inline-block p-4 bg-white rounded-2xl shadow-lg mb-8">
+            <img
+              src="https://api.qrserver.com/v1/create-qr-code/?data=https%3A%2F%2Fwa.me%2F13345083612%3Ftext%3DHi&size=200x200&format=png"
+              alt="Scan to chat on WhatsApp"
+              className="w-48 h-48"
+            />
+          </div>
+
+          <p className="text-sm text-muted-foreground mb-6">
+            Or message directly: <a href="https://wa.me/13345083612?text=Hi" target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline">+1 (334) 508-3612</a>
+          </p>
+
+          <Button size="lg" className="hover-glow text-lg px-10 h-14 animate-pulse-glow" asChild>
+            <a href="https://wa.me/13345083612?text=Hi" target="_blank" rel="noopener noreferrer">
+              Try Live Demo <Send className="ml-2 w-5 h-5" />
+            </a>
           </Button>
         </div>
       </section>
