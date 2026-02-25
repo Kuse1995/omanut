@@ -1,128 +1,65 @@
 
 
-# Analysis: Demo Page Location & Intelligent Handoff System
+# Demo Preparation Plan — Banking Industry Pitch
 
-## Demo Page Location
+## Overview
 
-The demo page is at `/demo` (public showcase page at `src/pages/Demo.tsx`). There's also `/live-demo` (authenticated internal testing page at `src/pages/LiveDemo.tsx`).
+Updated plan: instead of an Eco Bank-specific page, create a **generic banking industry pitch page** at `/pitch/banking` that positions Omanut as the AI solution for any bank. This makes the same page reusable for Eco Bank, Stanbic, FNB, or any financial institution demo.
 
-## Current Handoff Problem
+## Changes
 
-The current handoff logic is a single line in the system prompt:
+### 1. Create `/pitch/banking` page (`src/pages/PitchBanking.tsx`)
+
+A clean, full-screen presentation page with no site navigation (no FloatingNav). Dark, enterprise-grade design. Sections:
+
+- **Header**: Omanut logo + "AI Customer Service for Banking"
+- **The Problem**: 3 pain points — (1) Call center queues costing millions yearly, (2) 70% of inquiries are repetitive Tier 1 (balance, card status, branch info), (3) Zero support outside business hours
+- **The Solution**: WhatsApp AI that handles Tier 1 queries conversationally (not menu bots). Includes an embedded simulated banking chat showing: balance check → card block request → intelligent handoff with structured summary to agent
+- **How It Works**: 3-step visual flow — Customer texts WhatsApp → AI resolves or routes → Structured handoff to human agent with full context
+- **Key Metrics**: ROI projections (estimated 70% Tier 1 automation, 24/7 availability, seconds vs minutes response time)
+- **Voice AI — Coming Soon**: Teaser section mentioning phone call handling is in development
+- **CTA**: "See It Live" button linking to the demo WhatsApp number (or QR code)
+
+### 2. Update hero chat demo (`src/components/landing/LiveChatDemo.tsx`)
+
+Replace the restaurant reservation conversation with a banking scenario:
 
 ```
-If the customer explicitly asks to speak to a human, a manager, or has a complex issue
-you absolutely cannot resolve, include [HANDOFF_REQUIRED] at the very end of your response.
-Only use this when truly necessary.
+Customer: "Hi, I need to check my account balance"
+AI: "Hello! I can help with that. For security, could you confirm the last 4 digits of your account number?"
+Customer: "4521"  
+AI: "Your current balance is K12,450.00. Would you like a mini-statement or help with anything else?"
 ```
 
-This is too passive. The AI only hands off when the customer **explicitly asks** for a human. It has zero awareness of conversational milestones like "order complete, need to pass details to the restaurant." A customer who places an order, gives delivery info, and expects fulfillment will never trigger this because they never said "let me speak to a human."
+### 3. Add "Live Demo" to navigation (`src/components/landing/FloatingNav.tsx`)
 
-## Proposed Solution: Intelligent Handoff Agent
+Add a "Live Demo" link between "Customers" and "Pricing" in both desktop and mobile menus, pointing to `/demo`.
 
-Replace the single-line handoff instruction with a dedicated **Handoff Evaluation Agent** — a second AI call that runs after the main response, analyzing the conversation for handoff triggers based on context, not just explicit requests.
+### 4. Update client logos (`src/components/landing/ClientLogosCarousel.tsx`)
 
-### How It Works
+Replace placeholder names with enterprise-sounding companies across sectors: "Capital Finance Group", "Pan-African Logistics", "Continental Hotels", "Meridian Insurance", "Atlas Telecom", "Savanna Health", "Zenith Property", "Equator Energy".
 
-```text
-Customer message arrives
-        │
-        ▼
-  Main AI generates response
-        │
-        ▼
-  Handoff Agent evaluates full conversation
-  (lightweight, fast model - gemini-2.5-flash-lite)
-        │
-        ├── NO HANDOFF → send response as-is
-        │
-        ├── SOFT HANDOFF → AI completes interaction,
-        │   sends structured summary to boss
-        │   (e.g., order details, delivery info)
-        │
-        └── HARD HANDOFF → AI tells customer
-            someone will follow up, sends urgent
-            alert to boss
-```
+### 5. Add financial services testimonial (`src/components/landing/TestimonialCards.tsx`)
 
-### Changes
+Replace the school testimonial with a financial services one about reducing call center load and automating account inquiries.
 
-#### 1. `supabase/functions/demo-session/index.ts`
+### 6. Update feature descriptions (`src/components/landing/FeatureShowcase.tsx`)
 
-**a) Remove `[HANDOFF_REQUIRED]` from system prompt** — the main AI no longer decides handoffs.
+Adjust the WhatsApp Integration description to mention "account inquiries, card services, and branch information" alongside existing capabilities.
 
-**b) Add `evaluateHandoff()` function** — after the main AI responds, call a second lightweight AI with the full conversation history and a structured evaluation prompt:
+### 7. Register route (`src/App.tsx`)
 
-```text
-Analyze this conversation and determine if a handoff to a human is needed.
+Add `/pitch/banking` route pointing to `PitchBanking`.
 
-HANDOFF TRIGGERS (return "soft_handoff"):
-- Customer has completed an order/booking with all details provided
-- Customer has shared payment/delivery information
-- Customer has a complaint that needs real resolution
-- Customer is negotiating a deal that needs human approval
-- Customer shared sensitive personal/financial information
+## Files
 
-HARD HANDOFF TRIGGERS (return "hard_handoff"):
-- Customer explicitly asks for a human/manager
-- Customer expresses frustration after multiple exchanges
-- Legal, safety, or emergency situation
-- AI cannot resolve after 3+ attempts on same issue
-
-NO HANDOFF (return "none"):
-- General inquiries, FAQs, browsing
-- Customer is still gathering information
-- Conversation is naturally flowing
-
-Return JSON: {
-  "decision": "none" | "soft_handoff" | "hard_handoff",
-  "reason": "brief explanation",
-  "summary": "structured summary of key info for boss (only if handoff)",
-  "extracted_data": { order details, contact info, etc. }
-}
-```
-
-**c) Implement soft vs hard handoff behavior:**
-
-- **Soft handoff**: AI responds normally to the customer (no interruption), but sends a structured summary to the boss with all extracted data (order items, delivery address, contact info, etc.)
-- **Hard handoff**: AI tells the customer someone will follow up, sends urgent notification to boss
-
-**d) Update boss notification format** to include structured extracted data:
-
-```text
-🔔 *[ORDER RECEIVED]*
-
-👤 Customer: Sarah (+260971234567)
-🏢 Demo: Pizza Palace
-
-📋 *Order Summary:*
-- 2x Margherita Pizza (Large)
-- 1x Garlic Bread
-- 1x Coca Cola
-
-📍 *Delivery:*
-Address: 123 Cairo Road, Lusaka
-Time: ASAP
-
-💰 Estimated total: ~K180
-
-🤖 AI handled the full conversation. Customer expects confirmation.
-```
-
-### 2. No changes needed to `whatsapp-messages/index.ts`
-
-The handoff logic is entirely within `demo-session`.
-
----
-
-## Technical Details
-
-| Aspect | Detail |
-|--------|--------|
-| Handoff model | `google/gemini-2.5-flash-lite` (fast, cheap, classification task) |
-| Latency impact | ~200-400ms extra per message (runs in parallel or after response) |
-| Evaluation frequency | Every customer message (lightweight enough) |
-| Soft handoff | No customer interruption, boss gets structured data |
-| Hard handoff | Customer notified, boss gets urgent alert |
-| Backward compatible | Yes, same Twilio/WhatsApp flow |
+| Action | File |
+|--------|------|
+| Create | `src/pages/PitchBanking.tsx` |
+| Edit | `src/App.tsx` — add route |
+| Edit | `src/components/landing/LiveChatDemo.tsx` — banking conversation |
+| Edit | `src/components/landing/FloatingNav.tsx` — add Live Demo link |
+| Edit | `src/components/landing/ClientLogosCarousel.tsx` — enterprise logos |
+| Edit | `src/components/landing/TestimonialCards.tsx` — financial testimonial |
+| Edit | `src/components/landing/FeatureShowcase.tsx` — banking use cases |
 
