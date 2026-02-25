@@ -342,6 +342,28 @@ Return ONLY valid JSON:
 
   const conversationId = activeConv?.id || null;
 
+  // Check if an open ticket already exists for this customer to avoid duplicates
+  const { data: existingTicket } = await supabase
+    .from('support_tickets')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('customer_phone', senderPhone)
+    .in('status', ['open', 'in_progress'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingTicket) {
+    console.log(`[DEMO] Ticket already exists for ${senderPhone} (${existingTicket.id}), skipping duplicate creation`);
+    // Update existing ticket with latest summary if available
+    await supabase.from('support_tickets').update({
+      issue_summary: result.summary || result.reason || 'Handoff from AI',
+      priority,
+      updated_at: new Date().toISOString(),
+    }).eq('id', existingTicket.id);
+    return;
+  }
+
   // Insert support ticket
   const { data: ticket, error: ticketError } = await supabase
     .from('support_tickets')
