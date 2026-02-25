@@ -13,7 +13,7 @@ const features = [
   {
     icon: MessageSquare,
     title: "WhatsApp Integration",
-    description: "Native WhatsApp Business API integration. Respond to customers instantly on their favorite platform.",
+    description: "Native WhatsApp Business API integration. Handle account inquiries, card services, branch information, and more — instantly on your customers' favorite platform.",
     size: "large",
   },
   {

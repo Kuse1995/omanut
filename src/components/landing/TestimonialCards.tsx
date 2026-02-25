@@ -16,10 +16,10 @@ const testimonials = [
     rating: 5,
   },
   {
-    quote: "Parents love being able to book school tours and get information via WhatsApp at any hour. Our administrative workload dropped by 60%.",
-    author: "Grace Tembo",
-    role: "Head of Admissions",
-    company: "North Park School",
+    quote: "Our call center was drowning in balance inquiries and card status requests. Omanut automated 68% of Tier 1 queries in the first month — our agents now focus on complex cases.",
+    author: "David Chisanga",
+    role: "Head of Digital Banking",
+    company: "Capital Finance Group",
     rating: 5,
   },
 ];

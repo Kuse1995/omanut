@@ -1,12 +1,12 @@
 const logos = [
-  { name: "Streamside Resort", initials: "SR" },
-  { name: "North Park School", initials: "NP" },
-  { name: "Finch Investments", initials: "FI" },
-  { name: "Urban Kitchen", initials: "UK" },
-  { name: "Metro Dental", initials: "MD" },
-  { name: "Prime Fitness", initials: "PF" },
-  { name: "Horizon Tech", initials: "HT" },
-  { name: "Lakeside Spa", initials: "LS" },
+  { name: "Capital Finance Group", initials: "CF" },
+  { name: "Pan-African Logistics", initials: "PA" },
+  { name: "Continental Hotels", initials: "CH" },
+  { name: "Meridian Insurance", initials: "MI" },
+  { name: "Atlas Telecom", initials: "AT" },
+  { name: "Savanna Health", initials: "SH" },
+  { name: "Zenith Property", initials: "ZP" },
+  { name: "Equator Energy", initials: "EE" },
 ];
 
 const ClientLogosCarousel = () => {
