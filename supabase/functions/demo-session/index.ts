@@ -205,29 +205,44 @@ async function evaluateAndHandoff(
   profileName: string | null,
   companyId: string,
 ): Promise<void> {
+  // Skip evaluation on short conversations (fewer than 4 messages = less than 2 full exchanges)
+  const userMessages = conversationHistory.filter(m => m.role === 'user');
+  if (userMessages.length < 3) {
+    console.log(`[DEMO] Skipping handoff eval — only ${userMessages.length} user messages (need 3+)`);
+    return;
+  }
+
   const evaluationPrompt = `You are a handoff evaluation agent. Analyze this conversation between a customer and an AI receptionist for "${session.demo_company_name}" and determine if a handoff to a human is needed RIGHT NOW.
 
-SOFT HANDOFF (return "soft_handoff") — AI handled it well, but a human needs to act on the information:
-- Customer has completed placing an order with items, quantities, and delivery/pickup details
-- Customer has provided payment or delivery information
-- Customer made a booking/reservation with all required details (date, time, guests, name)
-- Customer shared sensitive personal or financial information
-- Customer is negotiating a deal that needs human approval or final confirmation
-- Customer has a complaint that requires real-world resolution (refund, replacement, etc.)
+SOFT HANDOFF (return "soft_handoff") — AI handled it well, but a human needs to act on the outcome:
+- Customer has COMPLETED placing an order: confirmed specific items, quantities, AND delivery/pickup details
+- Customer has provided payment details or proof of payment
+- Customer made a COMPLETE booking/reservation with ALL required details (date, time, guests, name)
+- Customer explicitly filed a complaint demanding a refund, replacement, or escalation
+- Customer completed a negotiation that requires human sign-off on final terms/pricing
 
-HARD HANDOFF (return "hard_handoff") — Customer needs a human to take over the conversation:
+HARD HANDOFF (return "hard_handoff") — Customer needs a human to take over NOW:
 - Customer explicitly asks for a human, manager, or real person
-- Customer expresses clear frustration or anger after multiple exchanges
+- Customer expresses clear frustration or anger after 3+ exchanges on the same issue
 - Legal, safety, or emergency situation mentioned
 - AI has failed to resolve the same issue after 3+ back-and-forth messages
 
-NO HANDOFF (return "none") — Conversation is flowing normally:
+NO HANDOFF (return "none") — MOST conversations fall here:
+- Customer asking how to do something (e.g., "how do I withdraw?", "what are your rates?")
+- Customer asking about services, prices, hours, locations, policies
 - General inquiries, FAQs, browsing menu/services
-- Customer is still gathering information or deciding
-- Early stage conversation (greetings, first questions)
-- AI is successfully helping without any actionable commitment yet
+- Customer gathering information or deciding — even if asking many questions
+- Customer asking "why" questions about policies or processes
+- Customer expressing mild dissatisfaction that the AI is actively resolving
+- AI explaining processes, providing instructions, or answering questions
+- ANY informational question, even complex ones — the AI can handle these
 
-CRITICAL: Only trigger a handoff when there is a CLEAR milestone or need. Do not trigger prematurely on casual browsing. An order is only complete when the customer has confirmed items AND delivery/contact details.
+CRITICAL RULES:
+- DEFAULT TO "none". Only trigger handoff when there is a CLEAR, COMPLETED action milestone.
+- Asking questions ≠ complaint. Asking "how do I withdraw money?" is an FAQ, NOT a handoff.
+- An order is only complete when customer confirmed items AND delivery/contact details.
+- A complaint only triggers handoff if the customer DEMANDS action (refund/replacement/escalation).
+- When in doubt, return "none".
 
 Return ONLY valid JSON:
 {
@@ -290,6 +305,80 @@ Return ONLY valid JSON:
       (ed.complaint_details ? `💬 *Details:* ${ed.complaint_details}\n` : '') +
       (result.summary ? `\n📝 ${result.summary}\n` : '') +
       `\n🔴 Customer has been told someone will follow up. Please respond ASAP.`;
+  }
+
+  // Create support ticket and queue item for visibility on pitch page
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const customerLabel = profileName || ed.customer_name || 'Unknown';
+  const priority = ed.urgency === 'high' ? 'high' : ed.urgency === 'medium' ? 'medium' : 'low';
+  const issueCategory = ed.complaint_details ? 'complaint' : ed.order_items ? 'order' : ed.booking_details ? 'booking' : 'general';
+  const department = issueCategory === 'complaint' ? 'Customer Service' : issueCategory === 'order' ? 'Sales' : issueCategory === 'booking' ? 'Reservations' : 'General';
+
+  // Get conversation ID
+  const { data: activeConv } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('phone', `whatsapp:${senderPhone}`)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const conversationId = activeConv?.id || null;
+
+  // Insert support ticket
+  const { data: ticket, error: ticketError } = await supabase
+    .from('support_tickets')
+    .insert({
+      company_id: companyId,
+      customer_name: customerLabel,
+      customer_phone: senderPhone,
+      issue_summary: result.summary || result.reason || 'Handoff from AI',
+      issue_category: issueCategory,
+      priority,
+      status: 'open',
+      recommended_department: department,
+      conversation_id: conversationId,
+    })
+    .select('id')
+    .single();
+
+  if (ticketError) {
+    console.error('[DEMO] Failed to create ticket:', ticketError);
+  } else {
+    console.log(`[DEMO] Created ticket ${ticket.id}`);
+
+    // Insert agent queue item
+    const slaDeadline = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const { error: queueError } = await supabase
+      .from('agent_queue')
+      .insert({
+        company_id: companyId,
+        ticket_id: ticket.id,
+        conversation_id: conversationId,
+        customer_name: customerLabel,
+        customer_phone: senderPhone,
+        priority,
+        status: 'waiting',
+        department,
+        ai_summary: result.summary || result.reason || 'Escalated from AI demo',
+        sla_deadline: slaDeadline,
+      });
+
+    if (queueError) {
+      console.error('[DEMO] Failed to create queue item:', queueError);
+    } else {
+      console.log(`[DEMO] Created queue item for ticket ${ticket.id}`);
+    }
+  }
+
+  // Mark conversation as handed off
+  if (conversationId) {
+    await supabase.from('conversations').update({
+      human_takeover: true,
+      takeover_at: new Date().toISOString(),
+    }).eq('id', conversationId);
   }
 
   try {
