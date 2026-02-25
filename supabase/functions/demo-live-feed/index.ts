@@ -29,11 +29,13 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    // Get recent conversations
+    // Get recent conversations (only from current demo session)
+    const sessionStart = demoSession?.created_at || new Date().toISOString();
     const { data: conversations } = await supabase
       .from("conversations")
       .select("id, customer_name, phone, status, active_agent, human_takeover, created_at, last_message_preview")
       .eq("company_id", DEMO_COMPANY_ID)
+      .gte("created_at", sessionStart)
       .order("created_at", { ascending: false })
       .limit(10);
 
@@ -56,6 +58,7 @@ Deno.serve(async (req) => {
       .from("support_tickets")
       .select("id, ticket_number, customer_name, customer_phone, issue_summary, issue_category, priority, status, assigned_to, recommended_department, created_at")
       .eq("company_id", DEMO_COMPANY_ID)
+      .gte("created_at", sessionStart)
       .order("created_at", { ascending: false })
       .limit(10);
 
@@ -64,6 +67,7 @@ Deno.serve(async (req) => {
       .from("agent_queue")
       .select("id, customer_name, customer_phone, priority, status, department, ai_summary, sla_deadline, claimed_at, created_at")
       .eq("company_id", DEMO_COMPANY_ID)
+      .gte("created_at", sessionStart)
       .order("created_at", { ascending: false })
       .limit(10);
 
