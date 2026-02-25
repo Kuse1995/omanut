@@ -25,6 +25,7 @@ import EditCompany from "./pages/admin/EditCompany";
 import NotFound from "./pages/NotFound";
 import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 import PitchBanking from "./pages/PitchBanking";
+import PitchAgentDemo from "./pages/PitchAgentDemo";
 
 const queryClient = new QueryClient();
 
@@ -37,6 +38,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/pitch/banking" element={<PitchBanking />} />
+          <Route path="/pitch/banking/agent" element={<PitchAgentDemo />} />
           <Route path="/demo" element={<Demo />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin/login" element={<AdminLogin />} />

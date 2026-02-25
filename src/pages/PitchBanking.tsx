@@ -3,6 +3,7 @@ import { Bot, Send, Phone, Users, Clock, Shield, ArrowRight, Mic, CheckCircle2, 
 import { Button } from "@/components/ui/button";
 import omanutLogo from "@/assets/omanut-logo-new.png";
 import LiveActivityFeed from "@/components/pitch/LiveActivityFeed";
+import AgentWorkspacePreview from "@/components/pitch/AgentWorkspacePreview";
 
 // Simulated banking chat messages
 const bankingChat = [
@@ -288,6 +289,9 @@ const PitchBanking = () => {
 
       {/* Live Activity Feed */}
       <LiveActivityFeed />
+
+      {/* Agent Workspace Preview */}
+      <AgentWorkspacePreview />
 
       {/* Footer */}
       <footer className="py-8 px-6 border-t border-border/50 text-center">
