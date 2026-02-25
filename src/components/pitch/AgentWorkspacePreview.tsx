@@ -70,6 +70,7 @@ function timeAgo(dateStr: string) {
 const AgentWorkspacePreview = () => {
   const [data, setData] = useState<FeedData | null>(null);
   const [claimedIds, setClaimedIds] = useState<Set<string>>(new Set());
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({});
 
   const fetchFeed = async () => {
     try {
@@ -92,16 +93,49 @@ const AgentWorkspacePreview = () => {
 
   const handleClaim = (id: string) => {
     setClaimedIds((prev) => new Set(prev).add(id));
+    setStatusOverrides((prev) => ({ ...prev, [id]: 'in_progress' }));
+  };
+
+  const handleMarkInProgress = (id: string) => {
+    setStatusOverrides((prev) => ({ ...prev, [id]: 'in_progress' }));
+  };
+
+  const handleMarkResolved = async (id: string) => {
+    setStatusOverrides((prev) => ({ ...prev, [id]: 'resolved' }));
+    // Also update in database
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      await fetch(
+        `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
+        {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: 'resolve', queue_id: id }),
+        }
+      );
+    } catch (e) {
+      console.error("Resolve error:", e);
+    }
+  };
+
+  const getItemStatus = (item: QueueItem) => {
+    return statusOverrides[item.id] || (item.claimed_at || claimedIds.has(item.id) ? 'in_progress' : item.status);
   };
 
   const pendingQueue = data?.queue.filter(
-    (q) => q.status === "waiting" && !q.claimed_at && !claimedIds.has(q.id)
+    (q) => q.status === "waiting" && !q.claimed_at && !claimedIds.has(q.id) && !statusOverrides[q.id]
   ) || [];
-  const claimedQueue = data?.queue.filter(
-    (q) => q.claimed_at || claimedIds.has(q.id)
+  const activeQueue = data?.queue.filter(
+    (q) => {
+      const status = getItemStatus(q);
+      return status === 'in_progress' || (q.claimed_at && !statusOverrides[q.id]);
+    }
+  ) || [];
+  const resolvedQueue = data?.queue.filter(
+    (q) => statusOverrides[q.id] === 'resolved'
   ) || [];
 
-  const hasData = data && (data.queue.length > 0 || data.tickets.length > 0);
+  const hasData = data && (data.queue.length > 0 || data.tickets.length > 0 || resolvedQueue.length > 0);
 
   return (
     <section className="py-24 px-6 border-t border-border/50 bg-muted/20">
@@ -200,23 +234,23 @@ const AgentWorkspacePreview = () => {
                 )}
               </div>
 
-              {/* Claimed */}
-              {claimedQueue.length > 0 && (
+              {/* In Progress */}
+              {activeQueue.length > 0 && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    <div className="w-2 h-2 rounded-full bg-blue-400" />
                     <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
-                      Claimed ({claimedQueue.length})
+                      In Progress ({activeQueue.length})
                     </h3>
                   </div>
                   <div className="space-y-3">
-                    {claimedQueue.map((item) => (
-                      <div key={item.id} className="bg-card border border-green-500/20 rounded-xl p-4">
+                    {activeQueue.map((item) => (
+                      <div key={item.id} className="bg-card border border-blue-500/20 rounded-xl p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/30">
-                                Claimed
+                              <Badge variant="outline" className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                                In Progress
                               </Badge>
                               {item.department && (
                                 <Badge variant="outline" className="text-xs">{item.department}</Badge>
@@ -226,10 +260,48 @@ const AgentWorkspacePreview = () => {
                               <p className="text-sm text-muted-foreground line-clamp-1">{item.ai_summary}</p>
                             )}
                           </div>
-                          <span className="text-xs text-green-400 flex items-center gap-1">
-                            <User className="w-3 h-3" />
-                            Agent
-                          </span>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleMarkResolved(item.id)}
+                            className="shrink-0 text-xs gap-1"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            Resolve
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Resolved */}
+              {resolvedQueue.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
+                      Resolved ({resolvedQueue.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-3">
+                    {resolvedQueue.map((item) => (
+                      <div key={item.id} className="bg-card border border-green-500/20 rounded-xl p-4 opacity-70">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/30">
+                                Resolved ✓
+                              </Badge>
+                              {item.department && (
+                                <Badge variant="outline" className="text-xs">{item.department}</Badge>
+                              )}
+                            </div>
+                            {item.ai_summary && (
+                              <p className="text-sm text-muted-foreground line-clamp-1">{item.ai_summary}</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

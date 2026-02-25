@@ -19,7 +19,43 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Get active demo session
+    // Handle POST actions (resolve, etc.)
+    if (req.method === "POST") {
+      const body = await req.json();
+      if (body.action === 'resolve' && body.queue_id) {
+        // Get linked ticket/conversation before updating
+        const { data: queueItem } = await supabase
+          .from('agent_queue')
+          .select('ticket_id, conversation_id')
+          .eq('id', body.queue_id)
+          .single();
+
+        await supabase.from('agent_queue').update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        }).eq('id', body.queue_id);
+
+        if (queueItem?.ticket_id) {
+          await supabase.from('support_tickets').update({
+            status: 'resolved',
+            resolved_at: new Date().toISOString(),
+          }).eq('id', queueItem.ticket_id);
+        }
+        if (queueItem?.conversation_id) {
+          await supabase.from('conversations').update({
+            is_paused_for_human: false,
+            human_takeover: false,
+          }).eq('id', queueItem.conversation_id);
+        }
+
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // GET: return live feed data
     const { data: demoSession } = await supabase
       .from("demo_sessions")
       .select("*")
@@ -29,7 +65,6 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    // Get recent conversations (only from current demo session)
     const sessionStart = demoSession?.created_at || new Date().toISOString();
     const { data: conversations } = await supabase
       .from("conversations")
@@ -41,7 +76,6 @@ Deno.serve(async (req) => {
 
     const conversationIds = (conversations || []).map((c: any) => c.id);
 
-    // Get recent messages across demo conversations
     let messages: any[] = [];
     if (conversationIds.length > 0) {
       const { data } = await supabase
@@ -53,7 +87,6 @@ Deno.serve(async (req) => {
       messages = data || [];
     }
 
-    // Get support tickets
     const { data: tickets } = await supabase
       .from("support_tickets")
       .select("id, ticket_number, customer_name, customer_phone, issue_summary, issue_category, priority, status, assigned_to, recommended_department, created_at")
@@ -62,7 +95,6 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(10);
 
-    // Get agent queue
     const { data: queue } = await supabase
       .from("agent_queue")
       .select("id, customer_name, customer_phone, priority, status, department, ai_summary, sla_deadline, claimed_at, created_at")
@@ -71,7 +103,6 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false })
       .limit(10);
 
-    // Stats
     const totalConversations = conversations?.length || 0;
     const activeConversations = conversations?.filter((c: any) => c.status === "active").length || 0;
     const handoffs = conversations?.filter((c: any) => c.human_takeover).length || 0;
