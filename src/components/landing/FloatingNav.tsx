@@ -59,6 +59,12 @@ const FloatingNav = () => {
               Customers
             </button>
             <button
+              onClick={() => navigate("/demo")}
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Live Demo
+            </button>
+            <button
               onClick={() => scrollToSection("pricing")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
@@ -112,6 +118,12 @@ const FloatingNav = () => {
               className="block w-full text-left text-sm text-muted-foreground hover:text-foreground py-2"
             >
               Customers
+            </button>
+            <button
+              onClick={() => navigate("/demo")}
+              className="block w-full text-left text-sm text-muted-foreground hover:text-foreground py-2"
+            >
+              Live Demo
             </button>
             <button
               onClick={() => scrollToSection("pricing")}

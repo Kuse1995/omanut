@@ -9,10 +9,10 @@ interface Message {
 }
 
 const demoConversation: Message[] = [
-  { role: "user", content: "Hi, I'd like to make a reservation for Friday" },
-  { role: "assistant", content: "Hello! I'd be happy to help you with a reservation for Friday. How many guests will be joining you, and what time works best?" },
-  { role: "user", content: "4 people at 7pm please" },
-  { role: "assistant", content: "Perfect! I have availability for 4 guests at 7:00 PM on Friday. May I have your name and phone number to confirm the booking?" },
+  { role: "user", content: "Hi, I need to check my account balance" },
+  { role: "assistant", content: "Hello! I can help with that. For security, could you confirm the last 4 digits of your account number?" },
+  { role: "user", content: "4521" },
+  { role: "assistant", content: "Thank you! Your current balance is K12,450.00. Would you like a mini-statement or help with anything else?" },
 ];
 
 const LiveChatDemo = () => {
@@ -56,7 +56,7 @@ const LiveChatDemo = () => {
         ...prev,
         {
           role: "assistant",
-          content: "That's great! Your reservation is confirmed. You'll receive a confirmation message shortly. Is there anything else I can help you with?",
+          content: "Here's your mini-statement for the last 3 transactions:\n• K500 – POS Purchase (Shoprite)\n• K1,200 – Transfer to M. Banda\n• K3,000 – Salary Credit\nAnything else I can help with?",
         },
       ]);
     }, 2000);
