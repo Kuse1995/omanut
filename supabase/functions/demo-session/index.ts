@@ -309,7 +309,6 @@ Return ONLY valid JSON:
 
   // Create support ticket and queue item for visibility on pitch page
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const customerLabel = profileName || ed.customer_name || 'Unknown';
   const priority = ed.urgency === 'high' ? 'high' : ed.urgency === 'medium' ? 'medium' : 'low';
   const issueCategory = ed.complaint_details ? 'complaint' : ed.order_items ? 'order' : ed.booking_details ? 'booking' : 'general';
   const department = issueCategory === 'complaint' ? 'Customer Service' : issueCategory === 'order' ? 'Sales' : issueCategory === 'booking' ? 'Reservations' : 'General';
