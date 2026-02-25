@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Bot, Send, Phone, Users, Clock, Shield, ArrowRight, Mic, CheckCircle2, MessageSquare, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import omanutLogo from "@/assets/omanut-logo-new.png";
+import LiveActivityFeed from "@/components/pitch/LiveActivityFeed";
 
 // Simulated banking chat messages
 const bankingChat = [
@@ -284,6 +285,9 @@ const PitchBanking = () => {
           </Button>
         </div>
       </section>
+
+      {/* Live Activity Feed */}
+      <LiveActivityFeed />
 
       {/* Footer */}
       <footer className="py-8 px-6 border-t border-border/50 text-center">
