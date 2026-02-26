@@ -17,6 +17,7 @@ interface QueueItem {
   sla_deadline: string | null;
   claimed_at: string | null;
   created_at: string;
+  conversation_id: string | null;
 }
 
 interface TicketItem {
@@ -161,12 +162,8 @@ const PitchAgentDemo = () => {
   };
 
   const selectedItem = data?.queue.find((q) => q.id === selectedQueueId);
-  const serverMessages = selectedItem
-    ? data?.messages.filter((m) =>
-        data?.conversations.some(
-          (c) => c.id === m.conversation_id && c.phone === selectedItem.customer_phone
-        )
-      ) || []
+  const serverMessages = selectedItem?.conversation_id
+    ? data?.messages.filter((m) => m.conversation_id === selectedItem.conversation_id) || []
     : [];
   const selectedConversationMessages = [...serverMessages, ...localMessages];
 
