@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { Headset, Clock, AlertTriangle, CheckCircle2, User, MessageSquare, ArrowLeft, Shield, Zap, Radio, Phone, Mail, RefreshCw } from "lucide-react";
+import { Headset, Clock, AlertTriangle, CheckCircle2, User, MessageSquare, ArrowLeft, Shield, Zap, Radio, Phone, Mail, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useToast } from "@/hooks/use-toast";
 import omanutLogo from "@/assets/omanut-logo-new.png";
 
 interface QueueItem {
@@ -85,6 +86,8 @@ const PitchAgentDemo = () => {
   const [loading, setLoading] = useState(true);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
+  const [localMessages, setLocalMessages] = useState<FeedMessage[]>([]);
+  const { toast } = useToast();
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -114,10 +117,22 @@ const PitchAgentDemo = () => {
 
   const handleSendReply = async () => {
     if (!replyText.trim() || !selectedItem?.customer_phone) return;
+    const messageText = replyText.trim();
     setSending(true);
+    
+    // Immediately add message to local state for instant feedback
+    const localMsg: FeedMessage = {
+      id: `local-${Date.now()}`,
+      conversation_id: '',
+      role: 'assistant',
+      content: `[Agent] ${messageText}`,
+      created_at: new Date().toISOString(),
+    };
+    setLocalMessages(prev => [...prev, localMsg]);
+    setReplyText("");
+
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      console.log("[Agent] Sending reply to:", selectedItem.customer_phone, "message:", replyText.trim());
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         {
@@ -126,32 +141,34 @@ const PitchAgentDemo = () => {
           body: JSON.stringify({
             action: 'send_reply',
             customer_phone: selectedItem.customer_phone,
-            message: replyText.trim(),
+            message: messageText,
           }),
         }
       );
       const result = await res.json();
-      console.log("[Agent] Reply response:", res.status, result);
       if (res.ok) {
-        setReplyText("");
-        // Refresh to show the new message
+        toast({ title: "Message sent", description: "Your reply was sent to the customer via WhatsApp." });
         await fetchFeed();
+      } else {
+        toast({ title: "Send failed", description: result.error || "Could not send message", variant: "destructive" });
       }
     } catch (e) {
       console.error("Send reply error:", e);
+      toast({ title: "Send failed", description: "Network error", variant: "destructive" });
     } finally {
       setSending(false);
     }
   };
 
   const selectedItem = data?.queue.find((q) => q.id === selectedQueueId);
-  const selectedConversationMessages = selectedItem
+  const serverMessages = selectedItem
     ? data?.messages.filter((m) =>
         data?.conversations.some(
           (c) => c.id === m.conversation_id && c.phone === selectedItem.customer_phone
         )
       ) || []
     : [];
+  const selectedConversationMessages = [...serverMessages, ...localMessages];
 
   const matchingTicket = selectedItem
     ? data?.tickets.find((t) => t.customer_phone === selectedItem.customer_phone)
@@ -346,7 +363,8 @@ const PitchAgentDemo = () => {
                       onChange={(e) => setReplyText(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleSendReply()}
                     />
-                    <Button onClick={handleSendReply} disabled={sending || !replyText.trim()}>
+                    <Button onClick={handleSendReply} disabled={sending || !replyText.trim()} className="gap-2">
+                      <Send className="w-4 h-4" />
                       {sending ? "Sending..." : "Send"}
                     </Button>
                   </div>
