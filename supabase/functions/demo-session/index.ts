@@ -234,8 +234,10 @@ SOFT HANDOFF (return "soft_handoff") — AI handled it well, but a human needs t
 - Customer has COMPLETED placing an order: confirmed specific items, quantities, AND delivery/pickup details
 - Customer has provided payment details or proof of payment
 - Customer made a COMPLETE booking/reservation with ALL required details (date, time, guests, name)
+- Customer reported a problem that REQUIRES HUMAN ACTION to fix (e.g., blocked card, account locked, failed transaction, service outage, missing delivery). The key test: can the AI actually fix this, or does a real person need to take action in a system?
 - Customer explicitly filed a complaint demanding a refund, replacement, or escalation
 - Customer completed a negotiation that requires human sign-off on final terms/pricing
+- The AI's own response promised to escalate, forward, or have someone follow up
 
 HARD HANDOFF (return "hard_handoff") — Customer needs a human to take over NOW:
 - Customer explicitly asks for a human, manager, or real person
@@ -249,16 +251,18 @@ NO HANDOFF (return "none") — MOST conversations fall here:
 - General inquiries, FAQs, browsing menu/services
 - Customer gathering information or deciding — even if asking many questions
 - Customer asking "why" questions about policies or processes
-- Customer expressing mild dissatisfaction that the AI is actively resolving
+- Customer expressing mild dissatisfaction that the AI is actively resolving with information
 - AI explaining processes, providing instructions, or answering questions
-- ANY informational question, even complex ones — the AI can handle these
+- ANY purely informational question — the AI can handle these
 
 CRITICAL RULES:
-- DEFAULT TO "none". Only trigger handoff when there is a CLEAR, COMPLETED action milestone.
+- DEFAULT TO "none" for informational questions.
 - Asking questions ≠ complaint. Asking "how do I withdraw money?" is an FAQ, NOT a handoff.
+- BUT: "my card is blocked, please fix it" IS a handoff — the customer needs ACTION, not information.
+- The key distinction: Does the customer need INFORMATION (→ none) or ACTION that only a human can perform (→ soft_handoff)?
 - An order is only complete when customer confirmed items AND delivery/contact details.
-- A complaint only triggers handoff if the customer DEMANDS action (refund/replacement/escalation).
-- When in doubt, return "none".
+- If the AI's last response said it would escalate or have someone follow up, that IS a handoff.
+- When in doubt between "none" and "soft_handoff", check: did the AI promise human follow-up? If yes → soft_handoff.
 
 Return ONLY valid JSON:
 {
