@@ -294,6 +294,7 @@ CRITICAL RULES:
 - An order is only complete when customer confirmed items AND delivery/contact details.
 - If the AI's last response said it would escalate or have someone follow up, that IS a handoff.
 - When in doubt between "none" and "soft_handoff", check: did the AI promise human follow-up? If yes → soft_handoff.
+- IMPORTANT: If the AI's LAST message is asking the customer a follow-up question (e.g., "can you share your reference number?", "what date works for you?"), return "none" — the AI is still actively gathering information. Wait until the customer has provided the requested details AND the AI has processed them before triggering any handoff.
 
 Return ONLY valid JSON:
 {
