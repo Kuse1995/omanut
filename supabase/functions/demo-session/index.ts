@@ -70,18 +70,19 @@ Deno.serve(async (req) => {
       const statusResponse = await lookupTicketStatus(supabase, company_id, senderPhone);
       if (statusResponse) {
         // Save messages and return status
-        const conversationId = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
-        if (conversationId) {
-          await supabase.from('messages').insert({ conversation_id: conversationId, role: 'user', content: messageText });
-          await supabase.from('messages').insert({ conversation_id: conversationId, role: 'assistant', content: statusResponse });
-          await supabase.from('conversations').update({ last_message_preview: statusResponse.substring(0, 100) }).eq('id', conversationId);
+        const conv = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
+        if (conv.id) {
+          await supabase.from('messages').insert({ conversation_id: conv.id, role: 'user', content: messageText });
+          await supabase.from('messages').insert({ conversation_id: conv.id, role: 'assistant', content: statusResponse });
+          await supabase.from('conversations').update({ last_message_preview: statusResponse.substring(0, 100) }).eq('id', conv.id);
         }
         return respond(statusResponse);
       }
     }
 
     // Get or create conversation
-    const conversationId = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
+    const conversation = await getOrCreateConversation(supabase, company_id, senderPhone, profile_name, activeSession.demo_company_name);
+    const conversationId = conversation.id;
 
     // Save customer message
     if (conversationId) {
@@ -90,6 +91,15 @@ Deno.serve(async (req) => {
         role: 'user',
         content: messageText,
       });
+    }
+
+    // If human takeover is active, skip AI response — agent will reply manually
+    if (conversation.human_takeover || conversation.is_paused_for_human) {
+      console.log(`[DEMO] Human takeover active for ${senderPhone}, skipping AI response`);
+      if (conversationId) {
+        await supabase.from('conversations').update({ last_message_preview: messageText.substring(0, 100) }).eq('id', conversationId);
+      }
+      return respond(null); // No AI reply — agent handles it
     }
 
     // Get conversation history
