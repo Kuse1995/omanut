@@ -173,11 +173,26 @@ async function handleBossCommand(supabase: any, upperMessage: string, messageTex
     );
   }
 
+  // RELEASE / UNMUTE — release all conversations from human takeover back to AI
+  if (/\b(RELEASE|UNMUTE)\b/.test(upperMessage)) {
+    const { data: released } = await supabase.from('conversations')
+      .update({ human_takeover: false, is_paused_for_human: false })
+      .eq('company_id', company_id)
+      .or('human_takeover.eq.true,is_paused_for_human.eq.true')
+      .select('id');
+    const count = released?.length || 0;
+    return respond(count > 0 
+      ? `🔓 Released ${count} conversation(s) back to AI control.` 
+      : `ℹ️ No conversations are currently in human takeover mode.`);
+  }
+
   // ERASE / RESET / CLEAR
   if (/\b(ERASE|RESET|CLEAR)\b/.test(upperMessage)) {
+    // Also release all human takeovers for a clean slate
+    await supabase.from('conversations').update({ human_takeover: false, is_paused_for_human: false }).eq('company_id', company_id).or('human_takeover.eq.true,is_paused_for_human.eq.true');
     await supabase.from('conversations').update({ status: 'ended' }).eq('company_id', company_id).eq('active_agent', 'demo').eq('status', 'active');
     const { data: deleted } = await supabase.from('demo_sessions').delete().eq('company_id', company_id).eq('status', 'active').select('demo_company_name');
-    return respond(deleted?.length ? `🧹 Demo erased! ${deleted.length} session(s) cleared. Ready for next demo.` : `ℹ️ No active demo to erase.`);
+    return respond(deleted?.length ? `🧹 Demo erased! ${deleted.length} session(s) cleared. All takeovers released. Ready for next demo.` : `ℹ️ No active demo to erase.`);
   }
 
   // ACT AS [persona]
