@@ -1,35 +1,67 @@
 
 
-## Plan: Prevent AI from responding when conversation is in human takeover mode
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### Problem
-When an agent sends a message to a client via the web workspace and the client replies, the `demo-session` edge function processes the incoming message and generates an AI response immediately — it never checks whether the conversation is in `human_takeover` mode. The agent gets no chance to respond first.
+## Problem Analysis
 
-### Root Cause
-In `supabase/functions/demo-session/index.ts`, around lines 83-116, the function:
-1. Gets/creates the conversation
-2. Saves the customer message
-3. Immediately calls the AI and saves the AI response
+Two issues identified in the `demo-session` edge function:
 
-There is **no check** for `human_takeover` or `is_paused_for_human` on the conversation before generating the AI response.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-### Solution
-Modify `demo-session/index.ts` to:
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-1. **Update `getOrCreateConversation`** to also return the `human_takeover` and `is_paused_for_human` flags (not just the `id`)
-2. **Add a guard** after saving the customer message: if `human_takeover` is `true`, skip AI response generation entirely — just save the incoming message and return an empty 200 response (the message is stored in DB and will appear in the agent workspace via the live feed polling)
-3. **Still store the message** so the agent can see it in the workspace, but do NOT generate or send an AI reply
+## Changes
 
-### Technical Details
+### File: `supabase/functions/demo-session/index.ts`
 
-**File: `supabase/functions/demo-session/index.ts`**
+**1. Tighten handoff evaluation prompt**
 
-- Modify `getOrCreateConversation` (~line 501) to `select('id, human_takeover, is_paused_for_human')` and return an object instead of just a string
-- Add a check after line 93 (after saving the customer message): if the conversation has `human_takeover === true`, update `last_message_preview` and return a no-op response without calling the AI
-- The ticket status query path (lines 67-81) should also respect this check
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-### Changes Summary
-- **1 file edited**: `supabase/functions/demo-session/index.ts`
-- No database changes
-- No frontend changes
+**2. Create tickets and queue items on handoff**
+
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
