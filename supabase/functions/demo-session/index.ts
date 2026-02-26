@@ -446,12 +446,16 @@ Return ONLY valid JSON:
     }
   }
 
-  // Mark conversation as handed off (always, regardless of dedup)
-  if (conversationId) {
+  // Only set human_takeover for hard handoffs — soft handoffs let the AI keep chatting
+  if (conversationId && result.decision === 'hard_handoff') {
     await supabase.from('conversations').update({
       human_takeover: true,
+      is_paused_for_human: true,
       takeover_at: new Date().toISOString(),
     }).eq('id', conversationId);
+    console.log(`[DEMO] Hard handoff: conversation ${conversationId} marked for human takeover`);
+  } else if (conversationId && result.decision === 'soft_handoff') {
+    console.log(`[DEMO] Soft handoff: ticket/queue created but AI continues responding`);
   }
 
   try {
