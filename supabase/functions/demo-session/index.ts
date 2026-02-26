@@ -649,30 +649,59 @@ async function callAIWithHistory(messages: { role: string; content: string }[], 
     response = null;
   }
 
-  // Fallback to OpenAI directly
+  // Fallback #1: OpenAI directly
   if (!response) {
     provider = 'openai';
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      console.error('[DEMO] No OPENAI_API_KEY for fallback');
-      return null;
+    if (OPENAI_API_KEY) {
+      try {
+        const fallbackModel = isEvaluation ? 'gpt-4o-mini' : 'gpt-4o';
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ model: fallbackModel, messages: allMessages, temperature }),
+        });
+        if (!response.ok) {
+          console.warn(`[DEMO] OpenAI fallback error: ${response.status}, trying DeepSeek`);
+          response = null;
+        }
+      } catch (error) {
+        console.warn('[DEMO] OpenAI fallback call failed, trying DeepSeek:', error);
+        response = null;
+      }
+    } else {
+      console.warn('[DEMO] No OPENAI_API_KEY, trying DeepSeek');
     }
-    try {
-      const fallbackModel = isEvaluation ? 'gpt-4o-mini' : 'gpt-4o';
-      response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ model: fallbackModel, messages: allMessages, temperature }),
-      });
-      if (!response.ok) {
-        console.error(`[DEMO] OpenAI fallback error: ${response.status}`);
+  }
+
+  // Fallback #2: DeepSeek
+  if (!response) {
+    provider = 'deepseek';
+    const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+    if (DEEPSEEK_API_KEY) {
+      try {
+        const dsModel = isEvaluation ? 'deepseek-chat' : 'deepseek-chat';
+        response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ model: dsModel, messages: allMessages, temperature }),
+        });
+        if (!response.ok) {
+          console.error(`[DEMO] DeepSeek fallback error: ${response.status}`);
+          return null;
+        }
+      } catch (error) {
+        console.error('[DEMO] DeepSeek fallback call failed:', error);
         return null;
       }
-    } catch (error) {
-      console.error('[DEMO] OpenAI fallback call failed:', error);
+    } else {
+      console.error('[DEMO] No DEEPSEEK_API_KEY for fallback');
       return null;
     }
   }
