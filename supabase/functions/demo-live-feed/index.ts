@@ -53,6 +53,64 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+
+      // Handle agent reply — send WhatsApp message to customer
+      if (body.action === 'send_reply' && body.customer_phone && body.message) {
+        const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
+        const twilioAuth = Deno.env.get("TWILIO_AUTH_TOKEN");
+        const twilioNumber = Deno.env.get("TWILIO_WHATSAPP_NUMBER") || "whatsapp:+13345083612";
+
+        // Find the conversation for this customer
+        const { data: conv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('company_id', DEMO_COMPANY_ID)
+          .eq('phone', body.customer_phone)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        // Store the agent message in DB
+        if (conv) {
+          await supabase.from('messages').insert({
+            conversation_id: conv.id,
+            role: 'assistant',
+            content: `[Agent] ${body.message}`,
+          });
+        }
+
+        // Send via Twilio WhatsApp
+        if (twilioSid && twilioAuth) {
+          const toNumber = body.customer_phone.startsWith('whatsapp:')
+            ? body.customer_phone
+            : `whatsapp:${body.customer_phone}`;
+
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append("To", toNumber);
+          formData.append("From", twilioNumber);
+          formData.append("Body", body.message);
+
+          const twilioRes = await fetch(twilioUrl, {
+            method: "POST",
+            headers: {
+              "Authorization": `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formData.toString(),
+          });
+
+          if (!twilioRes.ok) {
+            const err = await twilioRes.text();
+            console.error("Twilio send error:", err);
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ success: true }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // GET: return live feed data

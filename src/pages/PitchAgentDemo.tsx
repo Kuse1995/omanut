@@ -83,6 +83,8 @@ const PitchAgentDemo = () => {
   const [claimedIds, setClaimedIds] = useState<Set<string>>(new Set());
   const [selectedQueueId, setSelectedQueueId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -108,6 +110,33 @@ const PitchAgentDemo = () => {
   const handleClaim = (id: string) => {
     setClaimedIds((prev) => new Set(prev).add(id));
     setSelectedQueueId(id);
+  };
+
+  const handleSendReply = async () => {
+    if (!replyText.trim() || !selectedItem?.customer_phone) return;
+    setSending(true);
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      await fetch(
+        `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
+        {
+          method: 'POST',
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: 'send_reply',
+            customer_phone: selectedItem.customer_phone,
+            message: replyText.trim(),
+          }),
+        }
+      );
+      setReplyText("");
+      // Refresh to show the new message
+      await fetchFeed();
+    } catch (e) {
+      console.error("Send reply error:", e);
+    } finally {
+      setSending(false);
+    }
   };
 
   const selectedItem = data?.queue.find((q) => q.id === selectedQueueId);
@@ -308,9 +337,13 @@ const PitchAgentDemo = () => {
                       type="text"
                       placeholder="Type your response to the customer..."
                       className="flex-1 bg-muted border border-border rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      readOnly
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSendReply()}
                     />
-                    <Button disabled>Send</Button>
+                    <Button onClick={handleSendReply} disabled={sending || !replyText.trim()}>
+                      {sending ? "Sending..." : "Send"}
+                    </Button>
                   </div>
                 </div>
               )}
