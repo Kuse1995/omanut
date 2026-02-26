@@ -17,6 +17,7 @@ interface QueueItem {
   sla_deadline: string | null;
   claimed_at: string | null;
   created_at: string;
+  conversation_id: string | null;
 }
 
 interface TicketItem {
