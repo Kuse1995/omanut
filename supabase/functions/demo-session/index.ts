@@ -498,10 +498,10 @@ async function lookupTicketStatus(supabase: any, companyId: string, senderPhone:
 }
 
 // ─── Conversation Management ───
-async function getOrCreateConversation(supabase: any, companyId: string, senderPhone: string, profileName: string | null, demoCompanyName: string): Promise<string | null> {
+async function getOrCreateConversation(supabase: any, companyId: string, senderPhone: string, profileName: string | null, demoCompanyName: string): Promise<{ id: string | null; human_takeover: boolean; is_paused_for_human: boolean }> {
   const { data: existingConv } = await supabase
     .from('conversations')
-    .select('id')
+    .select('id, human_takeover, is_paused_for_human')
     .eq('company_id', companyId)
     .eq('phone', `whatsapp:${senderPhone}`)
     .eq('status', 'active')
@@ -513,7 +513,7 @@ async function getOrCreateConversation(supabase: any, companyId: string, senderP
     if (profileName) {
       await supabase.from('conversations').update({ customer_name: profileName }).eq('id', existingConv.id);
     }
-    return existingConv.id;
+    return { id: existingConv.id, human_takeover: !!existingConv.human_takeover, is_paused_for_human: !!existingConv.is_paused_for_human };
   }
 
   const { data: newConv } = await supabase
@@ -528,7 +528,7 @@ async function getOrCreateConversation(supabase: any, companyId: string, senderP
     .select('id')
     .single();
 
-  return newConv?.id || null;
+  return { id: newConv?.id || null, human_takeover: false, is_paused_for_human: false };
 }
 
 async function getConversationHistory(supabase: any, conversationId: string | null): Promise<{ role: string; content: string }[]> {
