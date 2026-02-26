@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
         .select("id, conversation_id, role, content, created_at")
         .in("conversation_id", conversationIds)
         .order("created_at", { ascending: false })
-        .limit(30);
+        .limit(100);
       messages = data || [];
     }
 
