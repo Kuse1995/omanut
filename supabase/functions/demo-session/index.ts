@@ -294,6 +294,7 @@ CRITICAL RULES:
 - An order is only complete when customer confirmed items AND delivery/contact details.
 - If the AI's last response said it would escalate or have someone follow up, that IS a handoff.
 - When in doubt between "none" and "soft_handoff", check: did the AI promise human follow-up? If yes → soft_handoff.
+- IMPORTANT: If the AI's LAST message is asking the customer a follow-up question (e.g., "can you share your reference number?", "what date works for you?"), return "none" — the AI is still actively gathering information. Wait until the customer has provided the requested details AND the AI has processed them before triggering any handoff.
 
 Return ONLY valid JSON:
 {
@@ -446,12 +447,16 @@ Return ONLY valid JSON:
     }
   }
 
-  // Mark conversation as handed off (always, regardless of dedup)
-  if (conversationId) {
+  // Only set human_takeover for hard handoffs — soft handoffs let the AI keep chatting
+  if (conversationId && result.decision === 'hard_handoff') {
     await supabase.from('conversations').update({
       human_takeover: true,
+      is_paused_for_human: true,
       takeover_at: new Date().toISOString(),
     }).eq('id', conversationId);
+    console.log(`[DEMO] Hard handoff: conversation ${conversationId} marked for human takeover`);
+  } else if (conversationId && result.decision === 'soft_handoff') {
+    console.log(`[DEMO] Soft handoff: ticket/queue created but AI continues responding`);
   }
 
   try {
