@@ -99,7 +99,11 @@ Deno.serve(async (req) => {
       if (conversationId) {
         await supabase.from('conversations').update({ last_message_preview: messageText.substring(0, 100) }).eq('id', conversationId);
       }
-      return new Response(JSON.stringify({ success: true, mode: 'human_takeover' }), {
+      return new Response(JSON.stringify({ 
+        success: true, 
+        mode: 'human_takeover',
+        reply: 'Your message has been received. A human agent is reviewing your case and will respond shortly.'
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
