@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
 
     const { data: queue } = await supabase
       .from("agent_queue")
-      .select("id, customer_name, customer_phone, priority, status, department, ai_summary, sla_deadline, claimed_at, created_at")
+      .select("id, customer_name, customer_phone, priority, status, department, ai_summary, sla_deadline, claimed_at, created_at, conversation_id")
       .eq("company_id", DEMO_COMPANY_ID)
       .gte("created_at", sessionStart)
       .order("created_at", { ascending: false })
