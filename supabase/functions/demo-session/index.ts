@@ -617,32 +617,69 @@ async function callAI(userMessage: string, systemPrompt: string): Promise<any> {
 }
 
 async function callAIWithHistory(messages: { role: string; content: string }[], systemPrompt: string): Promise<any> {
-  try {
-    // Use flash-lite for evaluation prompts (cheap/fast), flash for main responses
-    const isEvaluation = systemPrompt.includes('handoff evaluation agent');
-    const model = isEvaluation ? 'google/gemini-2.5-flash-lite' : 'google/gemini-3-flash-preview';
+  const isEvaluation = systemPrompt.includes('handoff evaluation agent');
+  const allMessages = [{ role: 'system', content: systemPrompt }, ...messages];
+  const temperature = isEvaluation ? 0.3 : 0.7;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+  // Try Lovable gateway first with 8s timeout
+  let response: Response | null = null;
+  let provider = 'lovable';
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const lovableModel = isEvaluation ? 'google/gemini-2.5-flash-lite' : 'google/gemini-3-flash-preview';
+
+    response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          ...messages,
-        ],
-        temperature: isEvaluation ? 0.3 : 0.7,
-      }),
+      body: JSON.stringify({ model: lovableModel, messages: allMessages, temperature }),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
 
     if (!response.ok) {
-      console.error('[DEMO] AI API error:', response.status);
+      console.warn(`[DEMO] Lovable gateway returned ${response.status}, falling back to OpenAI`);
+      response = null;
+    }
+  } catch (err) {
+    console.warn('[DEMO] Lovable gateway failed, falling back to OpenAI:', err);
+    response = null;
+  }
+
+  // Fallback to OpenAI directly
+  if (!response) {
+    provider = 'openai';
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      console.error('[DEMO] No OPENAI_API_KEY for fallback');
       return null;
     }
+    try {
+      const fallbackModel = isEvaluation ? 'gpt-4o-mini' : 'gpt-4o';
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: fallbackModel, messages: allMessages, temperature }),
+      });
+      if (!response.ok) {
+        console.error(`[DEMO] OpenAI fallback error: ${response.status}`);
+        return null;
+      }
+    } catch (error) {
+      console.error('[DEMO] OpenAI fallback call failed:', error);
+      return null;
+    }
+  }
 
+  console.log(`[DEMO] AI response via ${provider}`);
+
+  try {
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
 
@@ -660,7 +697,7 @@ async function callAIWithHistory(messages: { role: string; content: string }[], 
 
     return content;
   } catch (error) {
-    console.error('[DEMO] AI call error:', error);
+    console.error('[DEMO] Response parse error:', error);
     return null;
   }
 }
