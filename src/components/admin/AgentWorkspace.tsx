@@ -269,7 +269,7 @@ export const AgentWorkspace = () => {
     },
   });
 
-  // Realtime subscription
+  // Realtime subscription for queue changes
   useEffect(() => {
     if (!selectedCompany?.id) return;
     const channel = supabase
@@ -285,6 +285,23 @@ export const AgentWorkspace = () => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [selectedCompany?.id, queryClient]);
+
+  // Realtime subscription for messages in the selected conversation
+  useEffect(() => {
+    if (!selectedItem?.conversation_id) return;
+    const channel = supabase
+      .channel(`agent-messages-${selectedItem.conversation_id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${selectedItem.conversation_id}`,
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['queue-messages', selectedItem.conversation_id] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedItem?.conversation_id, queryClient]);
 
   // Performance metrics query
   const { data: performanceData } = useQuery({
