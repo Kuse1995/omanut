@@ -117,7 +117,8 @@ const PitchAgentDemo = () => {
     setSending(true);
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      await fetch(
+      console.log("[Agent] Sending reply to:", selectedItem.customer_phone, "message:", replyText.trim());
+      const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         {
           method: 'POST',
@@ -129,9 +130,13 @@ const PitchAgentDemo = () => {
           }),
         }
       );
-      setReplyText("");
-      // Refresh to show the new message
-      await fetchFeed();
+      const result = await res.json();
+      console.log("[Agent] Reply response:", res.status, result);
+      if (res.ok) {
+        setReplyText("");
+        // Refresh to show the new message
+        await fetchFeed();
+      }
     } catch (e) {
       console.error("Send reply error:", e);
     } finally {

@@ -56,6 +56,7 @@ Deno.serve(async (req) => {
 
       // Handle agent reply — send WhatsApp message to customer
       if (body.action === 'send_reply' && body.customer_phone && body.message) {
+        console.log("[demo-live-feed] send_reply to:", body.customer_phone, "message:", body.message.substring(0, 50));
         const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
         const twilioAuth = Deno.env.get("TWILIO_AUTH_TOKEN");
         const twilioNumber = Deno.env.get("TWILIO_WHATSAPP_NUMBER") || "whatsapp:+13345083612";
@@ -111,6 +112,13 @@ Deno.serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+
+      // Unknown POST action - return error
+      console.log("[demo-live-feed] Unknown POST action:", body.action);
+      return new Response(
+        JSON.stringify({ error: "Unknown action: " + body.action }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // GET: return live feed data
