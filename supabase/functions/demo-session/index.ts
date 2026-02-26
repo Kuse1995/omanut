@@ -346,75 +346,76 @@ Return ONLY valid JSON:
 
   const conversationId = activeConv?.id || null;
 
-  // Check if an open ticket already exists for this customer to avoid duplicates
+  // Check if an open ticket already exists for this customer IN THE CURRENT SESSION
+  // We scope by session.created_at so that tickets from previous demo sessions don't block new ones
   const { data: existingTicket } = await supabase
     .from('support_tickets')
     .select('id')
     .eq('company_id', companyId)
     .eq('customer_phone', senderPhone)
     .in('status', ['open', 'in_progress'])
+    .gte('created_at', session.created_at)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (existingTicket) {
-    console.log(`[DEMO] Ticket already exists for ${senderPhone} (${existingTicket.id}), skipping duplicate creation`);
-    // Update existing ticket with latest summary if available
+    console.log(`[DEMO] Ticket already exists for ${senderPhone} in current session (${existingTicket.id}), updating`);
     await supabase.from('support_tickets').update({
       issue_summary: result.summary || result.reason || 'Handoff from AI',
       priority,
       updated_at: new Date().toISOString(),
     }).eq('id', existingTicket.id);
-    return;
-  }
-
-  // Insert support ticket
-  const { data: ticket, error: ticketError } = await supabase
-    .from('support_tickets')
-    .insert({
-      company_id: companyId,
-      customer_name: customerLabel,
-      customer_phone: senderPhone,
-      issue_summary: result.summary || result.reason || 'Handoff from AI',
-      issue_category: issueCategory,
-      priority,
-      status: 'open',
-      recommended_department: department,
-      conversation_id: conversationId,
-    })
-    .select('id')
-    .single();
-
-  if (ticketError) {
-    console.error('[DEMO] Failed to create ticket:', ticketError);
+    // Still send the boss notification even on duplicate
   } else {
-    console.log(`[DEMO] Created ticket ${ticket.id}`);
-
-    // Insert agent queue item
-    const slaDeadline = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    const { error: queueError } = await supabase
-      .from('agent_queue')
+    // Insert support ticket
+    const { data: ticket, error: ticketError } = await supabase
+      .from('support_tickets')
       .insert({
         company_id: companyId,
-        ticket_id: ticket.id,
-        conversation_id: conversationId,
         customer_name: customerLabel,
         customer_phone: senderPhone,
+        issue_summary: result.summary || result.reason || 'Handoff from AI',
+        issue_category: issueCategory,
         priority,
-        status: 'waiting',
-        department,
-        ai_summary: result.summary || result.reason || 'Escalated from AI demo',
-        sla_deadline: slaDeadline,
-      });
+        status: 'open',
+        recommended_department: department,
+        conversation_id: conversationId,
+      })
+      .select('id')
+      .single();
 
-    if (queueError) {
-      console.error('[DEMO] Failed to create queue item:', queueError);
+    if (ticketError) {
+      console.error('[DEMO] Failed to create ticket:', ticketError);
     } else {
-      console.log(`[DEMO] Created queue item for ticket ${ticket.id}`);
+      console.log(`[DEMO] Created ticket ${ticket.id}`);
+
+      // Insert agent queue item
+      const slaDeadline = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const { error: queueError } = await supabase
+        .from('agent_queue')
+        .insert({
+          company_id: companyId,
+          ticket_id: ticket.id,
+          conversation_id: conversationId,
+          customer_name: customerLabel,
+          customer_phone: senderPhone,
+          priority,
+          status: 'waiting',
+          department,
+          ai_summary: result.summary || result.reason || 'Escalated from AI demo',
+          sla_deadline: slaDeadline,
+        });
+
+      if (queueError) {
+        console.error('[DEMO] Failed to create queue item:', queueError);
+      } else {
+        console.log(`[DEMO] Created queue item for ticket ${ticket.id}`);
+      }
     }
   }
 
-  // Mark conversation as handed off
+  // Mark conversation as handed off (always, regardless of dedup)
   if (conversationId) {
     await supabase.from('conversations').update({
       human_takeover: true,
