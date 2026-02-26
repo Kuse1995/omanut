@@ -99,7 +99,9 @@ Deno.serve(async (req) => {
       if (conversationId) {
         await supabase.from('conversations').update({ last_message_preview: messageText.substring(0, 100) }).eq('id', conversationId);
       }
-      return respond(null); // No AI reply — agent handles it
+      return new Response(JSON.stringify({ success: true, mode: 'human_takeover' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // Get conversation history
