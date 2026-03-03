@@ -119,6 +119,9 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
 
   return (
     <div className="space-y-6">
+      {/* AI Training Coach */}
+      <AITrainingCoach companyId={companyId} />
+
       {/* Smart Configure */}
       <SmartConfigurePanel companyId={companyId} onConfigApplied={fetchData} />
 
