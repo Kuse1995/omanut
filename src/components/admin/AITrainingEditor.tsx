@@ -193,7 +193,7 @@ POLICIES:
                 Uploaded documents that provide additional context for the AI.
               </CardDescription>
             </div>
-            <Button variant="outline" size="sm" onClick={fetchData}>
+            <Button variant="outline" size="sm" onClick={() => fetchData(true)}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
