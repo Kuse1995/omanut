@@ -194,7 +194,7 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
                           onClick={() => copyToClipboard(msg.content, idx)}
                         >
                           {copiedIdx === idx ? (
-                            <Check className="h-3 w-3 text-green-500" />
+                            <Check className="h-3 w-3 text-primary" />
                           ) : (
                             <Copy className="h-3 w-3" />
                           )}
