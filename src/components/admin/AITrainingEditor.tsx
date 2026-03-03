@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { SmartConfigurePanel } from "./SmartConfigurePanel";
+import { AITrainingCoach } from "./AITrainingCoach";
 
 interface Document {
   id: string;
@@ -118,6 +119,9 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
 
   return (
     <div className="space-y-6">
+      {/* AI Training Coach */}
+      <AITrainingCoach companyId={companyId} />
+
       {/* Smart Configure */}
       <SmartConfigurePanel companyId={companyId} onConfigApplied={fetchData} />
 
