@@ -30,15 +30,17 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
   const [quickReferenceInfo, setQuickReferenceInfo] = useState("");
   const [originalQuickRef, setOriginalQuickRef] = useState("");
   const [documents, setDocuments] = useState<Document[]>([]);
+  const isInitialLoad = useRef(true);
 
   useEffect(() => {
     fetchData();
   }, [companyId]);
 
-  const fetchData = async () => {
-    setIsLoading(true);
+  const fetchData = async (silent = false) => {
+    if (!silent && isInitialLoad.current) {
+      setIsLoading(true);
+    }
     try {
-      // Fetch company quick reference
       const { data: company, error: companyError } = await supabase
         .from("companies")
         .select("quick_reference_info")
@@ -49,7 +51,6 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
       setQuickReferenceInfo(company?.quick_reference_info || "");
       setOriginalQuickRef(company?.quick_reference_info || "");
 
-      // Fetch documents
       const { data: docs, error: docsError } = await supabase
         .from("company_documents")
         .select("*")
@@ -60,9 +61,12 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
       setDocuments(docs || []);
     } catch (error) {
       console.error("Error fetching training data:", error);
-      toast.error("Failed to load training data");
+      if (!silent) toast.error("Failed to load training data");
     } finally {
-      setIsLoading(false);
+      if (isInitialLoad.current) {
+        setIsLoading(false);
+        isInitialLoad.current = false;
+      }
     }
   };
 
