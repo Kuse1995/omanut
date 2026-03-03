@@ -124,10 +124,10 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
   return (
     <div className="space-y-6">
       {/* AI Training Coach */}
-      <AITrainingCoach companyId={companyId} onDataChanged={fetchData} />
+      <AITrainingCoach companyId={companyId} onDataChanged={() => fetchData(true)} />
 
       {/* Smart Configure */}
-      <SmartConfigurePanel companyId={companyId} onConfigApplied={fetchData} />
+      <SmartConfigurePanel companyId={companyId} onConfigApplied={() => fetchData(true)} />
 
       {/* Quick Reference Editor */}
       <Card>
