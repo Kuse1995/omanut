@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { SmartConfigurePanel } from "./SmartConfigurePanel";
+import { AITrainingCoach } from "./AITrainingCoach";
 
 interface Document {
   id: string;
