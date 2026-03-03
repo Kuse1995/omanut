@@ -3,8 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Send, Loader2, RotateCcw, GraduationCap, User, Sparkles, Copy, Check } from "lucide-react";
+import { Send, Loader2, RotateCcw, GraduationCap, User, Sparkles, Copy, Check, Database, Settings } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -12,10 +11,12 @@ import ReactMarkdown from "react-markdown";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  savedItems?: Array<{ target: string; summary: string }>;
 }
 
 interface AITrainingCoachProps {
   companyId: string;
+  onDataChanged?: () => void;
 }
 
 const starterPrompts = [
@@ -26,7 +27,7 @@ const starterPrompts = [
   "How to handle payment questions?",
 ];
 
-export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
+export const AITrainingCoach = ({ companyId, onDataChanged }: AITrainingCoachProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -40,7 +41,6 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
     }
   }, [messages]);
 
-  // Auto-start conversation
   useEffect(() => {
     if (messages.length === 0) {
       sendMessage("Hi, I'd like to train my AI assistant. Let's get started.");
@@ -53,10 +53,8 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
 
     if (!overrideMessage) setInput("");
 
-    const userMsg: Message = { role: "user", content: messageText };
-    // Don't show the auto-start message in chat
     if (!overrideMessage) {
-      setMessages(prev => [...prev, userMsg]);
+      setMessages(prev => [...prev, { role: "user", content: messageText }]);
     }
     setIsLoading(true);
 
@@ -68,7 +66,7 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
         return;
       }
 
-      const history = overrideMessage ? [] : messages;
+      const history = overrideMessage ? [] : messages.map(m => ({ role: m.role, content: m.content }));
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-training-coach`,
@@ -92,7 +90,20 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
       }
 
       const data = await response.json();
-      setMessages(prev => [...prev, { role: "assistant", content: data.response }]);
+      const saved = data.saved || [];
+
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: data.response,
+        savedItems: saved.length > 0 ? saved : undefined,
+      }]);
+
+      if (saved.length > 0) {
+        saved.forEach((item: { target: string; summary: string }) => {
+          toast.success(`Saved to ${item.target}`, { description: item.summary });
+        });
+        onDataChanged?.();
+      }
     } catch (error: any) {
       console.error("Coach error:", error);
       toast.error(error.message || "Failed to get AI response");
@@ -104,7 +115,6 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
 
   const clearChat = () => {
     setMessages([]);
-    // Re-trigger auto-start
     setTimeout(() => {
       sendMessage("Hi, I'd like to train my AI assistant. Let's get started.");
     }, 100);
@@ -124,6 +134,11 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
     setTimeout(() => setCopiedIdx(null), 2000);
   };
 
+  const getTargetIcon = (target: string) => {
+    if (target === 'Knowledge Base') return <Database className="h-3 w-3" />;
+    return <Settings className="h-3 w-3" />;
+  };
+
   return (
     <Card className="border-primary/20">
       <CardHeader className="pb-3">
@@ -135,7 +150,7 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
             <div>
               <CardTitle className="text-lg">AI Training Coach</CardTitle>
               <CardDescription>
-                Chat with your AI coach to define how your assistant should behave
+                Chat with your AI coach — agreed items are saved automatically
               </CardDescription>
             </div>
           </div>
@@ -156,52 +171,68 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
           ) : (
             <div className="space-y-4">
               {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
-                  <div className={`flex items-start gap-2 max-w-[85%] ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                    <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-1 ${
-                      msg.role === "user" ? "bg-primary" : "bg-primary/10"
-                    }`}>
-                      {msg.role === "user" ? (
-                        <User className="h-3.5 w-3.5 text-primary-foreground" />
-                      ) : (
-                        <GraduationCap className="h-3.5 w-3.5 text-primary" />
-                      )}
-                    </div>
-                    <div className="group relative">
-                      <div
-                        className={`rounded-lg px-4 py-3 ${
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-card border shadow-sm"
-                        }`}
-                      >
-                        {msg.role === "assistant" ? (
-                          <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2">
-                            <ReactMarkdown>{msg.content}</ReactMarkdown>
-                          </div>
+                <div key={idx}>
+                  <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`flex items-start gap-2 max-w-[85%] ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                      <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-1 ${
+                        msg.role === "user" ? "bg-primary" : "bg-primary/10"
+                      }`}>
+                        {msg.role === "user" ? (
+                          <User className="h-3.5 w-3.5 text-primary-foreground" />
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                          <GraduationCap className="h-3.5 w-3.5 text-primary" />
                         )}
                       </div>
-                      {msg.role === "assistant" && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
-                          onClick={() => copyToClipboard(msg.content, idx)}
+                      <div className="group relative">
+                        <div
+                          className={`rounded-lg px-4 py-3 ${
+                            msg.role === "user"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-card border shadow-sm"
+                          }`}
                         >
-                          {copiedIdx === idx ? (
-                            <Check className="h-3 w-3 text-primary" />
+                          {msg.role === "assistant" ? (
+                            <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&>p]:mb-2 [&>ul]:mb-2 [&>ol]:mb-2">
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
                           ) : (
-                            <Copy className="h-3 w-3" />
+                            <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                           )}
-                        </Button>
-                      )}
+                        </div>
+                        {msg.role === "assistant" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                            onClick={() => copyToClipboard(msg.content, idx)}
+                          >
+                            {copiedIdx === idx ? (
+                              <Check className="h-3 w-3 text-primary" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  {/* Saved items indicator */}
+                  {msg.savedItems && msg.savedItems.length > 0 && (
+                    <div className="flex justify-start ml-9 mt-2">
+                      <div className="space-y-1">
+                        {msg.savedItems.map((item, si) => (
+                          <div
+                            key={si}
+                            className="flex items-center gap-2 text-xs bg-primary/10 text-primary rounded-full px-3 py-1"
+                          >
+                            {getTargetIcon(item.target)}
+                            <span className="font-medium">Saved to {item.target}:</span>
+                            <span className="text-foreground/70">{item.summary}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {isLoading && (
@@ -224,7 +255,6 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
           )}
         </ScrollArea>
 
-        {/* Starter prompts when conversation is fresh */}
         {messages.length <= 1 && !isLoading && (
           <div className="flex flex-wrap gap-2">
             {starterPrompts.map((prompt) => (
@@ -245,7 +275,6 @@ export const AITrainingCoach = ({ companyId }: AITrainingCoachProps) => {
           </div>
         )}
 
-        {/* Input */}
         <div className="flex gap-2">
           <Input
             ref={inputRef}
