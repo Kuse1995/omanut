@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff } from 'lucide-react';
+import { useCompany } from '@/context/CompanyContext';
 
 interface MetaCredential {
   id: string;
@@ -17,10 +18,12 @@ interface MetaCredential {
   access_token: string;
   platform: 'facebook' | 'instagram';
   ai_system_prompt: string;
+  company_id: string;
   created_at: string;
 }
 
 export const MetaIntegrationsPanel = () => {
+  const { selectedCompany } = useCompany();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
