@@ -914,6 +914,107 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 message: `Complete Customer Database (${allCustomers?.length || 0} total conversations, ${uniquePhones.size} unique customers):\n\n${customerList}` 
               };
               break;
+
+            case 'schedule_facebook_post': {
+              // Look up meta_credentials for the company's page_id
+              const { data: metaCred } = await supabase
+                .from('meta_credentials')
+                .select('page_id')
+                .eq('company_id', company.id)
+                .limit(1)
+                .maybeSingle();
+
+              if (!metaCred?.page_id) {
+                result = { success: false, message: '❌ No Facebook page connected for this company. Please set up Meta credentials first.' };
+                break;
+              }
+
+              let imageUrl = args.image_url || null;
+
+              // If boss wants image generation, call whatsapp-image-gen
+              if (args.needs_image_generation && !imageUrl) {
+                const imageSettings = Array.isArray(company.image_generation_settings)
+                  ? company.image_generation_settings[0]
+                  : company.image_generation_settings;
+
+                if (imageSettings?.enabled) {
+                  try {
+                    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+                    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                    const imgRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                      },
+                      body: JSON.stringify({
+                        companyId: company.id,
+                        customerPhone: '',
+                        conversationId: null,
+                        prompt: `Create a brand-aligned image for this Facebook post: ${args.content}`,
+                        messageType: 'generate',
+                      }),
+                    });
+                    if (imgRes.ok) {
+                      const imgResult = await imgRes.json();
+                      imageUrl = imgResult.imageUrl || null;
+                      console.log('[BOSS-SCHEDULE] Generated image URL:', imageUrl);
+                    }
+                  } catch (imgErr) {
+                    console.error('[BOSS-SCHEDULE] Image generation error:', imgErr);
+                  }
+                }
+              }
+
+              // Insert draft into scheduled_posts
+              // Use a placeholder UUID for created_by since boss doesn't have a dashboard user ID
+              const systemUserId = '00000000-0000-0000-0000-000000000000';
+              const { data: newPost, error: insertError } = await supabase
+                .from('scheduled_posts')
+                .insert({
+                  company_id: company.id,
+                  page_id: metaCred.page_id,
+                  content: args.content,
+                  scheduled_time: args.scheduled_time,
+                  image_url: imageUrl,
+                  status: 'draft',
+                  created_by: systemUserId,
+                })
+                .select('id')
+                .single();
+
+              if (insertError || !newPost) {
+                console.error('[BOSS-SCHEDULE] Insert error:', insertError);
+                result = { success: false, message: `❌ Failed to create post draft: ${insertError?.message || 'Unknown error'}` };
+                break;
+              }
+
+              // Call schedule-meta-post to push to Facebook
+              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                },
+                body: JSON.stringify({ post_id: newPost.id }),
+              });
+
+              const scheduleResult = await scheduleRes.json();
+
+              if (!scheduleRes.ok || !scheduleResult.success) {
+                result = { success: false, message: `❌ Post draft created but scheduling failed: ${scheduleResult.error || 'Unknown error'}` };
+                break;
+              }
+
+              const scheduledDate = new Date(args.scheduled_time);
+              result = {
+                success: true,
+                message: `✅ Facebook post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+              };
+              break;
+            }
               
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
