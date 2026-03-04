@@ -10,6 +10,7 @@ import { ImageGenerationPanel } from './ImageGenerationPanel';
 import { MediaLibraryPanel } from './MediaLibraryPanel';
 import { TicketsPanel } from './TicketsPanel';
 import { AgentWorkspace } from './AgentWorkspace';
+import { MetaIntegrationsPanel } from './MetaIntegrationsPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
