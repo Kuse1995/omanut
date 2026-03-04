@@ -72,6 +72,31 @@ serve(async (req) => {
       throw new Error('Missing required fields: name, admin_email, admin_password');
     }
 
+    // Check for orphaned auth user (exists in auth but not in public schema)
+    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
+    const orphanUser = existingUsers?.users?.find(u => u.email === admin_email);
+    
+    if (orphanUser) {
+      // Check if this user has any active company memberships
+      const { count: cuCount } = await supabaseAdmin
+        .from('company_users')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', orphanUser.id);
+      
+      const { count: uCount } = await supabaseAdmin
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('id', orphanUser.id);
+      
+      if ((cuCount ?? 0) === 0 && (uCount ?? 0) === 0) {
+        // Orphan — delete before re-creating
+        console.log(`Deleting orphaned auth user: ${orphanUser.id} (${admin_email})`);
+        await supabaseAdmin.auth.admin.deleteUser(orphanUser.id);
+      } else {
+        throw new Error('Email already in use by an active user');
+      }
+    }
+
     // Create auth user using admin client
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: admin_email,
