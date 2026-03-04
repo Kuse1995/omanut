@@ -16,20 +16,31 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    // Auth: use user's JWT for RLS
+    // Auth: support both user JWT and service role key
     const authHeader = req.headers.get('Authorization') || '';
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Verify user
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    
+    // Check if this is a service role call (internal) or user JWT call
+    const token = authHeader.replace('Bearer ', '');
+    const isServiceRole = token === supabaseServiceKey;
+    
+    let postClient;
+    if (isServiceRole) {
+      // Internal call from boss-chat or other edge functions - use service client
+      postClient = supabaseService;
+    } else {
+      // User JWT call - verify auth and use RLS client
+      const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      postClient = supabaseUser;
     }
 
     const { post_id } = await req.json();
@@ -40,8 +51,8 @@ serve(async (req) => {
       });
     }
 
-    // Load scheduled post (RLS ensures user has access)
-    const { data: post, error: postError } = await supabaseUser
+    // Load scheduled post
+    const { data: post, error: postError } = await postClient
       .from('scheduled_posts')
       .select('*')
       .eq('id', post_id)
