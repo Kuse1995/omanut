@@ -317,8 +317,17 @@ export const ChatView = ({
         </div>
       )}
 
-      {/* Input Area */}
-      {conversation.human_takeover && (
+      {/* Input Area - Platform-adaptive */}
+      {isFacebook ? (
+        <div className="px-3 py-2 border-t border-border bg-blue-50/50 dark:bg-blue-950/20 text-center">
+          <div className="flex items-center justify-center gap-1.5">
+            <Facebook className="h-3.5 w-3.5 text-blue-500" />
+            <p className="text-xs text-muted-foreground">
+              Facebook comments are handled automatically by AI. Replies appear as public comments.
+            </p>
+          </div>
+        </div>
+      ) : conversation.human_takeover ? (
         <div className="px-3 py-2 border-t border-border bg-card/80 backdrop-blur-sm">
           {attachedFile && (
             <div className="flex items-center gap-2 mb-2 p-1.5 bg-secondary rounded-lg">
@@ -357,7 +366,7 @@ export const ChatView = ({
               </Button>
             </div>
             <Input
-              placeholder="Type a message..."
+              placeholder="Type a WhatsApp message..."
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -393,9 +402,7 @@ export const ChatView = ({
             }}
           />
         </div>
-      )}
-
-      {!conversation.human_takeover && (
+      ) : (
         <div className="px-3 py-2 border-t border-border bg-secondary/50 text-center">
           <div className="flex items-center justify-center gap-1.5">
             <Bot className="h-3.5 w-3.5 text-muted-foreground" />
