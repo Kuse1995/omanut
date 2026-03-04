@@ -88,7 +88,11 @@ export const ContentSchedulerPanel = () => {
         body: { post_id: post.id },
       });
 
-      if (fnError) throw fnError;
+      if (fnError) {
+        // Try to parse the error body for a meaningful message
+        const errMsg = typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError);
+        throw new Error(errMsg);
+      }
       if (result?.error) throw new Error(result.error);
 
       return result;
