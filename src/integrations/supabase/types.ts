@@ -1110,6 +1110,7 @@ export type Database = {
           last_message_preview: string | null
           phone: string | null
           pinned: boolean | null
+          platform: string
           quality_flag: string | null
           started_at: string
           status: string
@@ -1133,6 +1134,7 @@ export type Database = {
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
+          platform?: string
           quality_flag?: string | null
           started_at?: string
           status?: string
@@ -1156,6 +1158,7 @@ export type Database = {
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
+          platform?: string
           quality_flag?: string | null
           started_at?: string
           status?: string

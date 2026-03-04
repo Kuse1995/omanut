@@ -1,6 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, MessageCircle } from 'lucide-react';
+import { Search, MessageCircle, Facebook } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -25,8 +25,8 @@ interface ConversationsListProps {
   onSelectConversation: (id: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
-  filter: 'all' | 'unread' | 'takeover';
-  onFilterChange: (filter: 'all' | 'unread' | 'takeover') => void;
+  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp';
+  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp') => void;
 }
 
 export const ConversationsList = ({
@@ -46,13 +46,16 @@ export const ConversationsList = ({
     const matchesFilter = 
       filter === 'all' ? true :
       filter === 'unread' ? (conv.unread_count > 0) :
-      filter === 'takeover' ? conv.human_takeover : true;
+      filter === 'takeover' ? conv.human_takeover :
+      filter === 'facebook' ? (conv.phone?.startsWith('fb:')) :
+      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:')) : true;
     
     return matchesSearch && matchesFilter;
   });
 
   const unreadCount = conversations.filter(c => c.unread_count > 0).length;
   const takeoverCount = conversations.filter(c => c.human_takeover).length;
+  const facebookCount = conversations.filter(c => c.phone?.startsWith('fb:')).length;
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-border">
@@ -122,6 +125,27 @@ export const ConversationsList = ({
                 : "bg-primary/10 text-primary"
             )}>
               {takeoverCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onFilterChange('facebook')}
+          className={cn(
+            "flex-1 h-8 text-xs font-medium gap-1",
+            filter === 'facebook' && "bg-blue-600 text-white hover:bg-blue-700"
+          )}
+        >
+          <Facebook className="h-3 w-3" />
+          {facebookCount > 0 && (
+            <span className={cn(
+              "text-[10px] px-1.5 rounded-full",
+              filter === 'facebook' 
+                ? "bg-white/20" 
+                : "bg-blue-500/10 text-blue-600"
+            )}>
+              {facebookCount}
             </span>
           )}
         </Button>

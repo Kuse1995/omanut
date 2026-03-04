@@ -106,7 +106,7 @@ async function processWebhook(body: any) {
       console.log(`Processing comment ${commentId}: "${messageText}" from ${commenterName}`);
 
       try {
-        await handleComment(supabase, pageId, commentId, messageText, commenterName);
+        await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
       } catch (err) {
         console.error(`Error handling comment ${commentId}:`, err);
       }
@@ -120,6 +120,7 @@ async function handleComment(
   commentId: string,
   messageText: string,
   commenterName: string,
+  commenterFbId: string,
 ) {
   // 1. Look up credentials for this page
   const { data: cred, error: credError } = await supabase
@@ -175,6 +176,89 @@ async function handleComment(
 
   const result = await fbResponse.json();
   console.log(`Reply posted successfully! Reply ID: ${result.id}`);
+
+  // 5. Save interaction to conversations & messages tables
+  try {
+    // Find company_id from meta_credentials user_id
+    const { data: credFull } = await supabase
+      .from('meta_credentials')
+      .select('user_id')
+      .eq('page_id', pageId)
+      .limit(1)
+      .maybeSingle();
+
+    if (credFull?.user_id) {
+      const { data: userData } = await supabase
+        .from('users')
+        .select('company_id')
+        .eq('id', credFull.user_id)
+        .single();
+
+      if (userData?.company_id) {
+        const companyId = userData.company_id;
+        const fbPhone = `fb:${commenterFbId}`;
+
+        // Upsert conversation
+        const { data: existingConv } = await supabase
+          .from('conversations')
+          .select('id, unread_count')
+          .eq('company_id', companyId)
+          .eq('phone', fbPhone)
+          .limit(1)
+          .maybeSingle();
+
+        let conversationId: string;
+
+        if (existingConv) {
+          conversationId = existingConv.id;
+          await supabase
+            .from('conversations')
+            .update({
+              last_message_preview: aiReply.slice(0, 100),
+              unread_count: (existingConv.unread_count || 0) + 1,
+              status: 'active',
+            })
+            .eq('id', conversationId);
+        } else {
+          const { data: newConv } = await supabase
+            .from('conversations')
+            .insert({
+              company_id: companyId,
+              phone: fbPhone,
+              customer_name: commenterName,
+              platform: 'facebook',
+              status: 'active',
+              last_message_preview: aiReply.slice(0, 100),
+              unread_count: 1,
+            })
+            .select('id')
+            .single();
+          conversationId = newConv?.id;
+        }
+
+        if (conversationId) {
+          // Insert user comment and AI reply as messages
+          await supabase.from('messages').insert([
+            {
+              conversation_id: conversationId,
+              role: 'user',
+              content: messageText,
+              message_metadata: { source: 'facebook', comment_id: commentId },
+            },
+            {
+              conversation_id: conversationId,
+              role: 'assistant',
+              content: aiReply,
+              message_metadata: { source: 'facebook', reply_id: result.id },
+            },
+          ]);
+          console.log(`Saved Facebook interaction to conversation ${conversationId}`);
+        }
+      }
+    }
+  } catch (dbErr) {
+    console.error('Error saving Facebook interaction to DB:', dbErr);
+  }
 }
 
 async function generateAIReply(
