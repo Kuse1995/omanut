@@ -2805,7 +2805,74 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 if (keywords.some((k: string) => k.length > 3 && refInfo.toLowerCase().includes(k))) {
                   recommendations.push({ type: 'info', content: refInfo.substring(0, 300) });
                 }
+          } else if (toolCall.function.name === 'lookup_product') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[LOOKUP-PRODUCT] Searching for:', args.query);
+            
+            try {
+              // Search products by name/description using ilike
+              const searchTerm = `%${args.query}%`;
+              let productQuery = supabase
+                .from('payment_products')
+                .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
+                .eq('company_id', company.id)
+                .eq('is_active', true);
+              
+              if (args.category) {
+                productQuery = productQuery.eq('category', args.category);
               }
+              
+              const { data: products, error: prodError } = await productQuery.limit(20);
+              
+              if (prodError) {
+                console.error('[LOOKUP-PRODUCT] DB error:', prodError);
+                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
+              } else {
+                // Filter by relevance - match against query keywords
+                const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                const matchedProducts = (products || []).filter((p: any) => {
+                  const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                  return queryWords.some((word: string) => text.includes(word));
+                });
+                
+                // If no keyword match, return all products
+                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : (products || []);
+                
+                const productList = resultsToReturn.slice(0, 10).map((p: any) => ({
+                  id: p.id,
+                  name: p.name,
+                  description: p.description,
+                  price: p.price,
+                  currency: p.currency || 'K',
+                  category: p.category,
+                  product_type: p.product_type,
+                  delivery_type: p.delivery_type,
+                  selar_link: p.selar_link
+                }));
+                
+                anyToolExecuted = true;
+                toolExecutionContext.push(`found ${productList.length} products matching "${args.query}"`);
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({
+                    success: true,
+                    products: productList,
+                    total_found: productList.length,
+                    query: args.query,
+                    message: productList.length > 0 
+                      ? `Found ${productList.length} product(s) matching your search`
+                      : 'No products found matching that query. Try a different search term.'
+                  })
+                });
+                
+                console.log('[LOOKUP-PRODUCT] Found', productList.length, 'products');
+              }
+            } catch (error) {
+              console.error('[LOOKUP-PRODUCT] Exception:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
+            }
+          }
               
               anyToolExecuted = true;
               toolExecutionContext.push(`found ${recommendations.length} service recommendations`);
