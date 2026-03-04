@@ -1,34 +1,67 @@
 
 
-## Plan: Return Generated Image URL When Scheduling Posts
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### Problem
-When the `schedule_facebook_post` tool generates an image, the image URL is correctly attached to the Facebook post and scheduled, but it is never sent back to the boss on WhatsApp. The `boss-chat` function's final response (line 1091) only returns `{ response: aiResponse }` without an `imageUrl` field. The `whatsapp-messages` function checks for `bossData.imageUrl` to attach media, but it's always `false` for scheduled posts.
+## Problem Analysis
 
-### Fix
+Two issues identified in the `demo-session` edge function:
 
-**File: `supabase/functions/boss-chat/index.ts`**
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-1. Track the image URL generated during tool execution by declaring a variable (e.g., `let toolImageUrl = null`) before the tool loop.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-2. In the `schedule_facebook_post` case (around line 1003), capture the generated image URL into this variable:
-   ```typescript
-   toolImageUrl = imageUrl;
-   ```
+## Changes
 
-3. Update the final response (line 1091) to include the image URL:
-   ```typescript
-   return new Response(JSON.stringify({ 
-     response: aiResponse,
-     imageUrl: toolImageUrl || undefined
-   }), { ... });
-   ```
+### File: `supabase/functions/demo-session/index.ts`
 
-This ensures that when the whatsapp-messages function checks `bossData.imageUrl`, it finds the generated image and attaches it as media to the WhatsApp reply.
+**1. Tighten handoff evaluation prompt**
 
-### Files Changed
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-| File | Change |
-|------|--------|
-| `supabase/functions/boss-chat/index.ts` | Track and return `imageUrl` from tool execution in the final response |
+**2. Create tickets and queue items on handoff**
+
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 

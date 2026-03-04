@@ -838,6 +838,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       console.log('Tool calls detected:', aiMessage.tool_calls.length);
       
       const toolResults = [];
+      let toolImageUrl: string | null = null;
       
       for (const toolCall of aiMessage.tool_calls) {
         const functionName = toolCall.function.name;
@@ -1001,6 +1002,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                       const imgResult = await imgRes.json();
                       imageUrl = imgResult.imageUrl || null;
                       console.log('[BOSS-SCHEDULE] Generated image URL:', imageUrl);
+                      toolImageUrl = imageUrl;
                     }
                   } catch (imgErr) {
                     console.error('[BOSS-SCHEDULE] Image generation error:', imgErr);
@@ -1088,7 +1090,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       });
 
     // Return JSON response (not TwiML) for whatsapp-messages to handle
-    return new Response(JSON.stringify({ response: aiResponse }), {
+    return new Response(JSON.stringify({ response: aiResponse, ...(toolImageUrl ? { imageUrl: toolImageUrl } : {}) }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
