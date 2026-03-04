@@ -1,67 +1,38 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Problem
 
-## Problem Analysis
+When deleting a company, the `delete_company` RPC function tries to delete `auth.users` records but has ordering/constraint issues:
 
-Two issues identified in the `demo-session` edge function:
+1. **`users` table FK**: `public.users.company_id` references `companies(id)` **without `ON DELETE CASCADE`**. The function deletes `public.users` rows *before* `companies`, which should work — but the `auth.users` deletion happens in two separate loops (one for `company_users`-only members, one for legacy `users` table members), creating race conditions.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+2. **`users.email` unique constraint**: `users_email_key` on `public.users.email` means if a deleted company's user row isn't fully cleaned up, re-creating with the same email fails.
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+3. **`companies` unique constraints**: `unique_whatsapp_number_idx` and `unique_twilio_number_idx` on the `companies` table mean if the company row isn't deleted (due to FK failures), re-creating with the same number conflicts.
 
-## Changes
+4. **Missing `user_roles` cleanup**: The `delete_company` function never deletes from `public.user_roles` before deleting `auth.users`. Since `user_roles.user_id` has `ON DELETE CASCADE` from `auth.users`, this *should* work — but if the `auth.users` delete fails for any reason, orphan `user_roles` rows remain.
 
-### File: `supabase/functions/demo-session/index.ts`
+5. **FK ordering bug**: The function deletes `public.users` rows, then tries to delete `companies`. But `public.users.company_id` → `companies(id)` has no `ON DELETE CASCADE`, so if there's any error or partial execution, the company row can't be deleted.
 
-**1. Tighten handoff evaluation prompt**
+## Fix
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+Update the `delete_company` database function to:
 
-**2. Create tickets and queue items on handoff**
+1. **Delete `user_roles`** explicitly before deleting `auth.users` (safety net)
+2. **Consolidate user deletion** — collect ALL user IDs from both `company_users` and `users` tables, deduplicate, then check each for multi-company membership before deleting from `auth.users`
+3. **Delete `public.users` rows before `companies`** (already done, but ensure it's robust)
+4. **Add missing table cleanups** for any new tables like `support_tickets`, `ticket_notes`, `company_departments`
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+### Migration SQL
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+A single migration to replace the `delete_company` function with a more robust version that:
+- Collects all user IDs upfront from both `company_users` and `users` tables
+- Explicitly deletes `user_roles` for those users
+- Deletes `auth.users` only for single-company users
+- Cleans up `support_tickets`, `ticket_notes`, `company_departments` (missing from current function)
+- Ensures proper ordering so no FK violations occur
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| Action | Target |
+|---|---|
+| DB Migration | Replace `delete_company` function |
 
