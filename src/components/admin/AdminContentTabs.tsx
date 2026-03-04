@@ -51,6 +51,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         return <BillingPanel />;
       case 'payments':
         return <PaymentsPanel />;
+      case 'meta-integrations':
+        return <MetaIntegrationsPanel />;
       default:
         return <ConversationsPanel />;
     }

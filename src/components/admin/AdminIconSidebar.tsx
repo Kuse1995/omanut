@@ -44,6 +44,7 @@ const navItems = [
   { id: 'settings', icon: Settings, label: 'Company Settings' },
   { id: 'billing', icon: CreditCard, label: 'Billing & Credits' },
   { id: 'payments', icon: DollarSign, label: 'Products & Payments' },
+  { id: 'meta-integrations', icon: Share2, label: 'Meta Integrations' },
 ];
 
 export const AdminIconSidebar = ({ activeTab, onTabChange, onOpenCommandPalette }: AdminIconSidebarProps) => {
