@@ -46,7 +46,9 @@ export const ConversationsList = ({
     const matchesFilter = 
       filter === 'all' ? true :
       filter === 'unread' ? (conv.unread_count > 0) :
-      filter === 'takeover' ? conv.human_takeover : true;
+      filter === 'takeover' ? conv.human_takeover :
+      filter === 'facebook' ? (conv.phone?.startsWith('fb:')) :
+      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:')) : true;
     
     return matchesSearch && matchesFilter;
   });
