@@ -1823,6 +1823,7 @@ export type Database = {
         Row: {
           access_token: string
           ai_system_prompt: string | null
+          company_id: string | null
           created_at: string | null
           id: string
           page_id: string
@@ -1833,6 +1834,7 @@ export type Database = {
         Insert: {
           access_token: string
           ai_system_prompt?: string | null
+          company_id?: string | null
           created_at?: string | null
           id?: string
           page_id: string
@@ -1843,6 +1845,7 @@ export type Database = {
         Update: {
           access_token?: string
           ai_system_prompt?: string | null
+          company_id?: string | null
           created_at?: string | null
           id?: string
           page_id?: string
@@ -1850,7 +1853,15 @@ export type Database = {
           updated_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "meta_credentials_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       onboarding_sessions: {
         Row: {
