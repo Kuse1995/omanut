@@ -139,31 +139,11 @@ async function processWebhook(body: any) {
   }
 }
 
-// ── Resolve company_id from page credentials ──
-async function resolveCompanyId(supabase: any, pageId: string): Promise<string | null> {
-  const { data: credFull } = await supabase
-    .from('meta_credentials')
-    .select('user_id')
-    .eq('page_id', pageId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!credFull?.user_id) return null;
-
-  const { data: userData } = await supabase
-    .from('users')
-    .select('company_id')
-    .eq('id', credFull.user_id)
-    .single();
-
-  return userData?.company_id || null;
-}
-
-// ── Get page credentials ──
+// ── Get page credentials (includes company_id) ──
 async function getPageCredentials(supabase: any, pageId: string) {
   const { data: cred, error } = await supabase
     .from('meta_credentials')
-    .select('access_token, ai_system_prompt')
+    .select('access_token, ai_system_prompt, company_id')
     .eq('page_id', pageId)
     .limit(1)
     .maybeSingle();
@@ -259,7 +239,7 @@ async function handleComment(
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
-  const { access_token, ai_system_prompt } = cred;
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
   const aiReply = await generateAIReply(messageText, commenterName, ai_system_prompt || '', 'comment');
   if (!aiReply) {
@@ -296,7 +276,6 @@ async function handleComment(
 
   // Save to DB
   try {
-    const companyId = await resolveCompanyId(supabase, pageId);
     if (companyId) {
       await saveInteraction(
         supabase,
@@ -325,7 +304,7 @@ async function handleMessengerDM(
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
-  const { access_token, ai_system_prompt } = cred;
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
   const aiReply = await generateAIReply(messageText, 'Customer', ai_system_prompt || '', 'messenger');
   if (!aiReply) {
@@ -363,7 +342,6 @@ async function handleMessengerDM(
 
   // Save to DB
   try {
-    const companyId = await resolveCompanyId(supabase, pageId);
     if (companyId) {
       await saveInteraction(
         supabase,

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff } from 'lucide-react';
+import { useCompany } from '@/context/CompanyContext';
 
 interface MetaCredential {
   id: string;
@@ -17,10 +18,12 @@ interface MetaCredential {
   access_token: string;
   platform: 'facebook' | 'instagram';
   ai_system_prompt: string;
+  company_id: string;
   created_at: string;
 }
 
 export const MetaIntegrationsPanel = () => {
+  const { selectedCompany } = useCompany();
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -33,15 +36,18 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const { data: credentials, isLoading } = useQuery({
-    queryKey: ['meta-credentials'],
+    queryKey: ['meta-credentials', selectedCompany?.id],
     queryFn: async () => {
+      if (!selectedCompany?.id) return [];
       const { data, error } = await supabase
         .from('meta_credentials')
         .select('*')
+        .eq('company_id', selectedCompany.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as MetaCredential[];
     },
+    enabled: !!selectedCompany?.id,
   });
 
   const saveMutation = useMutation({
@@ -56,9 +62,10 @@ export const MetaIntegrationsPanel = () => {
           .eq('id', editingId);
         if (error) throw error;
       } else {
+        if (!selectedCompany?.id) throw new Error('No company selected');
         const { error } = await supabase
           .from('meta_credentials')
-          .insert({ ...form, user_id: user.id });
+          .insert({ ...form, user_id: user.id, company_id: selectedCompany.id });
         if (error) throw error;
       }
     },
