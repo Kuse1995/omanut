@@ -1742,6 +1742,13 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
       enabledToolNames = enabledToolNames.filter(t => !schoolExcludedTools.includes(t));
       console.log('[TOOLS] School business - excluded payment tools:', schoolExcludedTools);
     }
+
+    // Companies with payments disabled (sell on external websites)
+    if (company.payments_disabled) {
+      const paymentTools = ['request_payment', 'deliver_digital_product', 'lookup_product'];
+      enabledToolNames = enabledToolNames.filter(t => !paymentTools.includes(t));
+      console.log('[TOOLS] Payments disabled for company - excluded payment tools:', paymentTools);
+    }
     
     // Filter tools array based on enabled tools
     const filteredTools = enabledToolNames
