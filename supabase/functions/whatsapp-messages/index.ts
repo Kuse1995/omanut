@@ -1713,6 +1713,21 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["issue_description"]
           }
         }
+      },
+      lookup_product: {
+        type: "function",
+        function: {
+          name: "lookup_product",
+          description: "Search for products/items in the company's catalog by name, keyword, category, or description. Use when a customer asks about a specific product, wants recommendations, or you need product details like price and description.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query - product name, keyword, or category to look up" },
+              category: { type: "string", description: "Optional category filter" }
+            },
+            required: ["query"]
+          }
+        }
       }
     };
 
