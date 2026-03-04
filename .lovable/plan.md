@@ -1,67 +1,72 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Analysis
 
-## Problem Analysis
+You're absolutely right. Currently `meta_credentials` is scoped to `user_id` (individual user), not `company_id`. This means:
+- Credentials aren't shared across team members of the same company
+- The webhook has to do a convoluted lookup: `meta_credentials.user_id` → `users.company_id` to resolve the company
+- If the user who created the credential leaves, the integration breaks
+- Multiple companies can't each have their own Facebook/Instagram pages properly isolated
 
-Two issues identified in the `demo-session` edge function:
+## Plan: Make Meta Credentials Company-Scoped
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+### 1. Database Migration
+Add a `company_id` column to `meta_credentials`, backfill from `users.company_id`, then update RLS:
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+```sql
+-- Add company_id column
+ALTER TABLE public.meta_credentials ADD COLUMN company_id uuid REFERENCES public.companies(id) ON DELETE CASCADE;
 
-## Changes
+-- Backfill from users table
+UPDATE public.meta_credentials mc
+SET company_id = u.company_id
+FROM public.users u
+WHERE mc.user_id = u.id;
 
-### File: `supabase/functions/demo-session/index.ts`
+-- Make it NOT NULL after backfill
+ALTER TABLE public.meta_credentials ALTER COLUMN company_id SET NOT NULL;
 
-**1. Tighten handoff evaluation prompt**
+-- Drop old user-scoped RLS policies
+DROP POLICY IF EXISTS "Users can view own meta credentials" ON public.meta_credentials;
+DROP POLICY IF EXISTS "Users can insert own meta credentials" ON public.meta_credentials;
+DROP POLICY IF EXISTS "Users can update own meta credentials" ON public.meta_credentials;
+DROP POLICY IF EXISTS "Users can delete own meta credentials" ON public.meta_credentials;
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+-- New company-scoped RLS policies
+CREATE POLICY "Company members can view meta credentials"
+  ON public.meta_credentials FOR SELECT TO authenticated
+  USING (user_has_company_access_v2(company_id));
 
-**2. Create tickets and queue items on handoff**
+CREATE POLICY "Managers can insert meta credentials"
+  ON public.meta_credentials FOR INSERT TO authenticated
+  WITH CHECK (has_company_role(company_id, 'manager'::company_role));
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+CREATE POLICY "Managers can update meta credentials"
+  ON public.meta_credentials FOR UPDATE TO authenticated
+  USING (has_company_role(company_id, 'manager'::company_role));
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+CREATE POLICY "Owners can delete meta credentials"
+  ON public.meta_credentials FOR DELETE TO authenticated
+  USING (has_company_role(company_id, 'owner'::company_role));
+```
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+Keep the existing admin policy as-is.
 
-**3. Skip evaluation on short conversations**
+### 2. Edge Function: `meta-webhook/index.ts`
+- **Simplify `resolveCompanyId`**: Read `company_id` directly from `meta_credentials` instead of the multi-hop `user_id → users → company_id` lookup.
+- Update `getPageCredentials` to also return `company_id` in one query, eliminating the second call.
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+### 3. Frontend: `MetaIntegrationsPanel.tsx`
+- Use `useCompany()` to get `selectedCompany.id`
+- Insert with `company_id` instead of `user_id`
+- Filter queries by `company_id` so each company sees only its own credentials
+- Keep `user_id` as an audit field (who created it) but scope visibility to company
 
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
+### Files Changed
 
 | Action | File |
 |--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| Migration | Add `company_id` to `meta_credentials`, update RLS |
+| Edit | `supabase/functions/meta-webhook/index.ts` |
+| Edit | `src/components/admin/MetaIntegrationsPanel.tsx` |
 
