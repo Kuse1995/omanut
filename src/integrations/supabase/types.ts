@@ -2199,6 +2199,56 @@ export type Database = {
           },
         ]
       }
+      scheduled_posts: {
+        Row: {
+          company_id: string
+          content: string
+          created_at: string
+          created_by: string
+          error_message: string | null
+          id: string
+          meta_post_id: string | null
+          page_id: string
+          scheduled_time: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          content: string
+          created_at?: string
+          created_by: string
+          error_message?: string | null
+          id?: string
+          meta_post_id?: string | null
+          page_id: string
+          scheduled_time: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          content?: string
+          created_at?: string
+          created_by?: string
+          error_message?: string | null
+          id?: string
+          meta_post_id?: string | null
+          page_id?: string
+          scheduled_time?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_posts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       security_events: {
         Row: {
           company_id: string | null
