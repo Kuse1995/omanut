@@ -239,7 +239,7 @@ async function handleComment(
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
-  const { access_token, ai_system_prompt } = cred;
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
   const aiReply = await generateAIReply(messageText, commenterName, ai_system_prompt || '', 'comment');
   if (!aiReply) {
@@ -276,7 +276,6 @@ async function handleComment(
 
   // Save to DB
   try {
-    const companyId = await resolveCompanyId(supabase, pageId);
     if (companyId) {
       await saveInteraction(
         supabase,
