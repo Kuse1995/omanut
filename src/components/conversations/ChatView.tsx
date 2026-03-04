@@ -151,7 +151,7 @@ export const ChatView = ({
           <div className="relative">
             <Avatar className={cn(
               "h-8 w-8 ring-2",
-              isFacebook ? "ring-blue-500/30" : "ring-primary/20"
+              isFacebook ? "ring-blue-500/30" : isMessenger ? "ring-violet-500/30" : "ring-primary/20"
             )}>
               <AvatarFallback className={cn(
                 "font-semibold text-xs",
