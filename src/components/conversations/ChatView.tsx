@@ -136,7 +136,8 @@ export const ChatView = ({
     }
   };
 
-  const isFacebook = conversation.phone?.startsWith('fb:');
+  const isFacebook = conversation.phone?.startsWith('fb:') && !conversation.phone?.startsWith('fbdm:');
+  const isMessenger = conversation.phone?.startsWith('fbdm:');
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-background relative">
