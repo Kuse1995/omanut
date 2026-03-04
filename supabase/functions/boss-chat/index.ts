@@ -711,6 +711,23 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: []
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "schedule_facebook_post",
+          description: "Schedule a Facebook post for the company's page. Parse the boss's message to extract the post content and desired publish time. If the boss wants an image generated, set needs_image_generation to true.",
+          parameters: {
+            type: "object",
+            properties: {
+              content: { type: "string", description: "The text content of the Facebook post" },
+              scheduled_time: { type: "string", description: "ISO 8601 timestamp for when to publish (e.g., 2026-03-05T14:00:00Z)" },
+              image_url: { type: "string", description: "Optional URL of an existing image to attach" },
+              needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" }
+            },
+            required: ["content", "scheduled_time"]
+          }
+        }
       }
     ];
 
