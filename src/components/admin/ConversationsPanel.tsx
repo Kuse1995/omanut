@@ -165,7 +165,8 @@ export const ConversationsPanel = () => {
       filter === 'all' ? true :
       filter === 'unread' ? (conv.unread_count > 0) :
       filter === 'takeover' ? conv.human_takeover :
-      filter === 'facebook' ? (conv.phone?.startsWith('fb:')) : true;
+      filter === 'facebook' ? (conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) :
+      filter === 'messenger' ? (conv.phone?.startsWith('fbdm:')) : true;
     
     return matchesSearch && matchesFilter;
   });
