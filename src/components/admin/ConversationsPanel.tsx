@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { 
   Search, Send, MessageCircle, Bot, UserCog, 
-  Headset, TrendingUp, UserCircle, Loader2, ChevronDown
+  Headset, TrendingUp, UserCircle, Loader2, ChevronDown, Facebook
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
