@@ -1002,6 +1002,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                       const imgResult = await imgRes.json();
                       imageUrl = imgResult.imageUrl || null;
                       console.log('[BOSS-SCHEDULE] Generated image URL:', imageUrl);
+                      toolImageUrl = imageUrl;
                     }
                   } catch (imgErr) {
                     console.error('[BOSS-SCHEDULE] Image generation error:', imgErr);
