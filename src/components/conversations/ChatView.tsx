@@ -186,11 +186,13 @@ export const ChatView = ({
                   "gap-0.5 h-4 text-[9px] px-1.5 border-0",
                   isFacebook 
                     ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" 
+                    : isMessenger
+                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
                     : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
                 )}
               >
-                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
-                {isFacebook ? 'Facebook' : 'WhatsApp'}
+                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : isMessenger ? <MessageSquare className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
+                {isFacebook ? 'Facebook' : isMessenger ? 'Messenger' : 'WhatsApp'}
               </Badge>
               {conversation.human_takeover ? (
                 <Badge variant="secondary" className="gap-0.5 h-4 text-[9px] px-1.5">
