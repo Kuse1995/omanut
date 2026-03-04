@@ -10,6 +10,7 @@ import { ImageGenerationPanel } from './ImageGenerationPanel';
 import { MediaLibraryPanel } from './MediaLibraryPanel';
 import { TicketsPanel } from './TicketsPanel';
 import { AgentWorkspace } from './AgentWorkspace';
+import { MetaIntegrationsPanel } from './MetaIntegrationsPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
@@ -50,6 +51,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         return <BillingPanel />;
       case 'payments':
         return <PaymentsPanel />;
+      case 'meta-integrations':
+        return <MetaIntegrationsPanel />;
       default:
         return <ConversationsPanel />;
     }

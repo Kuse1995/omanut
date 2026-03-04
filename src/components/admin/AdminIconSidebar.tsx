@@ -18,6 +18,7 @@ import {
   Image,
   Ticket,
   Headset,
+  Share2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ const navItems = [
   { id: 'settings', icon: Settings, label: 'Company Settings' },
   { id: 'billing', icon: CreditCard, label: 'Billing & Credits' },
   { id: 'payments', icon: DollarSign, label: 'Products & Payments' },
+  { id: 'meta-integrations', icon: Share2, label: 'Meta Integrations' },
 ];
 
 export const AdminIconSidebar = ({ activeTab, onTabChange, onOpenCommandPalette }: AdminIconSidebarProps) => {

@@ -1816,6 +1816,39 @@ export type Database = {
         }
         Relationships: []
       }
+      meta_credentials: {
+        Row: {
+          access_token: string
+          ai_system_prompt: string | null
+          created_at: string | null
+          id: string
+          page_id: string
+          platform: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          access_token: string
+          ai_system_prompt?: string | null
+          created_at?: string | null
+          id?: string
+          page_id: string
+          platform: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          access_token?: string
+          ai_system_prompt?: string | null
+          created_at?: string | null
+          id?: string
+          page_id?: string
+          platform?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       onboarding_sessions: {
         Row: {
           collected_data: Json

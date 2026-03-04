@@ -1,71 +1,67 @@
 
 
-## Plan: Add Meta Integrations (Facebook/Instagram) Tab
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### 1. Database Migration
+## Problem Analysis
 
-Create `meta_credentials` table:
+Two issues identified in the `demo-session` edge function:
 
-```sql
-CREATE TABLE public.meta_credentials (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  page_id text NOT NULL,
-  access_token text NOT NULL,
-  platform text NOT NULL CHECK (platform IN ('facebook', 'instagram')),
-  ai_system_prompt text DEFAULT '',
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-ALTER TABLE public.meta_credentials ENABLE ROW LEVEL SECURITY;
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
--- Users can CRUD their own credentials
-CREATE POLICY "Users can view own meta credentials" ON public.meta_credentials
-  FOR SELECT TO authenticated USING (user_id = auth.uid());
+## Changes
 
-CREATE POLICY "Users can insert own meta credentials" ON public.meta_credentials
-  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+### File: `supabase/functions/demo-session/index.ts`
 
-CREATE POLICY "Users can update own meta credentials" ON public.meta_credentials
-  FOR UPDATE TO authenticated USING (user_id = auth.uid());
+**1. Tighten handoff evaluation prompt**
 
-CREATE POLICY "Users can delete own meta credentials" ON public.meta_credentials
-  FOR DELETE TO authenticated USING (user_id = auth.uid());
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
--- Platform admins full access
-CREATE POLICY "Admins full access to meta credentials" ON public.meta_credentials
-  FOR ALL TO authenticated USING (has_role(auth.uid(), 'admin'));
-```
+**2. Create tickets and queue items on handoff**
 
-### 2. Add Sidebar Nav Item
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-In `AdminIconSidebar.tsx`, add a new nav item:
-```ts
-{ id: 'meta-integrations', icon: Share2, label: 'Meta Integrations' }
-```
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-### 3. Create MetaIntegrationsPanel Component
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-New file: `src/components/admin/MetaIntegrationsPanel.tsx`
+**3. Skip evaluation on short conversations**
 
-A form with:
-- **Platform** select (Facebook / Instagram)
-- **Page ID** text input
-- **Access Token** password input
-- **AI System Prompt** textarea
-- Save button that upserts to `meta_credentials`
-- List of existing saved credentials with edit/delete
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-Uses `useQuery` to load existing credentials and `useMutation` to save/delete.
+### Summary of behavior after fix
 
-### 4. Wire into AdminContentTabs
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-Add `case 'meta-integrations'` in `AdminContentTabs.tsx` rendering `<MetaIntegrationsPanel />`.
+### Files
 
-### Files to Create/Modify
-- **New migration** -- `meta_credentials` table + RLS
-- **New component** -- `src/components/admin/MetaIntegrationsPanel.tsx`
-- **Edit** `src/components/admin/AdminIconSidebar.tsx` -- add nav item
-- **Edit** `src/components/admin/AdminContentTabs.tsx` -- add case
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
