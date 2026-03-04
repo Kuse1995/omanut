@@ -198,6 +198,44 @@ export const CompanySettingsPanel = () => {
             </CardContent>
           </Card>
 
+          {/* Payments Toggle */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShoppingCart className="h-4 w-4 text-primary" />
+                Payment Configuration
+              </CardTitle>
+              <CardDescription>
+                Disable in-chat payments for companies that sell products on external websites
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div>
+                  <p className="font-medium text-sm">Disable WhatsApp Payments</p>
+                  <p className="text-xs text-muted-foreground">
+                    Turn on if this company handles payments outside WhatsApp (e.g. website checkout)
+                  </p>
+                </div>
+                <Switch
+                  checked={selectedCompany.payments_disabled ?? false}
+                  onCheckedChange={async (checked) => {
+                    const { error } = await supabase
+                      .from('companies')
+                      .update({ payments_disabled: checked })
+                      .eq('id', selectedCompany.id);
+                    if (error) {
+                      toast.error('Failed to update payment setting');
+                    } else {
+                      toast.success(checked ? 'Payments disabled' : 'Payments enabled');
+                      refreshCompanies();
+                    }
+                  }}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           {/* SLA Configuration */}
           <Card>
             <CardHeader className="pb-3">
