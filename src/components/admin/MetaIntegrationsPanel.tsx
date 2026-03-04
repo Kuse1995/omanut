@@ -62,9 +62,10 @@ export const MetaIntegrationsPanel = () => {
           .eq('id', editingId);
         if (error) throw error;
       } else {
+        if (!selectedCompany?.id) throw new Error('No company selected');
         const { error } = await supabase
           .from('meta_credentials')
-          .insert({ ...form, user_id: user.id });
+          .insert({ ...form, user_id: user.id, company_id: selectedCompany.id });
         if (error) throw error;
       }
     },

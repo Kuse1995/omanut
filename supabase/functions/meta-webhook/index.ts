@@ -304,7 +304,7 @@ async function handleMessengerDM(
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
-  const { access_token, ai_system_prompt } = cred;
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
   const aiReply = await generateAIReply(messageText, 'Customer', ai_system_prompt || '', 'messenger');
   if (!aiReply) {
@@ -342,7 +342,6 @@ async function handleMessengerDM(
 
   // Save to DB
   try {
-    const companyId = await resolveCompanyId(supabase, pageId);
     if (companyId) {
       await saveInteraction(
         supabase,
