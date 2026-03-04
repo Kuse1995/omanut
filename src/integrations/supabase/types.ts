@@ -2207,6 +2207,7 @@ export type Database = {
           created_by: string
           error_message: string | null
           id: string
+          image_url: string | null
           meta_post_id: string | null
           page_id: string
           scheduled_time: string
@@ -2220,6 +2221,7 @@ export type Database = {
           created_by: string
           error_message?: string | null
           id?: string
+          image_url?: string | null
           meta_post_id?: string | null
           page_id: string
           scheduled_time: string
@@ -2233,6 +2235,7 @@ export type Database = {
           created_by?: string
           error_message?: string | null
           id?: string
+          image_url?: string | null
           meta_post_id?: string | null
           page_id?: string
           scheduled_time?: string
