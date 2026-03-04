@@ -103,8 +103,16 @@ export const ConversationItem = ({ conversation, isSelected, onClick }: Conversa
               {getInitials()}
             </AvatarFallback>
           </Avatar>
-          {/* Online status dot */}
-          <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full border-2 border-card" />
+          {/* Platform icon */}
+          {conversation.phone?.startsWith('fb:') ? (
+            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
+              <Facebook className="h-2.5 w-2.5 text-white" />
+            </div>
+          ) : (
+            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
+              <MessageCircle className="h-2.5 w-2.5 text-white" />
+            </div>
+          )}
         </div>
 
         {/* Content */}

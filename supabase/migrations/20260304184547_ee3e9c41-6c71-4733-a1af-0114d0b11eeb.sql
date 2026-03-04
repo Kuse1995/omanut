@@ -1,0 +1,1 @@
+ALTER TABLE public.conversations ADD COLUMN IF NOT EXISTS platform text NOT NULL DEFAULT 'whatsapp';

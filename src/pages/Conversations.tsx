@@ -65,7 +65,7 @@ const Conversations = () => {
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived, active_agent')
+      .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived, active_agent, platform')
       .eq('company_id', userData.company_id)
       .eq('archived', false)
       .order('pinned', { ascending: false })

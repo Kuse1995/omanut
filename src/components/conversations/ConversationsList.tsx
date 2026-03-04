@@ -128,6 +128,27 @@ export const ConversationsList = ({
             </span>
           )}
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onFilterChange('facebook')}
+          className={cn(
+            "flex-1 h-8 text-xs font-medium gap-1",
+            filter === 'facebook' && "bg-blue-600 text-white hover:bg-blue-700"
+          )}
+        >
+          <Facebook className="h-3 w-3" />
+          {facebookCount > 0 && (
+            <span className={cn(
+              "text-[10px] px-1.5 rounded-full",
+              filter === 'facebook' 
+                ? "bg-white/20" 
+                : "bg-blue-500/10 text-blue-600"
+            )}>
+              {facebookCount}
+            </span>
+          )}
+        </Button>
       </div>
 
       {/* Conversations List */}
