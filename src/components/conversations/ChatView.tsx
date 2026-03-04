@@ -136,29 +136,36 @@ export const ChatView = ({
     }
   };
 
-  const isFacebook = conversation.phone?.startsWith('fb:');
+  const isFacebook = conversation.phone?.startsWith('fb:') && !conversation.phone?.startsWith('fbdm:');
+  const isMessenger = conversation.phone?.startsWith('fbdm:');
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-background relative">
       {/* Header */}
       <div className={cn(
         "flex items-center justify-between px-3 py-2 border-b border-border backdrop-blur-sm",
-        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : "bg-card/80"
+        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : 
+        isMessenger ? "bg-violet-50/80 dark:bg-violet-950/30" : "bg-card/80"
       )}>
         <div className="flex items-center gap-2">
           <div className="relative">
             <Avatar className={cn(
               "h-8 w-8 ring-2",
-              isFacebook ? "ring-blue-500/30" : "ring-primary/20"
+              isFacebook ? "ring-blue-500/30" : isMessenger ? "ring-violet-500/30" : "ring-primary/20"
             )}>
               <AvatarFallback className={cn(
                 "font-semibold text-xs",
-                isFacebook ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-primary/10 text-primary"
+                isFacebook ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : 
+                isMessenger ? "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300" : "bg-primary/10 text-primary"
               )}>
                 {getInitials()}
               </AvatarFallback>
             </Avatar>
-            {isFacebook ? (
+            {isMessenger ? (
+              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
+                <MessageSquare className="h-2 w-2 text-white" />
+              </div>
+            ) : isFacebook ? (
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
                 <Facebook className="h-2 w-2 text-white" />
               </div>
@@ -179,11 +186,13 @@ export const ChatView = ({
                   "gap-0.5 h-4 text-[9px] px-1.5 border-0",
                   isFacebook 
                     ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" 
+                    : isMessenger
+                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
                     : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
                 )}
               >
-                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
-                {isFacebook ? 'Facebook' : 'WhatsApp'}
+                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : isMessenger ? <MessageSquare className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
+                {isFacebook ? 'Facebook' : isMessenger ? 'Messenger' : 'WhatsApp'}
               </Badge>
               {conversation.human_takeover ? (
                 <Badge variant="secondary" className="gap-0.5 h-4 text-[9px] px-1.5">
@@ -209,7 +218,7 @@ export const ChatView = ({
           >
             <Image className="h-4 w-4" />
           </Button>
-          {!isFacebook && (
+          {!isFacebook && !isMessenger && (
             <Button
               variant={conversation.human_takeover ? "destructive" : "default"}
               size="sm"
@@ -318,7 +327,16 @@ export const ChatView = ({
       )}
 
       {/* Input Area - Platform-adaptive */}
-      {isFacebook ? (
+      {isMessenger ? (
+        <div className="px-3 py-2 border-t border-border bg-violet-50/50 dark:bg-violet-950/20 text-center">
+          <div className="flex items-center justify-center gap-1.5">
+            <MessageSquare className="h-3.5 w-3.5 text-violet-500" />
+            <p className="text-xs text-muted-foreground">
+              Messenger DMs are handled automatically by AI. Replies are sent as private messages.
+            </p>
+          </div>
+        </div>
+      ) : isFacebook ? (
         <div className="px-3 py-2 border-t border-border bg-blue-50/50 dark:bg-blue-950/20 text-center">
           <div className="flex items-center justify-center gap-1.5">
             <Facebook className="h-3.5 w-3.5 text-blue-500" />

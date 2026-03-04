@@ -1,6 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, MessageCircle, Facebook } from 'lucide-react';
+import { Search, MessageCircle, Facebook, MessageSquare } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -25,8 +25,8 @@ interface ConversationsListProps {
   onSelectConversation: (id: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
-  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp';
-  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp') => void;
+  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp';
+  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp') => void;
 }
 
 export const ConversationsList = ({
@@ -47,15 +47,17 @@ export const ConversationsList = ({
       filter === 'all' ? true :
       filter === 'unread' ? (conv.unread_count > 0) :
       filter === 'takeover' ? conv.human_takeover :
-      filter === 'facebook' ? (conv.phone?.startsWith('fb:')) :
-      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:')) : true;
+      filter === 'facebook' ? (conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) :
+      filter === 'messenger' ? (conv.phone?.startsWith('fbdm:')) :
+      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) : true;
     
     return matchesSearch && matchesFilter;
   });
 
   const unreadCount = conversations.filter(c => c.unread_count > 0).length;
   const takeoverCount = conversations.filter(c => c.human_takeover).length;
-  const facebookCount = conversations.filter(c => c.phone?.startsWith('fb:')).length;
+  const facebookCount = conversations.filter(c => c.phone?.startsWith('fb:') && !c.phone?.startsWith('fbdm:')).length;
+  const messengerCount = conversations.filter(c => c.phone?.startsWith('fbdm:')).length;
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-border">
@@ -146,6 +148,27 @@ export const ConversationsList = ({
                 : "bg-blue-500/10 text-blue-600"
             )}>
               {facebookCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onFilterChange('messenger')}
+          className={cn(
+            "flex-1 h-8 text-xs font-medium gap-1",
+            filter === 'messenger' && "bg-violet-600 text-white hover:bg-violet-700"
+          )}
+        >
+          <MessageSquare className="h-3 w-3" />
+          {messengerCount > 0 && (
+            <span className={cn(
+              "text-[10px] px-1.5 rounded-full",
+              filter === 'messenger' 
+                ? "bg-white/20" 
+                : "bg-violet-500/10 text-violet-600"
+            )}>
+              {messengerCount}
             </span>
           )}
         </Button>

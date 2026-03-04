@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { 
   Search, Send, MessageCircle, Bot, UserCog, 
-  Headset, TrendingUp, UserCircle, Loader2, ChevronDown, Facebook
+  Headset, TrendingUp, UserCircle, Loader2, ChevronDown, Facebook, MessageSquare
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -44,7 +44,7 @@ export const ConversationsPanel = () => {
   const [loading, setLoading] = useState(true);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover' | 'facebook'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover' | 'facebook' | 'messenger'>('all');
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -165,7 +165,8 @@ export const ConversationsPanel = () => {
       filter === 'all' ? true :
       filter === 'unread' ? (conv.unread_count > 0) :
       filter === 'takeover' ? conv.human_takeover :
-      filter === 'facebook' ? (conv.phone?.startsWith('fb:')) : true;
+      filter === 'facebook' ? (conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) :
+      filter === 'messenger' ? (conv.phone?.startsWith('fbdm:')) : true;
     
     return matchesSearch && matchesFilter;
   });
@@ -282,6 +283,17 @@ export const ConversationsPanel = () => {
             >
               <Facebook className="h-3 w-3" />
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFilter('messenger')}
+              className={cn(
+                "flex-1 h-7 text-xs gap-1",
+                filter === 'messenger' && "bg-violet-600 text-white hover:bg-violet-700"
+              )}
+            >
+              <MessageSquare className="h-3 w-3" />
+            </Button>
           </div>
 
           {/* List */}
@@ -308,7 +320,11 @@ export const ConversationsPanel = () => {
                           {getInitials(conv)}
                         </AvatarFallback>
                       </Avatar>
-                      {conv.phone?.startsWith('fb:') ? (
+                      {conv.phone?.startsWith('fbdm:') ? (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
+                          <MessageSquare className="h-2.5 w-2.5 text-white" />
+                        </div>
+                      ) : conv.phone?.startsWith('fb:') ? (
                         <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
                           <Facebook className="h-2.5 w-2.5 text-white" />
                         </div>
