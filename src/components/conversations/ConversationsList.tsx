@@ -25,8 +25,8 @@ interface ConversationsListProps {
   onSelectConversation: (id: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
-  filter: 'all' | 'unread' | 'takeover';
-  onFilterChange: (filter: 'all' | 'unread' | 'takeover') => void;
+  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp';
+  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'whatsapp') => void;
 }
 
 export const ConversationsList = ({
