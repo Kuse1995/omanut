@@ -524,6 +524,7 @@ export type Database = {
           payment_number_airtel: string | null
           payment_number_mtn: string | null
           payment_number_zamtel: string | null
+          payments_disabled: boolean
           quick_reference_info: string | null
           service_locations: string | null
           services: string | null
@@ -559,6 +560,7 @@ export type Database = {
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
           payment_number_zamtel?: string | null
+          payments_disabled?: boolean
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null
@@ -594,6 +596,7 @@ export type Database = {
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
           payment_number_zamtel?: string | null
+          payments_disabled?: boolean
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null

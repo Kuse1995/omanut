@@ -1,0 +1,1 @@
+ALTER TABLE public.companies ADD COLUMN payments_disabled boolean NOT NULL DEFAULT false;
