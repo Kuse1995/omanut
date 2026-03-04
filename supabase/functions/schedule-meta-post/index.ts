@@ -105,22 +105,45 @@ serve(async (req) => {
     // Convert to Unix timestamp
     const unixTimestamp = Math.floor(scheduledDate.getTime() / 1000);
 
-    // Schedule on Facebook
-    const fbResponse = await fetch(
-      `https://graph.facebook.com/v25.0/${post.page_id}/feed`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${cred.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: post.content,
-          published: false,
-          scheduled_publish_time: unixTimestamp,
-        }),
-      }
-    );
+    // Schedule on Facebook – branch based on image
+    let fbResponse: Response;
+
+    if (post.image_url) {
+      // Photo post via /photos endpoint
+      fbResponse = await fetch(
+        `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${cred.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            url: post.image_url,
+            caption: post.content,
+            published: false,
+            scheduled_publish_time: unixTimestamp,
+          }),
+        }
+      );
+    } else {
+      // Text-only post via /feed endpoint
+      fbResponse = await fetch(
+        `https://graph.facebook.com/v25.0/${post.page_id}/feed`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${cred.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: post.content,
+            published: false,
+            scheduled_publish_time: unixTimestamp,
+          }),
+        }
+      );
+    }
 
     const fbResult = await fbResponse.json();
 
