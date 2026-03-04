@@ -161,7 +161,11 @@ export const ChatView = ({
                 {getInitials()}
               </AvatarFallback>
             </Avatar>
-            {isFacebook ? (
+            {isMessenger ? (
+              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
+                <MessageSquare className="h-2 w-2 text-white" />
+              </div>
+            ) : isFacebook ? (
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
                 <Facebook className="h-2 w-2 text-white" />
               </div>
