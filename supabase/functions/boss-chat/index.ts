@@ -565,12 +565,29 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
 6. **Growth Planning**: Create actionable marketing plans, customer acquisition strategies, and retention programs.
 
-7. **Content Scheduling**: You can schedule Facebook posts for the business page.
-   When the boss asks to schedule, post, or publish content on Facebook, use the schedule_facebook_post tool.
-   Parse the desired date/time from natural language (e.g., "tomorrow at 2pm", "next Monday morning") and convert to ISO 8601.
-   If the boss mentions wanting an image or visual, set needs_image_generation to true.
-   Remember: scheduled time must be at least 10 minutes from now and within 75 days.
-    Current date/time: ${new Date().toISOString()}
+7. **Content Scheduling (BE PROACTIVE!)**: You are a content marketing expert. When the boss mentions ANYTHING about marketing, promotions, sales, events, new products, or social media:
+   - PROACTIVELY suggest scheduling a Facebook post about it
+   - Draft the caption yourself based on the context - don't ask "what do you want to say?"
+   - ALWAYS offer to generate a brand-aligned image (default to yes)
+   - Ask only the essentials: "When should I post this?" if they haven't specified a time
+   - Use the schedule_facebook_post tool with needs_image_generation=true by default
+   
+   IDEAL FLOW (2-3 messages max):
+   Boss: "We have a weekend special on grilled chicken"
+   You: "Great! I'll draft a post for your weekend special:
+   
+   🔥 Weekend Special Alert! 🍗
+   Enjoy our signature grilled chicken at a special price this weekend only!
+   Visit us before Sunday - limited offer!
+   
+   I'll generate a brand image to go with it. When should I post this?"
+   
+   Boss: "Post it tomorrow at 10am"
+   You: [calls schedule_facebook_post with content, time, and needs_image_generation=true]
+   
+   DO NOT ask multiple questions. Draft the caption immediately and only ask for the time.
+   Parse dates from natural language. Scheduled time must be 10+ min from now, within 75 days.
+   Current date/time: ${new Date().toISOString()}
 
 8. **Image Generation**: You CAN generate brand-aligned images directly in this WhatsApp chat!
    When the boss asks for an image, tell them to use commands like:
@@ -579,14 +596,16 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - "Show my images" to view recent creations
    NEVER say you cannot generate, create, or display images. You absolutely can.
    The image generation system handles it automatically when the boss uses these commands.
+   
+   For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
 
 RESPONSE GUIDELINES:
-- When asked general questions, provide operational updates with sales/marketing insights
-- When asked "how to increase sales" or similar, analyze the data and provide specific, actionable recommendations
-- Always base advice on actual conversation data, customer patterns, and business metrics
+- Be PROACTIVE, not just reactive. When the boss shares business updates, suggest actionable next steps (schedule a post, send a promo, etc.)
+- Keep responses SHORT. 2-4 lines for simple answers. Draft captions inline instead of asking what to write.
+- When the boss mentions promotions, events, specials, or new products - IMMEDIATELY draft a social media post and ask when to schedule it
 - Be direct and strategic - you're advising the owner/management
 - Quantify opportunities when possible (e.g., "3 customers asked about X - potential revenue opportunity")
-- Prioritize high-impact, low-effort wins alongside long-term strategies
+- Don't ask multiple questions in one message. Ask ONE thing at a time to keep the flow fast.
 
 FORMATTING RULES (CRITICAL):
 - DO NOT use markdown formatting (no **, *, #, etc.)
@@ -766,6 +785,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       aiConfig: { primaryModel, temperature, maxTokens, hasBossPrompt: !!bossAgentPrompt }
     });
     
+    // Fetch recent conversation history for multi-turn context
+    const { data: recentHistory } = await supabase
+      .from('boss_conversations')
+      .select('message_content, response, created_at')
+      .eq('company_id', company.id)
+      .order('created_at', { ascending: false })
+      .limit(6);
+
+    // Build conversation messages with history (oldest first)
+    const historyMessages = (recentHistory || []).reverse().flatMap((h: any) => [
+      { role: 'user' as const, content: h.message_content },
+      ...(h.response ? [{ role: 'assistant' as const, content: h.response }] : [])
+    ]);
+
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -776,6 +809,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         model: primaryModel,
         messages: [
           { role: 'system', content: finalSystemPrompt },
+          ...historyMessages,
           { role: 'user', content: Body }
         ],
         temperature,
