@@ -106,7 +106,7 @@ async function processWebhook(body: any) {
       console.log(`Processing comment ${commentId}: "${messageText}" from ${commenterName}`);
 
       try {
-        await handleComment(supabase, pageId, commentId, messageText, commenterName);
+        await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
       } catch (err) {
         console.error(`Error handling comment ${commentId}:`, err);
       }
