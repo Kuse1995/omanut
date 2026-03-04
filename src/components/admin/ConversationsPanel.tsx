@@ -271,6 +271,17 @@ export const ConversationsPanel = () => {
                 {f === 'takeover' ? 'Human' : f}
               </Button>
             ))}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFilter('facebook')}
+              className={cn(
+                "flex-1 h-7 text-xs gap-1",
+                filter === 'facebook' && "bg-blue-600 text-white hover:bg-blue-700"
+              )}
+            >
+              <Facebook className="h-3 w-3" />
+            </Button>
           </div>
 
           {/* List */}
