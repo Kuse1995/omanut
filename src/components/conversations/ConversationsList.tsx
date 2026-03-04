@@ -151,6 +151,27 @@ export const ConversationsList = ({
             </span>
           )}
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onFilterChange('messenger')}
+          className={cn(
+            "flex-1 h-8 text-xs font-medium gap-1",
+            filter === 'messenger' && "bg-violet-600 text-white hover:bg-violet-700"
+          )}
+        >
+          <MessageSquare className="h-3 w-3" />
+          {messengerCount > 0 && (
+            <span className={cn(
+              "text-[10px] px-1.5 rounded-full",
+              filter === 'messenger' 
+                ? "bg-white/20" 
+                : "bg-violet-500/10 text-violet-600"
+            )}>
+              {messengerCount}
+            </span>
+          )}
+        </Button>
       </div>
 
       {/* Conversations List */}
