@@ -187,13 +187,16 @@ export const MetaIntegrationsPanel = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>AI System Prompt</Label>
+              <Label>Additional Instructions (Optional)</Label>
               <Textarea
-                placeholder="Enter the system prompt the AI should use when replying on this page..."
+                placeholder="Leave empty to use your company's AI settings and knowledge base automatically. Add text here only for page-specific overrides..."
                 value={form.ai_system_prompt}
                 onChange={(e) => setForm({ ...form, ai_system_prompt: e.target.value })}
                 rows={4}
               />
+              <p className="text-xs text-muted-foreground">
+                Your company's system instructions, QA style, banned topics, and knowledge base are loaded automatically. Use this field only for page-specific additions.
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
