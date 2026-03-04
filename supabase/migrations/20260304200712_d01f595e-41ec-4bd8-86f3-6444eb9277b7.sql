@@ -1,0 +1,1 @@
+ALTER TABLE public.scheduled_posts ADD COLUMN image_url text;
