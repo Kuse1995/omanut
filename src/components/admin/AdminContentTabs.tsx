@@ -11,6 +11,7 @@ import { MediaLibraryPanel } from './MediaLibraryPanel';
 import { TicketsPanel } from './TicketsPanel';
 import { AgentWorkspace } from './AgentWorkspace';
 import { MetaIntegrationsPanel } from './MetaIntegrationsPanel';
+import { ContentSchedulerPanel } from './ContentSchedulerPanel';
 
 interface AdminContentTabsProps {
   activeTab: string;
