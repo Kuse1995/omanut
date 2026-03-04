@@ -120,6 +120,7 @@ async function handleComment(
   commentId: string,
   messageText: string,
   commenterName: string,
+  commenterFbId: string,
 ) {
   // 1. Look up credentials for this page
   const { data: cred, error: credError } = await supabase
