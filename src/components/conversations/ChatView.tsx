@@ -144,7 +144,8 @@ export const ChatView = ({
       {/* Header */}
       <div className={cn(
         "flex items-center justify-between px-3 py-2 border-b border-border backdrop-blur-sm",
-        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : "bg-card/80"
+        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : 
+        isMessenger ? "bg-violet-50/80 dark:bg-violet-950/30" : "bg-card/80"
       )}>
         <div className="flex items-center gap-2">
           <div className="relative">
