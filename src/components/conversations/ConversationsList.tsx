@@ -55,6 +55,7 @@ export const ConversationsList = ({
 
   const unreadCount = conversations.filter(c => c.unread_count > 0).length;
   const takeoverCount = conversations.filter(c => c.human_takeover).length;
+  const facebookCount = conversations.filter(c => c.phone?.startsWith('fb:')).length;
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-border">
