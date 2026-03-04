@@ -138,10 +138,12 @@ async function processWebhook(body: any) {
 
 // ── Get page credentials (includes company_id) ──
 async function getPageCredentials(supabase: any, pageId: string) {
+  // Prefer credentials with a company_id (fully configured)
   const { data: cred, error } = await supabase
     .from('meta_credentials')
     .select('access_token, ai_system_prompt, company_id')
     .eq('page_id', pageId)
+    .not('company_id', 'is', null)
     .limit(1)
     .maybeSingle();
 
@@ -149,9 +151,25 @@ async function getPageCredentials(supabase: any, pageId: string) {
     console.error('Error fetching meta_credentials:', error);
     return null;
   }
+
+  // Fallback: try without company_id filter for backward compatibility
   if (!cred) {
-    console.warn(`No meta_credentials found for page_id: ${pageId}`);
-    return null;
+    const { data: fallback, error: fbErr } = await supabase
+      .from('meta_credentials')
+      .select('access_token, ai_system_prompt, company_id')
+      .eq('page_id', pageId)
+      .limit(1)
+      .maybeSingle();
+
+    if (fbErr) {
+      console.error('Error fetching fallback meta_credentials:', fbErr);
+      return null;
+    }
+    if (!fallback) {
+      console.warn(`No meta_credentials found for page_id: ${pageId}`);
+      return null;
+    }
+    return fallback;
   }
   return cred;
 }
