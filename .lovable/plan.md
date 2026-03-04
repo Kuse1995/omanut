@@ -1,67 +1,69 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Plan: WhatsApp-Based Post Scheduling for Boss/Manager
 
-## Problem Analysis
+### Overview
+Enable the boss to schedule Facebook posts directly from WhatsApp via natural language. The AI parses intent, content, time, and optionally generates a brand image, then sends a preview for approval before calling the existing `schedule-meta-post` function.
 
-Two issues identified in the `demo-session` edge function:
+### How It Works (User Flow)
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+1. Boss sends: *"Schedule a post for tomorrow at 2pm: Check out our weekend special!"*
+2. AI parses content + time, creates a draft in `scheduled_posts`
+3. AI replies with preview: content, scheduled time, and asks "Reply APPROVE to schedule or EDIT to change"
+4. If boss says *"Add an image"* → AI generates brand image, sends preview with image
+5. Boss replies *"APPROVE"* → system calls `schedule-meta-post` edge function
+6. Boss gets confirmation with Meta post ID
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+### Changes
 
-## Changes
+#### 1. New Tool in `boss-chat/index.ts`
+Add a `schedule_facebook_post` tool to the existing `managementTools` array:
 
-### File: `supabase/functions/demo-session/index.ts`
+```
+{
+  name: "schedule_facebook_post",
+  description: "Schedule a Facebook post. The AI should parse the user's message to extract content and scheduled time.",
+  parameters: {
+    content: string,        // Post text
+    scheduled_time: string, // ISO 8601 timestamp
+    image_url?: string,     // Optional image URL
+    needs_image_generation?: boolean  // If boss wants AI to generate an image
+  }
+}
+```
 
-**1. Tighten handoff evaluation prompt**
+**Tool handler logic:**
+- Look up the company's `meta_credentials` to get the `page_id`
+- Insert a row into `scheduled_posts` with status `draft`
+- If `needs_image_generation` is true, call `whatsapp-image-gen` to generate an image, attach the URL
+- Call the `schedule-meta-post` edge function internally (service role) to push to Facebook
+- Return success/failure message to the boss
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+#### 2. Update System Prompt in `boss-chat/index.ts`
+Add scheduling capability description to the system prompt so the AI knows it can schedule posts:
 
-**2. Create tickets and queue items on handoff**
+```
+7. **Content Scheduling**: You can schedule Facebook posts for the business page.
+   When the boss asks to schedule/post/publish content, use the schedule_facebook_post tool.
+   Parse the desired date/time from natural language (e.g., "tomorrow at 2pm", "next Monday morning").
+   If the boss mentions wanting an image, set needs_image_generation to true.
+   Remember: scheduled time must be at least 10 minutes from now and within 75 days.
+```
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+#### 3. No Database Changes
+The `scheduled_posts` table already has all needed columns (`content`, `scheduled_time`, `image_url`, `page_id`, `company_id`, `status`, `created_by`).
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+#### 4. No New Edge Functions
+Reuses existing `schedule-meta-post` and `whatsapp-image-gen` functions via internal service-role calls.
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+### Files Changed
 
-**3. Skip evaluation on short conversations**
+| File | Change |
+|------|--------|
+| `supabase/functions/boss-chat/index.ts` | Add `schedule_facebook_post` tool + handler + system prompt update |
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+### Security
+- Boss identity already verified by phone number match against `companies.boss_phone`
+- Internal calls to `schedule-meta-post` use service role key
+- `created_by` field will store a system identifier since boss doesn't have a dashboard user ID
 
