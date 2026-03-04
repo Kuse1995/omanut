@@ -150,7 +150,11 @@ async function handleComment(
 
   console.log(`AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
 
-  // 3. Post reply to Facebook Graph API
+  // 3. Wait 15 seconds to appear more human and avoid Meta bot filters
+  console.log(`Waiting 15 seconds before posting reply to ${commentId}...`);
+  await new Promise(resolve => setTimeout(resolve, 15000));
+
+  // 4. Post reply to Facebook Graph API
   const fbResponse = await fetch(
     `https://graph.facebook.com/v25.0/${commentId}/comments`,
     {
