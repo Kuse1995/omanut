@@ -1090,7 +1090,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       });
 
     // Return JSON response (not TwiML) for whatsapp-messages to handle
-    return new Response(JSON.stringify({ response: aiResponse }), {
+    return new Response(JSON.stringify({ response: aiResponse, ...(toolImageUrl ? { imageUrl: toolImageUrl } : {}) }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
