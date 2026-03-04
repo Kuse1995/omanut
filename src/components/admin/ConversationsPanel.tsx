@@ -44,7 +44,7 @@ export const ConversationsPanel = () => {
   const [loading, setLoading] = useState(true);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover' | 'facebook'>('all');
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
