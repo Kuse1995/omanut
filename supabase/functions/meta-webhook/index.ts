@@ -98,7 +98,7 @@ async function processWebhook(body: any) {
           continue;
         }
 
-        console.log(`Processing comment ${commentId}: "${messageText}" from ${commenterName}`);
+        console.log(`Processing comment ${commentId}: \"${messageText}\" from ${commenterName}`);
 
         try {
           await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
@@ -111,9 +111,7 @@ async function processWebhook(body: any) {
     // ── Handle Messenger DMs ──
     if (entry.messaging) {
       for (const event of entry.messaging) {
-        // Skip non-text events (read receipts, deliveries, etc.)
         if (!event.message?.text) continue;
-        // Skip echo messages (our own outgoing messages)
         if (event.message?.is_echo) continue;
 
         const senderId = event.sender?.id;
@@ -121,13 +119,12 @@ async function processWebhook(body: any) {
 
         if (!senderId || !messageText) continue;
 
-        // Don't reply to ourselves
         if (senderId === pageId) {
           console.log('Skipping own message from page');
           continue;
         }
 
-        console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
+        console.log(`Processing Messenger DM from ${senderId}: \"${messageText.slice(0, 80)}\"`);
 
         try {
           await handleMessengerDM(supabase, pageId, senderId, messageText);
@@ -157,6 +154,95 @@ async function getPageCredentials(supabase: any, pageId: string) {
     return null;
   }
   return cred;
+}
+
+// ── Build composite system prompt from company config + knowledge base ──
+async function buildCompanySystemPrompt(
+  supabase: any,
+  companyId: string,
+  credentialPrompt: string | null,
+  context: 'comment' | 'messenger',
+): Promise<string> {
+  const contextLabel = context === 'messenger'
+    ? 'Facebook Messenger direct messages'
+    : 'Facebook comments on posts';
+
+  // Fetch company info, AI overrides, and documents in parallel
+  const [companyResult, overridesResult, docsResult] = await Promise.all([
+    supabase
+      .from('companies')
+      .select('name, business_type, services, quick_reference_info')
+      .eq('id', companyId)
+      .single(),
+    supabase
+      .from('company_ai_overrides')
+      .select('system_instructions, qa_style, banned_topics')
+      .eq('company_id', companyId)
+      .maybeSingle(),
+    supabase
+      .from('company_documents')
+      .select('filename, parsed_content')
+      .eq('company_id', companyId)
+      .not('parsed_content', 'is', null),
+  ]);
+
+  const company = companyResult.data;
+  const overrides = overridesResult.data;
+  const docs = docsResult.data || [];
+
+  const parts: string[] = [];
+
+  // 1. Role & context
+  parts.push(`You are a helpful AI assistant replying to ${contextLabel} on behalf of a business. Keep replies friendly, concise, and professional.`);
+
+  // 2. Company identity
+  if (company) {
+    const identity = [`Company: ${company.name}`];
+    if (company.business_type) identity.push(`Business type: ${company.business_type}`);
+    if (company.services) identity.push(`Services: ${company.services}`);
+    parts.push(`=== COMPANY IDENTITY ===\n${identity.join('\n')}`);
+  }
+
+  // 3. AI overrides
+  if (overrides) {
+    if (overrides.system_instructions?.trim()) {
+      parts.push(`=== CORE INSTRUCTIONS ===\n${overrides.system_instructions}`);
+    }
+    if (overrides.qa_style?.trim()) {
+      parts.push(`=== RESPONSE STYLE ===\n${overrides.qa_style}`);
+    }
+    if (overrides.banned_topics?.trim()) {
+      parts.push(`=== RESTRICTED TOPICS (never discuss) ===\n${overrides.banned_topics}`);
+    }
+  }
+
+  // 4. Knowledge base
+  if (company?.quick_reference_info?.trim()) {
+    parts.push(`=== KNOWLEDGE BASE ===\n${company.quick_reference_info}`);
+  }
+
+  // 5. Document library (truncated to avoid token overflow)
+  if (docs.length > 0) {
+    const docContent = docs
+      .filter((d: any) => d.parsed_content?.trim())
+      .map((d: any) => `--- ${d.filename} ---\n${d.parsed_content.slice(0, 2000)}`)
+      .join('\n\n');
+    if (docContent) {
+      parts.push(`=== DOCUMENT LIBRARY ===\n${docContent}`);
+    }
+  }
+
+  // 6. Page-specific override (optional)
+  if (credentialPrompt?.trim()) {
+    parts.push(`=== PAGE-SPECIFIC INSTRUCTIONS ===\n${credentialPrompt}`);
+  }
+
+  // 7. Context-specific guidance
+  if (context === 'comment') {
+    parts.push('Do not use hashtags unless relevant. Keep replies public-appropriate and concise.');
+  }
+
+  return parts.join('\n\n');
 }
 
 // ── Upsert conversation & save messages ──
@@ -241,13 +327,18 @@ async function handleComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  const aiReply = await generateAIReply(messageText, commenterName, ai_system_prompt || '', 'comment');
+  // Build composite prompt from company config + knowledge base
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'comment')
+    : ai_system_prompt || '';
+
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment');
   if (!aiReply) {
     console.error('AI returned empty reply, skipping');
     return;
   }
 
-  console.log(`AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
+  console.log(`AI reply for ${commentId}: \"${aiReply.slice(0, 100)}...\"`);
 
   // Wait 15 seconds to appear more human
   console.log(`Waiting 15 seconds before posting reply to ${commentId}...`);
@@ -306,15 +397,19 @@ async function handleMessengerDM(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  const aiReply = await generateAIReply(messageText, 'Customer', ai_system_prompt || '', 'messenger');
+  // Build composite prompt from company config + knowledge base
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
+    : ai_system_prompt || '';
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'messenger');
   if (!aiReply) {
     console.error('AI returned empty reply for Messenger DM, skipping');
     return;
   }
 
-  console.log(`Messenger AI reply for ${senderId}: "${aiReply.slice(0, 100)}..."`);
+  console.log(`Messenger AI reply for ${senderId}: \"${aiReply.slice(0, 100)}...\"`);
 
-  // No delay for DMs — Messenger expects fast replies
   const messengerResponse = await fetch(
     `https://graph.facebook.com/v25.0/me/messages`,
     {
@@ -373,13 +468,9 @@ async function generateAIReply(
     return null;
   }
 
-  const defaultSystemPrompt = context === 'messenger'
-    ? `You are a helpful customer service assistant replying to Facebook Messenger direct messages on behalf of a business. Keep replies friendly, concise, and professional.`
-    : `You are a helpful social media assistant replying to Facebook comments on behalf of a business page. Keep replies friendly, concise, and professional. Do not use hashtags unless relevant.`;
-
   const userPrompt = context === 'messenger'
-    ? `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`
-    : `A user named "${commenterName}" commented on our Facebook post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`;
+    ? `A customer sent a direct message on Facebook Messenger:\n\n\"${userMessage}\"\n\nWrite a short, helpful reply.`
+    : `A user named \"${commenterName}\" commented on our Facebook post:\n\n\"${userMessage}\"\n\nWrite a short, helpful reply.`;
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
@@ -390,7 +481,7 @@ async function generateAIReply(
     body: JSON.stringify({
       model: 'google/gemini-3-flash-preview',
       messages: [
-        { role: 'system', content: systemPrompt || defaultSystemPrompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       max_tokens: 300,
