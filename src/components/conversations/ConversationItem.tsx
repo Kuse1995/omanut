@@ -1,6 +1,6 @@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { UserCog, Bot, Pin, Headset, TrendingUp, UserCircle, Facebook, MessageCircle } from 'lucide-react';
+import { UserCog, Bot, Pin, Headset, TrendingUp, UserCircle, Facebook, MessageCircle, MessageSquare } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
