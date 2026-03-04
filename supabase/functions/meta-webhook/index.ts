@@ -63,9 +63,7 @@ serve(async (req) => {
 
     console.log('Facebook verification request received:', { mode, token: token ? '[REDACTED]' : null, challenge });
 
-    const verifyToken = Deno.env.get('META_VERIFY_TOKEN');
-
-    if (mode === 'subscribe' && token === verifyToken) {
+    if (mode === 'subscribe' && token === 'Omanut_Secure_123') {
       console.log('Verification successful, returning challenge');
       return new Response(challenge, {
         status: 200,
