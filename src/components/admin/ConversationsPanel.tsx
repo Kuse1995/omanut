@@ -283,6 +283,17 @@ export const ConversationsPanel = () => {
             >
               <Facebook className="h-3 w-3" />
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setFilter('messenger')}
+              className={cn(
+                "flex-1 h-7 text-xs gap-1",
+                filter === 'messenger' && "bg-violet-600 text-white hover:bg-violet-700"
+              )}
+            >
+              <MessageSquare className="h-3 w-3" />
+            </Button>
           </div>
 
           {/* List */}
