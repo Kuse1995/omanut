@@ -136,24 +136,55 @@ export const ChatView = ({
     }
   };
 
+  const isFacebook = conversation.phone?.startsWith('fb:');
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-background relative">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/80 backdrop-blur-sm">
+      <div className={cn(
+        "flex items-center justify-between px-3 py-2 border-b border-border backdrop-blur-sm",
+        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : "bg-card/80"
+      )}>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Avatar className="h-8 w-8 ring-2 ring-primary/20">
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+            <Avatar className={cn(
+              "h-8 w-8 ring-2",
+              isFacebook ? "ring-blue-500/30" : "ring-primary/20"
+            )}>
+              <AvatarFallback className={cn(
+                "font-semibold text-xs",
+                isFacebook ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : "bg-primary/10 text-primary"
+              )}>
                 {getInitials()}
               </AvatarFallback>
             </Avatar>
-            <div className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 bg-emerald-500 rounded-full border-2 border-card" />
+            {isFacebook ? (
+              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
+                <Facebook className="h-2 w-2 text-white" />
+              </div>
+            ) : (
+              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
+                <MessageCircleIcon className="h-2 w-2 text-white" />
+              </div>
+            )}
           </div>
           <div>
             <h3 className="font-semibold text-xs">
-              {conversation.customer_name || conversation.phone || 'Unknown'}
+              {conversation.customer_name || (isFacebook ? 'Facebook User' : conversation.phone) || 'Unknown'}
             </h3>
             <div className="flex items-center gap-1.5">
+              <Badge 
+                variant="outline" 
+                className={cn(
+                  "gap-0.5 h-4 text-[9px] px-1.5 border-0",
+                  isFacebook 
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" 
+                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                )}
+              >
+                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
+                {isFacebook ? 'Facebook' : 'WhatsApp'}
+              </Badge>
               {conversation.human_takeover ? (
                 <Badge variant="secondary" className="gap-0.5 h-4 text-[9px] px-1.5">
                   <UserCog className="h-2.5 w-2.5" />
@@ -178,14 +209,16 @@ export const ChatView = ({
           >
             <Image className="h-4 w-4" />
           </Button>
-          <Button
-            variant={conversation.human_takeover ? "destructive" : "default"}
-            size="sm"
-            onClick={onToggleTakeover}
-            className="font-medium h-7 text-xs px-2"
-          >
-            {conversation.human_takeover ? "Release" : "Take Over"}
-          </Button>
+          {!isFacebook && (
+            <Button
+              variant={conversation.human_takeover ? "destructive" : "default"}
+              size="sm"
+              onClick={onToggleTakeover}
+              className="font-medium h-7 text-xs px-2"
+            >
+              {conversation.human_takeover ? "Release" : "Take Over"}
+            </Button>
+          )}
         </div>
       </div>
 
