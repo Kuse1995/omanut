@@ -327,7 +327,16 @@ export const ChatView = ({
       )}
 
       {/* Input Area - Platform-adaptive */}
-      {isFacebook ? (
+      {isMessenger ? (
+        <div className="px-3 py-2 border-t border-border bg-violet-50/50 dark:bg-violet-950/20 text-center">
+          <div className="flex items-center justify-center gap-1.5">
+            <MessageSquare className="h-3.5 w-3.5 text-violet-500" />
+            <p className="text-xs text-muted-foreground">
+              Messenger DMs are handled automatically by AI. Replies are sent as private messages.
+            </p>
+          </div>
+        </div>
+      ) : isFacebook ? (
         <div className="px-3 py-2 border-t border-border bg-blue-50/50 dark:bg-blue-950/20 text-center">
           <div className="flex items-center justify-center gap-1.5">
             <Facebook className="h-3.5 w-3.5 text-blue-500" />
