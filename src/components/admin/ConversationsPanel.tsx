@@ -296,17 +296,28 @@ export const ConversationsPanel = () => {
                     selectedConversationId === conv.id && "bg-accent border-l-2 border-l-primary"
                   )}
                 >
-                  <div className="flex gap-3">
-                    <Avatar className="h-10 w-10 shrink-0">
-                      <AvatarFallback className={cn(
-                        "text-sm font-semibold",
-                        selectedConversationId === conv.id 
-                          ? "bg-primary text-primary-foreground" 
-                          : "bg-primary/10 text-primary"
-                      )}>
-                        {getInitials(conv)}
-                      </AvatarFallback>
-                    </Avatar>
+                    <div className="flex gap-3">
+                    <div className="relative shrink-0">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className={cn(
+                          "text-sm font-semibold",
+                          selectedConversationId === conv.id 
+                            ? "bg-primary text-primary-foreground" 
+                            : "bg-primary/10 text-primary"
+                        )}>
+                          {getInitials(conv)}
+                        </AvatarFallback>
+                      </Avatar>
+                      {conv.phone?.startsWith('fb:') ? (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
+                          <Facebook className="h-2.5 w-2.5 text-white" />
+                        </div>
+                      ) : (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
+                          <MessageCircle className="h-2.5 w-2.5 text-white" />
+                        </div>
+                      )}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-0.5">
                         <span className="font-medium text-sm truncate">
