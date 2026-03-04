@@ -36,15 +36,18 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const { data: credentials, isLoading } = useQuery({
-    queryKey: ['meta-credentials'],
+    queryKey: ['meta-credentials', selectedCompany?.id],
     queryFn: async () => {
+      if (!selectedCompany?.id) return [];
       const { data, error } = await supabase
         .from('meta_credentials')
         .select('*')
+        .eq('company_id', selectedCompany.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as MetaCredential[];
     },
+    enabled: !!selectedCompany?.id,
   });
 
   const saveMutation = useMutation({
