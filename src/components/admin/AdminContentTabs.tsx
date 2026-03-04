@@ -54,6 +54,8 @@ export const AdminContentTabs = ({ activeTab }: AdminContentTabsProps) => {
         return <PaymentsPanel />;
       case 'meta-integrations':
         return <MetaIntegrationsPanel />;
+      case 'content-scheduler':
+        return <ContentSchedulerPanel />;
       default:
         return <ConversationsPanel />;
     }
