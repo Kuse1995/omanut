@@ -785,6 +785,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       aiConfig: { primaryModel, temperature, maxTokens, hasBossPrompt: !!bossAgentPrompt }
     });
     
+    // Fetch recent conversation history for multi-turn context
+    const { data: recentHistory } = await supabase
+      .from('boss_conversations')
+      .select('message_content, response, created_at')
+      .eq('company_id', company.id)
+      .order('created_at', { ascending: false })
+      .limit(6);
+
+    // Build conversation messages with history (oldest first)
+    const historyMessages = (recentHistory || []).reverse().flatMap((h: any) => [
+      { role: 'user' as const, content: h.message_content },
+      ...(h.response ? [{ role: 'assistant' as const, content: h.response }] : [])
+    ]);
+
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -795,6 +809,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         model: primaryModel,
         messages: [
           { role: 'system', content: finalSystemPrompt },
+          ...historyMessages,
           { role: 'user', content: Body }
         ],
         temperature,
