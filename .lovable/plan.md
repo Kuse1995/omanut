@@ -1,67 +1,34 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Plan: Redeploy Edge Functions to Restore WhatsApp Responsiveness
 
-## Problem Analysis
+### Problem
+No messages (boss or customer) are being recorded since March 5. The `whatsapp-messages` and `boss-chat` edge functions show zero logs, meaning they are not receiving or processing any webhook requests. This happened after the last code edit to `boss-chat/index.ts`.
 
-Two issues identified in the `demo-session` edge function:
+The most likely cause is a failed or stale deployment. Edge functions need to be redeployed.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+### Fix
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+**Step 1: Redeploy the affected edge functions**
+- `whatsapp-messages` (the main webhook handler)
+- `boss-chat` (the management AI function)
 
-## Changes
+No code changes are needed. The existing code is syntactically valid. This is a deployment issue that will be resolved by triggering a fresh deploy of both functions.
 
-### File: `supabase/functions/demo-session/index.ts`
+**Step 2: Verify deployment**
+After redeployment, check edge function logs to confirm both functions are booting and processing requests.
 
-**1. Tighten handoff evaluation prompt**
+### Additional cleanup (minor, same edit session)
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+**File: `supabase/functions/whatsapp-messages/index.ts`** (lines 3929-3936)
 
-**2. Create tickets and queue items on handoff**
+Remove the duplicate `boss_conversations` insert. Currently, `whatsapp-messages` inserts a record with no response (line 3930), and then `boss-chat` inserts another record with the response (line 1083). This creates orphaned rows with `response: null`. Remove the insert from `whatsapp-messages` since `boss-chat` already handles it.
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
+### Files Changed
 
 | Action | File |
 |--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| Deploy | `supabase/functions/whatsapp-messages/index.ts` |
+| Deploy | `supabase/functions/boss-chat/index.ts` |
+| Edit | `supabase/functions/whatsapp-messages/index.ts` — remove duplicate boss_conversations insert |
 
