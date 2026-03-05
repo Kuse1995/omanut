@@ -46,6 +46,8 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.process-scheduled-posts]
     verify_jwt = false
+  [functions.publish-meta-post]
+    verify_jwt = false
   [functions.publish-facebook-post]
     verify_jwt = true
   [functions.realtime-session]

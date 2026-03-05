@@ -30,6 +30,7 @@ export const ContentSchedulerPanel = () => {
   const [uploading, setUploading] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both'>('facebook');
+  const [publishMode, setPublishMode] = useState<'schedule' | 'now'>('schedule');
 
   // Fetch meta credentials (pages) for this company
   const { data: pages } = useQuery({
@@ -111,20 +112,25 @@ export const ContentSchedulerPanel = () => {
     }
   };
 
-  // Create draft & schedule
+  // Create draft & schedule or publish now
   const scheduleMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCompany) throw new Error('No company selected');
       if (!content.trim()) throw new Error('Post content is required');
-      if (!scheduledDate || !scheduledTime) throw new Error('Date and time are required');
       if (!selectedPageId) throw new Error('Select a page');
+
+      if (publishMode === 'schedule' && (!scheduledDate || !scheduledTime)) {
+        throw new Error('Date and time are required for scheduling');
+      }
 
       // Instagram requires an image
       if ((targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl) {
         throw new Error('Instagram posts require an image. Please attach one.');
       }
 
-      const scheduledTimeISO = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+      const scheduledTimeISO = publishMode === 'now'
+        ? new Date().toISOString()
+        : new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -146,7 +152,8 @@ export const ContentSchedulerPanel = () => {
 
       if (insertError) throw insertError;
 
-      const { data: result, error: fnError } = await supabase.functions.invoke('schedule-meta-post', {
+      const fnName = publishMode === 'now' ? 'publish-meta-post' : 'schedule-meta-post';
+      const { data: result, error: fnError } = await supabase.functions.invoke(fnName, {
         body: { post_id: post.id },
       });
 
@@ -160,7 +167,8 @@ export const ContentSchedulerPanel = () => {
     },
     onSuccess: () => {
       const label = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
-      toast.success(`Post scheduled on ${label}!`);
+      const action = publishMode === 'now' ? 'published' : 'scheduled';
+      toast.success(`Post ${action} on ${label}!`);
       setContent('');
       setScheduledDate('');
       setScheduledTime('');
@@ -238,16 +246,40 @@ export const ContentSchedulerPanel = () => {
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
       {/* Compose Card */}
       <Card>
-        <CardHeader>
+       <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Send className="w-5 h-5" />
-            Schedule a Social Post
+            {publishMode === 'now' ? 'Publish a Social Post' : 'Schedule a Social Post'}
           </CardTitle>
           <CardDescription>
-            Write your post, pick a date & time, and schedule it to Facebook, Instagram, or both.
+            {publishMode === 'now'
+              ? 'Write your post and publish it immediately to Facebook, Instagram, or both.'
+              : 'Write your post, pick a date & time, and schedule it to Facebook, Instagram, or both.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Publish Mode Toggle */}
+          <div className="space-y-2">
+            <Label>Publish Mode</Label>
+            <ToggleGroup
+              type="single"
+              value={publishMode}
+              onValueChange={(val) => {
+                if (val) setPublishMode(val as 'schedule' | 'now');
+              }}
+              className="justify-start"
+            >
+              <ToggleGroupItem value="schedule" className="gap-1.5 data-[state=on]:bg-primary/20 data-[state=on]:text-primary">
+                <Clock className="h-4 w-4" />
+                Schedule
+              </ToggleGroupItem>
+              <ToggleGroupItem value="now" className="gap-1.5 data-[state=on]:bg-primary/20 data-[state=on]:text-primary">
+                <Send className="h-4 w-4" />
+                Publish Now
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           {/* Page selector */}
           <div className="space-y-2">
             <Label>Page / Account</Label>
@@ -406,44 +438,53 @@ export const ContentSchedulerPanel = () => {
             </Popover>
           )}
 
-          {/* Date & Time */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Calendar className="w-4 h-4" /> Date
-              </Label>
-              <Input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                min={minDateStr}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4" /> Time
-              </Label>
-              <Input
-                type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-              />
-            </div>
-          </div>
+          {/* Date & Time — only for schedule mode */}
+          {publishMode === 'schedule' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4" /> Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    min={minDateStr}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Clock className="w-4 h-4" /> Time
+                  </Label>
+                  <Input
+                    type="time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                  />
+                </div>
+              </div>
 
-          <p className="text-xs text-muted-foreground">
-            Meta requires the scheduled time to be between 10 minutes and 75 days from now.
-          </p>
+              <p className="text-xs text-muted-foreground">
+                Meta requires the scheduled time to be between 10 minutes and 75 days from now.
+              </p>
+            </>
+          )}
 
           <Button
             onClick={() => scheduleMutation.mutate()}
-            disabled={scheduleMutation.isPending || !content.trim() || !scheduledDate || !scheduledTime || !selectedPageId}
+            disabled={
+              scheduleMutation.isPending ||
+              !content.trim() ||
+              !selectedPageId ||
+              (publishMode === 'schedule' && (!scheduledDate || !scheduledTime))
+            }
             className="w-full"
           >
             {scheduleMutation.isPending ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Scheduling...</>
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {publishMode === 'now' ? 'Publishing...' : 'Scheduling...'}</>
             ) : (
-              <><Send className="w-4 h-4 mr-2" /> Schedule Post</>
+              <><Send className="w-4 h-4 mr-2" /> {publishMode === 'now' ? 'Publish Now' : 'Schedule Post'}</>
             )}
           </Button>
         </CardContent>

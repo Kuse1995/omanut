@@ -756,13 +756,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             type: "object",
             properties: {
               content: { type: "string", description: "The text content of the post" },
-              scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z" },
+              scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z. Ignored when publish_now is true." },
+              publish_now: { type: "boolean", description: "Set to true to publish immediately instead of scheduling. When true, scheduled_time is ignored." },
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" },
               image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." },
               target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
             },
-            required: ["content", "scheduled_time"]
+            required: ["content"]
           }
         }
       }
@@ -964,7 +965,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'schedule_social_post':
             case 'schedule_facebook_post': {
               const targetPlatform = args.target_platform || 'facebook';
-              // Look up meta_credentials for the company's page_id
+              const isPublishNow = args.publish_now === true;
               const { data: metaCred } = await supabase
                 .from('meta_credentials')
                 .select('page_id')
@@ -1024,7 +1025,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   company_id: company.id,
                   page_id: metaCred.page_id,
                   content: args.content,
-                  scheduled_time: args.scheduled_time,
+                  scheduled_time: isPublishNow ? new Date().toISOString() : args.scheduled_time,
                   image_url: imageUrl,
                   status: 'draft',
                   created_by: systemUserId,
@@ -1039,10 +1040,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              // Call schedule-meta-post to push to Facebook
+              // Call the appropriate function
+              const fnName = isPublishNow ? 'publish-meta-post' : 'schedule-meta-post';
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
@@ -1054,16 +1056,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const scheduleResult = await scheduleRes.json();
 
               if (!scheduleRes.ok || !scheduleResult.success) {
-                result = { success: false, message: `❌ Post draft created but scheduling failed: ${scheduleResult.error || 'Unknown error'}` };
+                const action = isPublishNow ? 'publishing' : 'scheduling';
+                result = { success: false, message: `❌ Post draft created but ${action} failed: ${scheduleResult.error || 'Unknown error'}` };
                 break;
               }
 
-              const scheduledDate = new Date(args.scheduled_time);
               const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
-              result = {
-                success: true,
-                message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
-              };
+              if (isPublishNow) {
+                result = {
+                  success: true,
+                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                };
+              } else {
+                const scheduledDate = new Date(args.scheduled_time);
+                result = {
+                  success: true,
+                  message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                };
+              }
               break;
             }
               

@@ -1,41 +1,67 @@
 
 
-## Plan: Add "Publish Now" to Content Scheduler
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### Overview
-Add a "Publish Now" button alongside the existing "Schedule Post" button. This creates a new edge function that immediately publishes to Facebook/Instagram (bypassing the 10-min scheduling constraint), and updates the UI to let users choose between scheduling and instant publishing.
+## Problem Analysis
 
----
+Two issues identified in the `demo-session` edge function:
 
-### 1. New Edge Function: `publish-meta-post`
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-Create `supabase/functions/publish-meta-post/index.ts` — a streamlined version of `schedule-meta-post` that publishes immediately:
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-- **Facebook**: `POST /{page_id}/feed` with `published: true` (no `scheduled_publish_time`), or `/{page_id}/photos` with `published: true` for image posts
-- **Instagram**: Same two-step flow (create container → publish), which already publishes immediately
-- Accepts `post_id`, loads the post record, looks up credentials, publishes, and updates status to `published` with `published_at` timestamp
-- Skips the 10-min/75-day time validation since it's instant
-- Add `verify_jwt = false` in `config.toml` (manual auth in code, same pattern as other functions)
+## Changes
 
-### 2. UI Changes: `ContentSchedulerPanel.tsx`
+### File: `supabase/functions/demo-session/index.ts`
 
-- Add a `publishMode` state: `'schedule' | 'now'`
-- Add a toggle or tab at the top of the compose form to switch between "Schedule" and "Publish Now"
-- When "Publish Now" is selected: hide the date/time inputs, change the button label to "Publish Now", and invoke `publish-meta-post` instead of `schedule-meta-post`
-- For instant publish: insert the record with `scheduled_time` set to `now()` and status `draft`, then call the new edge function
-- Keep all existing validation (IG requires image, platform selection, etc.)
+**1. Tighten handoff evaluation prompt**
 
-### 3. Boss Chat Tool Update: `boss-chat/index.ts`
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-- Add a `publish_now` boolean parameter to the `schedule_social_post` tool
-- When `publish_now` is true, call `publish-meta-post` instead of `schedule-meta-post`
+**2. Create tickets and queue items on handoff**
 
-### Files Changed
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-| File | Change |
-|------|--------|
-| `supabase/functions/publish-meta-post/index.ts` | New edge function for instant publishing |
-| `supabase/config.toml` | Add `verify_jwt = false` for `publish-meta-post` |
-| `src/components/admin/ContentSchedulerPanel.tsx` | Add publish mode toggle and "Publish Now" button |
-| `supabase/functions/boss-chat/index.ts` | Add `publish_now` param to scheduling tool |
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
