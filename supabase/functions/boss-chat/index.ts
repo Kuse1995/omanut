@@ -818,7 +818,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             properties: {
               post_index: { type: "integer", description: "1-based index of the post from the pending list" },
               post_id: { type: "string", description: "UUID of the post (if known directly)" },
-              action: { type: "string", enum: ["approve", "edit", "reject"], description: "What to do with the post" },
+              action: { type: "string", enum: ["approve", "edit", "reject", "approve_and_publish"], description: "What to do with the post. Use 'approve' to schedule for its planned time, 'approve_and_publish' to publish immediately right now, 'edit' to change caption/time, 'reject' to remove." },
               new_caption: { type: "string", description: "Updated caption text (only for 'edit' action)" },
               new_scheduled_time: { type: "string", description: "Updated ISO 8601 scheduled time in UTC (only for 'edit' action)" },
               new_image_url: { type: "string", description: "Updated image URL (only for 'edit' action)" }
