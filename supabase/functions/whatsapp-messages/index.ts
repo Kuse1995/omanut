@@ -3926,14 +3926,7 @@ serve(async (req) => {
         });
       }
       
-      // Store boss message in database (for non-unmute, non-reservation messages)
-      await supabase
-        .from('boss_conversations')
-        .insert({
-          company_id: company.id,
-          message_from: 'management',
-          message_content: Body
-        });
+      // boss_conversations insert is handled by boss-chat function (with AI response)
       
       // Start background processing
       // @ts-ignore - EdgeRuntime is a Deno Deploy global
