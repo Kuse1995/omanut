@@ -961,7 +961,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
               break;
 
+            case 'schedule_social_post':
             case 'schedule_facebook_post': {
+              const targetPlatform = args.target_platform || 'facebook';
               // Look up meta_credentials for the company's page_id
               const { data: metaCred } = await supabase
                 .from('meta_credentials')
