@@ -587,7 +587,8 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    
    DO NOT ask multiple questions. Draft the caption immediately and only ask for the time.
    Parse dates from natural language. Scheduled time must be 10+ min from now, within 75 days.
-   Current date/time: ${new Date().toISOString()}
+    Current UTC time: ${new Date().toISOString()}
+    The boss is in the Africa/Lusaka timezone (GMT+2). When the boss says a time like "07:00", they mean 07:00 local time (which is 05:00 UTC). ALWAYS convert local times to UTC by subtracting 2 hours before setting scheduled_time. For example: "tomorrow at 7am" → scheduled_time should be "...T05:00:00Z".
 
 8. **Image Generation**: You CAN generate brand-aligned images directly in this WhatsApp chat!
    When the boss asks for an image, tell them to use commands like:
@@ -755,7 +756,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             type: "object",
             properties: {
               content: { type: "string", description: "The text content of the Facebook post" },
-              scheduled_time: { type: "string", description: "ISO 8601 timestamp for when to publish (e.g., 2026-03-05T14:00:00Z)" },
+              scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z" },
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" }
             },
