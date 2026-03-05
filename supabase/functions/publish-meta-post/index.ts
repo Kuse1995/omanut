@@ -178,7 +178,7 @@ serve(async (req) => {
                   Authorization: `Bearer ${cred.access_token}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ creation_id: containerResult.id }),
+              body: JSON.stringify({ creation_id: creationId }),
               }
             );
 
@@ -189,7 +189,7 @@ serve(async (req) => {
               results.instagram = publishResult;
               console.log(`Post ${post_id} published on Instagram. ID: ${publishResult.id}`);
             }
-          }
+            }
         } catch (igErr: any) {
           errors.push(`Instagram: ${igErr.message}`);
         }
