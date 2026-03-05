@@ -1,29 +1,67 @@
 
 
-## Plan: Unify Meta Credentials — Add IG Business ID to Existing Facebook Config
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### Problem
-Currently, the form forces choosing either "facebook" or "instagram" as the platform and requires a separate credential entry for each. Since the IG Professional account shares the same Page Access Token as the linked Facebook Page, this creates duplication and confusion.
+## Problem Analysis
 
-### Solution
-Remove the platform selector. Each credential represents a **Facebook Page** (with its Page ID and Access Token). Add an optional **Instagram Business Account ID** field to the same form. If filled, the system knows this page also has Instagram enabled and uses the same token for IG API calls.
+Two issues identified in the `demo-session` edge function:
 
-### Changes
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-**UI: `src/components/admin/MetaIntegrationsPanel.tsx`**
-- Remove the `platform` select dropdown entirely
-- Add an optional `ig_user_id` text input: "Instagram Business Account ID (optional)"
-- Add helper text: "If your Instagram Professional account is linked to this Facebook Page, paste the IG Business Account ID here to enable Instagram publishing with the same token"
-- Update the form state to include `ig_user_id` instead of `platform`
-- On save, set `platform: 'facebook'` as default (it's always a FB page credential)
-- In the credential list cards, show both Facebook icon + Instagram badge if `ig_user_id` is present
-- Update the interface to include `ig_user_id`
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-**Edge functions** — no changes needed. The `meta-webhook` and `schedule-meta-post` already look up `ig_user_id` from `meta_credentials` and use the same `access_token`.
+## Changes
 
-### Files Changed
+### File: `supabase/functions/demo-session/index.ts`
 
-| File | Change |
-|------|--------|
-| `src/components/admin/MetaIntegrationsPanel.tsx` | Remove platform selector, add `ig_user_id` field, show IG badge when present |
+**1. Tighten handoff evaluation prompt**
+
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+
+**2. Create tickets and queue items on handoff**
+
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
