@@ -996,7 +996,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                         companyId: company.id,
                         customerPhone: '',
                         conversationId: null,
-                        prompt: `Create a brand-aligned image for this Facebook post: ${args.content}`,
+                        prompt: args.image_prompt || `Create a brand-aligned image for this Facebook post: ${args.content}`,
                         messageType: 'generate',
                       }),
                     });
