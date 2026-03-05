@@ -16,7 +16,7 @@ const Conversations = () => {
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp' | 'instagram' | 'instagram_dm'>('all');
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [sendingMessage, setSendingMessage] = useState<string | null>(null);
   const [generatingImage, setGeneratingImage] = useState<string | null>(null);
