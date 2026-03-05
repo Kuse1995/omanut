@@ -1059,9 +1059,10 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               const scheduledDate = new Date(args.scheduled_time);
+              const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
               result = {
                 success: true,
-                message: `✅ Facebook post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
               };
               break;
             }

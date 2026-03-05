@@ -1,6 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, MessageCircle, Facebook, MessageSquare } from 'lucide-react';
+import { Search, MessageCircle, Facebook, MessageSquare, Instagram } from 'lucide-react';
 import { ConversationItem } from './ConversationItem';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -25,8 +25,8 @@ interface ConversationsListProps {
   onSelectConversation: (id: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
-  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp';
-  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp') => void;
+  filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp' | 'instagram' | 'instagram_dm';
+  onFilterChange: (filter: 'all' | 'unread' | 'takeover' | 'facebook' | 'messenger' | 'whatsapp' | 'instagram' | 'instagram_dm') => void;
 }
 
 export const ConversationsList = ({
@@ -49,7 +49,9 @@ export const ConversationsList = ({
       filter === 'takeover' ? conv.human_takeover :
       filter === 'facebook' ? (conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) :
       filter === 'messenger' ? (conv.phone?.startsWith('fbdm:')) :
-      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:')) : true;
+      filter === 'instagram' ? (conv.phone?.startsWith('ig:') && !conv.phone?.startsWith('igdm:')) :
+      filter === 'instagram_dm' ? (conv.phone?.startsWith('igdm:')) :
+      filter === 'whatsapp' ? (!conv.phone?.startsWith('fb:') && !conv.phone?.startsWith('fbdm:') && !conv.phone?.startsWith('ig:') && !conv.phone?.startsWith('igdm:')) : true;
     
     return matchesSearch && matchesFilter;
   });
@@ -58,6 +60,7 @@ export const ConversationsList = ({
   const takeoverCount = conversations.filter(c => c.human_takeover).length;
   const facebookCount = conversations.filter(c => c.phone?.startsWith('fb:') && !c.phone?.startsWith('fbdm:')).length;
   const messengerCount = conversations.filter(c => c.phone?.startsWith('fbdm:')).length;
+  const instagramCount = conversations.filter(c => (c.phone?.startsWith('ig:') && !c.phone?.startsWith('igdm:')) || c.phone?.startsWith('igdm:')).length;
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-border">
@@ -76,13 +79,13 @@ export const ConversationsList = ({
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-1 p-2 border-b border-border bg-secondary/30">
+      <div className="flex gap-1 p-2 border-b border-border bg-secondary/30 flex-wrap">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => onFilterChange('all')}
           className={cn(
-            "flex-1 h-8 text-xs font-medium",
+            "h-8 text-xs font-medium",
             filter === 'all' && "bg-primary text-primary-foreground hover:bg-primary/90"
           )}
         >
@@ -93,7 +96,7 @@ export const ConversationsList = ({
           size="sm"
           onClick={() => onFilterChange('unread')}
           className={cn(
-            "flex-1 h-8 text-xs font-medium gap-1",
+            "h-8 text-xs font-medium gap-1",
             filter === 'unread' && "bg-primary text-primary-foreground hover:bg-primary/90"
           )}
         >
@@ -114,7 +117,7 @@ export const ConversationsList = ({
           size="sm"
           onClick={() => onFilterChange('takeover')}
           className={cn(
-            "flex-1 h-8 text-xs font-medium gap-1",
+            "h-8 text-xs font-medium gap-1",
             filter === 'takeover' && "bg-primary text-primary-foreground hover:bg-primary/90"
           )}
         >
@@ -135,7 +138,7 @@ export const ConversationsList = ({
           size="sm"
           onClick={() => onFilterChange('facebook')}
           className={cn(
-            "flex-1 h-8 text-xs font-medium gap-1",
+            "h-8 text-xs font-medium gap-1",
             filter === 'facebook' && "bg-blue-600 text-white hover:bg-blue-700"
           )}
         >
@@ -156,7 +159,7 @@ export const ConversationsList = ({
           size="sm"
           onClick={() => onFilterChange('messenger')}
           className={cn(
-            "flex-1 h-8 text-xs font-medium gap-1",
+            "h-8 text-xs font-medium gap-1",
             filter === 'messenger' && "bg-violet-600 text-white hover:bg-violet-700"
           )}
         >
@@ -169,6 +172,27 @@ export const ConversationsList = ({
                 : "bg-violet-500/10 text-violet-600"
             )}>
               {messengerCount}
+            </span>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onFilterChange('instagram')}
+          className={cn(
+            "h-8 text-xs font-medium gap-1",
+            filter === 'instagram' && "bg-gradient-to-r from-pink-500 to-orange-400 text-white hover:from-pink-600 hover:to-orange-500"
+          )}
+        >
+          <Instagram className="h-3 w-3" />
+          {instagramCount > 0 && (
+            <span className={cn(
+              "text-[10px] px-1.5 rounded-full",
+              filter === 'instagram' 
+                ? "bg-white/20" 
+                : "bg-pink-500/10 text-pink-600"
+            )}>
+              {instagramCount}
             </span>
           )}
         </Button>

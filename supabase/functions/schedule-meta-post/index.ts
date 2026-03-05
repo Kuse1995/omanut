@@ -16,20 +16,16 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-    // Auth: support both user JWT and service role key
     const authHeader = req.headers.get('Authorization') || '';
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
     
-    // Check if this is a service role call (internal) or user JWT call
     const token = authHeader.replace('Bearer ', '');
     const isServiceRole = token === supabaseServiceKey;
     
     let postClient;
     if (isServiceRole) {
-      // Internal call from boss-chat or other edge functions - use service client
       postClient = supabaseService;
     } else {
-      // User JWT call - verify auth and use RLS client
       const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } },
       });
@@ -75,8 +71,8 @@ serve(async (req) => {
     // Validate scheduled_time is 10min–75days from now
     const scheduledDate = new Date(post.scheduled_time);
     const now = new Date();
-    const minTime = new Date(now.getTime() + 10 * 60 * 1000); // +10 minutes
-    const maxTime = new Date(now.getTime() + 75 * 24 * 60 * 60 * 1000); // +75 days
+    const minTime = new Date(now.getTime() + 10 * 60 * 1000);
+    const maxTime = new Date(now.getTime() + 75 * 24 * 60 * 60 * 1000);
 
     if (scheduledDate < minTime) {
       return new Response(JSON.stringify({ error: 'Scheduled time must be at least 10 minutes from now' }), {
@@ -91,10 +87,10 @@ serve(async (req) => {
       });
     }
 
-    // Look up access token from meta_credentials
+    // Look up credentials
     const { data: cred, error: credError } = await supabaseService
       .from('meta_credentials')
-      .select('access_token')
+      .select('access_token, ig_user_id')
       .eq('page_id', post.page_id)
       .eq('company_id', post.company_id)
       .limit(1)
@@ -113,79 +109,162 @@ serve(async (req) => {
       });
     }
 
-    // Convert to Unix timestamp
     const unixTimestamp = Math.floor(scheduledDate.getTime() / 1000);
+    const targetPlatform = post.target_platform || 'facebook';
+    
+    const results: { facebook?: any; instagram?: any } = {};
+    const errors: string[] = [];
 
-    // Schedule on Facebook – branch based on image
-    let fbResponse: Response;
+    // ── Facebook Publishing ──
+    if (targetPlatform === 'facebook' || targetPlatform === 'both') {
+      try {
+        let fbResponse: Response;
 
-    if (post.image_url) {
-      // Photo post via /photos endpoint
-      fbResponse = await fetch(
-        `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${cred.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: post.image_url,
-            caption: post.content,
-            published: false,
-            scheduled_publish_time: unixTimestamp,
-          }),
+        if (post.image_url) {
+          fbResponse = await fetch(
+            `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                url: post.image_url,
+                caption: post.content,
+                published: false,
+                scheduled_publish_time: unixTimestamp,
+              }),
+            }
+          );
+        } else {
+          fbResponse = await fetch(
+            `https://graph.facebook.com/v25.0/${post.page_id}/feed`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                message: post.content,
+                published: false,
+                scheduled_publish_time: unixTimestamp,
+              }),
+            }
+          );
         }
-      );
-    } else {
-      // Text-only post via /feed endpoint
-      fbResponse = await fetch(
-        `https://graph.facebook.com/v25.0/${post.page_id}/feed`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${cred.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: post.content,
-            published: false,
-            scheduled_publish_time: unixTimestamp,
-          }),
+
+        const fbResult = await fbResponse.json();
+        if (!fbResponse.ok) {
+          errors.push(`Facebook: ${fbResult.error?.message || 'API error'}`);
+          console.error(`Facebook scheduling error:`, fbResult);
+        } else {
+          results.facebook = fbResult;
+          console.log(`Post ${post_id} scheduled on Facebook. Meta post ID: ${fbResult.id}`);
         }
-      );
+      } catch (fbErr: any) {
+        errors.push(`Facebook: ${fbErr.message}`);
+      }
     }
 
-    const fbResult = await fbResponse.json();
+    // ── Instagram Publishing (two-step) ──
+    if (targetPlatform === 'instagram' || targetPlatform === 'both') {
+      if (!cred.ig_user_id) {
+        errors.push('Instagram: No Instagram Business Account ID configured');
+      } else if (!post.image_url) {
+        errors.push('Instagram: An image is required for Instagram posts');
+      } else {
+        try {
+          // Step 1: Create media container
+          const containerRes = await fetch(
+            `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                image_url: post.image_url,
+                caption: post.content,
+              }),
+            }
+          );
 
-    if (!fbResponse.ok) {
-      const errMsg = fbResult.error?.message || 'Facebook API error';
-      console.error(`Facebook scheduling error for post ${post_id}:`, fbResult);
+          const containerResult = await containerRes.json();
+          if (!containerRes.ok) {
+            errors.push(`Instagram container: ${containerResult.error?.message || 'API error'}`);
+            console.error('IG container error:', containerResult);
+          } else {
+            const creationId = containerResult.id;
+            console.log(`IG media container created: ${creationId}`);
 
+            // Step 2: Publish the container
+            const publishRes = await fetch(
+              `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media_publish`,
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${cred.access_token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  creation_id: creationId,
+                }),
+              }
+            );
+
+            const publishResult = await publishRes.json();
+            if (!publishRes.ok) {
+              errors.push(`Instagram publish: ${publishResult.error?.message || 'API error'}`);
+              console.error('IG publish error:', publishResult);
+            } else {
+              results.instagram = publishResult;
+              console.log(`Post ${post_id} published on Instagram. Media ID: ${publishResult.id}`);
+            }
+          }
+        } catch (igErr: any) {
+          errors.push(`Instagram: ${igErr.message}`);
+        }
+      }
+    }
+
+    // Determine final status
+    const hasAnySuccess = results.facebook || results.instagram;
+    const hasAnyError = errors.length > 0;
+
+    if (!hasAnySuccess) {
+      // Complete failure
       await supabaseService.from('scheduled_posts').update({
         status: 'failed',
-        error_message: errMsg,
+        error_message: errors.join('; '),
         updated_at: new Date().toISOString(),
       }).eq('id', post_id);
 
-      return new Response(JSON.stringify({ error: errMsg }), {
+      return new Response(JSON.stringify({ error: errors.join('; ') }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Success – update post
+    // At least partial success
+    const metaPostId = results.facebook?.id || results.instagram?.id || null;
     await supabaseService.from('scheduled_posts').update({
       status: 'scheduled',
-      meta_post_id: fbResult.id,
+      meta_post_id: metaPostId,
+      error_message: hasAnyError ? errors.join('; ') : null,
       updated_at: new Date().toISOString(),
     }).eq('id', post_id);
 
-    console.log(`Post ${post_id} scheduled on Facebook. Meta post ID: ${fbResult.id}`);
-
     return new Response(JSON.stringify({
       success: true,
-      meta_post_id: fbResult.id,
+      meta_post_id: metaPostId,
+      platforms: {
+        facebook: results.facebook ? 'success' : (targetPlatform === 'facebook' || targetPlatform === 'both' ? 'failed' : 'skipped'),
+        instagram: results.instagram ? 'success' : (targetPlatform === 'instagram' || targetPlatform === 'both' ? 'failed' : 'skipped'),
+      },
+      errors: hasAnyError ? errors : undefined,
     }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

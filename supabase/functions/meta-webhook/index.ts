@@ -67,81 +67,129 @@ async function processWebhook(body: any) {
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-  if (body.object !== 'page' || !body.entry) {
-    console.log('Not a page event, ignoring');
+  const objectType = body.object;
+
+  if (!body.entry) {
+    console.log('No entry array, ignoring');
     return;
   }
 
-  for (const entry of body.entry) {
-    const pageId = entry.id;
+  if (objectType === 'page') {
+    // ── Facebook Page events (comments + Messenger DMs) ──
+    for (const entry of body.entry) {
+      const pageId = entry.id;
 
-    // ── Handle feed comments ──
-    if (entry.changes) {
-      for (const change of entry.changes) {
-        if (change.field !== 'feed') continue;
+      // Handle feed comments
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (change.field !== 'feed') continue;
+          const value = change.value;
+          if (!value || value.item !== 'comment' || value.verb !== 'add') continue;
 
-        const value = change.value;
-        if (!value || value.item !== 'comment' || value.verb !== 'add') continue;
+          const commentId = value.comment_id;
+          const messageText = value.message;
+          const commenterName = value.from?.name || 'User';
+          const commenterFbId = value.from?.id;
 
-        const commentId = value.comment_id;
-        const messageText = value.message;
-        const commenterName = value.from?.name || 'User';
-        const commenterFbId = value.from?.id;
+          if (!commentId || !messageText) continue;
+          if (commenterFbId === pageId) {
+            console.log('Skipping own comment from page');
+            continue;
+          }
 
-        if (!commentId || !messageText) {
-          console.log('Missing comment_id or message, skipping');
-          continue;
+          console.log(`Processing FB comment ${commentId}: "${messageText}" from ${commenterName}`);
+          try {
+            await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
+          } catch (err) {
+            console.error(`Error handling comment ${commentId}:`, err);
+          }
         }
+      }
 
-        if (commenterFbId === pageId) {
-          console.log('Skipping own comment from page');
-          continue;
-        }
+      // Handle Messenger DMs
+      if (entry.messaging) {
+        for (const event of entry.messaging) {
+          if (!event.message?.text) continue;
+          if (event.message?.is_echo) continue;
 
-        console.log(`Processing comment ${commentId}: \"${messageText}\" from ${commenterName}`);
+          const senderId = event.sender?.id;
+          const messageText = event.message.text;
+          if (!senderId || !messageText) continue;
+          if (senderId === pageId) continue;
 
-        try {
-          await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
-        } catch (err) {
-          console.error(`Error handling comment ${commentId}:`, err);
+          console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
+          try {
+            await handleMessengerDM(supabase, pageId, senderId, messageText);
+          } catch (err) {
+            console.error(`Error handling Messenger DM from ${senderId}:`, err);
+          }
         }
       }
     }
+  } else if (objectType === 'instagram') {
+    // ── Instagram events (comments + DMs) ──
+    for (const entry of body.entry) {
+      const igUserId = entry.id;
 
-    // ── Handle Messenger DMs ──
-    if (entry.messaging) {
-      for (const event of entry.messaging) {
-        if (!event.message?.text) continue;
-        if (event.message?.is_echo) continue;
+      // Handle Instagram comments
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (change.field !== 'comments') continue;
+          const value = change.value;
+          if (!value) continue;
 
-        const senderId = event.sender?.id;
-        const messageText = event.message.text;
+          const commentId = value.id;
+          const messageText = value.text;
+          const commenterName = value.from?.username || 'Instagram User';
+          const commenterIgId = value.from?.id;
+          const mediaId = value.media?.id;
 
-        if (!senderId || !messageText) continue;
+          if (!commentId || !messageText) continue;
+          // Skip own comments
+          if (commenterIgId === igUserId) {
+            console.log('Skipping own Instagram comment');
+            continue;
+          }
 
-        if (senderId === pageId) {
-          console.log('Skipping own message from page');
-          continue;
+          console.log(`Processing IG comment ${commentId}: "${messageText}" from ${commenterName}`);
+          try {
+            await handleInstagramComment(supabase, igUserId, commentId, messageText, commenterName, commenterIgId, mediaId);
+          } catch (err) {
+            console.error(`Error handling IG comment ${commentId}:`, err);
+          }
         }
+      }
 
-        console.log(`Processing Messenger DM from ${senderId}: \"${messageText.slice(0, 80)}\"`);
+      // Handle Instagram DMs
+      if (entry.messaging) {
+        for (const event of entry.messaging) {
+          if (!event.message?.text) continue;
+          if (event.message?.is_echo) continue;
 
-        try {
-          await handleMessengerDM(supabase, pageId, senderId, messageText);
-        } catch (err) {
-          console.error(`Error handling Messenger DM from ${senderId}:`, err);
+          const senderId = event.sender?.id;
+          const messageText = event.message.text;
+          if (!senderId || !messageText) continue;
+          if (senderId === igUserId) continue;
+
+          console.log(`Processing IG DM from ${senderId}: "${messageText.slice(0, 80)}"`);
+          try {
+            await handleInstagramDM(supabase, igUserId, senderId, messageText);
+          } catch (err) {
+            console.error(`Error handling IG DM from ${senderId}:`, err);
+          }
         }
       }
     }
+  } else {
+    console.log(`Unhandled object type: ${objectType}, ignoring`);
   }
 }
 
-// ── Get page credentials (includes company_id) ──
+// ── Get page credentials by page_id ──
 async function getPageCredentials(supabase: any, pageId: string) {
-  // Prefer credentials with a company_id (fully configured)
   const { data: cred, error } = await supabase
     .from('meta_credentials')
-    .select('access_token, ai_system_prompt, company_id')
+    .select('access_token, ai_system_prompt, company_id, ig_user_id')
     .eq('page_id', pageId)
     .not('company_id', 'is', null)
     .limit(1)
@@ -152,11 +200,10 @@ async function getPageCredentials(supabase: any, pageId: string) {
     return null;
   }
 
-  // Fallback: try without company_id filter for backward compatibility
   if (!cred) {
     const { data: fallback, error: fbErr } = await supabase
       .from('meta_credentials')
-      .select('access_token, ai_system_prompt, company_id')
+      .select('access_token, ai_system_prompt, company_id, ig_user_id')
       .eq('page_id', pageId)
       .limit(1)
       .maybeSingle();
@@ -174,18 +221,43 @@ async function getPageCredentials(supabase: any, pageId: string) {
   return cred;
 }
 
+// ── Get credentials by ig_user_id ──
+async function getIgCredentials(supabase: any, igUserId: string) {
+  const { data: cred, error } = await supabase
+    .from('meta_credentials')
+    .select('access_token, ai_system_prompt, company_id, page_id, ig_user_id')
+    .eq('ig_user_id', igUserId)
+    .not('company_id', 'is', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching IG meta_credentials:', error);
+    return null;
+  }
+
+  if (!cred) {
+    console.warn(`No meta_credentials found for ig_user_id: ${igUserId}`);
+    return null;
+  }
+  return cred;
+}
+
 // ── Build composite system prompt from company config + knowledge base ──
 async function buildCompanySystemPrompt(
   supabase: any,
   companyId: string,
   credentialPrompt: string | null,
-  context: 'comment' | 'messenger',
+  context: 'comment' | 'messenger' | 'instagram_comment' | 'instagram_dm',
 ): Promise<string> {
-  const contextLabel = context === 'messenger'
-    ? 'Facebook Messenger direct messages'
-    : 'Facebook comments on posts';
+  const contextLabels: Record<string, string> = {
+    comment: 'Facebook comments on posts',
+    messenger: 'Facebook Messenger direct messages',
+    instagram_comment: 'Instagram comments on posts',
+    instagram_dm: 'Instagram direct messages',
+  };
+  const contextLabel = contextLabels[context] || context;
 
-  // Fetch company info, AI overrides, and documents in parallel
   const [companyResult, overridesResult, docsResult] = await Promise.all([
     supabase
       .from('companies')
@@ -210,10 +282,8 @@ async function buildCompanySystemPrompt(
 
   const parts: string[] = [];
 
-  // 1. Role & context
   parts.push(`You are a helpful AI assistant replying to ${contextLabel} on behalf of a business. Keep replies friendly, concise, and professional.`);
 
-  // 2. Company identity
   if (company) {
     const identity = [`Company: ${company.name}`];
     if (company.business_type) identity.push(`Business type: ${company.business_type}`);
@@ -221,7 +291,6 @@ async function buildCompanySystemPrompt(
     parts.push(`=== COMPANY IDENTITY ===\n${identity.join('\n')}`);
   }
 
-  // 3. AI overrides
   if (overrides) {
     if (overrides.system_instructions?.trim()) {
       parts.push(`=== CORE INSTRUCTIONS ===\n${overrides.system_instructions}`);
@@ -234,12 +303,10 @@ async function buildCompanySystemPrompt(
     }
   }
 
-  // 4. Knowledge base
   if (company?.quick_reference_info?.trim()) {
     parts.push(`=== KNOWLEDGE BASE ===\n${company.quick_reference_info}`);
   }
 
-  // 5. Document library (truncated to avoid token overflow)
   if (docs.length > 0) {
     const docContent = docs
       .filter((d: any) => d.parsed_content?.trim())
@@ -250,13 +317,11 @@ async function buildCompanySystemPrompt(
     }
   }
 
-  // 6. Page-specific override (optional)
   if (credentialPrompt?.trim()) {
     parts.push(`=== PAGE-SPECIFIC INSTRUCTIONS ===\n${credentialPrompt}`);
   }
 
-  // 7. Context-specific guidance
-  if (context === 'comment') {
+  if (context === 'comment' || context === 'instagram_comment') {
     parts.push('Do not use hashtags unless relevant. Keep replies public-appropriate and concise.');
   }
 
@@ -345,7 +410,6 @@ async function handleComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  // Build composite prompt from company config + knowledge base
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'comment')
     : ai_system_prompt || '';
@@ -356,7 +420,7 @@ async function handleComment(
     return;
   }
 
-  console.log(`AI reply for ${commentId}: \"${aiReply.slice(0, 100)}...\"`);
+  console.log(`AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
 
   // Wait 15 seconds to appear more human
   console.log(`Waiting 15 seconds before posting reply to ${commentId}...`);
@@ -383,7 +447,6 @@ async function handleComment(
   const result = await fbResponse.json();
   console.log(`Reply posted successfully! Reply ID: ${result.id}`);
 
-  // Save to DB
   try {
     if (companyId) {
       await saveInteraction(
@@ -415,7 +478,6 @@ async function handleMessengerDM(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  // Build composite prompt from company config + knowledge base
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
     : ai_system_prompt || '';
@@ -426,7 +488,7 @@ async function handleMessengerDM(
     return;
   }
 
-  console.log(`Messenger AI reply for ${senderId}: \"${aiReply.slice(0, 100)}...\"`);
+  console.log(`Messenger AI reply for ${senderId}: "${aiReply.slice(0, 100)}..."`);
 
   const messengerResponse = await fetch(
     `https://graph.facebook.com/v25.0/me/messages`,
@@ -453,7 +515,6 @@ async function handleMessengerDM(
   const result = await messengerResponse.json();
   console.log(`Messenger reply sent successfully! Message ID: ${result.message_id}`);
 
-  // Save to DB
   try {
     if (companyId) {
       await saveInteraction(
@@ -473,12 +534,151 @@ async function handleMessengerDM(
   }
 }
 
+// ── Handle Instagram Comment ──
+async function handleInstagramComment(
+  supabase: any,
+  igUserId: string,
+  commentId: string,
+  messageText: string,
+  commenterName: string,
+  commenterIgId: string,
+  mediaId: string | undefined,
+) {
+  const cred = await getIgCredentials(supabase, igUserId);
+  if (!cred) return;
+
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
+
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
+    : ai_system_prompt || '';
+
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment');
+  if (!aiReply) {
+    console.error('AI returned empty reply for IG comment, skipping');
+    return;
+  }
+
+  console.log(`IG AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
+
+  // Wait 15 seconds to appear more human
+  console.log(`Waiting 15 seconds before posting IG reply to ${commentId}...`);
+  await new Promise(resolve => setTimeout(resolve, 15000));
+
+  const igResponse = await fetch(
+    `https://graph.facebook.com/v25.0/${commentId}/replies`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: aiReply }),
+    },
+  );
+
+  if (!igResponse.ok) {
+    const errorData = await igResponse.text();
+    console.error(`Instagram Comment API error (${igResponse.status}):`, errorData);
+    return;
+  }
+
+  const result = await igResponse.json();
+  console.log(`IG reply posted successfully! Reply ID: ${result.id}`);
+
+  try {
+    if (companyId) {
+      await saveInteraction(
+        supabase,
+        companyId,
+        `ig:${commenterIgId}`,
+        'instagram',
+        commenterName,
+        messageText,
+        aiReply,
+        { source: 'instagram', comment_id: commentId, media_id: mediaId },
+        { source: 'instagram', reply_id: result.id },
+      );
+    }
+  } catch (dbErr) {
+    console.error('Error saving IG comment interaction to DB:', dbErr);
+  }
+}
+
+// ── Handle Instagram DM ──
+async function handleInstagramDM(
+  supabase: any,
+  igUserId: string,
+  senderId: string,
+  messageText: string,
+) {
+  const cred = await getIgCredentials(supabase, igUserId);
+  if (!cred) return;
+
+  const { access_token, ai_system_prompt, company_id: companyId } = cred;
+
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_dm')
+    : ai_system_prompt || '';
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm');
+  if (!aiReply) {
+    console.error('AI returned empty reply for IG DM, skipping');
+    return;
+  }
+
+  console.log(`IG DM AI reply for ${senderId}: "${aiReply.slice(0, 100)}..."`);
+
+  // Send reply via Instagram Messaging API
+  const igResponse = await fetch(
+    `https://graph.facebook.com/v25.0/me/messages`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        recipient: { id: senderId },
+        message: { text: aiReply },
+      }),
+    },
+  );
+
+  if (!igResponse.ok) {
+    const errorData = await igResponse.text();
+    console.error(`Instagram DM API error (${igResponse.status}):`, errorData);
+    return;
+  }
+
+  const result = await igResponse.json();
+  console.log(`IG DM reply sent! Message ID: ${result.message_id}`);
+
+  try {
+    if (companyId) {
+      await saveInteraction(
+        supabase,
+        companyId,
+        `igdm:${senderId}`,
+        'instagram_dm',
+        'Instagram User',
+        messageText,
+        aiReply,
+        { source: 'instagram_dm', sender_id: senderId },
+        { source: 'instagram_dm', message_id: result.message_id },
+      );
+    }
+  } catch (dbErr) {
+    console.error('Error saving IG DM interaction to DB:', dbErr);
+  }
+}
+
 // ── AI Reply Generation ──
 async function generateAIReply(
   userMessage: string,
   commenterName: string,
   systemPrompt: string,
-  context: 'comment' | 'messenger',
+  context: 'comment' | 'messenger' | 'instagram_comment' | 'instagram_dm',
 ): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   if (!LOVABLE_API_KEY) {
@@ -486,9 +686,14 @@ async function generateAIReply(
     return null;
   }
 
-  const userPrompt = context === 'messenger'
-    ? `A customer sent a direct message on Facebook Messenger:\n\n\"${userMessage}\"\n\nWrite a short, helpful reply.`
-    : `A user named \"${commenterName}\" commented on our Facebook post:\n\n\"${userMessage}\"\n\nWrite a short, helpful reply.`;
+  const contextPrompts: Record<string, string> = {
+    comment: `A user named "${commenterName}" commented on our Facebook post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+    messenger: `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+    instagram_comment: `A user named "${commenterName}" commented on our Instagram post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+    instagram_dm: `A customer sent a direct message on Instagram:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+  };
+
+  const userPrompt = contextPrompts[context] || contextPrompts.comment;
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
