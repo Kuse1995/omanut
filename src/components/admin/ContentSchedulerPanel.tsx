@@ -112,20 +112,25 @@ export const ContentSchedulerPanel = () => {
     }
   };
 
-  // Create draft & schedule
+  // Create draft & schedule or publish now
   const scheduleMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCompany) throw new Error('No company selected');
       if (!content.trim()) throw new Error('Post content is required');
-      if (!scheduledDate || !scheduledTime) throw new Error('Date and time are required');
       if (!selectedPageId) throw new Error('Select a page');
+
+      if (publishMode === 'schedule' && (!scheduledDate || !scheduledTime)) {
+        throw new Error('Date and time are required for scheduling');
+      }
 
       // Instagram requires an image
       if ((targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl) {
         throw new Error('Instagram posts require an image. Please attach one.');
       }
 
-      const scheduledTimeISO = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+      const scheduledTimeISO = publishMode === 'now'
+        ? new Date().toISOString()
+        : new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -147,7 +152,8 @@ export const ContentSchedulerPanel = () => {
 
       if (insertError) throw insertError;
 
-      const { data: result, error: fnError } = await supabase.functions.invoke('schedule-meta-post', {
+      const fnName = publishMode === 'now' ? 'publish-meta-post' : 'schedule-meta-post';
+      const { data: result, error: fnError } = await supabase.functions.invoke(fnName, {
         body: { post_id: post.id },
       });
 
@@ -161,7 +167,8 @@ export const ContentSchedulerPanel = () => {
     },
     onSuccess: () => {
       const label = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
-      toast.success(`Post scheduled on ${label}!`);
+      const action = publishMode === 'now' ? 'published' : 'scheduled';
+      toast.success(`Post ${action} on ${label}!`);
       setContent('');
       setScheduledDate('');
       setScheduledTime('');
