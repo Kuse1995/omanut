@@ -258,6 +258,28 @@ export const ContentSchedulerPanel = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Publish Mode Toggle */}
+          <div className="space-y-2">
+            <Label>Publish Mode</Label>
+            <ToggleGroup
+              type="single"
+              value={publishMode}
+              onValueChange={(val) => {
+                if (val) setPublishMode(val as 'schedule' | 'now');
+              }}
+              className="justify-start"
+            >
+              <ToggleGroupItem value="schedule" className="gap-1.5 data-[state=on]:bg-primary/20 data-[state=on]:text-primary">
+                <Clock className="h-4 w-4" />
+                Schedule
+              </ToggleGroupItem>
+              <ToggleGroupItem value="now" className="gap-1.5 data-[state=on]:bg-primary/20 data-[state=on]:text-primary">
+                <Send className="h-4 w-4" />
+                Publish Now
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
           {/* Page selector */}
           <div className="space-y-2">
             <Label>Page / Account</Label>
