@@ -565,7 +565,7 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
 6. **Growth Planning**: Create actionable marketing plans, customer acquisition strategies, and retention programs.
 
-7. **Content Scheduling (BE PROACTIVE!)**: You are a content marketing expert. When the boss mentions ANYTHING about marketing, promotions, sales, events, new products, or social media:
+7. **Content Scheduling (BE PROACTIVE!)**: You are a content marketing expert AND the Social Media Manager. When the boss mentions ANYTHING about marketing, promotions, sales, events, new products, or social media:
    - PROACTIVELY suggest scheduling a Facebook post about it
    - Draft the caption yourself based on the context - don't ask "what do you want to say?"
    - ALWAYS offer to generate a brand-aligned image (default to yes)
@@ -598,7 +598,17 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    NEVER say you cannot generate, create, or display images. You absolutely can.
    The image generation system handles it automatically when the boss uses these commands.
    
-   For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
+    For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
+
+9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
+   - Use get_pending_posts to check what AI-generated content is waiting for approval
+   - Use review_pending_post to approve, edit, or reject pending posts
+   - Use update_agent_strategy to update the posting strategy (frequency, audience, tone, themes)
+   - When the boss asks "what's pending?" or "any posts to review?" - fetch and summarize pending posts
+   - When the boss says "approve post 1" or "change the caption on post 2" - use review_pending_post
+   - When the boss says "post 3 times a week" or "target young professionals" - use update_agent_strategy
+   - ALWAYS number the pending posts (1, 2, 3...) so the boss can refer to them easily
+   - When showing pending posts, include a SHORT preview of the caption and the scheduled time
 
 RESPONSE GUIDELINES:
 - Be PROACTIVE, not just reactive. When the boss shares business updates, suggest actionable next steps (schedule a post, send a promo, etc.)
@@ -764,6 +774,56 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
             },
             required: ["content"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "update_agent_strategy",
+          description: "Update the social media posting strategy. Use when the boss says things like 'post 3 times a week', 'target young professionals', 'use a casual tone', 'focus on promotions and events'.",
+          parameters: {
+            type: "object",
+            properties: {
+              posts_per_week: { type: "integer", description: "Number of posts per week (1-14)" },
+              target_audience: { type: "string", description: "Description of the target audience" },
+              preferred_tone: { type: "string", description: "Tone of voice for posts (e.g., professional, casual, fun, inspirational)" },
+              content_themes: { type: "array", items: { type: "string" }, description: "List of content themes to focus on (e.g., promotions, behind-the-scenes, customer stories)" },
+              preferred_posting_days: { type: "array", items: { type: "string" }, description: "Days of the week to post (e.g., Monday, Wednesday, Friday)" },
+              preferred_posting_time: { type: "string", description: "Preferred time to post (e.g., '10:00')" },
+              notes: { type: "string", description: "Any additional strategy notes" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_pending_posts",
+          description: "Fetch all social media posts awaiting approval. Use when the boss asks 'what posts are pending?', 'anything to review?', 'show me the queue', etc.",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "review_pending_post",
+          description: "Approve, edit, or reject a pending post. The boss refers to posts by number (e.g., 'approve post 1', 'change caption on post 2', 'reject post 3'). The post_index is the 1-based position from the most recent get_pending_posts result.",
+          parameters: {
+            type: "object",
+            properties: {
+              post_index: { type: "integer", description: "1-based index of the post from the pending list" },
+              post_id: { type: "string", description: "UUID of the post (if known directly)" },
+              action: { type: "string", enum: ["approve", "edit", "reject"], description: "What to do with the post" },
+              new_caption: { type: "string", description: "Updated caption text (only for 'edit' action)" },
+              new_scheduled_time: { type: "string", description: "Updated ISO 8601 scheduled time in UTC (only for 'edit' action)" },
+              new_image_url: { type: "string", description: "Updated image URL (only for 'edit' action)" }
+            },
+            required: ["action"]
           }
         }
       }
@@ -1077,6 +1137,109 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
               
+            case 'update_agent_strategy': {
+              const strategyUpdate: any = {};
+              const stratChanges: string[] = [];
+              if (args.posts_per_week !== undefined) { strategyUpdate.posts_per_week = args.posts_per_week; stratChanges.push(`Posts/week: ${args.posts_per_week}`); }
+              if (args.target_audience !== undefined) { strategyUpdate.target_audience = args.target_audience; stratChanges.push(`Audience: ${args.target_audience}`); }
+              if (args.preferred_tone !== undefined) { strategyUpdate.preferred_tone = args.preferred_tone; stratChanges.push(`Tone: ${args.preferred_tone}`); }
+              if (args.content_themes !== undefined) { strategyUpdate.content_themes = args.content_themes; stratChanges.push(`Themes: ${args.content_themes.join(', ')}`); }
+              if (args.preferred_posting_days !== undefined) { strategyUpdate.preferred_posting_days = args.preferred_posting_days; stratChanges.push(`Days: ${args.preferred_posting_days.join(', ')}`); }
+              if (args.preferred_posting_time !== undefined) { strategyUpdate.preferred_posting_time = args.preferred_posting_time; stratChanges.push(`Time: ${args.preferred_posting_time}`); }
+              if (args.notes !== undefined) { strategyUpdate.notes = args.notes; stratChanges.push(`Notes updated`); }
+
+              const { data: existingSettings } = await supabase
+                .from('agent_settings')
+                .select('id')
+                .eq('company_id', company.id)
+                .maybeSingle();
+
+              if (existingSettings) {
+                await supabase.from('agent_settings').update({ ...strategyUpdate, updated_at: new Date().toISOString() }).eq('company_id', company.id);
+              } else {
+                await supabase.from('agent_settings').insert({ company_id: company.id, ...strategyUpdate });
+              }
+              result = { success: true, message: `✅ Social media strategy updated!\n${stratChanges.join('\n')}` };
+              break;
+            }
+
+            case 'get_pending_posts': {
+              const { data: pendingPosts } = await supabase
+                .from('scheduled_posts')
+                .select('id, content, image_url, scheduled_time, target_platform, created_at')
+                .eq('company_id', company.id)
+                .eq('status', 'pending_approval')
+                .order('scheduled_time', { ascending: true });
+
+              if (!pendingPosts || pendingPosts.length === 0) {
+                result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
+              } else {
+                const postList = pendingPosts.map((p: any, i: number) => {
+                  const time = new Date(p.scheduled_time);
+                  const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
+                  return `${i + 1}. 📝 "${p.content.substring(0, 80)}${p.content.length > 80 ? '...' : ''}"\n   📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n   📱 ${p.target_platform}\n   ${p.image_url ? '🖼️ Has image' : '📄 Text only'}`;
+                }).join('\n\n');
+                result = { success: true, message: `📋 ${pendingPosts.length} post(s) pending approval:\n\n${postList}\n\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".` };
+              }
+              break;
+            }
+
+            case 'review_pending_post': {
+              // Get pending posts to resolve index
+              let targetPostId = args.post_id;
+              if (!targetPostId && args.post_index) {
+                const { data: pendingForReview } = await supabase
+                  .from('scheduled_posts')
+                  .select('id')
+                  .eq('company_id', company.id)
+                  .eq('status', 'pending_approval')
+                  .order('scheduled_time', { ascending: true });
+
+                if (!pendingForReview || args.post_index > pendingForReview.length || args.post_index < 1) {
+                  result = { success: false, message: `❌ Post #${args.post_index} not found. Use "show pending posts" to see the current list.` };
+                  break;
+                }
+                targetPostId = pendingForReview[args.post_index - 1].id;
+              }
+
+              if (!targetPostId) {
+                result = { success: false, message: '❌ Please specify which post to review (e.g., "approve post 1").' };
+                break;
+              }
+
+              if (args.action === 'approve') {
+                // Update to scheduled, then call schedule-meta-post
+                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
+                const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!;
+                const SRK2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const schedRes = await fetch(`${SUPABASE_URL2}/functions/v1/schedule-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK2}` },
+                  body: JSON.stringify({ post_id: targetPostId }),
+                });
+                const schedResult = await schedRes.json();
+                if (schedRes.ok && schedResult.success) {
+                  result = { success: true, message: `✅ Post approved and scheduled with Meta!\n🆔 Meta Post ID: ${schedResult.meta_post_id}` };
+                } else {
+                  result = { success: false, message: `⚠️ Post approved but scheduling failed: ${schedResult.error || 'Unknown error'}. Status set to 'scheduled' - you can retry.` };
+                }
+              } else if (args.action === 'edit') {
+                const editData: any = {};
+                const editChanges: string[] = [];
+                if (args.new_caption) { editData.content = args.new_caption; editChanges.push('Caption updated'); }
+                if (args.new_scheduled_time) { editData.scheduled_time = args.new_scheduled_time; editChanges.push('Time updated'); }
+                if (args.new_image_url) { editData.image_url = args.new_image_url; editChanges.push('Image updated'); }
+                await supabase.from('scheduled_posts').update(editData).eq('id', targetPostId);
+                result = { success: true, message: `✏️ Post updated!\n${editChanges.join('\n')}\n\nSay "approve post" when ready to schedule it.` };
+              } else if (args.action === 'reject') {
+                await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', targetPostId);
+                result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
+              } else {
+                result = { success: false, message: '❌ Unknown action. Use approve, edit, or reject.' };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
