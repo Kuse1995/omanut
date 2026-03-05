@@ -70,7 +70,7 @@ project_id = "dzheddvoiauevcayifev"
   [functions.send-whatsapp-flow]
     verify_jwt = false
   [functions.send-whatsapp-message]
-    verify_jwt = true
+    verify_jwt = false
   [functions.supervisor-agent]
     verify_jwt = true
   [functions.test-image-generation]
