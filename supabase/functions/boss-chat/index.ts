@@ -1056,16 +1056,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const scheduleResult = await scheduleRes.json();
 
               if (!scheduleRes.ok || !scheduleResult.success) {
-                result = { success: false, message: `❌ Post draft created but scheduling failed: ${scheduleResult.error || 'Unknown error'}` };
+                const action = isPublishNow ? 'publishing' : 'scheduling';
+                result = { success: false, message: `❌ Post draft created but ${action} failed: ${scheduleResult.error || 'Unknown error'}` };
                 break;
               }
 
-              const scheduledDate = new Date(args.scheduled_time);
               const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
-              result = {
-                success: true,
-                message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
-              };
+              if (isPublishNow) {
+                result = {
+                  success: true,
+                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                };
+              } else {
+                const scheduledDate = new Date(args.scheduled_time);
+                result = {
+                  success: true,
+                  message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                };
+              }
               break;
             }
               
