@@ -258,6 +258,56 @@ export type Database = {
           },
         ]
       }
+      agent_settings: {
+        Row: {
+          company_id: string
+          content_themes: string[] | null
+          created_at: string
+          id: string
+          notes: string | null
+          posts_per_week: number
+          preferred_posting_days: string[] | null
+          preferred_posting_time: string | null
+          preferred_tone: string | null
+          target_audience: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          content_themes?: string[] | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          posts_per_week?: number
+          preferred_posting_days?: string[] | null
+          preferred_posting_time?: string | null
+          preferred_tone?: string | null
+          target_audience?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          content_themes?: string[] | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          posts_per_week?: number
+          preferred_posting_days?: string[] | null
+          preferred_posting_time?: string | null
+          preferred_tone?: string | null
+          target_audience?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_error_logs: {
         Row: {
           ai_response: string
