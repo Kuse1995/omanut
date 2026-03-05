@@ -756,13 +756,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             type: "object",
             properties: {
               content: { type: "string", description: "The text content of the post" },
-              scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z" },
+              scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z. Ignored when publish_now is true." },
+              publish_now: { type: "boolean", description: "Set to true to publish immediately instead of scheduling. When true, scheduled_time is ignored." },
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" },
               image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." },
               target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
             },
-            required: ["content", "scheduled_time"]
+            required: ["content"]
           }
         }
       }
