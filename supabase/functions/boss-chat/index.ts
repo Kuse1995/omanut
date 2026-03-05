@@ -1025,7 +1025,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   company_id: company.id,
                   page_id: metaCred.page_id,
                   content: args.content,
-                  scheduled_time: args.scheduled_time,
+                  scheduled_time: isPublishNow ? new Date().toISOString() : args.scheduled_time,
                   image_url: imageUrl,
                   status: 'draft',
                   created_by: systemUserId,
