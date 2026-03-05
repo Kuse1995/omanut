@@ -605,8 +605,9 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - Use review_pending_post to approve, edit, or reject pending posts
    - Use update_agent_strategy to update the posting strategy (frequency, audience, tone, themes)
    - When the boss asks "what's pending?" or "any posts to review?" - fetch and summarize pending posts
-   - When the boss says "approve post 1" or "change the caption on post 2" - use review_pending_post
-   - When the boss says "post 3 times a week" or "target young professionals" - use update_agent_strategy
+    - When the boss says "approve post 1" or "change the caption on post 2" - use review_pending_post
+    - "approve" = schedule for its planned future time. "approve and publish" / "post now" / "publish post 1" = publish IMMEDIATELY
+    - When the boss says "post 3 times a week" or "target young professionals" - use update_agent_strategy
    - ALWAYS number the pending posts (1, 2, 3...) so the boss can refer to them easily
    - When showing pending posts, include a SHORT preview of the caption and the scheduled time
 
@@ -818,7 +819,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             properties: {
               post_index: { type: "integer", description: "1-based index of the post from the pending list" },
               post_id: { type: "string", description: "UUID of the post (if known directly)" },
-              action: { type: "string", enum: ["approve", "edit", "reject"], description: "What to do with the post" },
+              action: { type: "string", enum: ["approve", "edit", "reject", "approve_and_publish"], description: "What to do with the post. Use 'approve' to schedule for its planned time, 'approve_and_publish' to publish immediately right now, 'edit' to change caption/time, 'reject' to remove." },
               new_caption: { type: "string", description: "Updated caption text (only for 'edit' action)" },
               new_scheduled_time: { type: "string", description: "Updated ISO 8601 scheduled time in UTC (only for 'edit' action)" },
               new_image_url: { type: "string", description: "Updated image URL (only for 'edit' action)" }
@@ -1231,6 +1232,22 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 if (args.new_image_url) { editData.image_url = args.new_image_url; editChanges.push('Image updated'); }
                 await supabase.from('scheduled_posts').update(editData).eq('id', targetPostId);
                 result = { success: true, message: `✏️ Post updated!\n${editChanges.join('\n')}\n\nSay "approve post" when ready to schedule it.` };
+              } else if (args.action === 'approve_and_publish') {
+                // Approve and publish immediately
+                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
+                const SUPABASE_URL3 = Deno.env.get('SUPABASE_URL')!;
+                const SRK3 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const pubRes = await fetch(`${SUPABASE_URL3}/functions/v1/publish-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK3}` },
+                  body: JSON.stringify({ post_id: targetPostId }),
+                });
+                const pubResult = await pubRes.json();
+                if (pubRes.ok && pubResult.success) {
+                  result = { success: true, message: `✅ Post approved and published NOW!\n🆔 Meta Post ID: ${pubResult.meta_post_id}` };
+                } else {
+                  result = { success: false, message: `⚠️ Post approved but publishing failed: ${pubResult.error || 'Unknown error'}. You can retry with "publish post".` };
+                }
               } else if (args.action === 'reject') {
                 await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', targetPostId);
                 result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
