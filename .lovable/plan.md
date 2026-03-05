@@ -1,67 +1,36 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Plan: Fix Timezone Handling for Scheduled Posts
 
-## Problem Analysis
+### Problem
+The `boss-chat` system prompt injects the current time as UTC via `new Date().toISOString()` (line 590) and the `scheduled_time` tool parameter description says "ISO 8601 timestamp" with a `Z` (UTC) example. The AI has no awareness that the boss is in the Africa/Lusaka (GMT+2) timezone, so "07:00" from the boss becomes `07:00:00Z` = 09:00 local time.
 
-Two issues identified in the `demo-session` edge function:
+### Fix
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+**File: `supabase/functions/boss-chat/index.ts`**
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+1. **Line 590** -- Replace the UTC timestamp with a timezone-aware local time string and explicitly state the boss's timezone:
+   ```typescript
+   // Replace:
+   Current date/time: ${new Date().toISOString()}
+   
+   // With:
+   Current UTC time: ${new Date().toISOString()}
+   The boss is in the Africa/Lusaka timezone (GMT+2). When the boss says a time like "07:00", they mean 07:00 local time (which is 05:00 UTC). ALWAYS convert local times to UTC by subtracting 2 hours before setting scheduled_time. For example: "tomorrow at 7am" → scheduled_time should be "...T05:00:00Z".
+   ```
 
-## Changes
+2. **Line 758** -- Update the `scheduled_time` parameter description to reinforce UTC conversion:
+   ```typescript
+   // Replace:
+   description: "ISO 8601 timestamp for when to publish (e.g., 2026-03-05T14:00:00Z)"
+   
+   // With:
+   description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z"
+   ```
 
-### File: `supabase/functions/demo-session/index.ts`
+### Files Changed
 
-**1. Tighten handoff evaluation prompt**
-
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
-
-**2. Create tickets and queue items on handoff**
-
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/boss-chat/index.ts` | Add timezone context to system prompt and tool parameter description |
 
