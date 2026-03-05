@@ -1040,10 +1040,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              // Call schedule-meta-post to push to Facebook
+              // Call the appropriate function
+              const fnName = isPublishNow ? 'publish-meta-post' : 'schedule-meta-post';
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
