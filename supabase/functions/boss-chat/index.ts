@@ -776,6 +776,56 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["content"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "update_agent_strategy",
+          description: "Update the social media posting strategy. Use when the boss says things like 'post 3 times a week', 'target young professionals', 'use a casual tone', 'focus on promotions and events'.",
+          parameters: {
+            type: "object",
+            properties: {
+              posts_per_week: { type: "integer", description: "Number of posts per week (1-14)" },
+              target_audience: { type: "string", description: "Description of the target audience" },
+              preferred_tone: { type: "string", description: "Tone of voice for posts (e.g., professional, casual, fun, inspirational)" },
+              content_themes: { type: "array", items: { type: "string" }, description: "List of content themes to focus on (e.g., promotions, behind-the-scenes, customer stories)" },
+              preferred_posting_days: { type: "array", items: { type: "string" }, description: "Days of the week to post (e.g., Monday, Wednesday, Friday)" },
+              preferred_posting_time: { type: "string", description: "Preferred time to post (e.g., '10:00')" },
+              notes: { type: "string", description: "Any additional strategy notes" }
+            }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_pending_posts",
+          description: "Fetch all social media posts awaiting approval. Use when the boss asks 'what posts are pending?', 'anything to review?', 'show me the queue', etc.",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "review_pending_post",
+          description: "Approve, edit, or reject a pending post. The boss refers to posts by number (e.g., 'approve post 1', 'change caption on post 2', 'reject post 3'). The post_index is the 1-based position from the most recent get_pending_posts result.",
+          parameters: {
+            type: "object",
+            properties: {
+              post_index: { type: "integer", description: "1-based index of the post from the pending list" },
+              post_id: { type: "string", description: "UUID of the post (if known directly)" },
+              action: { type: "string", enum: ["approve", "edit", "reject"], description: "What to do with the post" },
+              new_caption: { type: "string", description: "Updated caption text (only for 'edit' action)" },
+              new_scheduled_time: { type: "string", description: "Updated ISO 8601 scheduled time in UTC (only for 'edit' action)" },
+              new_image_url: { type: "string", description: "Updated image URL (only for 'edit' action)" }
+            },
+            required: ["action"]
+          }
+        }
       }
     ];
 
