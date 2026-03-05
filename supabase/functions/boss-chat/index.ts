@@ -1137,6 +1137,109 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
               
+            case 'update_agent_strategy': {
+              const strategyUpdate: any = {};
+              const stratChanges: string[] = [];
+              if (args.posts_per_week !== undefined) { strategyUpdate.posts_per_week = args.posts_per_week; stratChanges.push(`Posts/week: ${args.posts_per_week}`); }
+              if (args.target_audience !== undefined) { strategyUpdate.target_audience = args.target_audience; stratChanges.push(`Audience: ${args.target_audience}`); }
+              if (args.preferred_tone !== undefined) { strategyUpdate.preferred_tone = args.preferred_tone; stratChanges.push(`Tone: ${args.preferred_tone}`); }
+              if (args.content_themes !== undefined) { strategyUpdate.content_themes = args.content_themes; stratChanges.push(`Themes: ${args.content_themes.join(', ')}`); }
+              if (args.preferred_posting_days !== undefined) { strategyUpdate.preferred_posting_days = args.preferred_posting_days; stratChanges.push(`Days: ${args.preferred_posting_days.join(', ')}`); }
+              if (args.preferred_posting_time !== undefined) { strategyUpdate.preferred_posting_time = args.preferred_posting_time; stratChanges.push(`Time: ${args.preferred_posting_time}`); }
+              if (args.notes !== undefined) { strategyUpdate.notes = args.notes; stratChanges.push(`Notes updated`); }
+
+              const { data: existingSettings } = await supabase
+                .from('agent_settings')
+                .select('id')
+                .eq('company_id', company.id)
+                .maybeSingle();
+
+              if (existingSettings) {
+                await supabase.from('agent_settings').update({ ...strategyUpdate, updated_at: new Date().toISOString() }).eq('company_id', company.id);
+              } else {
+                await supabase.from('agent_settings').insert({ company_id: company.id, ...strategyUpdate });
+              }
+              result = { success: true, message: `✅ Social media strategy updated!\n${stratChanges.join('\n')}` };
+              break;
+            }
+
+            case 'get_pending_posts': {
+              const { data: pendingPosts } = await supabase
+                .from('scheduled_posts')
+                .select('id, content, image_url, scheduled_time, target_platform, created_at')
+                .eq('company_id', company.id)
+                .eq('status', 'pending_approval')
+                .order('scheduled_time', { ascending: true });
+
+              if (!pendingPosts || pendingPosts.length === 0) {
+                result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
+              } else {
+                const postList = pendingPosts.map((p: any, i: number) => {
+                  const time = new Date(p.scheduled_time);
+                  const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
+                  return `${i + 1}. 📝 "${p.content.substring(0, 80)}${p.content.length > 80 ? '...' : ''}"\n   📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n   📱 ${p.target_platform}\n   ${p.image_url ? '🖼️ Has image' : '📄 Text only'}`;
+                }).join('\n\n');
+                result = { success: true, message: `📋 ${pendingPosts.length} post(s) pending approval:\n\n${postList}\n\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".` };
+              }
+              break;
+            }
+
+            case 'review_pending_post': {
+              // Get pending posts to resolve index
+              let targetPostId = args.post_id;
+              if (!targetPostId && args.post_index) {
+                const { data: pendingForReview } = await supabase
+                  .from('scheduled_posts')
+                  .select('id')
+                  .eq('company_id', company.id)
+                  .eq('status', 'pending_approval')
+                  .order('scheduled_time', { ascending: true });
+
+                if (!pendingForReview || args.post_index > pendingForReview.length || args.post_index < 1) {
+                  result = { success: false, message: `❌ Post #${args.post_index} not found. Use "show pending posts" to see the current list.` };
+                  break;
+                }
+                targetPostId = pendingForReview[args.post_index - 1].id;
+              }
+
+              if (!targetPostId) {
+                result = { success: false, message: '❌ Please specify which post to review (e.g., "approve post 1").' };
+                break;
+              }
+
+              if (args.action === 'approve') {
+                // Update to scheduled, then call schedule-meta-post
+                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
+                const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!;
+                const SRK2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const schedRes = await fetch(`${SUPABASE_URL2}/functions/v1/schedule-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK2}` },
+                  body: JSON.stringify({ post_id: targetPostId }),
+                });
+                const schedResult = await schedRes.json();
+                if (schedRes.ok && schedResult.success) {
+                  result = { success: true, message: `✅ Post approved and scheduled with Meta!\n🆔 Meta Post ID: ${schedResult.meta_post_id}` };
+                } else {
+                  result = { success: false, message: `⚠️ Post approved but scheduling failed: ${schedResult.error || 'Unknown error'}. Status set to 'scheduled' - you can retry.` };
+                }
+              } else if (args.action === 'edit') {
+                const editData: any = {};
+                const editChanges: string[] = [];
+                if (args.new_caption) { editData.content = args.new_caption; editChanges.push('Caption updated'); }
+                if (args.new_scheduled_time) { editData.scheduled_time = args.new_scheduled_time; editChanges.push('Time updated'); }
+                if (args.new_image_url) { editData.image_url = args.new_image_url; editChanges.push('Image updated'); }
+                await supabase.from('scheduled_posts').update(editData).eq('id', targetPostId);
+                result = { success: true, message: `✏️ Post updated!\n${editChanges.join('\n')}\n\nSay "approve post" when ready to schedule it.` };
+              } else if (args.action === 'reject') {
+                await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', targetPostId);
+                result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
+              } else {
+                result = { success: false, message: '❌ Unknown action. Use approve, edit, or reject.' };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
