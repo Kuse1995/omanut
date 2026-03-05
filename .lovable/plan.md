@@ -1,67 +1,38 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Plan: Pass Boss's Image Description to Image Generator
 
-## Problem Analysis
+### Problem
+The `schedule_facebook_post` tool has no parameter for the boss's specific image description. When the boss says "I want an image to be of Zambian preteens reading in a Bible study", the AI sets `needs_image_generation: true` but the actual image prompt sent to `whatsapp-image-gen` (line 998) is just:
 
-Two issues identified in the `demo-session` edge function:
+```
+"Create a brand-aligned image for this Facebook post: [caption text]"
+```
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+The caption text ("Uncover the heroes of the past...") has nothing to do with what the boss wanted the image to look like. The specific image instruction is discarded.
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+### Fix
 
-## Changes
+**File: `supabase/functions/boss-chat/index.ts`**
 
-### File: `supabase/functions/demo-session/index.ts`
+1. **Add `image_prompt` parameter** to the `schedule_facebook_post` tool definition (line 761):
+   ```typescript
+   image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'" }
+   ```
 
-**1. Tighten handoff evaluation prompt**
+2. **Use `image_prompt` in the image generation call** (line 998):
+   ```typescript
+   // Replace:
+   prompt: `Create a brand-aligned image for this Facebook post: ${args.content}`
+   // With:
+   prompt: args.image_prompt || `Create a brand-aligned image for this Facebook post: ${args.content}`
+   ```
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+This ensures the boss's specific image instructions are passed through to the image generator instead of just the post caption.
 
-**2. Create tickets and queue items on handoff**
+### Files Changed
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/boss-chat/index.ts` | Add `image_prompt` param to tool definition + use it in image gen call |
 
