@@ -965,7 +965,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'schedule_social_post':
             case 'schedule_facebook_post': {
               const targetPlatform = args.target_platform || 'facebook';
-              // Look up meta_credentials for the company's page_id
+              const isPublishNow = args.publish_now === true;
               const { data: metaCred } = await supabase
                 .from('meta_credentials')
                 .select('page_id')

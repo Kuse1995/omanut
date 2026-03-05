@@ -438,45 +438,55 @@ export const ContentSchedulerPanel = () => {
             </Popover>
           )}
 
-          {/* Date & Time */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Calendar className="w-4 h-4" /> Date
-              </Label>
-              <Input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                min={minDateStr}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4" /> Time
-              </Label>
-              <Input
-                type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-              />
-            </div>
-          </div>
+          {/* Date & Time — only for schedule mode */}
+          {publishMode === 'schedule' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4" /> Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    min={minDateStr}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    <Clock className="w-4 h-4" /> Time
+                  </Label>
+                  <Input
+                    type="time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                  />
+                </div>
+              </div>
 
-          <p className="text-xs text-muted-foreground">
-            Meta requires the scheduled time to be between 10 minutes and 75 days from now.
-          </p>
+              <p className="text-xs text-muted-foreground">
+                Meta requires the scheduled time to be between 10 minutes and 75 days from now.
+              </p>
+            </>
+          )}
 
           <Button
             onClick={() => scheduleMutation.mutate()}
-            disabled={scheduleMutation.isPending || !content.trim() || !scheduledDate || !scheduledTime || !selectedPageId}
+            disabled={
+              scheduleMutation.isPending ||
+              !content.trim() ||
+              !selectedPageId ||
+              (publishMode === 'schedule' && (!scheduledDate || !scheduledTime))
+            }
             className="w-full"
           >
             {scheduleMutation.isPending ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Scheduling...</>
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {publishMode === 'now' ? 'Publishing...' : 'Scheduling...'}</>
             ) : (
-              <><Send className="w-4 h-4 mr-2" /> Schedule Post</>
+              <><Send className="w-4 h-4 mr-2" /> {publishMode === 'now' ? 'Publish Now' : 'Schedule Post'}</>
             )}
+          </Button>
           </Button>
         </CardContent>
       </Card>
