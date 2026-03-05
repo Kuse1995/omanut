@@ -1028,6 +1028,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   image_url: imageUrl,
                   status: 'draft',
                   created_by: systemUserId,
+                  target_platform: targetPlatform,
                 })
                 .select('id')
                 .single();
