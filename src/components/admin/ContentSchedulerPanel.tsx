@@ -487,7 +487,6 @@ export const ContentSchedulerPanel = () => {
               <><Send className="w-4 h-4 mr-2" /> {publishMode === 'now' ? 'Publish Now' : 'Schedule Post'}</>
             )}
           </Button>
-          </Button>
         </CardContent>
       </Card>
 
