@@ -246,13 +246,15 @@ export const ContentSchedulerPanel = () => {
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
       {/* Compose Card */}
       <Card>
-        <CardHeader>
+       <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Send className="w-5 h-5" />
-            Schedule a Social Post
+            {publishMode === 'now' ? 'Publish a Social Post' : 'Schedule a Social Post'}
           </CardTitle>
           <CardDescription>
-            Write your post, pick a date & time, and schedule it to Facebook, Instagram, or both.
+            {publishMode === 'now'
+              ? 'Write your post and publish it immediately to Facebook, Instagram, or both.'
+              : 'Write your post, pick a date & time, and schedule it to Facebook, Instagram, or both.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
