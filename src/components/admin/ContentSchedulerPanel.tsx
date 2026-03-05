@@ -30,6 +30,7 @@ export const ContentSchedulerPanel = () => {
   const [uploading, setUploading] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both'>('facebook');
+  const [publishMode, setPublishMode] = useState<'schedule' | 'now'>('schedule');
 
   // Fetch meta credentials (pages) for this company
   const { data: pages } = useQuery({
