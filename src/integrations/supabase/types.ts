@@ -1826,6 +1826,7 @@ export type Database = {
           company_id: string | null
           created_at: string | null
           id: string
+          ig_user_id: string | null
           page_id: string
           platform: string
           updated_at: string | null
@@ -1837,6 +1838,7 @@ export type Database = {
           company_id?: string | null
           created_at?: string | null
           id?: string
+          ig_user_id?: string | null
           page_id: string
           platform: string
           updated_at?: string | null
@@ -1848,6 +1850,7 @@ export type Database = {
           company_id?: string | null
           created_at?: string | null
           id?: string
+          ig_user_id?: string | null
           page_id?: string
           platform?: string
           updated_at?: string | null
@@ -2212,6 +2215,7 @@ export type Database = {
           page_id: string
           scheduled_time: string
           status: string
+          target_platform: string
           updated_at: string
         }
         Insert: {
@@ -2226,6 +2230,7 @@ export type Database = {
           page_id: string
           scheduled_time: string
           status?: string
+          target_platform?: string
           updated_at?: string
         }
         Update: {
@@ -2240,6 +2245,7 @@ export type Database = {
           page_id?: string
           scheduled_time?: string
           status?: string
+          target_platform?: string
           updated_at?: string
         }
         Relationships: [
