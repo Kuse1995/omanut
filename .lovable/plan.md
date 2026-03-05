@@ -1,110 +1,67 @@
 
 
-## Plan: Full Instagram Omnichannel Support
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-This is a large, multi-file change across 5 edge functions and 3 UI components. Here's the breakdown:
+## Problem Analysis
 
----
+Two issues identified in the `demo-session` edge function:
 
-### 1. Database: Add `target_platform` column to `scheduled_posts`
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-Add a migration to support targeting Facebook, Instagram, or both:
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-```sql
-ALTER TABLE public.scheduled_posts 
-ADD COLUMN target_platform text NOT NULL DEFAULT 'facebook';
--- Values: 'facebook', 'instagram', 'both'
-```
+## Changes
 
-Also add an `ig_user_id` column to `meta_credentials` to store the Instagram Business Account ID (needed for IG API calls):
+### File: `supabase/functions/demo-session/index.ts`
 
-```sql
-ALTER TABLE public.meta_credentials 
-ADD COLUMN ig_user_id text;
-```
+**1. Tighten handoff evaluation prompt**
 
----
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-### 2. Meta Webhook (`supabase/functions/meta-webhook/index.ts`)
+**2. Create tickets and queue items on handoff**
 
-Currently only handles `body.object === 'page'`. Instagram webhooks arrive with `body.object === 'instagram'`.
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-**Changes:**
-- Accept both `'page'` and `'instagram'` in the object check (line 70)
-- Add Instagram comment handler: `entry.changes` with `field === 'comments'` → extract comment text, commenter ID, media ID → call `handleInstagramComment()` which generates AI reply and posts via `POST /{comment-id}/replies`
-- Add Instagram DM handler: `entry.messaging` under instagram object → extract sender ID, message text → call `handleInstagramDM()` which generates AI reply and sends via `POST /me/messages` with the IG-scoped sender ID
-- Save interactions with `phone: 'ig:{userId}'` (comments) or `phone: 'igdm:{userId}'` (DMs) and `platform: 'instagram'` / `'instagram_dm'`
-- Update `buildCompanySystemPrompt` to accept `'instagram_comment'` and `'instagram_dm'` context types
-- Look up credentials by matching the `ig_user_id` field for Instagram webhooks
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
----
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-### 3. Schedule Meta Post (`supabase/functions/schedule-meta-post/index.ts`)
+**3. Skip evaluation on short conversations**
 
-**Changes:**
-- Read `post.target_platform` from the scheduled post record
-- For `'facebook'` (existing logic): publish via FB Graph API as today
-- For `'instagram'`: implement the two-step IG Content Publishing API:
-  1. `POST /{ig_user_id}/media` with `{ image_url, caption }` → get `creation_id`
-  2. `POST /{ig_user_id}/media_publish` with `{ creation_id }` → get published media ID
-  - Note: IG requires an image — text-only posts are not supported
-- For `'both'`: execute both Facebook and Instagram publishing sequentially
-- Look up `ig_user_id` from `meta_credentials` alongside `access_token`
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
----
+### Summary of behavior after fix
 
-### 4. Boss Chat Tool (`supabase/functions/boss-chat/index.ts`)
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-**Changes to `schedule_facebook_post` tool (lines 753-767):**
-- Rename tool to `schedule_social_post` (or keep name but update description)
-- Add `target_platform` parameter: `{ type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both" }`
-- Update tool execution (lines 963-1062) to pass `target_platform` to the `scheduled_posts` insert
-- Update the success message to reflect which platform(s) were targeted
+### Files
 
----
-
-### 5. Conversations Dashboard UI
-
-**`src/components/conversations/ConversationItem.tsx`:**
-- Add Instagram icon checks: `phone?.startsWith('ig:')` → pink/gradient Instagram badge, `phone?.startsWith('igdm:')` → pink Instagram DM badge
-- Use the Lucide `Instagram` icon (it exists in lucide-react)
-
-**`src/components/conversations/ConversationsList.tsx`:**
-- Add `'instagram'` and `'instagram_dm'` filter options
-- Add Instagram filter buttons with pink styling and counts
-
----
-
-### 6. Content Scheduler UI (`src/components/admin/ContentSchedulerPanel.tsx`)
-
-**Changes:**
-- Add a `targetPlatform` state: `'facebook' | 'instagram' | 'both'`
-- Add a platform selector (toggle group or select) in the compose form
-- Pass `target_platform` in the `scheduled_posts` insert
-- Show platform badge on each scheduled post in the list
-- When `'instagram'` is selected, require an image (since IG doesn't support text-only posts)
-
----
-
-### 7. Chat View Updates
-
-**`src/components/conversations/ChatView.tsx`:**
-- Add Instagram platform detection for `ig:` and `igdm:` prefixes
-- Show appropriate badges ("Instagram Comment", "Instagram DM")
-- Instagram comments should be read-only (same as Facebook comments — AI handles replies autonomously)
-
----
-
-### Files Changed
-
-| File | Change |
-|------|--------|
-| **Migration** | Add `target_platform` to `scheduled_posts`, `ig_user_id` to `meta_credentials` |
-| `supabase/functions/meta-webhook/index.ts` | Handle `instagram` object, route IG comments & DMs to AI, save with `ig:`/`igdm:` prefixes |
-| `supabase/functions/schedule-meta-post/index.ts` | Add Instagram 2-step publishing + `both` mode |
-| `supabase/functions/boss-chat/index.ts` | Add `target_platform` param to scheduling tool |
-| `src/components/conversations/ConversationItem.tsx` | Instagram icon badges |
-| `src/components/conversations/ConversationsList.tsx` | Instagram filter buttons |
-| `src/components/conversations/ChatView.tsx` | Instagram platform detection & badges |
-| `src/components/admin/ContentSchedulerPanel.tsx` | Platform selector toggle |
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 

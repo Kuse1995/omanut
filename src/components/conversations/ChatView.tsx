@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 
-import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown, Image, Facebook, MessageCircle as MessageCircleIcon } from 'lucide-react';
+import { UserCog, Bot, Send, Sparkles, Paperclip, X, FileText, MessageSquare, ChevronDown, Image, Facebook, MessageCircle as MessageCircleIcon, Instagram } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { QuickReplySelector } from './QuickReplySelector';
@@ -14,6 +14,7 @@ import { AgentSwitchIndicator } from './AgentSwitchIndicator';
 import { LiveInsightsBar } from './LiveInsightsBar';
 import { MediaGallery } from './MediaGallery';
 import { useLiveSupervisorAnalysis } from '@/hooks/useLiveSupervisorAnalysis';
+
 interface Message {
   id: string;
   content: string;
@@ -76,7 +77,6 @@ export const ChatView = ({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Live supervisor analysis
   const { liveInsight, isAnalyzing } = useLiveSupervisorAnalysis(
     conversation.id,
     conversation.company_id || null,
@@ -99,32 +99,23 @@ export const ChatView = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Auto-scroll when switching conversations or new messages arrive
   const lastConversationIdRef = useRef<string | null>(null);
   const isNearBottomRef = useRef(true);
 
   useEffect(() => {
-    // Always scroll to bottom when switching to a different conversation
     if (lastConversationIdRef.current !== conversation.id) {
       lastConversationIdRef.current = conversation.id;
-      // Use setTimeout to ensure DOM is updated
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
       }, 0);
     } else if (isNearBottomRef.current) {
-      // Only auto-scroll for new messages if already near bottom
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [conversation.id, conversation.messages.length]);
 
-  // Handle scroll to detect if user is near bottom
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
-    const scrollTop = target.scrollTop;
-    const scrollHeight = target.scrollHeight;
-    const clientHeight = target.clientHeight;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
     isNearBottomRef.current = distanceFromBottom < 100;
     setShowScrollButton(distanceFromBottom > 200);
   };
@@ -138,61 +129,81 @@ export const ChatView = ({
 
   const isFacebook = conversation.phone?.startsWith('fb:') && !conversation.phone?.startsWith('fbdm:');
   const isMessenger = conversation.phone?.startsWith('fbdm:');
+  const isInstagram = conversation.phone?.startsWith('ig:') && !conversation.phone?.startsWith('igdm:');
+  const isInstagramDM = conversation.phone?.startsWith('igdm:');
+  const isMetaReadOnly = isFacebook || isInstagram;
+  const isMetaDM = isMessenger || isInstagramDM;
+
+  // Determine platform styling
+  const getPlatformStyle = () => {
+    if (isInstagram || isInstagramDM) return { bg: 'bg-pink-50/80 dark:bg-pink-950/30', ring: 'ring-pink-500/30', avatarBg: 'bg-pink-100 text-pink-700 dark:bg-pink-900 dark:text-pink-300' };
+    if (isFacebook) return { bg: 'bg-blue-50/80 dark:bg-blue-950/30', ring: 'ring-blue-500/30', avatarBg: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' };
+    if (isMessenger) return { bg: 'bg-violet-50/80 dark:bg-violet-950/30', ring: 'ring-violet-500/30', avatarBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300' };
+    return { bg: 'bg-card/80', ring: 'ring-primary/20', avatarBg: 'bg-primary/10 text-primary' };
+  };
+
+  const style = getPlatformStyle();
+
+  const getPlatformBadge = () => {
+    if (isInstagram) return { icon: <Instagram className="h-2.5 w-2.5" />, label: 'Instagram', badgeCls: 'bg-pink-100 text-pink-700 dark:bg-pink-900/50 dark:text-pink-300' };
+    if (isInstagramDM) return { icon: <Instagram className="h-2.5 w-2.5" />, label: 'Instagram DM', badgeCls: 'bg-pink-100 text-pink-700 dark:bg-pink-900/50 dark:text-pink-300' };
+    if (isFacebook) return { icon: <Facebook className="h-2.5 w-2.5" />, label: 'Facebook', badgeCls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' };
+    if (isMessenger) return { icon: <MessageSquare className="h-2.5 w-2.5" />, label: 'Messenger', badgeCls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300' };
+    return { icon: <MessageCircleIcon className="h-2.5 w-2.5" />, label: 'WhatsApp', badgeCls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300' };
+  };
+
+  const platformBadge = getPlatformBadge();
+
+  const getPlatformMiniIcon = () => {
+    if (isInstagram || isInstagramDM) return (
+      <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card flex items-center justify-center bg-gradient-to-br from-pink-500 via-rose-500 to-orange-400">
+        <Instagram className="h-2 w-2 text-white" />
+      </div>
+    );
+    if (isMessenger) return (
+      <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
+        <MessageSquare className="h-2 w-2 text-white" />
+      </div>
+    );
+    if (isFacebook) return (
+      <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
+        <Facebook className="h-2 w-2 text-white" />
+      </div>
+    );
+    return (
+      <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
+        <MessageCircleIcon className="h-2 w-2 text-white" />
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-background relative">
       {/* Header */}
       <div className={cn(
         "flex items-center justify-between px-3 py-2 border-b border-border backdrop-blur-sm",
-        isFacebook ? "bg-blue-50/80 dark:bg-blue-950/30" : 
-        isMessenger ? "bg-violet-50/80 dark:bg-violet-950/30" : "bg-card/80"
+        style.bg
       )}>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Avatar className={cn(
-              "h-8 w-8 ring-2",
-              isFacebook ? "ring-blue-500/30" : isMessenger ? "ring-violet-500/30" : "ring-primary/20"
-            )}>
-              <AvatarFallback className={cn(
-                "font-semibold text-xs",
-                isFacebook ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" : 
-                isMessenger ? "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300" : "bg-primary/10 text-primary"
-              )}>
+            <Avatar className={cn("h-8 w-8 ring-2", style.ring)}>
+              <AvatarFallback className={cn("font-semibold text-xs", style.avatarBg)}>
                 {getInitials()}
               </AvatarFallback>
             </Avatar>
-            {isMessenger ? (
-              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
-                <MessageSquare className="h-2 w-2 text-white" />
-              </div>
-            ) : isFacebook ? (
-              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
-                <Facebook className="h-2 w-2 text-white" />
-              </div>
-            ) : (
-              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
-                <MessageCircleIcon className="h-2 w-2 text-white" />
-              </div>
-            )}
+            {getPlatformMiniIcon()}
           </div>
           <div>
             <h3 className="font-semibold text-xs">
-              {conversation.customer_name || (isFacebook ? 'Facebook User' : conversation.phone) || 'Unknown'}
+              {conversation.customer_name || ((isFacebook || isInstagram) ? 'Social User' : conversation.phone) || 'Unknown'}
             </h3>
             <div className="flex items-center gap-1.5">
               <Badge 
                 variant="outline" 
-                className={cn(
-                  "gap-0.5 h-4 text-[9px] px-1.5 border-0",
-                  isFacebook 
-                    ? "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" 
-                    : isMessenger
-                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
-                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
-                )}
+                className={cn("gap-0.5 h-4 text-[9px] px-1.5 border-0", platformBadge.badgeCls)}
               >
-                {isFacebook ? <Facebook className="h-2.5 w-2.5" /> : isMessenger ? <MessageSquare className="h-2.5 w-2.5" /> : <MessageCircleIcon className="h-2.5 w-2.5" />}
-                {isFacebook ? 'Facebook' : isMessenger ? 'Messenger' : 'WhatsApp'}
+                {platformBadge.icon}
+                {platformBadge.label}
               </Badge>
               {conversation.human_takeover ? (
                 <Badge variant="secondary" className="gap-0.5 h-4 text-[9px] px-1.5">
@@ -218,7 +229,7 @@ export const ChatView = ({
           >
             <Image className="h-4 w-4" />
           </Button>
-          {!isFacebook && !isMessenger && (
+          {!isMetaReadOnly && !isMetaDM && (
             <Button
               variant={conversation.human_takeover ? "destructive" : "default"}
               size="sm"
@@ -263,7 +274,6 @@ export const ChatView = ({
               return switchTime > prevMessageTime && switchTime <= messageTime;
             });
 
-            // Determine grouping - messages from same sender within 2 minutes are grouped
             const prevMessage = idx > 0 ? conversation.messages[idx - 1] : null;
             const nextMessage = idx < conversation.messages.length - 1 ? conversation.messages[idx + 1] : null;
             
@@ -327,21 +337,27 @@ export const ChatView = ({
       )}
 
       {/* Input Area - Platform-adaptive */}
-      {isMessenger ? (
-        <div className="px-3 py-2 border-t border-border bg-violet-50/50 dark:bg-violet-950/20 text-center">
+      {isMetaDM ? (
+        <div className={cn(
+          "px-3 py-2 border-t border-border text-center",
+          isInstagramDM ? "bg-pink-50/50 dark:bg-pink-950/20" : "bg-violet-50/50 dark:bg-violet-950/20"
+        )}>
           <div className="flex items-center justify-center gap-1.5">
-            <MessageSquare className="h-3.5 w-3.5 text-violet-500" />
+            {isInstagramDM ? <Instagram className="h-3.5 w-3.5 text-pink-500" /> : <MessageSquare className="h-3.5 w-3.5 text-violet-500" />}
             <p className="text-xs text-muted-foreground">
-              Messenger DMs are handled automatically by AI. Replies are sent as private messages.
+              {isInstagramDM ? 'Instagram' : 'Messenger'} DMs are handled automatically by AI. Replies are sent as private messages.
             </p>
           </div>
         </div>
-      ) : isFacebook ? (
-        <div className="px-3 py-2 border-t border-border bg-blue-50/50 dark:bg-blue-950/20 text-center">
+      ) : isMetaReadOnly ? (
+        <div className={cn(
+          "px-3 py-2 border-t border-border text-center",
+          isInstagram ? "bg-pink-50/50 dark:bg-pink-950/20" : "bg-blue-50/50 dark:bg-blue-950/20"
+        )}>
           <div className="flex items-center justify-center gap-1.5">
-            <Facebook className="h-3.5 w-3.5 text-blue-500" />
+            {isInstagram ? <Instagram className="h-3.5 w-3.5 text-pink-500" /> : <Facebook className="h-3.5 w-3.5 text-blue-500" />}
             <p className="text-xs text-muted-foreground">
-              Facebook comments are handled automatically by AI. Replies appear as public comments.
+              {isInstagram ? 'Instagram' : 'Facebook'} comments are handled automatically by AI. Replies appear as public comments.
             </p>
           </div>
         </div>

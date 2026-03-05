@@ -750,16 +750,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
-          name: "schedule_facebook_post",
-          description: "Schedule a Facebook post for the company's page. Parse the boss's message to extract the post content and desired publish time. If the boss wants an image generated, set needs_image_generation to true.",
+          name: "schedule_social_post",
+          description: "Schedule a social media post to Facebook, Instagram, or both. Parse the boss's message to extract the post content, desired publish time, and target platform. If the boss wants an image generated, set needs_image_generation to true. Instagram requires an image.",
           parameters: {
             type: "object",
             properties: {
-              content: { type: "string", description: "The text content of the Facebook post" },
+              content: { type: "string", description: "The text content of the post" },
               scheduled_time: { type: "string", description: "ISO 8601 timestamp in UTC. Convert boss's local time (GMT+2) to UTC by subtracting 2 hours. E.g., boss says 7am → use 05:00:00Z" },
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" },
-              image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." }
+              image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." },
+              target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
             },
             required: ["content", "scheduled_time"]
           }
@@ -960,7 +961,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
               break;
 
+            case 'schedule_social_post':
             case 'schedule_facebook_post': {
+              const targetPlatform = args.target_platform || 'facebook';
               // Look up meta_credentials for the company's page_id
               const { data: metaCred } = await supabase
                 .from('meta_credentials')
@@ -1025,6 +1028,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   image_url: imageUrl,
                   status: 'draft',
                   created_by: systemUserId,
+                  target_platform: targetPlatform,
                 })
                 .select('id')
                 .single();
@@ -1055,9 +1059,10 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               const scheduledDate = new Date(args.scheduled_time);
+              const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
               result = {
                 success: true,
-                message: `✅ Facebook post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
               };
               break;
             }

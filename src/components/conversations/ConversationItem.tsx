@@ -1,6 +1,6 @@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { UserCog, Bot, Pin, Headset, TrendingUp, UserCircle, Facebook, MessageCircle, MessageSquare } from 'lucide-react';
+import { UserCog, Bot, Pin, Headset, TrendingUp, UserCircle, Facebook, MessageCircle, MessageSquare, Instagram } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -83,6 +83,47 @@ export const ConversationItem = ({ conversation, isSelected, onClick }: Conversa
     }
   };
 
+  const isInstagram = conversation.phone?.startsWith('ig:') && !conversation.phone?.startsWith('igdm:');
+  const isInstagramDM = conversation.phone?.startsWith('igdm:');
+  const isMessenger = conversation.phone?.startsWith('fbdm:');
+  const isFacebook = conversation.phone?.startsWith('fb:') && !conversation.phone?.startsWith('fbdm:');
+
+  const getPlatformIcon = () => {
+    if (isInstagramDM) {
+      return (
+        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card flex items-center justify-center bg-gradient-to-br from-pink-500 via-rose-500 to-orange-400">
+          <Instagram className="h-2.5 w-2.5 text-white" />
+        </div>
+      );
+    }
+    if (isInstagram) {
+      return (
+        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card flex items-center justify-center bg-gradient-to-br from-pink-500 via-rose-500 to-orange-400">
+          <Instagram className="h-2.5 w-2.5 text-white" />
+        </div>
+      );
+    }
+    if (isMessenger) {
+      return (
+        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
+          <MessageSquare className="h-2.5 w-2.5 text-white" />
+        </div>
+      );
+    }
+    if (isFacebook) {
+      return (
+        <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
+          <Facebook className="h-2.5 w-2.5 text-white" />
+        </div>
+      );
+    }
+    return (
+      <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
+        <MessageCircle className="h-2.5 w-2.5 text-white" />
+      </div>
+    );
+  };
+
   return (
     <div
       onClick={onClick}
@@ -103,20 +144,7 @@ export const ConversationItem = ({ conversation, isSelected, onClick }: Conversa
               {getInitials()}
             </AvatarFallback>
           </Avatar>
-          {/* Platform icon */}
-          {conversation.phone?.startsWith('fbdm:') ? (
-            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-violet-600 rounded-full border-2 border-card flex items-center justify-center">
-              <MessageSquare className="h-2.5 w-2.5 text-white" />
-            </div>
-          ) : conversation.phone?.startsWith('fb:') ? (
-            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-blue-600 rounded-full border-2 border-card flex items-center justify-center">
-              <Facebook className="h-2.5 w-2.5 text-white" />
-            </div>
-          ) : (
-            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 bg-emerald-500 rounded-full border-2 border-card flex items-center justify-center">
-              <MessageCircle className="h-2.5 w-2.5 text-white" />
-            </div>
-          )}
+          {getPlatformIcon()}
         </div>
 
         {/* Content */}
