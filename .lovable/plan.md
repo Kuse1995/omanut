@@ -1,36 +1,67 @@
 
 
-## Fix: Instagram "Media ID is not available" Error
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-### Root Cause
-Instagram's two-step Content Publishing API creates a media container (step 1) that needs processing time before it can be published (step 2). The current code calls `media_publish` immediately after creating the container, but Instagram hasn't finished processing the image yet.
+## Problem Analysis
 
-The error from the database confirms this: `"Instagram publish: Media ID is not available"`.
+Two issues identified in the `demo-session` edge function:
 
-### Solution
-Add a polling loop between container creation and publishing in both `publish-meta-post` and `schedule-meta-post`. After creating the container, poll `GET /{container_id}?fields=status_code` until it returns `FINISHED`, then proceed with publishing.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-Instagram docs specify the container status can be:
-- `IN_PROGRESS` — still processing
-- `FINISHED` — ready to publish
-- `ERROR` — failed
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-### Changes
+## Changes
 
-**`supabase/functions/publish-meta-post/index.ts`**
-- After the container creation call succeeds, add a polling loop:
-  - `GET https://graph.facebook.com/v25.0/{creation_id}?fields=status_code`
-  - Retry up to 10 times with 3-second delays (30s max wait)
-  - Only proceed to `media_publish` once status is `FINISHED`
-  - If status is `ERROR`, report failure immediately
+### File: `supabase/functions/demo-session/index.ts`
 
-**`supabase/functions/schedule-meta-post/index.ts`**
-- Same polling logic added between container creation and publishing
+**1. Tighten handoff evaluation prompt**
 
-### Files Changed
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-| File | Change |
-|------|--------|
-| `supabase/functions/publish-meta-post/index.ts` | Add container status polling before `media_publish` |
-| `supabase/functions/schedule-meta-post/index.ts` | Add container status polling before `media_publish` |
+**2. Create tickets and queue items on handoff**
+
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 

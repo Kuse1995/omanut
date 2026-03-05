@@ -169,25 +169,47 @@ serve(async (req) => {
           if (!containerRes.ok) {
             errors.push(`Instagram container: ${containerResult.error?.message || 'API error'}`);
           } else {
-            // Step 2: Publish
-            const publishRes = await fetch(
-              `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media_publish`,
-              {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${cred.access_token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ creation_id: containerResult.id }),
-              }
-            );
+            const creationId = containerResult.id;
+            console.log(`IG media container created: ${creationId}`);
 
-            const publishResult = await publishRes.json();
-            if (!publishRes.ok) {
-              errors.push(`Instagram publish: ${publishResult.error?.message || 'API error'}`);
+            // Poll for container readiness
+            let containerStatus = 'IN_PROGRESS';
+            for (let i = 0; i < 10; i++) {
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              const statusRes = await fetch(
+                `https://graph.facebook.com/v25.0/${creationId}?fields=status_code&access_token=${cred.access_token}`
+              );
+              const statusData = await statusRes.json();
+              containerStatus = statusData.status_code;
+              console.log(`IG container ${creationId} status: ${containerStatus} (attempt ${i + 1})`);
+              if (containerStatus === 'FINISHED' || containerStatus === 'ERROR') break;
+            }
+
+            if (containerStatus === 'ERROR') {
+              errors.push('Instagram: Container processing failed');
+            } else if (containerStatus !== 'FINISHED') {
+              errors.push('Instagram: Container did not finish processing in time');
             } else {
-              results.instagram = publishResult;
-              console.log(`Post ${post_id} published on Instagram. ID: ${publishResult.id}`);
+              // Step 2: Publish
+              const publishRes = await fetch(
+                `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media_publish`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: `Bearer ${cred.access_token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ creation_id: creationId }),
+                }
+              );
+
+              const publishResult = await publishRes.json();
+              if (!publishRes.ok) {
+                errors.push(`Instagram publish: ${publishResult.error?.message || 'API error'}`);
+              } else {
+                results.instagram = publishResult;
+                console.log(`Post ${post_id} published on Instagram. ID: ${publishResult.id}`);
+              }
             }
           }
         } catch (igErr: any) {
