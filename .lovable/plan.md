@@ -1,67 +1,58 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Autonomous Content Engine
 
-## Problem Analysis
+### Overview
+Build a system where AI proactively creates social media posts (caption + image) and saves them for human review before publishing. Three parts: schema update, edge function, and approval UI.
 
-Two issues identified in the `demo-session` edge function:
+### 1. Database Update
+The `scheduled_posts` table already has a `status` column supporting `draft`, `scheduled`, `published`, `failed`. We need to add `pending_approval` as a valid state. Since it's a text column (no enum constraint), no migration is needed -- we just use the new value in code. The `publish-meta-post` function checks `status !== 'draft'`, so we'll also need it to accept `scheduled` status (posts approved from the queue).
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+### 2. New Edge Function: `auto-content-creator`
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+**File:** `supabase/functions/auto-content-creator/index.ts`
 
-## Changes
+When triggered with a `company_id`:
+1. Fetch company info (`companies` table: name, business_type) and AI settings (`company_ai_overrides`: system_instructions)
+2. Fetch image generation settings and any reference/approved images from `generated_images` and `company_media` for style context
+3. Call Lovable AI (`google/gemini-3-flash-preview`) to brainstorm an engaging social media caption based on company context
+4. Call Lovable AI image generation (`google/gemini-3-pro-image-preview`) to create a matching image, referencing brand style
+5. Upload the base64 image to `company-media` storage bucket, get public URL
+6. Calculate `scheduled_time` = now + 2 days
+7. Look up the company's `meta_credentials` to get the `page_id`
+8. Insert into `scheduled_posts` with `status: 'pending_approval'`, `target_platform: 'both'`
 
-### File: `supabase/functions/demo-session/index.ts`
+Config: `verify_jwt = true`, `timeout = 60`
 
-**1. Tighten handoff evaluation prompt**
+### 3. Frontend: Approval Queue UI
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+**Update:** `src/components/admin/ContentSchedulerPanel.tsx`
 
-**2. Create tickets and queue items on handoff**
+- Add a top-level tab structure: **Compose** | **Approval Queue** | **All Posts**
+- Move existing compose form into "Compose" tab, existing post list into "All Posts" tab
+- New **Approval Queue** tab:
+  - Fetches posts with `status = 'pending_approval'` for the selected company
+  - Each card shows: image thumbnail, AI-generated caption (editable textarea), scheduled time (editable date/time input), platform badge
+  - **Approve** button: updates status to `scheduled`, then calls `schedule-meta-post` to register with Meta
+  - **Edit & Approve**: allows inline editing of caption and time before approving
+  - **Reject** button: deletes the post or sets status to `failed`
+- Add a **Generate Content** button that triggers the `auto-content-creator` edge function for the current company
+- Update `statusBadge` helper to handle `pending_approval` state (orange/amber badge with "Pending Review" label)
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+### 4. Config Update
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+Add to `supabase/config.toml`:
+```toml
+[functions.auto-content-creator]
+  timeout = 60
+  verify_jwt = true
+```
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+### Files Changed
 
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/auto-content-creator/index.ts` | New edge function |
+| `supabase/config.toml` | Add function config |
+| `src/components/admin/ContentSchedulerPanel.tsx` | Add Approval Queue tab, Generate Content button, inline editing |
 
