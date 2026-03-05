@@ -1232,6 +1232,22 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 if (args.new_image_url) { editData.image_url = args.new_image_url; editChanges.push('Image updated'); }
                 await supabase.from('scheduled_posts').update(editData).eq('id', targetPostId);
                 result = { success: true, message: `✏️ Post updated!\n${editChanges.join('\n')}\n\nSay "approve post" when ready to schedule it.` };
+              } else if (args.action === 'approve_and_publish') {
+                // Approve and publish immediately
+                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
+                const SUPABASE_URL3 = Deno.env.get('SUPABASE_URL')!;
+                const SRK3 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const pubRes = await fetch(`${SUPABASE_URL3}/functions/v1/publish-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK3}` },
+                  body: JSON.stringify({ post_id: targetPostId }),
+                });
+                const pubResult = await pubRes.json();
+                if (pubRes.ok && pubResult.success) {
+                  result = { success: true, message: `✅ Post approved and published NOW!\n🆔 Meta Post ID: ${pubResult.meta_post_id}` };
+                } else {
+                  result = { success: false, message: `⚠️ Post approved but publishing failed: ${pubResult.error || 'Unknown error'}. You can retry with "publish post".` };
+                }
               } else if (args.action === 'reject') {
                 await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', targetPostId);
                 result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
