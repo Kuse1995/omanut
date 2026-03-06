@@ -137,11 +137,20 @@ export const ContentSchedulerPanel = () => {
         .select('id').single();
       if (insertError) throw insertError;
 
-      const fnName = publishMode === 'now' ? 'publish-meta-post' : 'schedule-meta-post';
-      const { data: result, error: fnError } = await supabase.functions.invoke(fnName, { body: { post_id: post.id } });
-      if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
-      if (result?.error) throw new Error(result.error);
-      return result;
+      if (publishMode === 'now') {
+        // Publish immediately via publish-meta-post
+        const { data: result, error: fnError } = await supabase.functions.invoke('publish-meta-post', { body: { post_id: post.id } });
+        if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
+        if (result?.error) throw new Error(result.error);
+        return result;
+      } else {
+        // Set status to approved — cron-publisher will handle publishing at scheduled_time
+        const { error: approveError } = await supabase.from('scheduled_posts').update({
+          status: 'approved', updated_at: new Date().toISOString(),
+        }).eq('id', post.id);
+        if (approveError) throw approveError;
+        return { success: true };
+      }
     },
     onSuccess: () => {
       const label = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
