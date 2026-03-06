@@ -202,17 +202,12 @@ export const ContentSchedulerPanel = () => {
         if (updateError) throw updateError;
       }
 
-      // Update status to scheduled
+      // Set status to approved — cron-publisher will publish at scheduled_time
       const { error } = await supabase.from('scheduled_posts').update({
-        status: 'scheduled', updated_at: new Date().toISOString(),
+        status: 'approved', updated_at: new Date().toISOString(),
       }).eq('id', postId);
       if (error) throw error;
-
-      // Trigger schedule-meta-post
-      const { data: result, error: fnError } = await supabase.functions.invoke('schedule-meta-post', { body: { post_id: postId } });
-      if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
-      if (result?.error) throw new Error(result.error);
-      return result;
+      return { success: true };
     },
     onSuccess: () => {
       toast.success('Post approved and scheduled!');
