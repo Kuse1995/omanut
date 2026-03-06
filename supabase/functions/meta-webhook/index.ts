@@ -258,8 +258,26 @@ async function getIgCredentials(supabase: any, igUserId: string) {
   }
 
   if (!cred) {
-    console.warn(`No meta_credentials found for ig_user_id: ${igUserId}`);
-    return null;
+    // Fallback: try looking up by page_id in case ig_user_id was stored differently
+    console.warn(`No meta_credentials found for ig_user_id: ${igUserId}, trying fallback by page_id...`);
+    const { data: fallbackCred, error: fbErr } = await supabase
+      .from('meta_credentials')
+      .select('access_token, ai_system_prompt, company_id, page_id, ig_user_id')
+      .eq('page_id', igUserId)
+      .not('company_id', 'is', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (fbErr) {
+      console.error('Error fetching IG fallback meta_credentials by page_id:', fbErr);
+      return null;
+    }
+    if (!fallbackCred) {
+      console.warn(`No meta_credentials found for ig_user_id OR page_id: ${igUserId}`);
+      return null;
+    }
+    console.log(`[getIgCredentials] Found credentials via page_id fallback for ${igUserId}`);
+    return fallbackCred;
   }
   return cred;
 }
