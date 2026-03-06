@@ -3997,36 +3997,42 @@ serve(async (req) => {
               
               for (let i = 0; i < bossData.mediaMessages.length; i++) {
                 const item = bossData.mediaMessages[i];
-                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-                const twilioFormData = new URLSearchParams();
-                twilioFormData.append('From', To);
-                twilioFormData.append('To', From);
-                twilioFormData.append('Body', item.body);
+                const cleanedBody = cleanFormatting(item.body);
+                const bodyChunks = splitMessage(cleanedBody);
                 
-                if (item.imageUrl) {
-                  console.log(`[BOSS] Media msg ${i+1}: attaching image ${item.imageUrl.substring(0, 80)}...`);
-                  twilioFormData.append('MediaUrl', item.imageUrl);
-                }
-                
-                const twilioResponse = await fetch(twilioUrl, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                  },
-                  body: twilioFormData
-                });
-                
-                if (twilioResponse.ok) {
-                  console.log(`[BOSS] Media msg ${i+1}/${bossData.mediaMessages.length} sent successfully`);
-                } else {
-                  const errorText = await twilioResponse.text();
-                  console.error(`[BOSS] Failed to send media msg ${i+1}:`, twilioResponse.status, errorText);
-                }
-                
-                // Delay between messages
-                if (i < bossData.mediaMessages.length - 1) {
-                  await new Promise(resolve => setTimeout(resolve, 500));
+                for (let c = 0; c < bodyChunks.length; c++) {
+                  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                  const twilioFormData = new URLSearchParams();
+                  twilioFormData.append('From', To);
+                  twilioFormData.append('To', From);
+                  twilioFormData.append('Body', bodyChunks[c]);
+                  
+                  // Attach image only to first chunk of this media item
+                  if (c === 0 && item.imageUrl) {
+                    console.log(`[BOSS] Media msg ${i+1}: attaching image ${item.imageUrl.substring(0, 80)}...`);
+                    twilioFormData.append('MediaUrl', item.imageUrl);
+                  }
+                  
+                  const twilioResponse = await fetch(twilioUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: twilioFormData
+                  });
+                  
+                  if (twilioResponse.ok) {
+                    console.log(`[BOSS] Media msg ${i+1} chunk ${c+1}/${bodyChunks.length} sent`);
+                  } else {
+                    const errorText = await twilioResponse.text();
+                    console.error(`[BOSS] Failed media msg ${i+1} chunk ${c+1}:`, twilioResponse.status, errorText);
+                  }
+                  
+                  // Delay between chunks/messages
+                  if (c < bodyChunks.length - 1 || i < bossData.mediaMessages.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                  }
                 }
               }
             } else {

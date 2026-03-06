@@ -898,7 +898,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const aiMessage = data.choices[0].message;
     let aiResponse = aiMessage.content || '';
     let toolImageUrl: string | null = null;
-    let toolMediaMessages: { body: string; imageUrl: string | null }[] | null = null;
+    let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
 
     // Handle tool calls if present
     if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
@@ -1070,7 +1070,6 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                       const imgResult = await imgRes.json();
                       imageUrl = imgResult.imageUrl || null;
                       console.log('[BOSS-SCHEDULE] Generated image URL:', imageUrl);
-                      toolImageUrl = imageUrl;
                     }
                   } catch (imgErr) {
                     console.error('[BOSS-SCHEDULE] Image generation error:', imgErr);
@@ -1123,16 +1122,27 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 }
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
+                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
                 };
+                // Append media message for WhatsApp delivery
+                toolMediaMessages.push({
+                  body: `✅ Published to ${platformLabel}:\n\n${args.content}`,
+                  imageUrl: imageUrl || null
+                });
               } else {
                 // Set to approved — cron-publisher will handle it at scheduled_time
                 await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
                 const scheduledDate = new Date(args.scheduled_time);
+                const localDate = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000); // GMT+2
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
+                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content}\n📅 Scheduled for: ${localDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
                 };
+                // Append media message for WhatsApp delivery
+                toolMediaMessages.push({
+                  body: `✅ Scheduled for ${platformLabel} (${localDate.toLocaleDateString()} at ${localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}):\n\n${args.content}`,
+                  imageUrl: imageUrl || null
+                });
               }
               break;
             }
@@ -1175,17 +1185,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
               } else {
                 // Build per-post media messages array for multi-image WhatsApp delivery
-                const mediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
+                const pendingMediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
                   const time = new Date(p.scheduled_time);
                   const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
-                  const caption = `Post ${i + 1}/${pendingPosts.length}: "${p.content.substring(0, 120)}${p.content.length > 120 ? '...' : ''}"\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
+                  const caption = `Post ${i + 1}/${pendingPosts.length}:\n\n${p.content}\n\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
                   return { body: caption, imageUrl: p.image_url || null };
                 });
                 // Add concluding prompt
-                mediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
+                pendingMediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
                 
-                // Store mediaMessages for response — toolMediaMessages will be picked up below
-                (result as any).__mediaMessages = mediaMessages;
+                // Merge into toolMediaMessages accumulator
+                toolMediaMessages.push(...pendingMediaMessages);
                 
                 const postList = pendingPosts.map((p: any, i: number) => {
                   const time = new Date(p.scheduled_time);
@@ -1263,10 +1273,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           
           toolResults.push(result.message);
           
-          // Capture mediaMessages from get_pending_posts
-          if ((result as any).__mediaMessages) {
-            toolMediaMessages = (result as any).__mediaMessages;
-          }
+          // mediaMessages are now accumulated directly in toolMediaMessages above
           
         } catch (error) {
           console.error(`Tool execution error for ${functionName}:`, error);
@@ -1294,7 +1301,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     // Return JSON response (not TwiML) for whatsapp-messages to handle
     const responsePayload: any = { response: aiResponse };
     if (toolImageUrl) responsePayload.imageUrl = toolImageUrl;
-    if (toolMediaMessages) responsePayload.mediaMessages = toolMediaMessages;
+    if (toolMediaMessages.length > 0) {
+      // If there's also an AI text response, append it as a final text-only message
+      if (aiResponse && aiResponse.trim()) {
+        toolMediaMessages.push({ body: aiResponse, imageUrl: null });
+      }
+      responsePayload.mediaMessages = toolMediaMessages;
+    }
     
     return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

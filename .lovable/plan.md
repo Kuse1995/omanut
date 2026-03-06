@@ -1,46 +1,67 @@
 
-Implementation plan for later (based on current code + logs):
 
-1) Confirmed root causes
-- Only one image is sent because `boss-chat` still returns a single `imageUrl` for multi-`schedule_social_post` runs (`toolImageUrl` gets overwritten by the last tool call).
-- `whatsapp-messages` uses the single-image fallback path (`Has imageUrl: true` in logs), so only first chunk gets media.
-- Captions are intentionally truncated in `boss-chat`:
-  - `schedule_social_post` result uses `args.content.substring(0, 100)...`
-  - `get_pending_posts` media caption uses `content.substring(0, 120)...`
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-2) File changes to implement
+## Problem Analysis
 
-A) `supabase/functions/boss-chat/index.ts`
-- Add accumulator for scheduled-post media payloads (not just one `toolImageUrl`).
-- In each successful `schedule_social_post`, append one media item:
-  - `{ body: full caption + post number + scheduled time + platform, imageUrl }`
-  - Use full `args.content` (remove 100-char truncation for WhatsApp delivery content).
-- Keep existing `get_pending_posts` `mediaMessages`, but remove/raise caption truncation there as well.
-- When collecting tool outputs, merge media arrays (append), do not overwrite.
-- If multiple posts are included, append final text-only message:
-  - “Which of these would you like to edit or approve?”
-- Return `mediaMessages` in payload whenever available (this should take precedence over single `imageUrl` behavior).
+Two issues identified in the `demo-session` edge function:
 
-B) `supabase/functions/whatsapp-messages/index.ts`
-- Keep current `mediaMessages` loop path, but harden it:
-  - For each media item, run formatting cleanup.
-  - If body is long, split into chunks (reuse `splitMessage`), attach `MediaUrl` only to first chunk of that post.
-  - Send chunks/messages sequentially with delay (existing 500ms).
-- Keep existing single-image fallback unchanged for legacy paths.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-C) Optional hardening (recommended)
-- In `boss-chat`, log model `finish_reason` and token usage when available.
-- Enforce safer output budget for boss responses (e.g., floor for max tokens) to avoid true model-length truncation in complex multi-post replies.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-3) Validation checklist after implementation
-- WhatsApp command: “schedule two posts …”
-  - Expect separate outbound messages per post with distinct image URLs.
-  - Expect full captions (not 100/120-char previews).
-  - Expect final prompt: “Which of these would you like to edit or approve?”
-- “show pending posts”
-  - Expect one media message per pending post + final prompt.
-- Logs should show media-message path used (not `Has imageUrl` fallback only).
-- Single-post flows should still work exactly as before.
+## Changes
 
-4) Scope note
-- No database migration required for this fix; this is edge-function response formatting/dispatch logic only.
+### File: `supabase/functions/demo-session/index.ts`
+
+**1. Tighten handoff evaluation prompt**
+
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+
+**2. Create tickets and queue items on handoff**
+
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
+
