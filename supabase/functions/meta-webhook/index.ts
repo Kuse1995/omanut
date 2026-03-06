@@ -35,7 +35,8 @@ serve(async (req) => {
   if (req.method === 'POST') {
     try {
       const body = await req.json();
-      console.log('Webhook received:', JSON.stringify(body).slice(0, 500));
+      console.log('Webhook received:', JSON.stringify(body).slice(0, 800));
+      console.log(`[meta-webhook] object=${body.object}, entries=${body.entry?.length || 0}, entry_ids=${(body.entry || []).map((e: any) => e.id).join(',')}`);
 
       const backgroundTask = processWebhook(body);
 
