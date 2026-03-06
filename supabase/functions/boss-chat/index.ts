@@ -1185,17 +1185,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
               } else {
                 // Build per-post media messages array for multi-image WhatsApp delivery
-                const mediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
+                const pendingMediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
                   const time = new Date(p.scheduled_time);
                   const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
-                  const caption = `Post ${i + 1}/${pendingPosts.length}: "${p.content.substring(0, 120)}${p.content.length > 120 ? '...' : ''}"\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
+                  const caption = `Post ${i + 1}/${pendingPosts.length}:\n\n${p.content}\n\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
                   return { body: caption, imageUrl: p.image_url || null };
                 });
                 // Add concluding prompt
-                mediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
+                pendingMediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
                 
-                // Store mediaMessages for response — toolMediaMessages will be picked up below
-                (result as any).__mediaMessages = mediaMessages;
+                // Merge into toolMediaMessages accumulator
+                toolMediaMessages.push(...pendingMediaMessages);
                 
                 const postList = pendingPosts.map((p: any, i: number) => {
                   const time = new Date(p.scheduled_time);
