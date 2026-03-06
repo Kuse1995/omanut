@@ -1301,7 +1301,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     // Return JSON response (not TwiML) for whatsapp-messages to handle
     const responsePayload: any = { response: aiResponse };
     if (toolImageUrl) responsePayload.imageUrl = toolImageUrl;
-    if (toolMediaMessages.length > 0) responsePayload.mediaMessages = toolMediaMessages;
+    if (toolMediaMessages.length > 0) {
+      // If there's also an AI text response, append it as a final text-only message
+      if (aiResponse && aiResponse.trim()) {
+        toolMediaMessages.push({ body: aiResponse, imageUrl: null });
+      }
+      responsePayload.mediaMessages = toolMediaMessages;
+    }
     
     return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
