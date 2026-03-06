@@ -107,8 +107,12 @@ async function processWebhook(body: any) {
         }
       }
 
-      // Handle Messenger DMs
+      // Handle Messenger DMs (may also include Instagram DMs via unified Page subscription)
       if (entry.messaging) {
+        // Pre-fetch page credentials to check if this page has an IG account linked
+        const pageCred = await getPageCredentials(supabase, pageId);
+        const linkedIgUserId = pageCred?.ig_user_id;
+
         for (const event of entry.messaging) {
           if (!event.message?.text) continue;
           if (event.message?.is_echo) continue;
@@ -118,11 +122,27 @@ async function processWebhook(body: any) {
           if (!senderId || !messageText) continue;
           if (senderId === pageId) continue;
 
-          console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
-          try {
-            await handleMessengerDM(supabase, pageId, senderId, messageText);
-          } catch (err) {
-            console.error(`Error handling Messenger DM from ${senderId}:`, err);
+          // Detect if this is an Instagram-scoped DM arriving through the Page webhook.
+          // Instagram DMs via the Page subscription have the sender ID matching an IG-scoped user.
+          // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
+          // (Instagram messages use the ig_user_id as recipient, not the page_id).
+          const recipientId = event.recipient?.id;
+          const isInstagramDM = linkedIgUserId && recipientId === linkedIgUserId;
+
+          if (isInstagramDM) {
+            console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
+            try {
+              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText);
+            } catch (err) {
+              console.error(`Error handling IG DM (via page) from ${senderId}:`, err);
+            }
+          } else {
+            console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
+            try {
+              await handleMessengerDM(supabase, pageId, senderId, messageText);
+            } catch (err) {
+              console.error(`Error handling Messenger DM from ${senderId}:`, err);
+            }
           }
         }
       }
