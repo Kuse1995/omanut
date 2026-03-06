@@ -388,7 +388,7 @@ export const ChatView = ({
               </Button>
             </div>
             <Input
-              placeholder="Type a WhatsApp message..."
+              placeholder={isMetaDM ? `Type a ${isInstagramDM ? 'Instagram' : 'Messenger'} reply...` : "Type a WhatsApp message..."}
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
