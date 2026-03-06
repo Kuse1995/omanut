@@ -827,6 +827,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["action"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_hot_leads",
+          description: "Get the hottest cross-platform leads from WhatsApp, Facebook, Instagram, and Messenger. Use when the boss asks about leads, hot leads, facebook leads, instagram leads, ads leads, or new inquiries.",
+          parameters: {
+            type: "object",
+            properties: {
+              hours_back: { type: "integer", description: "How many hours back to look (default 24)" },
+              platform_filter: { type: "string", enum: ["all", "whatsapp", "facebook", "instagram", "messenger"], description: "Filter by platform (default all)" }
+            }
+          }
+        }
       }
     ];
 
