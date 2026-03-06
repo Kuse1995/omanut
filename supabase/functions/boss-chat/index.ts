@@ -898,6 +898,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const aiMessage = data.choices[0].message;
     let aiResponse = aiMessage.content || '';
     let toolImageUrl: string | null = null;
+    let toolMediaMessages: { body: string; imageUrl: string | null }[] | null = null;
 
     // Handle tool calls if present
     if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
@@ -1173,12 +1174,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               if (!pendingPosts || pendingPosts.length === 0) {
                 result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
               } else {
-                const postList = pendingPosts.map((p: any, i: number) => {
+                // Build per-post media messages array for multi-image WhatsApp delivery
+                const mediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
                   const time = new Date(p.scheduled_time);
                   const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
+                  const caption = `Post ${i + 1}/${pendingPosts.length}: "${p.content.substring(0, 120)}${p.content.length > 120 ? '...' : ''}"\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
+                  return { body: caption, imageUrl: p.image_url || null };
+                });
+                // Add concluding prompt
+                mediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
+                
+                // Store mediaMessages for response — toolMediaMessages will be picked up below
+                (result as any).__mediaMessages = mediaMessages;
+                
+                const postList = pendingPosts.map((p: any, i: number) => {
+                  const time = new Date(p.scheduled_time);
+                  const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000);
                   return `${i + 1}. 📝 "${p.content.substring(0, 80)}${p.content.length > 80 ? '...' : ''}"\n   📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n   📱 ${p.target_platform}\n   ${p.image_url ? '🖼️ Has image' : '📄 Text only'}`;
                 }).join('\n\n');
-                result = { success: true, message: `📋 ${pendingPosts.length} post(s) pending approval:\n\n${postList}\n\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".` };
+                result = { ...result, success: true, message: `📋 ${pendingPosts.length} post(s) pending approval:\n\n${postList}\n\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".` };
               }
               break;
             }
@@ -1249,6 +1263,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           
           toolResults.push(result.message);
           
+          // Capture mediaMessages from get_pending_posts
+          if ((result as any).__mediaMessages) {
+            toolMediaMessages = (result as any).__mediaMessages;
+          }
+          
         } catch (error) {
           console.error(`Tool execution error for ${functionName}:`, error);
           const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1273,7 +1292,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       });
 
     // Return JSON response (not TwiML) for whatsapp-messages to handle
-    return new Response(JSON.stringify({ response: aiResponse, ...(toolImageUrl ? { imageUrl: toolImageUrl } : {}) }), {
+    const responsePayload: any = { response: aiResponse };
+    if (toolImageUrl) responsePayload.imageUrl = toolImageUrl;
+    if (toolMediaMessages) responsePayload.mediaMessages = toolMediaMessages;
+    
+    return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 

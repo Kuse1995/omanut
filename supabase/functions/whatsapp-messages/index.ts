@@ -3991,45 +3991,82 @@ serve(async (req) => {
               return chunks;
             };
             
-            // Clean the response before splitting
-            const cleanedResponse = cleanFormatting(bossData.response);
-            const responseChunks = splitMessage(cleanedResponse);
-            console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
-            console.log(`[BOSS] Has imageUrl: ${!!bossData.imageUrl}`);
-            
-            // Send each chunk sequentially
-            for (let i = 0; i < responseChunks.length; i++) {
-              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-              const twilioFormData = new URLSearchParams();
-              twilioFormData.append('From', To);
-              twilioFormData.append('To', From);
-              twilioFormData.append('Body', responseChunks[i]);
+            // Check if boss-chat returned a mediaMessages array (multi-image posts)
+            if (bossData.mediaMessages && Array.isArray(bossData.mediaMessages) && bossData.mediaMessages.length > 0) {
+              console.log(`[BOSS] Sending ${bossData.mediaMessages.length} individual media message(s)`);
               
-              // Add MediaUrl for the first chunk if an image was generated
-              if (i === 0 && bossData.imageUrl) {
-                console.log(`[BOSS] Attaching image URL to first chunk: ${bossData.imageUrl.substring(0, 80)}...`);
-                twilioFormData.append('MediaUrl', bossData.imageUrl);
+              for (let i = 0; i < bossData.mediaMessages.length; i++) {
+                const item = bossData.mediaMessages[i];
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                const twilioFormData = new URLSearchParams();
+                twilioFormData.append('From', To);
+                twilioFormData.append('To', From);
+                twilioFormData.append('Body', item.body);
+                
+                if (item.imageUrl) {
+                  console.log(`[BOSS] Media msg ${i+1}: attaching image ${item.imageUrl.substring(0, 80)}...`);
+                  twilioFormData.append('MediaUrl', item.imageUrl);
+                }
+                
+                const twilioResponse = await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: twilioFormData
+                });
+                
+                if (twilioResponse.ok) {
+                  console.log(`[BOSS] Media msg ${i+1}/${bossData.mediaMessages.length} sent successfully`);
+                } else {
+                  const errorText = await twilioResponse.text();
+                  console.error(`[BOSS] Failed to send media msg ${i+1}:`, twilioResponse.status, errorText);
+                }
+                
+                // Delay between messages
+                if (i < bossData.mediaMessages.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
               }
+            } else {
+              // Standard single-image chunk logic
+              const cleanedResponse = cleanFormatting(bossData.response);
+              const responseChunks = splitMessage(cleanedResponse);
+              console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
+              console.log(`[BOSS] Has imageUrl: ${!!bossData.imageUrl}`);
               
-              const twilioResponse = await fetch(twilioUrl, {
-                method: 'POST',
-                headers: {
-                  'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: twilioFormData
-              });
-              
-              if (twilioResponse.ok) {
-                console.log(`[BOSS] Chunk ${i+1}/${responseChunks.length} sent successfully`);
-              } else {
-                const errorText = await twilioResponse.text();
-                console.error(`[BOSS] Failed to send chunk ${i+1}:`, twilioResponse.status, errorText);
-              }
-              
-              // Add small delay between messages
-              if (i < responseChunks.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 500));
+              for (let i = 0; i < responseChunks.length; i++) {
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                const twilioFormData = new URLSearchParams();
+                twilioFormData.append('From', To);
+                twilioFormData.append('To', From);
+                twilioFormData.append('Body', responseChunks[i]);
+                
+                if (i === 0 && bossData.imageUrl) {
+                  console.log(`[BOSS] Attaching image URL to first chunk: ${bossData.imageUrl.substring(0, 80)}...`);
+                  twilioFormData.append('MediaUrl', bossData.imageUrl);
+                }
+                
+                const twilioResponse = await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: twilioFormData
+                });
+                
+                if (twilioResponse.ok) {
+                  console.log(`[BOSS] Chunk ${i+1}/${responseChunks.length} sent successfully`);
+                } else {
+                  const errorText = await twilioResponse.text();
+                  console.error(`[BOSS] Failed to send chunk ${i+1}:`, twilioResponse.status, errorText);
+                }
+                
+                if (i < responseChunks.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
               }
             }
           } catch (error) {
