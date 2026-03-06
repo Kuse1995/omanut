@@ -1,67 +1,62 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+## Fix: Move Scheduling from Meta API to Supabase Cron
 
-## Problem Analysis
+### Problem
+Instagram Graph API doesn't support `scheduled_publish_time`. Posts intended for future scheduling are published immediately. The current architecture relies on Meta's scheduling, which only works for Facebook.
 
-Two issues identified in the `demo-session` edge function:
+### Solution
+Replace Meta-side scheduling with a Supabase cron-based publisher. Approval now just sets status to `approved`. A cron job checks every minute for due posts and publishes them via the existing `publish-meta-post` function.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+### Changes
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+#### 1. Dashboard UI (`src/components/admin/ContentSchedulerPanel.tsx`)
+- **Approve mutation**: Remove the `supabase.functions.invoke('schedule-meta-post')` call. Just update status to `approved`.
+- **Compose "Schedule" flow**: Instead of calling `schedule-meta-post`, insert the post with status `approved` (it will be published by the cron when due).
+- Update toast messages accordingly ("Post approved! It will be published at the scheduled time.").
 
-## Changes
+#### 2. Boss Chat (`supabase/functions/boss-chat/index.ts`)
+- **`approve` action**: Remove the fetch to `schedule-meta-post`. Just set status to `approved`.
+- **`approve_and_publish` action**: Keep as-is (calls `publish-meta-post` for immediate publish).
+- Update system prompt to reflect that "approve" now means the cron will handle publishing at the scheduled time.
 
-### File: `supabase/functions/demo-session/index.ts`
+#### 3. New Edge Function: `cron-publisher`
+**File:** `supabase/functions/cron-publisher/index.ts`
 
-**1. Tighten handoff evaluation prompt**
+Logic:
+1. Query `scheduled_posts` where `status = 'approved'` AND `scheduled_time <= now()`
+2. For each due post, call `publish-meta-post` internally (reuse existing publishing logic)
+3. Log results
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+Config in `supabase/config.toml`:
+```toml
+[functions.cron-publisher]
+  timeout = 60
+  verify_jwt = false
+```
 
-**2. Create tickets and queue items on handoff**
+#### 4. Cron Job (pg_cron)
+Set up a cron job to invoke the `cron-publisher` function every minute:
+```sql
+SELECT cron.schedule('publish-due-posts', '* * * * *', $$
+  SELECT net.http_post(
+    url:='https://dzheddvoiauevcayifev.supabase.co/functions/v1/cron-publisher',
+    headers:='{"Content-Type":"application/json","Authorization":"Bearer <anon_key>"}'::jsonb,
+    body:='{}'::jsonb
+  ) as request_id;
+$$);
+```
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+#### 5. Schedule-meta-post cleanup
+This function is no longer needed for future scheduling. We can leave it in place but it will no longer be called by the approval flows.
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+### Files Changed
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/cron-publisher/index.ts` | New: queries due approved posts, calls publish-meta-post for each |
+| `supabase/config.toml` | Add cron-publisher config |
+| `src/components/admin/ContentSchedulerPanel.tsx` | Remove schedule-meta-post calls, set status to `approved` |
+| `supabase/functions/boss-chat/index.ts` | Remove schedule-meta-post call from approve action, set status to `approved` |
+| pg_cron SQL | Insert cron schedule to run every minute |
 
