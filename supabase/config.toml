@@ -46,6 +46,7 @@ project_id = "dzheddvoiauevcayifev"
   [functions.manage-api-keys]
     verify_jwt = false
   [functions.meta-webhook]
+    timeout = 60
     verify_jwt = false
   [functions.process-scheduled-posts]
     verify_jwt = false
