@@ -35,7 +35,8 @@ serve(async (req) => {
   if (req.method === 'POST') {
     try {
       const body = await req.json();
-      console.log('Webhook received:', JSON.stringify(body).slice(0, 500));
+      console.log('Webhook received:', JSON.stringify(body).slice(0, 800));
+      console.log(`[meta-webhook] object=${body.object}, entries=${body.entry?.length || 0}, entry_ids=${(body.entry || []).map((e: any) => e.id).join(',')}`);
 
       const backgroundTask = processWebhook(body);
 
@@ -106,8 +107,12 @@ async function processWebhook(body: any) {
         }
       }
 
-      // Handle Messenger DMs
+      // Handle Messenger DMs (may also include Instagram DMs via unified Page subscription)
       if (entry.messaging) {
+        // Pre-fetch page credentials to check if this page has an IG account linked
+        const pageCred = await getPageCredentials(supabase, pageId);
+        const linkedIgUserId = pageCred?.ig_user_id;
+
         for (const event of entry.messaging) {
           if (!event.message?.text) continue;
           if (event.message?.is_echo) continue;
@@ -117,11 +122,27 @@ async function processWebhook(body: any) {
           if (!senderId || !messageText) continue;
           if (senderId === pageId) continue;
 
-          console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
-          try {
-            await handleMessengerDM(supabase, pageId, senderId, messageText);
-          } catch (err) {
-            console.error(`Error handling Messenger DM from ${senderId}:`, err);
+          // Detect if this is an Instagram-scoped DM arriving through the Page webhook.
+          // Instagram DMs via the Page subscription have the sender ID matching an IG-scoped user.
+          // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
+          // (Instagram messages use the ig_user_id as recipient, not the page_id).
+          const recipientId = event.recipient?.id;
+          const isInstagramDM = linkedIgUserId && recipientId === linkedIgUserId;
+
+          if (isInstagramDM) {
+            console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
+            try {
+              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText);
+            } catch (err) {
+              console.error(`Error handling IG DM (via page) from ${senderId}:`, err);
+            }
+          } else {
+            console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
+            try {
+              await handleMessengerDM(supabase, pageId, senderId, messageText);
+            } catch (err) {
+              console.error(`Error handling Messenger DM from ${senderId}:`, err);
+            }
           }
         }
       }
@@ -237,8 +258,26 @@ async function getIgCredentials(supabase: any, igUserId: string) {
   }
 
   if (!cred) {
-    console.warn(`No meta_credentials found for ig_user_id: ${igUserId}`);
-    return null;
+    // Fallback: try looking up by page_id in case ig_user_id was stored differently
+    console.warn(`No meta_credentials found for ig_user_id: ${igUserId}, trying fallback by page_id...`);
+    const { data: fallbackCred, error: fbErr } = await supabase
+      .from('meta_credentials')
+      .select('access_token, ai_system_prompt, company_id, page_id, ig_user_id')
+      .eq('page_id', igUserId)
+      .not('company_id', 'is', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (fbErr) {
+      console.error('Error fetching IG fallback meta_credentials by page_id:', fbErr);
+      return null;
+    }
+    if (!fallbackCred) {
+      console.warn(`No meta_credentials found for ig_user_id OR page_id: ${igUserId}`);
+      return null;
+    }
+    console.log(`[getIgCredentials] Found credentials via page_id fallback for ${igUserId}`);
+    return fallbackCred;
   }
   return cred;
 }
