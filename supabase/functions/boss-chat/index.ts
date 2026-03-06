@@ -898,6 +898,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const aiMessage = data.choices[0].message;
     let aiResponse = aiMessage.content || '';
     let toolImageUrl: string | null = null;
+    let toolMediaMessages: { body: string; imageUrl: string | null }[] | null = null;
 
     // Handle tool calls if present
     if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
