@@ -229,7 +229,7 @@ export const ChatView = ({
           >
             <Image className="h-4 w-4" />
           </Button>
-          {!isMetaReadOnly && !isMetaDM && (
+          {!isMetaReadOnly && (
             <Button
               variant={conversation.human_takeover ? "destructive" : "default"}
               size="sm"
