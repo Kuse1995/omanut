@@ -1101,38 +1101,36 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              // Call the appropriate function
-              const fnName = isPublishNow ? 'publish-meta-post' : 'schedule-meta-post';
-              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-              const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-              const scheduleRes = await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                },
-                body: JSON.stringify({ post_id: newPost.id }),
-              });
-
-              const scheduleResult = await scheduleRes.json();
-
-              if (!scheduleRes.ok || !scheduleResult.success) {
-                const action = isPublishNow ? 'publishing' : 'scheduling';
-                result = { success: false, message: `❌ Post draft created but ${action} failed: ${scheduleResult.error || 'Unknown error'}` };
-                break;
-              }
-
               const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
+
               if (isPublishNow) {
+                // Publish immediately via publish-meta-post
+                const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+                const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const pubRes = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                  },
+                  body: JSON.stringify({ post_id: newPost.id }),
+                });
+                const pubResult = await pubRes.json();
+                if (!pubRes.ok || !pubResult.success) {
+                  result = { success: false, message: `❌ Post draft created but publishing failed: ${pubResult.error || 'Unknown error'}` };
+                  break;
+                }
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
                 };
               } else {
+                // Set to approved — cron-publisher will handle it at scheduled_time
+                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
                 const scheduledDate = new Date(args.scheduled_time);
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${scheduleResult.meta_post_id}`
+                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
                 };
               }
               break;
@@ -1209,21 +1207,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               if (args.action === 'approve') {
-                // Update to scheduled, then call schedule-meta-post
-                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
-                const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!;
-                const SRK2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-                const schedRes = await fetch(`${SUPABASE_URL2}/functions/v1/schedule-meta-post`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK2}` },
-                  body: JSON.stringify({ post_id: targetPostId }),
-                });
-                const schedResult = await schedRes.json();
-                if (schedRes.ok && schedResult.success) {
-                  result = { success: true, message: `✅ Post approved and scheduled with Meta!\n🆔 Meta Post ID: ${schedResult.meta_post_id}` };
-                } else {
-                  result = { success: false, message: `⚠️ Post approved but scheduling failed: ${schedResult.error || 'Unknown error'}. Status set to 'scheduled' - you can retry.` };
-                }
+                // Set to approved — cron-publisher will publish at scheduled_time
+                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', targetPostId);
+                result = { success: true, message: `✅ Post approved! It will be published automatically at the scheduled time.` };
               } else if (args.action === 'edit') {
                 const editData: any = {};
                 const editChanges: string[] = [];

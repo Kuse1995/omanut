@@ -57,7 +57,7 @@ serve(async (req) => {
       });
     }
 
-    if (post.status !== 'draft' && post.status !== 'scheduled') {
+    if (post.status !== 'draft' && post.status !== 'scheduled' && post.status !== 'approved') {
       return new Response(JSON.stringify({ error: `Post is already ${post.status}` }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

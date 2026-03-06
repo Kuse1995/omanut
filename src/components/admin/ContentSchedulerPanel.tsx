@@ -137,11 +137,20 @@ export const ContentSchedulerPanel = () => {
         .select('id').single();
       if (insertError) throw insertError;
 
-      const fnName = publishMode === 'now' ? 'publish-meta-post' : 'schedule-meta-post';
-      const { data: result, error: fnError } = await supabase.functions.invoke(fnName, { body: { post_id: post.id } });
-      if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
-      if (result?.error) throw new Error(result.error);
-      return result;
+      if (publishMode === 'now') {
+        // Publish immediately via publish-meta-post
+        const { data: result, error: fnError } = await supabase.functions.invoke('publish-meta-post', { body: { post_id: post.id } });
+        if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
+        if (result?.error) throw new Error(result.error);
+        return result;
+      } else {
+        // Set status to approved — cron-publisher will handle publishing at scheduled_time
+        const { error: approveError } = await supabase.from('scheduled_posts').update({
+          status: 'approved', updated_at: new Date().toISOString(),
+        }).eq('id', post.id);
+        if (approveError) throw approveError;
+        return { success: true };
+      }
     },
     onSuccess: () => {
       const label = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
@@ -193,20 +202,15 @@ export const ContentSchedulerPanel = () => {
         if (updateError) throw updateError;
       }
 
-      // Update status to scheduled
+      // Set status to approved — cron-publisher will publish at scheduled_time
       const { error } = await supabase.from('scheduled_posts').update({
-        status: 'scheduled', updated_at: new Date().toISOString(),
+        status: 'approved', updated_at: new Date().toISOString(),
       }).eq('id', postId);
       if (error) throw error;
-
-      // Trigger schedule-meta-post
-      const { data: result, error: fnError } = await supabase.functions.invoke('schedule-meta-post', { body: { post_id: postId } });
-      if (fnError) throw new Error(typeof fnError === 'object' && fnError.message ? fnError.message : String(fnError));
-      if (result?.error) throw new Error(result.error);
-      return result;
+      return { success: true };
     },
     onSuccess: () => {
-      toast.success('Post approved and scheduled!');
+      toast.success('Post approved! It will be published at the scheduled time.');
       setEditingPostId(null);
       queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
     },
@@ -230,6 +234,8 @@ export const ContentSchedulerPanel = () => {
 
   const statusBadge = (status: string) => {
     switch (status) {
+      case 'approved':
+        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle2 className="w-3 h-3 mr-1" />Approved</Badge>;
       case 'scheduled':
         return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Clock className="w-3 h-3 mr-1" />Scheduled</Badge>;
       case 'published':
