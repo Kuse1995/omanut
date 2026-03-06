@@ -337,19 +337,7 @@ export const ChatView = ({
       )}
 
       {/* Input Area - Platform-adaptive */}
-      {isMetaDM ? (
-        <div className={cn(
-          "px-3 py-2 border-t border-border text-center",
-          isInstagramDM ? "bg-pink-50/50 dark:bg-pink-950/20" : "bg-violet-50/50 dark:bg-violet-950/20"
-        )}>
-          <div className="flex items-center justify-center gap-1.5">
-            {isInstagramDM ? <Instagram className="h-3.5 w-3.5 text-pink-500" /> : <MessageSquare className="h-3.5 w-3.5 text-violet-500" />}
-            <p className="text-xs text-muted-foreground">
-              {isInstagramDM ? 'Instagram' : 'Messenger'} DMs are handled automatically by AI. Replies are sent as private messages.
-            </p>
-          </div>
-        </div>
-      ) : isMetaReadOnly ? (
+      {isMetaReadOnly ? (
         <div className={cn(
           "px-3 py-2 border-t border-border text-center",
           isInstagram ? "bg-pink-50/50 dark:bg-pink-950/20" : "bg-blue-50/50 dark:bg-blue-950/20"
