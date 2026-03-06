@@ -1122,16 +1122,27 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 }
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
+                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
                 };
+                // Append media message for WhatsApp delivery
+                toolMediaMessages.push({
+                  body: `✅ Published to ${platformLabel}:\n\n${args.content}`,
+                  imageUrl: imageUrl || null
+                });
               } else {
                 // Set to approved — cron-publisher will handle it at scheduled_time
                 await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
                 const scheduledDate = new Date(args.scheduled_time);
+                const localDate = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000); // GMT+2
                 result = {
                   success: true,
-                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content.substring(0, 100)}${args.content.length > 100 ? '...' : ''}\n📅 Scheduled for: ${scheduledDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
+                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content}\n📅 Scheduled for: ${localDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
                 };
+                // Append media message for WhatsApp delivery
+                toolMediaMessages.push({
+                  body: `✅ Scheduled for ${platformLabel} (${localDate.toLocaleDateString()} at ${localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}):\n\n${args.content}`,
+                  imageUrl: imageUrl || null
+                });
               }
               break;
             }
