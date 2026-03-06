@@ -210,7 +210,7 @@ export const ContentSchedulerPanel = () => {
       return { success: true };
     },
     onSuccess: () => {
-      toast.success('Post approved and scheduled!');
+      toast.success('Post approved! It will be published at the scheduled time.');
       setEditingPostId(null);
       queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
     },

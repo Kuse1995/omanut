@@ -1207,21 +1207,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               if (args.action === 'approve') {
-                // Update to scheduled, then call schedule-meta-post
-                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
-                const SUPABASE_URL2 = Deno.env.get('SUPABASE_URL')!;
-                const SRK2 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-                const schedRes = await fetch(`${SUPABASE_URL2}/functions/v1/schedule-meta-post`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK2}` },
-                  body: JSON.stringify({ post_id: targetPostId }),
-                });
-                const schedResult = await schedRes.json();
-                if (schedRes.ok && schedResult.success) {
-                  result = { success: true, message: `✅ Post approved and scheduled with Meta!\n🆔 Meta Post ID: ${schedResult.meta_post_id}` };
-                } else {
-                  result = { success: false, message: `⚠️ Post approved but scheduling failed: ${schedResult.error || 'Unknown error'}. Status set to 'scheduled' - you can retry.` };
-                }
+                // Set to approved — cron-publisher will publish at scheduled_time
+                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', targetPostId);
+                result = { success: true, message: `✅ Post approved! It will be published automatically at the scheduled time.` };
               } else if (args.action === 'edit') {
                 const editData: any = {};
                 const editChanges: string[] = [];
