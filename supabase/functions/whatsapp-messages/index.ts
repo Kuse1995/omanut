@@ -3338,12 +3338,49 @@ serve(async (req) => {
 
     // === REGULAR MESSAGE PROCESSING BELOW ===
 
-    // Look up company by WhatsApp number
-    const { data: company, error: companyError } = await supabase
+    // Look up company by WhatsApp number (with resilient matching)
+    const normalizeForLookup = (phone: string) => phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '');
+    const normalizedTo = normalizeForLookup(To);
+    
+    // Try exact match first
+    let { data: company, error: companyError } = await supabase
       .from('companies')
       .select('*, metadata')
       .eq('whatsapp_number', To)
       .maybeSingle();
+
+    // Fallback 1: try with whatsapp: prefix stripped
+    if (!company && !companyError) {
+      const stripped = To.replace(/^whatsapp:/i, '');
+      const { data: fallback1 } = await supabase
+        .from('companies')
+        .select('*, metadata')
+        .eq('whatsapp_number', stripped)
+        .maybeSingle();
+      if (fallback1) {
+        company = fallback1;
+        console.log('[COMPANY-LOOKUP] Found via stripped prefix:', stripped);
+      }
+    }
+
+    // Fallback 2: try ilike on last 10 digits
+    if (!company && !companyError && normalizedTo.length >= 10) {
+      const lastDigits = normalizedTo.slice(-10);
+      const { data: fallback2 } = await supabase
+        .from('companies')
+        .select('*, metadata')
+        .ilike('whatsapp_number', `%${lastDigits}%`)
+        .limit(1)
+        .maybeSingle();
+      if (fallback2) {
+        company = fallback2;
+        console.log('[COMPANY-LOOKUP] Found via digit fallback:', lastDigits);
+      }
+    }
+    
+    if (!company) {
+      console.error('[COMPANY-LOOKUP] No company found for To:', To, 'normalized:', normalizedTo);
+    }
 
     if (companyError) {
       console.error('Database error:', companyError);

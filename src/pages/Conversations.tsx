@@ -169,16 +169,33 @@ const Conversations = () => {
         fileName = attachedFile.name;
       }
 
-      const { error } = await supabase.functions.invoke('send-whatsapp-message', {
-        body: {
-          phone: selectedConversation.phone,
-          message: messageText || '',
-          conversationId: convId,
-          mediaUrl,
-          mediaType,
-          fileName
-        }
-      });
+      const phone = selectedConversation.phone || '';
+      const isMetaDM = phone.startsWith('fbdm:') || phone.startsWith('igdm:');
+      
+      let error;
+      if (isMetaDM) {
+        // Route to Meta DM reply function
+        const result = await supabase.functions.invoke('send-meta-dm', {
+          body: {
+            conversationId: convId,
+            text: messageText || '',
+          }
+        });
+        error = result.error;
+      } else {
+        // Route to WhatsApp
+        const result = await supabase.functions.invoke('send-whatsapp-message', {
+          body: {
+            phone: phone,
+            message: messageText || '',
+            conversationId: convId,
+            mediaUrl,
+            mediaType,
+            fileName
+          }
+        });
+        error = result.error;
+      }
 
       if (error) throw error;
 

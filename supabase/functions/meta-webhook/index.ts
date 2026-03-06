@@ -367,6 +367,38 @@ async function buildCompanySystemPrompt(
   return parts.join('\n\n');
 }
 
+// ── Trigger boss lead alert (fire-and-forget) ──
+async function triggerLeadAlert(
+  companyId: string,
+  conversationId: string | undefined,
+  platform: string,
+  customerName: string,
+  messageText: string,
+) {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    await fetch(`${supabaseUrl}/functions/v1/meta-lead-alert`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        company_id: companyId,
+        conversation_id: conversationId,
+        platform,
+        customer_name: customerName,
+        message_text: messageText,
+      }),
+    });
+    console.log(`[meta-webhook] Lead alert triggered for ${platform}`);
+  } catch (err) {
+    console.error('[meta-webhook] Failed to trigger lead alert:', err);
+  }
+}
+
 // ── Upsert conversation & save messages ──
 async function saveInteraction(
   supabase: any,
@@ -433,6 +465,9 @@ async function saveInteraction(
     ]);
     console.log(`Saved interaction to conversation ${conversationId} (${platform})`);
   }
+
+  // Fire-and-forget: trigger boss lead alert
+  triggerLeadAlert(companyId, conversationId, platform, customerName, userMessage);
 }
 
 // ── Handle Facebook comment ──

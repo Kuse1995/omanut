@@ -827,6 +827,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["action"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_hot_leads",
+          description: "Get the hottest cross-platform leads from WhatsApp, Facebook, Instagram, and Messenger. Use when the boss asks about leads, hot leads, facebook leads, instagram leads, ads leads, or new inquiries.",
+          parameters: {
+            type: "object",
+            properties: {
+              hours_back: { type: "integer", description: "How many hours back to look (default 24)" },
+              platform_filter: { type: "string", enum: ["all", "whatsapp", "facebook", "instagram", "messenger"], description: "Filter by platform (default all)" }
+            }
+          }
+        }
       }
     ];
 
@@ -1263,6 +1277,58 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
               } else {
                 result = { success: false, message: '❌ Unknown action. Use approve, edit, or reject.' };
+              }
+              break;
+            }
+
+            case 'get_hot_leads': {
+              const hoursBack = args.hours_back || 24;
+              const platformFilter = args.platform_filter || 'all';
+              const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+              
+              let query = supabase
+                .from('conversations')
+                .select('id, customer_name, phone, platform, started_at, last_message_preview, unread_count, status')
+                .eq('company_id', company.id)
+                .gte('started_at', cutoff)
+                .order('started_at', { ascending: false })
+                .limit(20);
+              
+              if (platformFilter === 'facebook') {
+                query = query.or('phone.ilike.fb:%,phone.ilike.fbdm:%');
+              } else if (platformFilter === 'instagram') {
+                query = query.or('phone.ilike.ig:%,phone.ilike.igdm:%');
+              } else if (platformFilter === 'messenger') {
+                query = query.ilike('phone', 'fbdm:%');
+              } else if (platformFilter === 'whatsapp') {
+                query = query.ilike('phone', 'whatsapp:%');
+              }
+              
+              const { data: leads } = await query;
+              
+              if (!leads || leads.length === 0) {
+                result = { success: true, message: `No leads found in the last ${hoursBack} hours${platformFilter !== 'all' ? ` for ${platformFilter}` : ''}.` };
+              } else {
+                const platformIcon = (phone: string) => {
+                  if (phone?.startsWith('fbdm:')) return '💬';
+                  if (phone?.startsWith('fb:')) return '📘';
+                  if (phone?.startsWith('igdm:')) return '📸';
+                  if (phone?.startsWith('ig:')) return '📷';
+                  return '📱';
+                };
+                
+                const leadList = leads.map((l: any, i: number) => {
+                  const icon = platformIcon(l.phone || '');
+                  const name = l.customer_name || 'Unknown';
+                  const preview = l.last_message_preview ? `"${l.last_message_preview.slice(0, 80)}"` : 'No preview';
+                  const time = new Date(l.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  return `${i + 1}. ${icon} ${name}\n   ${preview}\n   ${time} | ${l.status}${l.unread_count ? ` | ${l.unread_count} unread` : ''}`;
+                }).join('\n\n');
+                
+                result = { 
+                  success: true, 
+                  message: `🔥 HOT LEADS (last ${hoursBack}h)${platformFilter !== 'all' ? ` - ${platformFilter}` : ''}:\n\n${leadList}\n\n${leads.length} lead(s) found across all platforms.` 
+                };
               }
               break;
             }
