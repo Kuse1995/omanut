@@ -1273,10 +1273,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           
           toolResults.push(result.message);
           
-          // Capture mediaMessages from get_pending_posts
-          if ((result as any).__mediaMessages) {
-            toolMediaMessages = (result as any).__mediaMessages;
-          }
+          // mediaMessages are now accumulated directly in toolMediaMessages above
           
         } catch (error) {
           console.error(`Tool execution error for ${functionName}:`, error);
