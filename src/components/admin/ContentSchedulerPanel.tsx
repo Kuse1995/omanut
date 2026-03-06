@@ -234,6 +234,8 @@ export const ContentSchedulerPanel = () => {
 
   const statusBadge = (status: string) => {
     switch (status) {
+      case 'approved':
+        return <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle2 className="w-3 h-3 mr-1" />Approved</Badge>;
       case 'scheduled':
         return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Clock className="w-3 h-3 mr-1" />Scheduled</Badge>;
       case 'published':
