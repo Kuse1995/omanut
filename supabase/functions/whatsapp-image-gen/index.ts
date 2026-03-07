@@ -439,11 +439,7 @@ async function editImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; editDescription: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using Gemini client
   
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
