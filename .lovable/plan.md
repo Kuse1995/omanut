@@ -1,53 +1,67 @@
 
 
-# Finch Investments Limited -- Not Responding on WhatsApp or Facebook
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Diagnosis
+## Problem Analysis
 
-### WhatsApp (Twilio +260766195857)
-**Status: No incoming messages reaching the system.**
-- The `whatsapp-messages` edge function shows **zero logs** for the Finch number.
-- The "single tick" issue you mentioned earlier confirms Twilio is not delivering messages to the webhook.
-- This is a **Twilio-side configuration issue** -- the number may be in sandbox mode with an expired session, or the webhook URL is not saved correctly.
+Two issues identified in the `demo-session` edge function:
 
-**Action required (no code change):**
-1. In Twilio Console, go to the WhatsApp sender for +260766195857
-2. Verify the webhook URL is `https://dzheddvoiauevcayifev.supabase.co/functions/v1/whatsapp-messages` with method POST
-3. If it's a sandbox number, re-join by sending the sandbox keyword from the phone
-4. Check **Twilio Monitor > Errors** for 11200/11205 errors (HTTP delivery failures)
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-### Facebook Comments (Page ID: 931406013380258)
-**Status: Facebook is not sending webhook events for Finch's page.**
-- The `meta-webhook` logs show activity only for E Library (page `776455652221283`), zero for Finch.
-- Finch has a valid `meta_credentials` record with page_id `931406013380258` and an access token.
-- The issue is that Facebook's App is **not subscribed to receive events** for Finch's page.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-**Root cause:** When a new Facebook Page is connected, the app must be programmatically subscribed to that page via the Graph API. Without this subscription, Facebook will never send webhook events for that page, regardless of the meta_credentials record existing in the database.
+## Changes
 
-## Fix: Auto-Subscribe Pages to Webhooks
+### File: `supabase/functions/demo-session/index.ts`
 
-### What needs to change
-When a Facebook Page's credentials are saved (in the Meta Integrations panel), the system should call the Meta Graph API to subscribe the app to the page:
+**1. Tighten handoff evaluation prompt**
 
-```
-POST /{page-id}/subscribed_apps?subscribed_fields=feed,messages&access_token={page_access_token}
-```
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-This is a one-time call per page that tells Facebook: "Send webhook events for this page to my app."
+**2. Create tickets and queue items on handoff**
 
-### Implementation
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-1. **Create a new edge function `subscribe-meta-page`** that:
-   - Accepts `{ credential_id }` (the meta_credentials record ID)
-   - Loads the page_id and access_token from meta_credentials
-   - Calls `POST https://graph.facebook.com/v18.0/{page_id}/subscribed_apps` with fields `feed,messages`
-   - If the credential has an `ig_user_id`, also subscribes for Instagram fields
-   - Returns success/failure status
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-2. **Update the Meta Integrations panel** (`MetaIntegrationsPanel.tsx`) to call `subscribe-meta-page` after saving credentials, so new pages are automatically subscribed.
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-3. **Immediate fix for Finch:** Call the subscription API for page `931406013380258` using the stored access token to start receiving events right away.
+**3. Skip evaluation on short conversations**
 
-### No database changes required
-The `meta_credentials` table already has all needed columns.
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 

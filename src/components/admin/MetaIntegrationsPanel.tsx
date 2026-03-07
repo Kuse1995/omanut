@@ -77,9 +77,45 @@ export const MetaIntegrationsPanel = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: async (_data, _vars, _ctx) => {
       queryClient.invalidateQueries({ queryKey: ['meta-credentials'] });
       toast.success(editingId ? 'Credential updated' : 'Credential saved');
+
+      // Auto-subscribe the page to webhook events
+      if (!editingId) {
+        // For new credentials, get the latest one to find its ID
+        const { data: latest } = await supabase
+          .from('meta_credentials')
+          .select('id')
+          .eq('company_id', selectedCompany!.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (latest) {
+          const { data: subResult, error: subError } = await supabase.functions.invoke('subscribe-meta-page', {
+            body: { credential_id: latest.id },
+          });
+          if (subError || !subResult?.success) {
+            toast.warning('Page saved but webhook subscription failed. The page may not receive events automatically.');
+            console.error('Subscribe error:', subError, subResult);
+          } else {
+            toast.success('Page subscribed to webhook events');
+          }
+        }
+      } else {
+        // Re-subscribe on edit (token may have changed)
+        const { data: subResult, error: subError } = await supabase.functions.invoke('subscribe-meta-page', {
+          body: { credential_id: editingId },
+        });
+        if (subError || !subResult?.success) {
+          toast.warning('Credentials updated but webhook re-subscription failed.');
+          console.error('Subscribe error:', subError, subResult);
+        } else {
+          toast.success('Page webhook subscription updated');
+        }
+      }
+
       resetForm();
     },
     onError: (err: Error) => toast.error(err.message),
