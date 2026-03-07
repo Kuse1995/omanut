@@ -123,17 +123,10 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const imageResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-pro-image-preview',
-        messages: [{ role: 'user', content: imagePrompt }],
-        modalities: ['image', 'text'],
-      }),
+    const imageResponse = await geminiChat({
+      model: 'gemini-3-pro-image-preview',
+      messages: [{ role: 'user', content: imagePrompt }],
+      modalities: ['image', 'text'],
     });
 
     if (!imageResponse.ok) {

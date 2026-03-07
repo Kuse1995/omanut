@@ -304,7 +304,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
       enhanced_prompt: enhancedPrompt,
       product_mode: !!productImage,
       product_id: productImage?.id || null,
-      model: "google/gemini-2.5-flash-image-preview",
+      model: "gemini-2.5-flash-image-preview",
       context: context || null
     };
     
