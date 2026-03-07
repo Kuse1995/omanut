@@ -85,16 +85,9 @@ Create ONE highly engaging social media post caption for Facebook and Instagram.
 
 Return ONLY the caption text, nothing else.`;
 
-    const captionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: [{ role: 'user', content: captionPrompt }],
-      }),
+    const captionResponse = await geminiChat({
+      model: 'gemini-3-flash-preview',
+      messages: [{ role: 'user', content: captionPrompt }],
     });
 
     if (!captionResponse.ok) {
