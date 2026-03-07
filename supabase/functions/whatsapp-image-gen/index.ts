@@ -574,7 +574,7 @@ async function generateSuggestions(
   companyName: string,
   businessType: string
 ): Promise<{ suggestions: string[] }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  // Using Gemini client
   
   // Get current time context
   const now = new Date();
