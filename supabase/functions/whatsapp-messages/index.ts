@@ -2911,6 +2911,82 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               console.error('[LOOKUP-PRODUCT] Exception:', error);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
             }
+          } else if (toolCall.function.name === 'check_stock') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] check_stock called for:', args.product_name);
+            
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
+                },
+                body: JSON.stringify({ action: 'check_stock', product_name: args.product_name }),
+              });
+              
+              const bmsResult = await bmsResponse.json();
+              console.log('[BMS] check_stock result:', JSON.stringify(bmsResult));
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`checked BMS stock for "${args.product_name}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify(bmsResult),
+              });
+            } catch (error) {
+              console.error('[BMS] check_stock error:', error);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }),
+              });
+              anyToolExecuted = true;
+              toolExecutionContext.push('BMS check_stock failed');
+            }
+
+          } else if (toolCall.function.name === 'record_sale') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] record_sale called:', JSON.stringify(args));
+            
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
+                },
+                body: JSON.stringify({
+                  action: 'record_sale',
+                  product_name: args.product_name,
+                  quantity: args.quantity,
+                  payment_method: args.payment_method,
+                  customer_name: args.customer_name || null,
+                  customer_phone: args.customer_phone || null,
+                }),
+              });
+              
+              const bmsResult = await bmsResponse.json();
+              console.log('[BMS] record_sale result:', JSON.stringify(bmsResult));
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`recorded sale in BMS: ${args.quantity}x ${args.product_name}`);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify(bmsResult),
+              });
+            } catch (error) {
+              console.error('[BMS] record_sale error:', error);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }),
+              });
+              anyToolExecuted = true;
+              toolExecutionContext.push('BMS record_sale failed');
+            }
           }
               
               anyToolExecuted = true;
