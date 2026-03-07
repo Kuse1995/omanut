@@ -110,6 +110,10 @@ serve(async (req) => {
     if (authError) throw authError;
     if (!authData.user) throw new Error('Failed to create user');
 
+    // Normalize empty strings to NULL to avoid unique constraint violations
+    const normalizedTwilio = twilio_number?.trim() || null;
+    const normalizedWhatsapp = whatsapp_number?.trim() || null;
+
     // Create company
     const { data: company, error: companyError } = await supabaseAdmin
       .from('companies')
@@ -122,8 +126,8 @@ serve(async (req) => {
         branches,
         currency_prefix,
         service_locations,
-        twilio_number,
-        whatsapp_number,
+        twilio_number: normalizedTwilio,
+        whatsapp_number: normalizedWhatsapp,
         whatsapp_voice_enabled,
         test_mode: test_mode ?? true,
         credit_balance,
