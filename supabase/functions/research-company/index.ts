@@ -24,10 +24,7 @@ serve(async (req) => {
 
     console.log(`[RESEARCH] Starting research for: ${company_name}`);
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
+    // Using Gemini client
 
     // Research prompt for AI
     const researchPrompt = `You are a business research assistant helping to set up an AI customer service system for a company.
