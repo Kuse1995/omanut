@@ -17,7 +17,6 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
 
     const {
       companyId,
