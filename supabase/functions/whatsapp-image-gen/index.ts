@@ -392,25 +392,18 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Generating with product image from:', productImageUrl.substring(0, 80));
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image-preview',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: enhancedPrompt },
-            { type: 'image_url', image_url: { url: productImageUrl } }
-          ]
-        }
-      ],
-      modalities: ['image', 'text']
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash-image-preview',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: enhancedPrompt },
+          { type: 'image_url', image_url: { url: productImageUrl } }
+        ]
+      }
+    ],
+    modalities: ['image', 'text']
   });
   
   if (!response.ok) {
@@ -419,9 +412,6 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
     
     if (response.status === 429) {
       throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    if (response.status === 402) {
-      throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to generate product image');
   }
