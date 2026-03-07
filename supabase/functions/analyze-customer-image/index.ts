@@ -80,27 +80,20 @@ Respond with ONLY valid JSON (no markdown):
   "category": "payment_proof" | "product_image" | "document" | "screenshot" | "photo" | "other"
 }`;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Analyze this image and extract relevant information:' },
-              { type: 'image_url', image_url: { url: imageUrl } }
-            ]
-          }
-        ],
-        temperature: 0.3,
-        max_tokens: 1000
-      }),
+    const response = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Analyze this image and extract relevant information:' },
+            { type: 'image_url', image_url: { url: imageUrl } }
+          ]
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1000
     });
 
     if (!response.ok) {

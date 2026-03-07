@@ -120,25 +120,18 @@ Return your analysis in the following JSON format:
 
 Only include items that are genuinely important. If there's nothing significant, return empty arrays.`;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: [
-          { role: 'system', content: 'You are a helpful assistant that analyzes customer service conversations and extracts actionable insights.' },
-          { role: 'user', content: analysisPrompt }
-        ],
-        temperature: 0.3,
-      }),
+    const response = await geminiChat({
+      model: 'gemini-3-flash-preview',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant that analyzes customer service conversations and extracts actionable insights.' },
+        { role: 'user', content: analysisPrompt }
+      ],
+      temperature: 0.3,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Lovable AI error:', response.status, errorText);
+      console.error('Gemini AI error:', response.status, errorText);
       
       if (response.status === 429) {
         return new Response(
@@ -146,13 +139,7 @@ Only include items that are genuinely important. If there's nothing significant,
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted. Please add credits.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      throw new Error(`Lovable AI error: ${response.status}`);
+      throw new Error(`Gemini AI error: ${response.status}`);
     }
 
     const aiData = await response.json();

@@ -83,26 +83,19 @@ Respond with ONLY a JSON object (no markdown, no code blocks):
   "reasoning": "<brief explanation of your assessment>"
 }`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: "You are a quality assessment AI. Always respond with valid JSON only." },
-          { role: "user", content: analysisPrompt }
-        ],
-        temperature: 0.3,
-      }),
+    const aiResponse = await geminiChat({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: "You are a quality assessment AI. Always respond with valid JSON only." },
+        { role: "user", content: analysisPrompt }
+      ],
+      temperature: 0.3,
     });
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error("AI gateway error:", aiResponse.status, errorText);
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
+      console.error("Gemini API error:", aiResponse.status, errorText);
+      throw new Error(`Gemini API error: ${aiResponse.status}`);
     }
 
     const aiData = await aiResponse.json();
