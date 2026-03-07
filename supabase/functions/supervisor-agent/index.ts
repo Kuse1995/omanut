@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
 
     // Perform web research if enabled and needed
     let researchInsights = null;
-    if (supervisorConfig.researchEnabled && lovableApiKey && 
+    if (supervisorConfig.researchEnabled && 
         (customerMessage.toLowerCase().includes('price') || 
          customerMessage.toLowerCase().includes('competitor') ||
          customerMessage.toLowerCase().includes('compare'))) {
