@@ -25,10 +25,7 @@ serve(async (req) => {
     console.log(`[SMART-CONFIG] Processing overview for company: ${company_id}`);
     console.log(`[SMART-CONFIG] Overview length: ${business_overview.length} chars`);
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
+    // Using Gemini client
 
     // Initialize Supabase to fetch existing company data for context
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
