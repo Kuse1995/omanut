@@ -1,67 +1,43 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Diagnosis: WhatsApp Messages Not Responding
 
-## Problem Analysis
+## Root Cause
+The `whatsapp-messages` edge function is **deployed, working, and the Gemini API integration is functional**. I confirmed this by sending a simulated Twilio POST — it processed successfully, identified the sender, and routed to the correct handler.
 
-Two issues identified in the `demo-session` edge function:
+**The problem is that Twilio is not delivering incoming WhatsApp messages to your webhook URL.** Zero real customer messages appear in the function logs.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+## Evidence
+1. Simulated POST to E Library's number returned `200 OK` with empty TwiML (background processing started)
+2. Logs confirmed: message parsed, boss phone matched, routed to `boss-chat` correctly
+3. No real Twilio webhook deliveries visible in any recent logs
+4. The Twilio error 93101 you shared is about Event Streams (analytics), not message delivery
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+## What You Need to Verify in Twilio Console
 
-## Changes
+### For Finch Investments (+260766195857)
+- Go to **Twilio Console → Messaging → Senders → WhatsApp Senders** (or Sandbox if using sandbox)
+- Set "When a message comes in" webhook URL to:
+  ```
+  https://dzheddvoiauevcayifev.supabase.co/functions/v1/whatsapp-messages
+  ```
+- Method: **POST**
 
-### File: `supabase/functions/demo-session/index.ts`
+### For E Library (+14647686485)
+- Same URL:
+  ```
+  https://dzheddvoiauevcayifev.supabase.co/functions/v1/whatsapp-messages
+  ```
+- Method: **POST**
 
-**1. Tighten handoff evaluation prompt**
+Note: The `?company_id=` query parameter is **not required** — the function looks up the company by the `To` phone number automatically. But adding it won't hurt.
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+### Common Twilio Webhook Issues to Check
+1. **Sandbox expiry** — If using Twilio Sandbox, the session expires after 72 hours of inactivity. Users must re-join by sending the sandbox keyword.
+2. **Number not approved** — If using a production WhatsApp number, it must be approved in Meta Business Manager.
+3. **Webhook URL typo** — Ensure there are no extra spaces or characters in the URL.
+4. **Twilio Debugger** — Check **Monitor → Errors** for any 11200 (HTTP retrieval failure) or 11205 (HTTP connection failure) errors, which indicate Twilio cannot reach your webhook.
 
-**2. Create tickets and queue items on handoff**
-
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+## No Code Changes Required
+The function code and Gemini API integration are working correctly. This is purely a Twilio configuration issue.
 
