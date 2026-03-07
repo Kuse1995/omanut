@@ -1,46 +1,67 @@
 
 
-# Diagnosis: Two Separate Issues
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Issue 1: Image Generation Not Working
+## Problem Analysis
 
-**Root Cause Found:** The `gemini-client.ts` routes image models to Google's native API (`generativelanguage.googleapis.com`) using model names like `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`. These are **Lovable Gateway aliases**, not valid Google API model names. The direct Gemini API migration broke image generation because Google's API does not recognize these model identifiers.
+Two issues identified in the `demo-session` edge function:
 
-**Evidence:** The most recent E Library post (`1d337625`) was published with `image_url: null`. Earlier posts that DO have images were likely created before the migration. The `whatsapp-image-gen` function shows zero logs, meaning either the call fails silently or the AI never triggered it.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-**Affected Functions:**
-- `whatsapp-image-gen/index.ts` — uses `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`
-- `auto-content-creator/index.ts` — uses `gemini-3-pro-image-preview`
-- `generate-business-image/index.ts` — uses `gemini-2.5-flash-image-preview`
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-**Fix:** Update `gemini-client.ts` to route image generation models through the Lovable AI Gateway (`https://ai.gateway.lovable.dev/v1/chat/completions` with `LOVABLE_API_KEY`) instead of Google's native API. Text models continue using direct Gemini. This is a single-file change in the shared client — all functions will automatically work.
+## Changes
 
-```text
-geminiChat() call flow:
+### File: `supabase/functions/demo-session/index.ts`
 
-Before (broken):
-  isImageModel? → Google native API → model not found → no image
+**1. Tighten handoff evaluation prompt**
 
-After (fix):
-  isImageModel? → Lovable Gateway → returns base64 image → works
-```
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-## Issue 2: Finch WhatsApp (+260766195857) — Single Tick
+**2. Create tickets and queue items on handoff**
 
-Single tick means the message is sent from the phone but **not delivered to WhatsApp servers** or **not acknowledged by Twilio**. This is NOT a code issue. Possible causes:
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-- The Twilio number is in sandbox mode and the sandbox session expired (72h inactivity)
-- The number is suspended or restricted on Twilio's side
-- The webhook URL was updated but the number's messaging service configuration wasn't saved
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-**No code change needed.** You need to:
-1. Check if the Finch number is a sandbox or production number in Twilio
-2. If sandbox: re-join by sending the join keyword to the number
-3. If production: check the number's status in Twilio Console → Phone Numbers → Active Numbers
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-## Implementation Plan
+**3. Skip evaluation on short conversations**
 
-1. **Update `_shared/gemini-client.ts`** — Add a Lovable Gateway path for image models. When `isImageModel()` returns true, call `ai.gateway.lovable.dev` with `LOVABLE_API_KEY` instead of Google's native endpoint. Keep the same response reshaping so all callers remain compatible.
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-2. **No changes to any other edge function** — They all use `geminiChat()` from the shared client, so the fix propagates automatically.
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
