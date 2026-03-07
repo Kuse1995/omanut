@@ -37,21 +37,23 @@ export interface GeminiChatOptions {
  * For image models, uses native Gemini API and reshapes the response.
  */
 export async function geminiChat(options: GeminiChatOptions): Promise<Response> {
+  const model = options.model; // Keep original model name for Gateway calls
+
+  // Image generation models route through Lovable AI Gateway
+  if (isImageModel(model)) {
+    return lovableGatewayImageCall(model, options);
+  }
+
+  // Text models use direct Gemini OpenAI-compatible endpoint
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  const model = normalizeModel(options.model);
+  const normalizedModel = normalizeModel(model);
 
-  // Image generation models need native Gemini API
-  if (isImageModel(model) && options.modalities?.includes('image')) {
-    return geminiNativeImageCall(model, options, apiKey);
-  }
-
-  // Text models use OpenAI-compatible endpoint
   const body: any = {
-    model,
+    model: normalizedModel,
     messages: options.messages,
   };
 
