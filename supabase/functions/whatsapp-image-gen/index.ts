@@ -515,7 +515,7 @@ async function generateCaption(
   context: string,
   companyName: string
 ): Promise<{ caption: string; hashtags: string[]; bestTime: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  // Using Gemini client
   
   // Get current time context
   const now = new Date();
