@@ -190,14 +190,7 @@ serve(async (req) => {
       console.log(`[test-image-generation] Using product: ${productImage.file_name}`);
     }
 
-    // Call Lovable AI Gateway for image generation
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "LOVABLE_API_KEY not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Using Gemini client
 
     let enhancedPrompt: string;
     let aiRequestBody: any;
