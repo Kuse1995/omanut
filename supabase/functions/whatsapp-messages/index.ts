@@ -1728,6 +1728,38 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["query"]
           }
         }
+      },
+      check_stock: {
+        type: "function",
+        function: {
+          name: "check_stock",
+          description: "Checks real-time inventory levels and pricing for a specific product in the BMS.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "The name of the product the user is asking about" }
+            },
+            required: ["product_name"]
+          }
+        }
+      },
+      record_sale: {
+        type: "function",
+        function: {
+          name: "record_sale",
+          description: "Records a completed sale in the BMS after the customer has confirmed their order.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "The name of the product being sold" },
+              quantity: { type: "integer", description: "The number of items being purchased" },
+              payment_method: { type: "string", description: "How the customer is paying", enum: ["cash", "mobile_money", "bank_transfer", "card"] },
+              customer_name: { type: "string", description: "The name of the customer, if known" },
+              customer_phone: { type: "string", description: "The phone number of the customer, if known" }
+            },
+            required: ["product_name", "quantity", "payment_method"]
+          }
+        }
       }
     };
 
