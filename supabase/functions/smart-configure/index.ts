@@ -134,26 +134,19 @@ Return ONLY valid JSON with this structure:
 
 Only include fields in extracted_fields if you found relevant information. Skip fields with no data.`;
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an AI configuration specialist. Extract and organize business information to optimize AI assistant performance. Always return valid JSON only, no markdown formatting.'
-          },
-          {
-            role: 'user',
-            content: configurePrompt
-          }
-        ],
-        temperature: 0.3, // Lower temp for more precise extraction
-      }),
+    const aiResponse = await geminiChat({
+      model: 'gemini-3-flash-preview',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an AI configuration specialist. Extract and organize business information to optimize AI assistant performance. Always return valid JSON only, no markdown formatting.'
+        },
+        {
+          role: 'user',
+          content: configurePrompt
+        }
+      ],
+      temperature: 0.3,
     });
 
     if (!aiResponse.ok) {
@@ -161,12 +154,6 @@ Only include fields in extracted_fields if you found relevant information. Skip 
         return new Response(
           JSON.stringify({ error: 'AI rate limit exceeded. Please try again in a moment.' }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted. Please add credits to your workspace.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       const errorText = await aiResponse.text();

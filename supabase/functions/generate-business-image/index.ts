@@ -81,28 +81,21 @@ serve(async (req) => {
 
     console.log('Generating image with prompt:', enhancedPrompt);
 
-    // Call Lovable AI image generation
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-image-preview',
-        messages: [
-          {
-            role: 'user',
-            content: enhancedPrompt
-          }
-        ],
-        modalities: ['image', 'text']
-      })
+    // Call Gemini AI for image generation
+    const response = await geminiChat({
+      model: 'gemini-2.5-flash-image-preview',
+      messages: [
+        {
+          role: 'user',
+          content: enhancedPrompt
+        }
+      ],
+      modalities: ['image', 'text']
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Lovable AI error:', response.status, errorText);
+      console.error('Gemini AI error:', response.status, errorText);
       
       if (response.status === 429) {
         return new Response(
@@ -111,7 +104,7 @@ serve(async (req) => {
         );
       }
       
-      throw new Error(`Lovable AI error: ${response.status}`);
+      throw new Error(`Gemini AI error: ${response.status}`);
     }
 
     const data = await response.json();
