@@ -309,11 +309,7 @@ async function generateImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using Gemini client
   
   // Enhance prompt with context
   const enhancedPrompt = `${context}\n\nCreate a professional marketing image for ${companyName} (${businessType}): ${prompt}. Ultra high resolution, professional quality, suitable for social media marketing.`;
