@@ -557,7 +557,11 @@ async function handleMessengerDM(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'messenger');
+  // Load conversation history for context
+  const phoneKey = `fbdm:${senderId}`;
+  const history = await loadConversationHistory(supabase, companyId, phoneKey);
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'messenger', history);
   if (!aiReply) {
     console.error('AI returned empty reply for Messenger DM, skipping');
     return;
