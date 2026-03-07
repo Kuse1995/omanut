@@ -700,7 +700,11 @@ async function handleInstagramDM(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_dm')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm');
+  // Load conversation history for context
+  const phoneKey = `igdm:${senderId}`;
+  const history = await loadConversationHistory(supabase, companyId, phoneKey);
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm', history);
   if (!aiReply) {
     console.error('AI returned empty reply for IG DM, skipping');
     return;
