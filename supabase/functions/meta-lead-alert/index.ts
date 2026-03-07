@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,49 +61,39 @@ serve(async (req) => {
     }
 
     // Use AI to classify the lead
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     let leadScore = 50;
     let intent = 'neutral';
     let summary = message_text.slice(0, 200);
 
-    if (LOVABLE_API_KEY) {
-      try {
-        const classifyResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
+    try {
+      const classifyResponse = await geminiChat({
+        model: 'gemini-2.5-flash-lite',
+        messages: [
+          {
+            role: 'system',
+            content: 'You classify customer messages for a business. Return JSON only: {"lead_score":0-100,"intent":"sales|support|neutral","summary":"2-line boss summary","next_step":"1 line recommendation"}'
           },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash-lite',
-            messages: [
-              {
-                role: 'system',
-                content: 'You classify customer messages for a business. Return JSON only: {"lead_score":0-100,"intent":"sales|support|neutral","summary":"2-line boss summary","next_step":"1 line recommendation"}'
-              },
-              {
-                role: 'user',
-                content: `Platform: ${platform}\nCustomer: ${customer_name || 'Unknown'}\nMessage: "${message_text}"\n\nClassify this lead.`
-              }
-            ],
-            temperature: 0.2,
-            max_tokens: 200,
-          }),
-        });
+          {
+            role: 'user',
+            content: `Platform: ${platform}\nCustomer: ${customer_name || 'Unknown'}\nMessage: "${message_text}"\n\nClassify this lead.`
+          }
+        ],
+        temperature: 0.2,
+        max_tokens: 200,
+      });
 
-        if (classifyResponse.ok) {
-          const data = await classifyResponse.json();
-          const content = data.choices?.[0]?.message?.content || '{}';
-          const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
-          leadScore = parsed.lead_score || 50;
-          intent = parsed.intent || 'neutral';
-          summary = parsed.summary || message_text.slice(0, 200);
-          const nextStep = parsed.next_step || '';
-          if (nextStep) summary += `\nNext step: ${nextStep}`;
-        }
-      } catch (aiErr) {
-        console.error('[meta-lead-alert] AI classification error:', aiErr);
+      if (classifyResponse.ok) {
+        const data = await classifyResponse.json();
+        const content = data.choices?.[0]?.message?.content || '{}';
+        const parsed = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
+        leadScore = parsed.lead_score || 50;
+        intent = parsed.intent || 'neutral';
+        summary = parsed.summary || message_text.slice(0, 200);
+        const nextStep = parsed.next_step || '';
+        if (nextStep) summary += `\nNext step: ${nextStep}`;
       }
+    } catch (aiErr) {
+      console.error('[meta-lead-alert] AI classification error:', aiErr);
     }
 
     // Only alert if lead score is >= 30 (low threshold to catch most leads)

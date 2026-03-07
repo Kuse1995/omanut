@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -189,14 +190,7 @@ serve(async (req) => {
       console.log(`[test-image-generation] Using product: ${productImage.file_name}`);
     }
 
-    // Call Lovable AI Gateway for image generation
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: "LOVABLE_API_KEY not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Using Gemini client
 
     let enhancedPrompt: string;
     let aiRequestBody: any;
@@ -230,7 +224,7 @@ ${context}
 Place THIS EXACT product into the requested environment while preserving ALL branding elements.`;
 
       aiRequestBody = {
-        model: "google/gemini-3-pro-image-preview",
+        model: "gemini-3-pro-image-preview",
         messages: [
           {
             role: "user",
@@ -249,7 +243,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
         : prompt;
       
       aiRequestBody = {
-        model: "google/gemini-3-pro-image-preview",
+        model: "gemini-3-pro-image-preview",
         messages: [
           {
             role: "user",
@@ -262,14 +256,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
 
     console.log(`[test-image-generation] Enhanced prompt (first 300 chars): ${enhancedPrompt.substring(0, 300)}`);
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(aiRequestBody),
-    });
+    const aiResponse = await geminiChat(aiRequestBody);
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
@@ -279,12 +266,6 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add more credits." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       
@@ -323,7 +304,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
       enhanced_prompt: enhancedPrompt,
       product_mode: !!productImage,
       product_id: productImage?.id || null,
-      model: "google/gemini-2.5-flash-image-preview",
+      model: "gemini-2.5-flash-image-preview",
       context: context || null
     };
     

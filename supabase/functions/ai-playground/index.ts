@@ -7,7 +7,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+import { geminiChatJSON } from "../_shared/gemini-client.ts";
+
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -149,32 +150,23 @@ Acknowledge training inputs and demonstrate how you would apply them.`;
       { role: 'user', content: message }
     ];
 
-    // Call Lovable AI with configured model
+    // Call Gemini AI with configured model
     const startTime = Date.now();
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    let aiData;
+    try {
+      aiData = await geminiChatJSON({
         model: primaryModel,
         messages,
         temperature,
         max_tokens: maxTokens,
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('AI API error:', errorText);
+      });
+    } catch (err: any) {
+      console.error('AI API error:', err.message);
       return new Response(JSON.stringify({ error: 'AI service error' }), {
-        status: 500,
+        status: err.status || 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    const aiData = await aiResponse.json();
     const responseTime = Date.now() - startTime;
     const assistantMessage = aiData.choices?.[0]?.message?.content || 'No response generated';
 

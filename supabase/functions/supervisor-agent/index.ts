@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,7 +17,6 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
 
     const {
       companyId,
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
 
     // Perform web research if enabled and needed
     let researchInsights = null;
-    if (supervisorConfig.researchEnabled && lovableApiKey && 
+    if (supervisorConfig.researchEnabled && 
         (customerMessage.toLowerCase().includes('price') || 
          customerMessage.toLowerCase().includes('competitor') ||
          customerMessage.toLowerCase().includes('compare'))) {
@@ -170,17 +170,10 @@ Customer is asking: "${customerMessage}"
 Provide brief market insights, pricing context, or competitive positioning that would help craft a strategic response.`;
 
       try {
-        const researchResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lovableApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-3-flash-preview',
-            messages: [{ role: 'user', content: researchPrompt }],
-            max_tokens: 500
-          }),
+        const researchResponse = await geminiChat({
+          model: 'gemini-3-flash-preview',
+          messages: [{ role: 'user', content: researchPrompt }],
+          max_tokens: 500
         });
 
         if (researchResponse.ok) {

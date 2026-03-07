@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -285,19 +286,13 @@ async function processCompany(
         // Get AI overrides for follow-up message
         const aiOverrides = company.company_ai_overrides?.[0];
 
-        // Use Lovable AI Gateway with Gemini 3 Pro to craft follow-up message
-        const geminiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-3-pro-preview',
-            messages: [
-              {
-                role: 'system',
-                content: `You are the Omanut Assistant for ${company.name}. Your supervisor has analyzed this customer conversation and provided strategic guidance. Craft a personalized follow-up WhatsApp message to re-engage the customer and drive conversion.
+        // Use Gemini to craft follow-up message
+        const geminiResponse = await geminiChat({
+          model: 'gemini-3-pro-preview',
+          messages: [
+            {
+              role: 'system',
+              content: `You are the Omanut Assistant for ${company.name}. Your supervisor has analyzed this customer conversation and provided strategic guidance. Craft a personalized follow-up WhatsApp message to re-engage the customer and drive conversion.
 
 SUPERVISOR'S STRATEGIC ANALYSIS:
 ${recommendation.analysis}
@@ -333,11 +328,10 @@ Create a warm, personalized follow-up message (max 150 words) that:
 4. Includes a clear call-to-action
 
 Return ONLY the message text, no prefix or explanation.`
-              }
-            ],
-            temperature: 1.0,
-            max_tokens: 8192
-          }),
+            }
+          ],
+          temperature: 1.0,
+          max_tokens: 8192
         });
 
         if (!geminiResponse.ok) {

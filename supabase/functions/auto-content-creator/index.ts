@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,13 +16,7 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-
-    if (!lovableApiKey) {
-      return new Response(JSON.stringify({ error: 'LOVABLE_API_KEY not configured' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    // Using Gemini client
 
     // Auth
     const authHeader = req.headers.get('Authorization') || '';
@@ -90,16 +85,9 @@ Create ONE highly engaging social media post caption for Facebook and Instagram.
 
 Return ONLY the caption text, nothing else.`;
 
-    const captionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: [{ role: 'user', content: captionPrompt }],
-      }),
+    const captionResponse = await geminiChat({
+      model: 'gemini-3-flash-preview',
+      messages: [{ role: 'user', content: captionPrompt }],
     });
 
     if (!captionResponse.ok) {
@@ -135,17 +123,10 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const imageResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-pro-image-preview',
-        messages: [{ role: 'user', content: imagePrompt }],
-        modalities: ['image', 'text'],
-      }),
+    const imageResponse = await geminiChat({
+      model: 'gemini-3-pro-image-preview',
+      messages: [{ role: 'user', content: imagePrompt }],
+      modalities: ['image', 'text'],
     });
 
     if (!imageResponse.ok) {

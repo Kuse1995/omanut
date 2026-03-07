@@ -1,13 +1,13 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -322,19 +322,12 @@ START by warmly greeting them and asking about a specific aspect of their custom
     ];
 
     // First AI call
-    const firstResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages,
-        temperature: 0.8,
-        max_tokens: 1024,
-        tools,
-      }),
+    const firstResponse = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages,
+      temperature: 0.8,
+      max_tokens: 1024,
+      tools,
     });
 
     if (!firstResponse.ok) {
@@ -397,18 +390,11 @@ START by warmly greeting them and asking about a specific aspect of their custom
       ...toolResults,
     ];
 
-    const secondResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: secondMessages,
-        temperature: 0.8,
-        max_tokens: 1024,
-      }),
+    const secondResponse = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages: secondMessages,
+      temperature: 0.8,
+      max_tokens: 1024,
     });
 
     if (!secondResponse.ok) {

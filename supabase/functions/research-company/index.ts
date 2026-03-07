@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,10 +24,7 @@ serve(async (req) => {
 
     console.log(`[RESEARCH] Starting research for: ${company_name}`);
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
+    // Using Gemini client
 
     // Research prompt for AI
     const researchPrompt = `You are a business research assistant helping to set up an AI customer service system for a company.
@@ -72,27 +70,19 @@ Return ONLY valid JSON with this exact structure:
   "research_summary": "string"
 }`;
 
-    // Call Lovable AI for research
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-3-flash-preview',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a business research assistant. Always return valid JSON only, no markdown formatting.'
-          },
-          {
-            role: 'user',
-            content: researchPrompt
-          }
-        ],
-        temperature: 0.7,
-      }),
+    const aiResponse = await geminiChat({
+      model: 'gemini-3-flash-preview',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a business research assistant. Always return valid JSON only, no markdown formatting.'
+        },
+        {
+          role: 'user',
+          content: researchPrompt
+        }
+      ],
+      temperature: 0.7,
     });
 
     if (!aiResponse.ok) {
@@ -100,12 +90,6 @@ Return ONLY valid JSON with this exact structure:
         return new Response(
           JSON.stringify({ error: 'AI rate limit exceeded. Please try again in a moment.' }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted. Please add credits to your Lovable workspace.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       const errorText = await aiResponse.text();

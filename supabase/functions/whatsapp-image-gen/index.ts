@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -308,28 +309,17 @@ async function generateImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using Gemini client
   
   // Enhance prompt with context
   const enhancedPrompt = `${context}\n\nCreate a professional marketing image for ${companyName} (${businessType}): ${prompt}. Ultra high resolution, professional quality, suitable for social media marketing.`;
   
   console.log('[IMAGE-GEN] Enhanced prompt:', enhancedPrompt.substring(0, 200));
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-3-pro-image-preview',
-      messages: [{ role: 'user', content: enhancedPrompt }],
-      modalities: ['image', 'text']
-    })
+  const response = await geminiChat({
+    model: 'gemini-3-pro-image-preview',
+    messages: [{ role: 'user', content: enhancedPrompt }],
+    modalities: ['image', 'text']
   });
   
   if (!response.ok) {
@@ -338,9 +328,6 @@ async function generateImage(
     
     if (response.status === 429) {
       throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    if (response.status === 402) {
-      throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to generate image');
   }
@@ -405,25 +392,18 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Generating with product image from:', productImageUrl.substring(0, 80));
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image-preview',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: enhancedPrompt },
-            { type: 'image_url', image_url: { url: productImageUrl } }
-          ]
-        }
-      ],
-      modalities: ['image', 'text']
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash-image-preview',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: enhancedPrompt },
+          { type: 'image_url', image_url: { url: productImageUrl } }
+        ]
+      }
+    ],
+    modalities: ['image', 'text']
   });
   
   if (!response.ok) {
@@ -432,9 +412,6 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
     
     if (response.status === 429) {
       throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    if (response.status === 402) {
-      throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to generate product image');
   }
@@ -462,35 +439,24 @@ async function editImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; editDescription: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using Gemini client
   
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image-preview',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: editInstruction },
-            { type: 'image_url', image_url: { url: sourceImageUrl } }
-          ]
-        }
-      ],
-      modalities: ['image', 'text']
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash-image-preview',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: editInstruction },
+          { type: 'image_url', image_url: { url: sourceImageUrl } }
+        ]
+      }
+    ],
+    modalities: ['image', 'text']
   });
   
   if (!response.ok) {
@@ -499,9 +465,6 @@ async function editImage(
     
     if (response.status === 429) {
       throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    if (response.status === 402) {
-      throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to edit image');
   }
@@ -552,7 +515,7 @@ async function generateCaption(
   context: string,
   companyName: string
 ): Promise<{ caption: string; hashtags: string[]; bestTime: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  // Using Gemini client
   
   // Get current time context
   const now = new Date();
@@ -571,26 +534,19 @@ async function generateCaption(
   const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
   const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Consider the time of day, day of week, and current date when crafting captions (e.g., weekend vibes, morning energy, end-of-week celebrations, seasonal themes). Respond in JSON format only.`
-        },
-        {
-          role: 'user',
-          content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nMake the caption time-appropriate (e.g., "Good morning" for morning, "Happy Friday" for Friday, weekend references on weekends, etc.).\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
-        }
-      ],
-      temperature: 0.7
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Consider the time of day, day of week, and current date when crafting captions (e.g., weekend vibes, morning energy, end-of-week celebrations, seasonal themes). Respond in JSON format only.`
+      },
+      {
+        role: 'user',
+        content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nMake the caption time-appropriate (e.g., "Good morning" for morning, "Happy Friday" for Friday, weekend references on weekends, etc.).\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
+      }
+    ],
+    temperature: 0.7
   });
   
   const data = await response.json();
@@ -618,7 +574,7 @@ async function generateSuggestions(
   companyName: string,
   businessType: string
 ): Promise<{ suggestions: string[] }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  // Using Gemini client
   
   // Get current time context
   const now = new Date();
@@ -637,26 +593,19 @@ async function generateSuggestions(
   const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
   const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas that are timely and relevant to the current day/time.`
-        },
-        {
-          role: 'user',
-          content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Consider the current time of day, day of week, and any upcoming events/seasons. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
-        }
-      ],
-      temperature: 0.8
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas that are timely and relevant to the current day/time.`
+      },
+      {
+        role: 'user',
+        content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Consider the current time of day, day of week, and any upcoming events/seasons. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
+      }
+    ],
+    temperature: 0.8
   });
   
   const data = await response.json();
