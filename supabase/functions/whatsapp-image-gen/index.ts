@@ -534,26 +534,19 @@ async function generateCaption(
   const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
   const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Consider the time of day, day of week, and current date when crafting captions (e.g., weekend vibes, morning energy, end-of-week celebrations, seasonal themes). Respond in JSON format only.`
-        },
-        {
-          role: 'user',
-          content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nMake the caption time-appropriate (e.g., "Good morning" for morning, "Happy Friday" for Friday, weekend references on weekends, etc.).\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
-        }
-      ],
-      temperature: 0.7
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Consider the time of day, day of week, and current date when crafting captions (e.g., weekend vibes, morning energy, end-of-week celebrations, seasonal themes). Respond in JSON format only.`
+      },
+      {
+        role: 'user',
+        content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nMake the caption time-appropriate (e.g., "Good morning" for morning, "Happy Friday" for Friday, weekend references on weekends, etc.).\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time like 'Tuesday 2pm' or 'Weekend morning'"}`
+      }
+    ],
+    temperature: 0.7
   });
   
   const data = await response.json();
