@@ -322,19 +322,12 @@ START by warmly greeting them and asking about a specific aspect of their custom
     ];
 
     // First AI call
-    const firstResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages,
-        temperature: 0.8,
-        max_tokens: 1024,
-        tools,
-      }),
+    const firstResponse = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages,
+      temperature: 0.8,
+      max_tokens: 1024,
+      tools,
     });
 
     if (!firstResponse.ok) {
