@@ -1,67 +1,68 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Plan: Migrate All AI from Lovable AI to Direct Gemini API
 
-## Problem Analysis
+## Overview
 
-Two issues identified in the `demo-session` edge function:
+21 edge functions currently call `https://ai.gateway.lovable.dev/v1/chat/completions` using `LOVABLE_API_KEY`. We'll switch them all to Google's OpenAI-compatible Gemini endpoint using your own API key.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+## Step 1: Store your Gemini API key
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+Add a `GEMINI_API_KEY` secret with your key from Google AI Studio.
 
-## Changes
+## Step 2: Create a shared helper
 
-### File: `supabase/functions/demo-session/index.ts`
+Create `supabase/functions/_shared/gemini-client.ts` with a reusable function that:
+- Uses endpoint: `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`
+- Authenticates with `GEMINI_API_KEY` via Bearer token
+- Strips `google/` prefix from model names (e.g. `google/gemini-2.5-flash` → `gemini-2.5-flash`)
+- Handles rate limits and errors consistently
 
-**1. Tighten handoff evaluation prompt**
+```text
+// Shared helper signature
+geminiChat({ model, messages, temperature?, max_tokens?, tools?, tool_choice?, modalities? })
+  → returns the JSON response (same shape as OpenAI format)
+```
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+## Step 3: Update all 21 edge functions
 
-**2. Create tickets and queue items on handoff**
+Replace every `fetch('https://ai.gateway.lovable.dev/...')` call with a call to the shared helper. The affected functions:
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+| Function | Models Used |
+|---|---|
+| whatsapp-messages | configurable (default gemini-3-flash-preview) |
+| boss-chat | configurable (default gemini-3-pro-preview) |
+| meta-webhook | gemini-3-flash-preview |
+| ai-playground | configurable |
+| supervisor-agent | gemini-3-flash-preview |
+| analyze-conversation | gemini-3-flash-preview |
+| analyze-ai-quality | gemini-3-flash-preview |
+| smart-configure | gemini-3-flash-preview |
+| research-company | gemini-3-flash-preview |
+| generate-reply-draft | configurable |
+| ai-training-coach | gemini-2.5-flash |
+| meta-lead-alert | gemini-2.5-flash-lite |
+| analyze-media | gemini-2.5-flash |
+| auto-content-creator | gemini-3-flash-preview + gemini-3-pro-image-preview |
+| generate-business-image | gemini-2.5-flash-image-preview |
+| test-image-generation | image models |
+| whatsapp-image-gen | image models |
+| analyze-reference-image | gemini-3-pro-image-preview |
+| analyze-customer-image | vision model |
+| demo-session | gemini-3-flash-preview |
+| analyze-and-followup | gemini-3-pro-preview |
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+## Step 4: Image generation consideration
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+Google's OpenAI-compatible endpoint supports text models well. For **image generation** models (`gemini-*-image-preview` with `modalities: ['image', 'text']`), the shared helper will use the native Gemini REST API (`generateContent`) since the OpenAI-compatible endpoint may not support image output. The helper will abstract this difference.
 
-**3. Skip evaluation on short conversations**
+## What stays the same
+- All request/response shapes (OpenAI chat completions format)
+- All model names in database (`company_ai_overrides`) — just stripped of `google/` prefix at call time
+- All existing logic, prompts, tool calling
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+## What changes
+- Gateway URL → Google's endpoint
+- Auth header: `LOVABLE_API_KEY` → `GEMINI_API_KEY`
+- One shared helper instead of duplicated fetch calls
 
