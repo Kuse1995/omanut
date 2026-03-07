@@ -1,0 +1,1 @@
+ALTER TABLE public.companies DROP CONSTRAINT companies_twilio_number_key;
