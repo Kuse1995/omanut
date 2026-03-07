@@ -557,7 +557,11 @@ async function handleMessengerDM(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'messenger');
+  // Load conversation history for context
+  const phoneKey = `fbdm:${senderId}`;
+  const history = await loadConversationHistory(supabase, companyId, phoneKey);
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'messenger', history);
   if (!aiReply) {
     console.error('AI returned empty reply for Messenger DM, skipping');
     return;
@@ -696,7 +700,11 @@ async function handleInstagramDM(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_dm')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm');
+  // Load conversation history for context
+  const phoneKey = `igdm:${senderId}`;
+  const history = await loadConversationHistory(supabase, companyId, phoneKey);
+
+  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm', history);
   if (!aiReply) {
     console.error('AI returned empty reply for IG DM, skipping');
     return;
@@ -748,12 +756,52 @@ async function handleInstagramDM(
   }
 }
 
+// ── Load conversation history for DMs ──
+async function loadConversationHistory(
+  supabase: any,
+  companyId: string | null,
+  phoneKey: string,
+): Promise<Array<{ role: string; content: string }>> {
+  if (!companyId) return [];
+
+  try {
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('phone', phoneKey)
+      .limit(1)
+      .maybeSingle();
+
+    if (!conv?.id) return [];
+
+    const { data: messages } = await supabase
+      .from('messages')
+      .select('role, content')
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: false })
+      .limit(6);
+
+    if (!messages || messages.length === 0) return [];
+
+    // Reverse to chronological order
+    return messages.reverse().map((m: any) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+  } catch (err) {
+    console.error('Error loading conversation history:', err);
+    return [];
+  }
+}
+
 // ── AI Reply Generation ──
 async function generateAIReply(
   userMessage: string,
   commenterName: string,
   systemPrompt: string,
   context: 'comment' | 'messenger' | 'instagram_comment' | 'instagram_dm',
+  conversationHistory: Array<{ role: string; content: string }> = [],
 ): Promise<string | null> {
   const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
   if (!GEMINI_API_KEY) {
@@ -763,20 +811,33 @@ async function generateAIReply(
 
   const contextPrompts: Record<string, string> = {
     comment: `A user named "${commenterName}" commented on our Facebook post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
-    messenger: `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+    messenger: `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a helpful reply.`,
     instagram_comment: `A user named "${commenterName}" commented on our Instagram post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
-    instagram_dm: `A customer sent a direct message on Instagram:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
+    instagram_dm: `A customer sent a direct message on Instagram:\n\n"${userMessage}"\n\nWrite a helpful reply.`,
   };
 
   const userPrompt = contextPrompts[context] || contextPrompts.comment;
 
+  // Build messages array with optional conversation history
+  const messages: Array<{ role: string; content: any }> = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  // Prepend conversation history for DMs
+  if (conversationHistory.length > 0) {
+    messages.push({ role: 'system', content: '=== RECENT CONVERSATION HISTORY ===' });
+    for (const msg of conversationHistory) {
+      messages.push(msg);
+    }
+    messages.push({ role: 'system', content: '=== END HISTORY — Now respond to the latest message below ===' });
+  }
+
+  messages.push({ role: 'user', content: userPrompt });
+
   const response = await geminiChat({
     model: 'gemini-3-flash-preview',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    max_tokens: 300,
+    messages,
+    max_tokens: 1024,
   });
 
   if (!response.ok) {

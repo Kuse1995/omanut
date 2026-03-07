@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     }
 
     // Subscribe the page to webhook events
-    const fields = ["feed", "messages"];
+    const fields = ["feed", "messages", "instagram_manage_messages"];
     const subscribeUrl = `https://graph.facebook.com/v18.0/${cred.page_id}/subscribed_apps`;
 
     const fbRes = await fetch(subscribeUrl, {
