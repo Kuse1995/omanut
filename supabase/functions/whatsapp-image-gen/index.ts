@@ -593,26 +593,19 @@ async function generateSuggestions(
   const isWeekend = dayOfWeek === 'Saturday' || dayOfWeek === 'Sunday';
   const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
-      messages: [
-        {
-          role: 'system',
-          content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas that are timely and relevant to the current day/time.`
-        },
-        {
-          role: 'user',
-          content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Consider the current time of day, day of week, and any upcoming events/seasons. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
-        }
-      ],
-      temperature: 0.8
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a creative marketing strategist for ${companyName}, a ${businessType}. Suggest compelling product image ideas that are timely and relevant to the current day/time.`
+      },
+      {
+        role: 'user',
+        content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Consider the current time of day, day of week, and any upcoming events/seasons. Be specific about composition, mood, and what to highlight. Format as a numbered list.`
+      }
+    ],
+    temperature: 0.8
   });
   
   const data = await response.json();
