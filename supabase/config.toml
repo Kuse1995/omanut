@@ -77,6 +77,8 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.send-whatsapp-message]
     verify_jwt = false
+  [functions.subscribe-meta-page]
+    verify_jwt = true
   [functions.supervisor-agent]
     verify_jwt = true
   [functions.test-image-generation]
