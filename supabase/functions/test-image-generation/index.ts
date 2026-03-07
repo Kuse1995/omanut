@@ -256,14 +256,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
 
     console.log(`[test-image-generation] Enhanced prompt (first 300 chars): ${enhancedPrompt.substring(0, 300)}`);
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(aiRequestBody),
-    });
+    const aiResponse = await geminiChat(aiRequestBody);
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
@@ -273,12 +266,6 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add more credits." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       
