@@ -390,18 +390,11 @@ START by warmly greeting them and asking about a specific aspect of their custom
       ...toolResults,
     ];
 
-    const secondResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: secondMessages,
-        temperature: 0.8,
-        max_tokens: 1024,
-      }),
+    const secondResponse = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages: secondMessages,
+      temperature: 0.8,
+      max_tokens: 1024,
     });
 
     if (!secondResponse.ok) {

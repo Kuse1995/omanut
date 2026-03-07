@@ -170,17 +170,10 @@ Customer is asking: "${customerMessage}"
 Provide brief market insights, pricing context, or competitive positioning that would help craft a strategic response.`;
 
       try {
-        const researchResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lovableApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-3-flash-preview',
-            messages: [{ role: 'user', content: researchPrompt }],
-            max_tokens: 500
-          }),
+        const researchResponse = await geminiChat({
+          model: 'gemini-3-flash-preview',
+          messages: [{ role: 'user', content: researchPrompt }],
+          max_tokens: 500
         });
 
         if (researchResponse.ok) {
