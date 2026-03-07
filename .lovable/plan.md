@@ -1,43 +1,46 @@
 
 
-# Diagnosis: WhatsApp Messages Not Responding
+# Diagnosis: Two Separate Issues
 
-## Root Cause
-The `whatsapp-messages` edge function is **deployed, working, and the Gemini API integration is functional**. I confirmed this by sending a simulated Twilio POST — it processed successfully, identified the sender, and routed to the correct handler.
+## Issue 1: Image Generation Not Working
 
-**The problem is that Twilio is not delivering incoming WhatsApp messages to your webhook URL.** Zero real customer messages appear in the function logs.
+**Root Cause Found:** The `gemini-client.ts` routes image models to Google's native API (`generativelanguage.googleapis.com`) using model names like `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`. These are **Lovable Gateway aliases**, not valid Google API model names. The direct Gemini API migration broke image generation because Google's API does not recognize these model identifiers.
 
-## Evidence
-1. Simulated POST to E Library's number returned `200 OK` with empty TwiML (background processing started)
-2. Logs confirmed: message parsed, boss phone matched, routed to `boss-chat` correctly
-3. No real Twilio webhook deliveries visible in any recent logs
-4. The Twilio error 93101 you shared is about Event Streams (analytics), not message delivery
+**Evidence:** The most recent E Library post (`1d337625`) was published with `image_url: null`. Earlier posts that DO have images were likely created before the migration. The `whatsapp-image-gen` function shows zero logs, meaning either the call fails silently or the AI never triggered it.
 
-## What You Need to Verify in Twilio Console
+**Affected Functions:**
+- `whatsapp-image-gen/index.ts` — uses `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`
+- `auto-content-creator/index.ts` — uses `gemini-3-pro-image-preview`
+- `generate-business-image/index.ts` — uses `gemini-2.5-flash-image-preview`
 
-### For Finch Investments (+260766195857)
-- Go to **Twilio Console → Messaging → Senders → WhatsApp Senders** (or Sandbox if using sandbox)
-- Set "When a message comes in" webhook URL to:
-  ```
-  https://dzheddvoiauevcayifev.supabase.co/functions/v1/whatsapp-messages
-  ```
-- Method: **POST**
+**Fix:** Update `gemini-client.ts` to route image generation models through the Lovable AI Gateway (`https://ai.gateway.lovable.dev/v1/chat/completions` with `LOVABLE_API_KEY`) instead of Google's native API. Text models continue using direct Gemini. This is a single-file change in the shared client — all functions will automatically work.
 
-### For E Library (+14647686485)
-- Same URL:
-  ```
-  https://dzheddvoiauevcayifev.supabase.co/functions/v1/whatsapp-messages
-  ```
-- Method: **POST**
+```text
+geminiChat() call flow:
 
-Note: The `?company_id=` query parameter is **not required** — the function looks up the company by the `To` phone number automatically. But adding it won't hurt.
+Before (broken):
+  isImageModel? → Google native API → model not found → no image
 
-### Common Twilio Webhook Issues to Check
-1. **Sandbox expiry** — If using Twilio Sandbox, the session expires after 72 hours of inactivity. Users must re-join by sending the sandbox keyword.
-2. **Number not approved** — If using a production WhatsApp number, it must be approved in Meta Business Manager.
-3. **Webhook URL typo** — Ensure there are no extra spaces or characters in the URL.
-4. **Twilio Debugger** — Check **Monitor → Errors** for any 11200 (HTTP retrieval failure) or 11205 (HTTP connection failure) errors, which indicate Twilio cannot reach your webhook.
+After (fix):
+  isImageModel? → Lovable Gateway → returns base64 image → works
+```
 
-## No Code Changes Required
-The function code and Gemini API integration are working correctly. This is purely a Twilio configuration issue.
+## Issue 2: Finch WhatsApp (+260766195857) — Single Tick
+
+Single tick means the message is sent from the phone but **not delivered to WhatsApp servers** or **not acknowledged by Twilio**. This is NOT a code issue. Possible causes:
+
+- The Twilio number is in sandbox mode and the sandbox session expired (72h inactivity)
+- The number is suspended or restricted on Twilio's side
+- The webhook URL was updated but the number's messaging service configuration wasn't saved
+
+**No code change needed.** You need to:
+1. Check if the Finch number is a sandbox or production number in Twilio
+2. If sandbox: re-join by sending the join keyword to the number
+3. If production: check the number's status in Twilio Console → Phone Numbers → Active Numbers
+
+## Implementation Plan
+
+1. **Update `_shared/gemini-client.ts`** — Add a Lovable Gateway path for image models. When `isImageModel()` returns true, call `ai.gateway.lovable.dev` with `LOVABLE_API_KEY` instead of Google's native endpoint. Keep the same response reshaping so all callers remain compatible.
+
+2. **No changes to any other edge function** — They all use `geminiChat()` from the shared client, so the fix propagates automatically.
 
