@@ -445,25 +445,18 @@ async function editImage(
   
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
-  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-2.5-flash-image-preview',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: editInstruction },
-            { type: 'image_url', image_url: { url: sourceImageUrl } }
-          ]
-        }
-      ],
-      modalities: ['image', 'text']
-    })
+  const response = await geminiChat({
+    model: 'gemini-2.5-flash-image-preview',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: editInstruction },
+          { type: 'image_url', image_url: { url: sourceImageUrl } }
+        ]
+      }
+    ],
+    modalities: ['image', 'text']
   });
   
   if (!response.ok) {
@@ -472,9 +465,6 @@ async function editImage(
     
     if (response.status === 429) {
       throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    if (response.status === 402) {
-      throw new Error('AI credits exhausted. Please contact support.');
     }
     throw new Error('Failed to edit image');
   }
