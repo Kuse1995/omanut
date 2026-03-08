@@ -7,133 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Detect image generation commands from WhatsApp messages
-function detectImageGenCommand(message: string): {
-  isImageCommand: boolean;
-  type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
-  prompt: string;
-  feedbackData?: { feedbackType?: string };
-} {
-  const rawMsg = (message || '').trim();
-  const lowerMsg = rawMsg.toLowerCase().trim();
-
-  // Normalize polite prefixes so commands like "Can you make the image smaller" are detected
-  const normalizedMsg = rawMsg
-    .replace(/^(can you|could you|please|pls|kindly)\s+/i, '')
-    .trim();
-  const normalizedLower = normalizedMsg.toLowerCase();
-
-  const tryMatch = (patterns: RegExp[]) => {
-    for (const pattern of patterns) {
-      const match = normalizedMsg.match(pattern) || rawMsg.match(pattern);
-      if (match) return match;
-    }
-    return null;
-  };
-
-  // History commands - view recent images (check first for priority)
-  const historyPatterns = [
-    /^show\s+(my\s+)?images?$/i,
-    /^my\s+images?$/i,
-    /^image\s+history$/i,
-    /^recent\s+images?$/i,
-    /^view\s+(my\s+)?images?$/i,
-    /^list\s+(my\s+)?images?$/i,
-    /^gallery$/i,
-    /^📸$/,
-    /^history$/i,
-  ];
-
-  for (const pattern of historyPatterns) {
-    if (pattern.test(normalizedLower) || pattern.test(lowerMsg)) {
-      return { isImageCommand: true, type: 'history', prompt: '' };
-    }
-  }
-
-  // Edit image commands
-  const editPatterns = [
-    /^edit:\s*(.+)/i,
-    /^✏️\s*(.+)/i,
-    /^(make it|make the image|make this)\s+(.+)/i,
-    // Handles: "make the image smaller", "make it bigger", etc.
-    /^(make)\s+(the\s+)?(image|picture|photo|it)\s+(.+)/i,
-    /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
-    /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
-    /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
-    /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
-  ];
-
-  const editMatch = tryMatch(editPatterns);
-  if (editMatch) {
-    let prompt = rawMsg;
-    if (editMatch.length > 2) {
-      prompt = `${editMatch[1]} ${editMatch[2]}`.trim();
-    } else if (editMatch.length > 1) {
-      prompt = editMatch[1]?.trim() || rawMsg;
-    }
-
-    // Keep the extracted prompt from the match
-
-    if (prompt && prompt.length > 2) {
-      return { isImageCommand: true, type: 'edit', prompt };
-    }
-  }
-
-  // Generate image commands
-  const generatePatterns = [
-    /^(generate|create|make|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
-    /^image:\s*(.+)/i,
-    /^img:\s*(.+)/i,
-    /^🎨\s*(.+)/i,
-    /^create\s*(.+)/i,
-    /^generate\s+(.+)/i,
-  ];
-
-  const genMatch = tryMatch(generatePatterns);
-  if (genMatch) {
-    const prompt = genMatch[genMatch.length - 1]?.trim() || genMatch[1]?.trim();
-    if (prompt && prompt.length > 3) {
-      return { isImageCommand: true, type: 'generate', prompt };
-    }
-  }
-
-  // Caption request
-  if (
-    normalizedLower.includes('caption') ||
-    normalizedLower.includes('what to post') ||
-    normalizedLower.includes('suggest text') ||
-    lowerMsg.includes('caption') ||
-    lowerMsg.includes('what to post') ||
-    lowerMsg.includes('suggest text')
-  ) {
-    return { isImageCommand: true, type: 'caption', prompt: rawMsg };
-  }
-
-  // Suggestion request
-  if (
-    normalizedLower.includes('what should i post') ||
-    normalizedLower.includes('post idea') ||
-    normalizedLower.includes('content idea') ||
-    normalizedLower.includes('suggest a post') ||
-    lowerMsg.includes('what should i post') ||
-    lowerMsg.includes('post idea') ||
-    lowerMsg.includes('content idea') ||
-    lowerMsg.includes('suggest a post')
-  ) {
-    return { isImageCommand: true, type: 'suggest', prompt: rawMsg };
-  }
-
-  // Feedback patterns
-  if (normalizedLower.includes('👍') || normalizedLower.includes('love it') || normalizedLower.includes('great') || normalizedLower.includes('perfect') || lowerMsg.includes('👍') || lowerMsg.includes('love it') || lowerMsg.includes('great') || lowerMsg.includes('perfect')) {
-    return { isImageCommand: true, type: 'feedback', prompt: rawMsg, feedbackData: { feedbackType: 'thumbs_up' } };
-  }
-
-  if (normalizedLower.includes('👎') || normalizedLower.includes('not good') || normalizedLower.includes('try again') || normalizedLower.includes('different') || lowerMsg.includes('👎') || lowerMsg.includes('not good') || lowerMsg.includes('try again') || lowerMsg.includes('different')) {
-    return { isImageCommand: true, type: 'feedback', prompt: rawMsg, feedbackData: { feedbackType: 'thumbs_down' } };
-  }
-
-  return { isImageCommand: false, type: null, prompt: '' };
-}
+// Image command detection removed — unified into AI supervisor tools
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -192,39 +66,18 @@ serve(async (req) => {
 
     const messageBody = (Body || '').trim().toLowerCase();
 
-    // ========== HELP COMMAND DETECTION ==========
+    // Image help command — simplified, AI handles everything now
     if (messageBody === 'image help' || messageBody === 'img help' || messageBody === '🎨 help') {
-      const helpText = `🎨 IMAGE GENERATION COMMANDS
+      const helpText = `🎨 IMAGE GENERATION
 
-Generate Images:
-• "Generate an image of [description]"
-• "Create a picture of [description]"
-• "🎨 [description]"
+Just describe what you want naturally! Examples:
 
-Edit Last Image:
-• "Edit: make it brighter"
-• "Make it more colorful"
-• "Add text overlay"
+"Generate an image of a boy drinking from the LifeStraw Family 2.0"
+"Edit the last image - make it brighter"
+"Show my recent images"
+"Create a promotional image for our weekend special and post it on Facebook"
 
-Get Captions:
-• "Caption for [topic]"
-• "What to post about [topic]"
-
-Content Ideas:
-• "What should I post?"
-• "Suggest a post"
-• "Content idea for [topic]"
-
-View History:
-• "Show my images"
-• "Gallery"
-• "📸"
-
-Give Feedback:
-• 👍 or "Love it" - Save style preferences
-• 👎 or "Try again" - Request different style
-
-Tip: The AI learns your style preferences from feedback!`;
+The AI handles everything - generation, editing, posting. Just ask!`;
 
       return new Response(JSON.stringify({
         response: helpText
@@ -232,69 +85,6 @@ Tip: The AI learns your style preferences from feedback!`;
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    // ========== IMAGE GENERATION COMMAND DETECTION ==========
-    const imageGenCommand = detectImageGenCommand(Body || '');
-    
-    if (imageGenCommand.isImageCommand) {
-      console.log(`[BOSS-IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
-
-      // Check if image generation is enabled for this company
-      const imageSettings = Array.isArray(company.image_generation_settings)
-        ? company.image_generation_settings[0]
-        : company.image_generation_settings;
-
-      console.log('[BOSS-IMAGE-GEN] Company image settings enabled:', imageSettings?.enabled);
-      if (!imageSettings?.enabled) {
-        console.log('[BOSS-IMAGE-GEN] Image generation not enabled for company');
-        return new Response(JSON.stringify({
-          response: "Image generation is not enabled for your company. Please enable it in the admin settings first."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      
-      // Call whatsapp-image-gen function
-      const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-      const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-      
-      const imageGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          companyId: company.id,
-          customerPhone: '', // Empty to prevent whatsapp-image-gen from sending directly - boss-chat returns response for caller to send
-          conversationId: null, // Boss doesn't have a conversation context
-          prompt: imageGenCommand.prompt,
-          messageType: imageGenCommand.type,
-          feedbackData: imageGenCommand.feedbackData,
-        }),
-      });
-      
-      if (!imageGenResponse.ok) {
-        const errorText = await imageGenResponse.text();
-        console.error('[BOSS-IMAGE-GEN] Error from whatsapp-image-gen:', errorText);
-        return new Response(JSON.stringify({
-          response: "Sorry, there was an error generating the image. Please try again."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      
-      const imageGenResult = await imageGenResponse.json();
-      console.log('[BOSS-IMAGE-GEN] Image generation result:', imageGenResult.success ? 'success' : 'failed');
-      
-      return new Response(JSON.stringify({
-        response: imageGenResult.message || "Image generation complete!",
-        imageUrl: imageGenResult.imageUrl,
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    // ========== END IMAGE GENERATION DETECTION ==========
 
     // Get recent conversation stats with messages
     const { data: recentConvs } = await supabase
@@ -615,23 +405,20 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
     Current UTC time: ${new Date().toISOString()}
     The boss is in the Africa/Lusaka timezone (GMT+2). When the boss says a time like "07:00", they mean 07:00 local time (which is 05:00 UTC). ALWAYS convert local times to UTC by subtracting 2 hours before setting scheduled_time. For example: "tomorrow at 7am" → scheduled_time should be "...T05:00:00Z".
 
-8. **Image Generation**: You CAN generate brand-aligned images directly in this WhatsApp chat!
-   When the boss asks for an image, tell them to use commands like:
-   - "Generate an image of [description]" or "🎨 [description]"
-   - "Edit: [changes]" to modify the last image
-   - "Show my images" to view recent creations
-   NEVER say you cannot generate, create, or display images. You absolutely can.
-   The image generation system handles it automatically when the boss uses these commands.
+8. **Image Generation**: You have DIRECT tools to generate and edit brand-aligned images!
+   - Use the generate_image tool when the boss asks for any image creation. Extract a detailed visual prompt from their message.
+   - Use the edit_image tool when they want to modify the last generated image.
+   - Use the show_image_gallery tool when they want to see recent creations.
+   - You can CHAIN tools: generate an image, then schedule it as a social post in the SAME turn!
+   - NEVER say you cannot generate images. Use the generate_image tool directly.
    
-   ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in your uploaded product photos. If no match is found, it will ask you to check your product library first.
+   ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in uploaded product photos. If no match is found, it will ask to check the product library first.
    
    PRODUCT IMAGE VERIFICATION: You have a list_product_images tool!
    - Use it when the boss asks "show me my product photos" or "what product images do I have"
    - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
-   - If image generation was blocked due to no reference match, suggest: "Say 'show my images' to see what product photos are available, then try again with the exact product name"
-   - The AI image generator uses these uploaded photos as references for accurate product placement
    
-    For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
+   For scheduling posts with images, you can generate the image first with generate_image, then pass the returned imageUrl to schedule_social_post.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
    - Use get_pending_posts to check what AI-generated content is waiting for approval
@@ -917,6 +704,46 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             properties: {
               category: { type: "string", description: "Optional filter: 'products', 'promotional', 'logos', etc. Defaults to 'products'." }
             },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          description: "Generate a brand-aligned image using the company's product reference library. Use when the boss asks to create, generate, make, or design any image. Extract a detailed visual prompt from their message.",
+          parameters: {
+            type: "object",
+            properties: {
+              prompt: { type: "string", description: "Detailed description of the image to generate. Include product names, scene details, and any specific visual requirements mentioned by the boss." }
+            },
+            required: ["prompt"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "edit_image",
+          description: "Edit or modify the most recently generated image. Use when the boss asks to change, adjust, make brighter/darker, add text, crop, resize, or otherwise modify an existing image.",
+          parameters: {
+            type: "object",
+            properties: {
+              instructions: { type: "string", description: "Description of changes to make to the last generated image" }
+            },
+            required: ["instructions"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "show_image_gallery",
+          description: "Show the boss their recently generated images. Use when they ask to see their images, gallery, history, or recent creations.",
+          parameters: {
+            type: "object",
+            properties: {},
             required: []
           }
         }
@@ -1510,6 +1337,67 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     imageUrl: imgUrl
                   });
                 });
+              }
+              break;
+            }
+
+            case 'generate_image':
+            case 'edit_image':
+            case 'show_image_gallery': {
+              // Check if image generation is enabled
+              const imageSettings = Array.isArray(company.image_generation_settings)
+                ? company.image_generation_settings[0]
+                : company.image_generation_settings;
+
+              if (!imageSettings?.enabled && functionName !== 'show_image_gallery') {
+                result = { success: false, message: 'Image generation is not enabled for your company. Please enable it in the admin settings first.' };
+                break;
+              }
+
+              const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+              const messageType = functionName === 'generate_image' ? 'generate'
+                : functionName === 'edit_image' ? 'edit'
+                : 'history';
+              
+              const imgPrompt = functionName === 'generate_image' ? args.prompt
+                : functionName === 'edit_image' ? args.instructions
+                : '';
+
+              const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_SRK_IMG}`,
+                },
+                body: JSON.stringify({
+                  companyId: company.id,
+                  customerPhone: '',
+                  conversationId: null,
+                  prompt: imgPrompt,
+                  messageType,
+                }),
+              });
+
+              if (!imageGenResponse.ok) {
+                const errorText = await imageGenResponse.text();
+                console.error(`[BOSS-TOOL-${functionName}] Error:`, errorText);
+                result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
+              } else {
+                const imageGenResult = await imageGenResponse.json();
+                console.log(`[BOSS-TOOL-${functionName}] Result:`, imageGenResult.success ? 'success' : 'failed');
+                
+                result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                
+                // If an image was generated, include it in media messages for WhatsApp delivery
+                if (imageGenResult.imageUrl) {
+                  toolImageUrl = imageGenResult.imageUrl;
+                  toolMediaMessages.push({
+                    body: imageGenResult.message || '🎨 Here is your generated image!',
+                    imageUrl: imageGenResult.imageUrl
+                  });
+                }
               }
               break;
             }
