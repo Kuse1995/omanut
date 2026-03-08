@@ -3112,6 +3112,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     const maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
     let currentRound = 0;
     let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
+    
+    // Validate tool_calls structure
+    if (currentToolCalls && !Array.isArray(currentToolCalls)) {
+      console.warn('[TOOL-LOOP] Invalid tool_calls structure, skipping loop');
+      currentToolCalls = null;
+    }
     let currentMessages = [...messages];
     
     while (toolResults.length > 0 && currentRound < maxToolRounds) {
