@@ -1619,11 +1619,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, notes: args.notes, company_id: company.id } }),
+                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, tracking_number: args.tracking_number, notes: args.notes, company_id: company.id } }),
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
+                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.tracking_number ? `\n🚚 Tracking: ${args.tracking_number}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
                 } else {
                   result = { success: false, message: `❌ Order update failed: ${bmsData.error || 'Unknown error'}` };
                 }
