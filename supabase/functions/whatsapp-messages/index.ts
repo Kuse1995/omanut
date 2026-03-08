@@ -26,6 +26,7 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
     /why|how does|explain|tell me about|describe/i,
     /urgent|asap|immediately|emergency/i,
     /order|variant|color|colour|size|track|cancel|history/i,
+    /expense|payable|receivable|contact|inquiry|enquiry/i,
   ];
   
   const lowerMsg = message.toLowerCase().trim();
