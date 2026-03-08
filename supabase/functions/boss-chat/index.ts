@@ -1733,7 +1733,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `👤 Customer History:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const hist = bmsData.data;
+                  const salesList = Array.isArray(hist?.sales) && hist.sales.length > 0
+                    ? hist.sales.map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || 0} (${s.date || s.created_at?.slice(0, 10) || 'N/A'})`).join('\n')
+                    : 'No sales found';
+                  const ordersList = Array.isArray(hist?.orders) && hist.orders.length > 0
+                    ? hist.orders.map((o: any, i: number) => `${i + 1}. #${o.order_number || 'N/A'} — ${o.status || 'pending'} — ${company.currency_prefix || 'K'}${o.total_amount || 0}`).join('\n')
+                    : 'No orders found';
+                  result = { success: true, message: `👤 Customer History: ${args.customer_name || args.customer_phone}\n\n🛒 Sales (${hist?.total_sales || 0}):\n${salesList}\n\n📦 Orders (${hist?.total_orders || 0}):\n${ordersList}\n\n💰 Total Spent: ${company.currency_prefix || 'K'}${hist?.total_spent || 0}` };
                 } else {
                   result = { success: false, message: `❌ Customer lookup failed: ${bmsData.error || 'Unknown error'}` };
                 }
