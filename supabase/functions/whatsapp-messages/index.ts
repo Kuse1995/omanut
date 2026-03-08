@@ -753,29 +753,21 @@ async function processAIResponse(
       // Generate 3 AI draft responses with different tones
       let aiDrafts: any[] = [];
       try {
-        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-        if (LOVABLE_API_KEY) {
-          const draftResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
-              messages: [
-                {
-                  role: 'system',
-                  content: `You are a customer service assistant for ${company.name}. Generate 3 response options for a human agent to use when replying to the customer. Each response should have a different tone. Return ONLY valid JSON array with objects having "tone" and "text" fields. Tones: "formal", "friendly", "concise".`
-                },
-                {
-                  role: 'user',
-                  content: `Customer message: "${userMessage}"\n\nConversation summary:\n${summary}\n\nGenerate 3 response drafts:`
-                }
-              ],
-              temperature: 0.7,
-              max_tokens: 600
-            })
+        {
+          const draftResponse = await geminiChat({
+            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a customer service assistant for ${company.name}. Generate 3 response options for a human agent to use when replying to the customer. Each response should have a different tone. Return ONLY valid JSON array with objects having "tone" and "text" fields. Tones: "formal", "friendly", "concise".`
+              },
+              {
+                role: 'user',
+                content: `Customer message: "${userMessage}"\n\nConversation summary:\n${summary}\n\nGenerate 3 response drafts:`
+              }
+            ],
+            temperature: 0.7,
+            max_tokens: 600
           });
           
           const draftData = await draftResponse.json();
