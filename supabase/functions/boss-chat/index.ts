@@ -405,23 +405,20 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
     Current UTC time: ${new Date().toISOString()}
     The boss is in the Africa/Lusaka timezone (GMT+2). When the boss says a time like "07:00", they mean 07:00 local time (which is 05:00 UTC). ALWAYS convert local times to UTC by subtracting 2 hours before setting scheduled_time. For example: "tomorrow at 7am" → scheduled_time should be "...T05:00:00Z".
 
-8. **Image Generation**: You CAN generate brand-aligned images directly in this WhatsApp chat!
-   When the boss asks for an image, tell them to use commands like:
-   - "Generate an image of [description]" or "🎨 [description]"
-   - "Edit: [changes]" to modify the last image
-   - "Show my images" to view recent creations
-   NEVER say you cannot generate, create, or display images. You absolutely can.
-   The image generation system handles it automatically when the boss uses these commands.
+8. **Image Generation**: You have DIRECT tools to generate and edit brand-aligned images!
+   - Use the generate_image tool when the boss asks for any image creation. Extract a detailed visual prompt from their message.
+   - Use the edit_image tool when they want to modify the last generated image.
+   - Use the show_image_gallery tool when they want to see recent creations.
+   - You can CHAIN tools: generate an image, then schedule it as a social post in the SAME turn!
+   - NEVER say you cannot generate images. Use the generate_image tool directly.
    
-   ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in your uploaded product photos. If no match is found, it will ask you to check your product library first.
+   ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in uploaded product photos. If no match is found, it will ask to check the product library first.
    
    PRODUCT IMAGE VERIFICATION: You have a list_product_images tool!
    - Use it when the boss asks "show me my product photos" or "what product images do I have"
    - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
-   - If image generation was blocked due to no reference match, suggest: "Say 'show my images' to see what product photos are available, then try again with the exact product name"
-   - The AI image generator uses these uploaded photos as references for accurate product placement
    
-    For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
+   For scheduling posts with images, you can generate the image first with generate_image, then pass the returned imageUrl to schedule_social_post.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
    - Use get_pending_posts to check what AI-generated content is waiting for approval
