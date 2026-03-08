@@ -1441,7 +1441,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData2 = await bmsRes2.json();
                 if (bmsRes2.ok && bmsData2.success) {
-                  result = { success: true, message: `✅ Sale recorded!\n${JSON.stringify(bmsData2.data || bmsData2, null, 2)}` };
+                  const saleInfo = bmsData2.data || bmsData2;
+                  result = { success: true, message: `✅ Sale Recorded!\n\n🛒 Product: ${args.product_name}\n📦 Qty: ${args.quantity}\n💳 Payment: ${args.payment_method || 'Not specified'}\n👤 Customer: ${args.customer_name || 'Walk-in'}${args.customer_phone ? `\n📞 Phone: ${args.customer_phone}` : ''}${saleInfo.total ? `\n💰 Total: ${company.currency_prefix || 'K'}${saleInfo.total}` : ''}${saleInfo.remaining_stock !== undefined ? `\n📊 Remaining Stock: ${saleInfo.remaining_stock}` : ''}` };
                 } else {
                   result = { success: false, message: `❌ Failed to record sale: ${bmsData2.error || bmsData2.message || 'Unknown error'}` };
                 }
