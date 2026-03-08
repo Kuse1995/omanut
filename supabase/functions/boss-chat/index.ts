@@ -882,6 +882,38 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
+          name: "list_quotations",
+          description: "List past quotations from BMS. Use when the boss asks to see, find, or retrieve an existing quotation. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_invoices",
+          description: "List past invoices from BMS. Use when the boss asks to see, find, or retrieve an existing invoice. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
           name: "get_low_stock_items",
           description: "Get all products that are at or below their reorder level. Use when the boss asks about low stock, items to reorder, or inventory warnings.",
           parameters: { type: "object", properties: {}, required: [] }
