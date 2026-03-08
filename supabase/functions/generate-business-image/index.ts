@@ -83,7 +83,7 @@ serve(async (req) => {
 
     // Call Gemini AI for image generation
     const response = await geminiChat({
-      model: 'gemini-3.1-flash-image',
+      model: 'gemini-2.5-flash-image',
       messages: [
         {
           role: 'user',
