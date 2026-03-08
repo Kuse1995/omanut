@@ -216,22 +216,15 @@ Respond with ONLY valid JSON (no markdown):
         })
       });
     } else {
-      // Use Lovable AI Gateway for other models (Gemini, GPT, etc.)
-      response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: routingModel,
-          messages: [
-            { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
-            { role: 'user', content: routingPrompt }
-          ],
-          temperature: routingTemperature,
-          max_tokens: 150
-        })
+      // Use direct Gemini API for other models
+      response = await geminiChat({
+        model: routingModel,
+        messages: [
+          { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+          { role: 'user', content: routingPrompt }
+        ],
+        temperature: routingTemperature,
+        max_tokens: 150
       });
     }
     
