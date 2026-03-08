@@ -1935,6 +1935,10 @@ Trust ONLY the information provided in this system prompt.
       assistantReply = aiData.choices[0].message.content || '';
       const toolCalls = aiData.choices[0].message.tool_calls;
 
+      if (!assistantReply && (!toolCalls || toolCalls.length === 0)) {
+        console.warn('[AI-RESPONSE] Model returned empty content and no tool calls for message:', userMessage?.substring(0, 100));
+      }
+
       // Enhanced logging for AI decision making
       console.log('[AI-TOOLS] Response from AI:', {
         hasReply: !!assistantReply,
