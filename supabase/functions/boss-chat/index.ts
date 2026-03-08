@@ -1864,6 +1864,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'generate_document': {
+              try {
+                const docRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ document_type: args.document_type, data: args.data, company_id: company.id, send_whatsapp: true }),
+                });
+                const docData = await docRes.json();
+                if (docData.success) {
+                  result = { success: true, message: `📄 ${args.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} PDF generated!\n\n${docData.whatsapp_sent ? '✅ Sent to your WhatsApp' : '📎 Download: ' + docData.pdf_url}` };
+                  if (docData.pdf_url) {
+                    toolMediaMessages.push({ body: docData.message, imageUrl: docData.pdf_url });
+                  }
+                } else {
+                  result = { success: false, message: `❌ PDF generation failed: ${docData.error}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-TOOL] generate_document error:', err);
+                result = { success: false, message: `❌ Document generation error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
             case 'get_low_stock_items': {
               try {
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
