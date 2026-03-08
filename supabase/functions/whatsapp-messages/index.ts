@@ -3490,6 +3490,14 @@ serve(async (req) => {
   }
 
   try {
+    // Guard: only accept form-data from Twilio webhooks
+    const contentType = req.headers.get('content-type') || '';
+    if (!contentType.includes('form') && req.method === 'POST') {
+      // Non-form requests (JSON status callbacks, etc.) - acknowledge silently
+      console.log('[SKIP] Non-form-data request, content-type:', contentType);
+      return new Response('OK', { status: 200, headers: corsHeaders });
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
