@@ -80,30 +80,65 @@ async function processWebhook(body: any) {
     // ── Facebook Page events (comments + Messenger DMs) ──
     for (const entry of body.entry) {
       const pageId = entry.id;
+      const hasMessagingArray = Array.isArray(entry.messaging) && entry.messaging.length > 0;
 
-      // Handle feed comments
+      // Pre-fetch page credentials to check if this page has an IG account linked
+      const pageCred = await getPageCredentials(supabase, pageId);
+      const linkedIgUserId = pageCred?.ig_user_id;
+
+      // Handle feed comments + fallback message events delivered via changes[]
       if (entry.changes) {
         for (const change of entry.changes) {
-          if (change.field !== 'feed') continue;
-          const value = change.value;
-          if (!value || value.item !== 'comment' || value.verb !== 'add') continue;
+          if (change.field === 'feed') {
+            const value = change.value;
+            if (!value || value.item !== 'comment' || value.verb !== 'add') continue;
 
-          const commentId = value.comment_id;
-          const messageText = value.message;
-          const commenterName = value.from?.name || 'User';
-          const commenterFbId = value.from?.id;
+            const commentId = value.comment_id;
+            const messageText = value.message;
+            const commenterName = value.from?.name || 'User';
+            const commenterFbId = value.from?.id;
 
-          if (!commentId || !messageText) continue;
-          if (commenterFbId === pageId) {
-            console.log('Skipping own comment from page');
+            if (!commentId || !messageText) continue;
+            if (commenterFbId === pageId) {
+              console.log('Skipping own comment from page');
+              continue;
+            }
+
+            console.log(`Processing FB comment ${commentId}: "${messageText}" from ${commenterName}`);
+            try {
+              await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
+            } catch (err) {
+              console.error(`Error handling comment ${commentId}:`, err);
+            }
             continue;
           }
 
-          console.log(`Processing FB comment ${commentId}: "${messageText}" from ${commenterName}`);
-          try {
-            await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
-          } catch (err) {
-            console.error(`Error handling comment ${commentId}:`, err);
+          // Some Meta deliveries put messaging events under changes[].value instead of entry.messaging
+          if (!hasMessagingArray && change.field === 'messages') {
+            const value = change.value;
+            const messageEvents = Array.isArray(value?.messaging)
+              ? value.messaging
+              : (value?.sender && value?.recipient && value?.message ? [value] : []);
+
+            for (const event of messageEvents) {
+              if (!event.message?.text || event.message?.is_echo) continue;
+              const senderId = event.sender?.id;
+              const messageText = event.message.text;
+              if (!senderId || !messageText || senderId === pageId) continue;
+
+              const recipientId = event.recipient?.id;
+              const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
+
+              try {
+                if (isInstagramDM) {
+                  await handleInstagramDM(supabase, String(linkedIgUserId), senderId, messageText);
+                } else {
+                  await handleMessengerDM(supabase, pageId, senderId, messageText);
+                }
+              } catch (err) {
+                console.error('Error handling message event from changes[]:', err);
+              }
+            }
           }
         }
       }
@@ -128,7 +163,7 @@ async function processWebhook(body: any) {
           // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
           // (Instagram messages use the ig_user_id as recipient, not the page_id).
           const recipientId = event.recipient?.id;
-          const isInstagramDM = linkedIgUserId && recipientId === linkedIgUserId;
+          const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
 
           if (isInstagramDM) {
             console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
