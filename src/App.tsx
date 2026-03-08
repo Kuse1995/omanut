@@ -26,6 +26,9 @@ import NotFound from "./pages/NotFound";
 import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 import PitchBanking from "./pages/PitchBanking";
 import PitchAgentDemo from "./pages/PitchAgentDemo";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
+import DataDeletion from "./pages/DataDeletion";
 
 const queryClient = new QueryClient();
 
@@ -58,6 +61,9 @@ const App = () => (
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/data-deletion" element={<DataDeletion />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
