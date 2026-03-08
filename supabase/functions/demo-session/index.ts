@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
