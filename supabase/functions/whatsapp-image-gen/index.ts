@@ -590,7 +590,7 @@ async function generateCaption(
   const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     messages: [
       {
         role: 'system',
