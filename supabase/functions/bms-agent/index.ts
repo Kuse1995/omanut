@@ -309,6 +309,30 @@ Deno.serve(async (req) => {
         break;
       }
 
+      case "list_quotations": {
+        result = await callBMS("list_quotations", {
+          client_name: params.client_name || null,
+          status: params.status || null,
+          start_date: params.start_date || null,
+          end_date: params.end_date || null,
+          limit: params.limit || 10,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "list_invoices": {
+        result = await callBMS("list_invoices", {
+          client_name: params.client_name || null,
+          status: params.status || null,
+          start_date: params.start_date || null,
+          end_date: params.end_date || null,
+          limit: params.limit || 10,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
       // ========== PHASE 2: NEW ACTIONS ==========
 
       case "get_low_stock_items": {
