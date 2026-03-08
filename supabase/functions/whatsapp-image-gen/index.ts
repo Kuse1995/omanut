@@ -446,7 +446,7 @@ async function editImage(
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image-preview',
+    model: 'gemini-2.5-flash-image',
     messages: [
       {
         role: 'user',
