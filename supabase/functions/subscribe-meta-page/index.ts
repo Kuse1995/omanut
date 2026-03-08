@@ -68,12 +68,28 @@ Deno.serve(async (req) => {
       );
     }
 
-    // If Instagram is linked, also subscribe for Instagram fields
+    // If Instagram is linked, subscribe the IG account to webhook events
     let igResult = null;
     if (cred.ig_user_id) {
-      // Instagram webhook events come through the page subscription
-      // The 'messages' field already covers Instagram DMs when the page has IG linked
-      igResult = { note: "Instagram events routed via page subscription" };
+      const igSubUrl = `https://graph.facebook.com/v18.0/${cred.ig_user_id}/subscribed_apps`;
+      console.log("Subscribing Instagram account:", cred.ig_user_id);
+
+      const igRes = await fetch(igSubUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscribed_fields: "messages",
+          access_token: cred.access_token,
+        }),
+      });
+
+      igResult = await igRes.json();
+      console.log("Instagram subscribe response:", JSON.stringify(igResult));
+
+      if (!igRes.ok || igResult.error) {
+        console.error("Instagram subscription failed:", JSON.stringify(igResult));
+        // Don't fail the whole request — page subscription succeeded
+      }
     }
 
     return new Response(
