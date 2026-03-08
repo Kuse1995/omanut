@@ -307,21 +307,31 @@ async function selectProductImageForPrompt(
     `${i + 1}. Name: "${img.file_name}", Tags: [${img.tags?.join(', ') || 'none'}], Description: "${img.description || 'No description'}"`
   ).join('\n');
 
+  // Detect if metadata is generic/useless
+  const allDescriptions = candidates.map(c => c.description || '');
+  const uniqueDescriptions = new Set(allDescriptions.filter(d => d.length > 0));
+  const metadataIsGeneric = uniqueDescriptions.size <= 1 || 
+    allDescriptions.every(d => d === 'Product image for AI generation' || d === 'Media file' || d === '' || d === 'No description');
+
+  const metadataWarning = metadataIsGeneric 
+    ? `\n⚠️ WARNING: Text metadata is UNRELIABLE for these products (all descriptions are generic placeholders). You MUST rely ENTIRELY on visual analysis. Ignore file names, tags, and descriptions — they contain no useful information. Match based ONLY on what you SEE in each image.\n`
+    : '';
+
   // Build multimodal content: text prompt + all product images
   const selectionPrompt = `You are a product image matcher with vision capabilities.
 A user wants to generate a marketing image for a specific product.
 Look at the product images below and match the one that best fits their request.
 
 USER REQUEST: "${prompt}"
-
+${metadataWarning}
 PRODUCT CATALOG:
 ${catalogText}
 
 ${bmsContext ? `\nINVENTORY DATA:\n${bmsContext}` : ''}
 
 INSTRUCTIONS:
-- LOOK at each image carefully — match based on what you SEE (product shape, branding, labels, colors, text on packaging)
-- Use the text metadata as supplementary context only
+- LOOK at each image carefully — match based on what you SEE: product labels, brand names printed on packaging, product shape, color, size, type, and any visible text
+- ${metadataIsGeneric ? 'IGNORE all text metadata — it is unreliable. Use ONLY visual analysis.' : 'Use text metadata as supplementary context only'}
 - Consider partial name matches, abbreviations, and synonyms
 - If BMS inventory data is available, use the exact product name from BMS to improve matching
 - If NO product visually matches the request, respond "NONE"
