@@ -232,12 +232,14 @@ async function buildMediaContext(supabase: any, companyId: string): Promise<stri
   return context;
 }
 
-// AI-powered product selection using Gemini Flash + BMS cross-reference
+// AI-powered product selection using Gemini Vision + BMS cross-reference
 async function selectProductImageForPrompt(
   supabase: any, 
   companyId: string, 
   prompt: string
 ): Promise<ProductImage | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+
   // Fetch all product images
   const { data: productImages, error } = await supabase
     .from('company_media')
@@ -252,7 +254,7 @@ async function selectProductImageForPrompt(
     return null;
   }
   
-  console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using AI selection`);
+  console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using multimodal vision selection`);
 
   // Cross-reference with BMS inventory for real product names/SKUs
   let bmsContext = '';
@@ -282,57 +284,99 @@ async function selectProductImageForPrompt(
     console.log('[PRODUCT-SELECT] BMS lookup skipped:', e);
   }
 
-  // Build the product catalog for AI
-  const catalogText = productImages.map((img: ProductImage, i: number) =>
-    `${i + 1}. ID: ${img.id}, Name: "${img.file_name}", Tags: [${img.tags?.join(', ') || 'none'}], Description: "${img.description || 'No description'}"`
+  // Pre-filter to top 10 candidates using keyword scoring if we have more than 10
+  let candidates = productImages as ProductImage[];
+  if (candidates.length > 10) {
+    const promptLower = prompt.toLowerCase();
+    const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
+    const scored = candidates.map(img => {
+      let score = 0;
+      const searchText = [img.file_name || '', img.description || '', ...(img.tags || [])].join(' ').toLowerCase();
+      for (const word of promptWords) {
+        if (searchText.includes(word)) score += 1;
+      }
+      return { img, score };
+    });
+    scored.sort((a, b) => b.score - a.score);
+    candidates = scored.slice(0, 10).map(s => s.img);
+    console.log(`[PRODUCT-SELECT] Pre-filtered to top 10 candidates from ${productImages.length}`);
+  }
+
+  // Build text catalog
+  const catalogText = candidates.map((img: ProductImage, i: number) =>
+    `${i + 1}. Name: "${img.file_name}", Tags: [${img.tags?.join(', ') || 'none'}], Description: "${img.description || 'No description'}"`
   ).join('\n');
 
-  // Ask Gemini Flash to pick the best match
-  const selectionPrompt = `You are a product matcher. Given a user's image generation request, select the BEST matching product image from the catalog below.
+  // Build multimodal content: text prompt + all product images
+  const selectionPrompt = `You are a product image matcher with vision capabilities.
+A user wants to generate a marketing image for a specific product.
+Look at the product images below and match the one that best fits their request.
 
 USER REQUEST: "${prompt}"
 
-AVAILABLE PRODUCT IMAGES:
+PRODUCT CATALOG:
 ${catalogText}
 
 ${bmsContext ? `\nINVENTORY DATA:\n${bmsContext}` : ''}
 
 INSTRUCTIONS:
-- Match based on product name, tags, and description similarity to the user's request
+- LOOK at each image carefully — match based on what you SEE (product shape, branding, labels, colors, text on packaging)
+- Use the text metadata as supplementary context only
 - Consider partial name matches, abbreviations, and synonyms
 - If BMS inventory data is available, use the exact product name from BMS to improve matching
-- If NO product reasonably matches the request, respond with "NONE"
-- Respond with ONLY the product ID (UUID) or "NONE". No explanation.`;
+- If NO product visually matches the request, respond "NONE"
+- Respond with ONLY the product number (e.g. "1") or "NONE". No explanation.`;
+
+  // Build multimodal content array: text + images
+  const contentParts: any[] = [{ type: 'text', text: selectionPrompt }];
+  
+  for (let i = 0; i < candidates.length; i++) {
+    const publicUrl = getMediaPublicUrl(supabaseUrl, candidates[i].file_path);
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: publicUrl }
+    });
+  }
 
   try {
+    console.log(`[PRODUCT-SELECT] Sending ${candidates.length} product images to Gemini Vision for multimodal matching`);
     const response = await geminiChat({
       model: 'gemini-2.5-flash',
-      messages: [{ role: 'user', content: selectionPrompt }],
+      messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
-      max_tokens: 100,
+      max_tokens: 50,
     });
 
     if (response.ok) {
       const data = await response.json();
       const aiChoice = (data.choices?.[0]?.message?.content || '').trim();
-      console.log(`[PRODUCT-SELECT] AI selected: ${aiChoice}`);
+      console.log(`[PRODUCT-SELECT] Vision AI selected: "${aiChoice}"`);
 
       if (aiChoice && aiChoice !== 'NONE') {
-        // Find the product by ID
-        const matched = productImages.find((img: ProductImage) => aiChoice.includes(img.id));
+        // Parse the number from the response
+        const numMatch = aiChoice.match(/(\d+)/);
+        if (numMatch) {
+          const idx = parseInt(numMatch[1], 10) - 1; // 1-indexed to 0-indexed
+          if (idx >= 0 && idx < candidates.length) {
+            console.log(`[PRODUCT-SELECT] Vision matched product #${idx + 1}: ${candidates[idx].file_name}`);
+            return candidates[idx];
+          }
+        }
+        // Fallback: check if AI returned a UUID
+        const matched = candidates.find((img: ProductImage) => aiChoice.includes(img.id));
         if (matched) {
-          console.log(`[PRODUCT-SELECT] AI matched product: ${matched.file_name}`);
+          console.log(`[PRODUCT-SELECT] Vision matched product by ID: ${matched.file_name}`);
           return matched;
         }
       }
-      console.log('[PRODUCT-SELECT] AI found no match');
+      console.log('[PRODUCT-SELECT] Vision AI found no match');
       return null;
     }
   } catch (e) {
-    console.error('[PRODUCT-SELECT] AI selection failed, falling back:', e);
+    console.error('[PRODUCT-SELECT] Vision selection failed, falling back to keyword:', e);
   }
 
-  // Fallback: simple keyword matching if AI fails
+  // Fallback: simple keyword matching if vision AI fails
   const promptLower = prompt.toLowerCase();
   const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
   let bestMatch: ProductImage | null = null;
