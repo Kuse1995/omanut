@@ -3083,25 +3083,6 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolExecutionContext.push('BMS generate_payment_link failed');
             }
           }
-              
-              anyToolExecuted = true;
-              toolExecutionContext.push(`found ${recommendations.length} service recommendations`);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify({
-                  success: true,
-                  recommendations,
-                  total_products: products?.length || 0,
-                  message: recommendations.length > 0 ? 'Found relevant services' : 'No exact matches, but here are available services'
-                })
-              });
-              
-            } catch (error) {
-              console.error('[RECOMMEND] Exception:', error);
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
-            }
-          }
         }
       }
 
