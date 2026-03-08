@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -149,7 +150,6 @@ async function routeToAgent(
 ): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
   // Use configured values or defaults
   const routingModel = config?.routingModel || 'deepseek-chat';
@@ -216,22 +216,15 @@ Respond with ONLY valid JSON (no markdown):
         })
       });
     } else {
-      // Use Lovable AI Gateway for other models (Gemini, GPT, etc.)
-      response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: routingModel,
-          messages: [
-            { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
-            { role: 'user', content: routingPrompt }
-          ],
-          temperature: routingTemperature,
-          max_tokens: 150
-        })
+      // Use direct Gemini API for other models
+      response = await geminiChat({
+        model: routingModel,
+        messages: [
+          { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+          { role: 'user', content: routingPrompt }
+        ],
+        temperature: routingTemperature,
+        max_tokens: 150
       });
     }
     
@@ -760,29 +753,21 @@ async function processAIResponse(
       // Generate 3 AI draft responses with different tones
       let aiDrafts: any[] = [];
       try {
-        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-        if (LOVABLE_API_KEY) {
-          const draftResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
-              messages: [
-                {
-                  role: 'system',
-                  content: `You are a customer service assistant for ${company.name}. Generate 3 response options for a human agent to use when replying to the customer. Each response should have a different tone. Return ONLY valid JSON array with objects having "tone" and "text" fields. Tones: "formal", "friendly", "concise".`
-                },
-                {
-                  role: 'user',
-                  content: `Customer message: "${userMessage}"\n\nConversation summary:\n${summary}\n\nGenerate 3 response drafts:`
-                }
-              ],
-              temperature: 0.7,
-              max_tokens: 600
-            })
+        {
+          const draftResponse = await geminiChat({
+            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a customer service assistant for ${company.name}. Generate 3 response options for a human agent to use when replying to the customer. Each response should have a different tone. Return ONLY valid JSON array with objects having "tone" and "text" fields. Tones: "formal", "friendly", "concise".`
+              },
+              {
+                role: 'user',
+                content: `Customer message: "${userMessage}"\n\nConversation summary:\n${summary}\n\nGenerate 3 response drafts:`
+              }
+            ],
+            temperature: 0.7,
+            max_tokens: 600
           });
           
           const draftData = await draftResponse.json();
@@ -792,7 +777,6 @@ async function processAIResponse(
           } catch {
             aiDrafts = [{ tone: 'friendly', text: draftContent }];
           }
-        }
       } catch (draftError) {
         console.error('[HUMAN-FIRST] Error generating drafts:', draftError);
         aiDrafts = [{ tone: 'friendly', text: `Thank you for contacting us about "${userMessage.substring(0, 50)}...". We're looking into this for you.` }];
@@ -1857,27 +1841,20 @@ Trust ONLY the information provided in this system prompt.
     let aiData: any = null; // Store AI response for tool loop
 
     try {
-      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+      const response = await geminiChat({
+        model: selectedModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+        tools: filteredTools,
+        tool_choice: "auto",
         signal: controller.signal,
-        body: JSON.stringify({
-          model: selectedModel,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-          tools: filteredTools,
-          tool_choice: "auto"
-        }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[BACKGROUND] Kimi AI error:', response.status, errorText);
-        throw new Error(`Kimi AI error: ${response.status}`);
+        console.error('[BACKGROUND] Gemini API error:', response.status, errorText);
+        throw new Error(`Gemini API error: ${response.status}`);
       }
 
       aiData = await response.json();
@@ -3058,19 +3035,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         const secondController = new AbortController();
         const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
         
-        const secondResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
+        const secondResponse = await geminiChat({
+          model: selectedModel,
+          messages: messagesWithToolResults,
+          temperature: 1.0,
+          max_tokens: 2048,
           signal: secondController.signal,
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: messagesWithToolResults,
-            temperature: 1.0,
-            max_tokens: 2048
-          }),
         });
         
         clearTimeout(secondTimeoutId);

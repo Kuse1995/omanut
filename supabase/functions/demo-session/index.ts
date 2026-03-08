@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
+import { geminiChat } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,7 +8,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
+// LOVABLE_API_KEY removed — now using geminiChat() with GEMINI_API_KEY
 const DEMO_BOSS_PHONE = '+260972064502';
 
 Deno.serve(async (req) => {
@@ -657,31 +658,28 @@ async function callAIWithHistory(messages: { role: string; content: string }[], 
   const allMessages = [{ role: 'system', content: systemPrompt }, ...messages];
   const temperature = isEvaluation ? 0.3 : 0.7;
 
-  // Try Lovable gateway first with 8s timeout
+  // Try direct Gemini API first with 8s timeout
   let response: Response | null = null;
-  let provider = 'lovable';
+  let provider = 'gemini';
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const lovableModel = isEvaluation ? 'google/gemini-2.5-flash-lite' : 'google/gemini-3-flash-preview';
+    const geminiModel = isEvaluation ? 'google/gemini-2.5-flash-lite' : 'google/gemini-3-flash-preview';
 
-    response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ model: lovableModel, messages: allMessages, temperature }),
+    response = await geminiChat({
+      model: geminiModel,
+      messages: allMessages,
+      temperature,
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (!response.ok) {
-      console.warn(`[DEMO] Lovable gateway returned ${response.status}, falling back to OpenAI`);
+      console.warn(`[DEMO] Gemini API returned ${response.status}, falling back to OpenAI`);
       response = null;
     }
   } catch (err) {
-    console.warn('[DEMO] Lovable gateway failed, falling back to OpenAI:', err);
+    console.warn('[DEMO] Gemini API failed, falling back to OpenAI:', err);
     response = null;
   }
 
