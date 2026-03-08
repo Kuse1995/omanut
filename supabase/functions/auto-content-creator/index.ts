@@ -146,7 +146,7 @@ The image should match this caption: "${caption}"
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
     const { imageBase64, text: imageText } = await geminiImageGenerate({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3.1-flash-image',
       prompt: imagePrompt,
     });
 
