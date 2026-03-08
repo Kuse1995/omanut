@@ -171,13 +171,16 @@ AGENT OPTIONS:
    - Keywords: "issue", "problem", "wrong", "broken", "not working", "help", "how to", "why", "confused", "disappointed", "frustrated"
    - Intent: Resolve issues, answer questions, handle complaints
 
-2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent
-   - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me"
-   - Intent: Convert to sale, persuade, close deal
+2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent, OR wants to pay/purchase
+   - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me", "pay", "payment", "transfer", "invoice", "send payment link"
+   - Intent: Convert to sale, persuade, close deal, process payment autonomously
 
-3. **BOSS** - Payment discussion OR critical issue requiring human escalation
-   - Keywords: "pay", "payment", "transfer", "invoice", "receipt", "money", OR extremely upset customer
-   - Intent: Human must handle payment or critical situation
+3. **BOSS** - ONLY for truly critical situations requiring human escalation
+   - ONLY use for: threats of legal action, abuse/harassment, fraud/scam reports, safety concerns, explicit demand to speak to a manager/owner
+   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries
+   - Intent: Human must handle critical/safety situation
+
+⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES, never BOSS. The sales agent has full checkout authority.
 
 CONVERSATION CONTEXT:
 ${recentContext}
