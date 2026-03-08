@@ -1,97 +1,67 @@
 
 
-# Fix AI Returning Empty Responses for Finch (Payment Link Requests)
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-The AI returns "Thank you for your message. How can I help you today?" — the empty-reply fallback — instead of processing purchase requests. This happens because:
+## Problem Analysis
 
-1. The model returns `null` content + tool_calls (normal for function calling)
-2. Tool handlers push results to `toolResults` but some paths don't set `assistantReply`
-3. The multi-round tool loop uses `currentToolCalls` from the initial response, but when it's passed to the next AI call with `tool_calls: undefined`, the API call fails silently
-4. The fallback empty-reply message fires
+Two issues identified in the `demo-session` edge function:
 
-Additionally, the routing sometimes incorrectly sends payment intents to `boss` before the safety override catches it, poisoning the transcript with handoff messages.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-## Root Causes
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-### 1. Multi-round loop crash when tool_calls structure is malformed
-Line 3128: `tool_calls: currentToolCalls` — if the initial AI response has tool_calls but the loop variable isn't properly validated, the subsequent AI call gets malformed input.
+## Changes
 
-### 2. Transcript pollution from repeated failures
-Once the first failure occurs, the transcript accumulates "How can I help you today?" responses, which further confuse the model on subsequent attempts.
+### File: `supabase/functions/demo-session/index.ts`
 
-### 3. Missing `assistantReply` after BMS tool execution
-The `check_stock`, `record_sale`, and `generate_payment_link` handlers (lines 2965-3081) push to `toolResults` but never set `assistantReply`. They rely on the multi-round loop to get the AI to generate a reply from tool results — but if that loop fails, there's no reply.
+**1. Tighten handoff evaluation prompt**
 
-## Fix
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-### `supabase/functions/whatsapp-messages/index.ts`
+**2. Create tickets and queue items on handoff**
 
-**Change 1 — Validate tool_calls before multi-round loop (around line 3114)**
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-```typescript
-let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-// Validate tool_calls structure
-if (currentToolCalls && !Array.isArray(currentToolCalls)) {
-  console.warn('[TOOL-LOOP] Invalid tool_calls structure, skipping loop');
-  currentToolCalls = null;
-}
-```
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-**Change 2 — Add safety fallback after multi-round loop (around line 3258)**
+**3. Skip evaluation on short conversations**
 
-If tools executed successfully but `assistantReply` is still empty, generate a meaningful response instead of the generic greeting:
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-```typescript
-if (!assistantReply || assistantReply.trim() === '') {
-  if (anyToolExecuted && toolExecutionContext.length > 0) {
-    assistantReply = "I've processed your request. Is there anything else I can help you with?";
-    console.log('[FALLBACK] Tools executed but no reply generated. Context:', toolExecutionContext);
-  } else {
-    // Check if the user message is about purchasing
-    const lowerUserMsg = userMessage.toLowerCase();
-    const isPurchaseIntent = /buy|purchase|order|payment link|pay/i.test(lowerUserMsg);
-    if (isPurchaseIntent) {
-      assistantReply = "I'd love to help you with your purchase! Could you let me know which product you're interested in? I can then provide you with the details and payment link.";
-    } else {
-      assistantReply = fallbackMessage;
-    }
-    console.log('[FALLBACK] No AI response generated, using contextual fallback');
-  }
-}
-```
+### Summary of behavior after fix
 
-**Change 3 — Add error resilience in multi-round loop (around line 3123)**
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-Wrap the assistant message construction to handle null/undefined tool_calls:
+### Files
 
-```typescript
-currentMessages = [
-  ...currentMessages,
-  {
-    role: "assistant",
-    content: assistantReply || null,
-    ...(currentToolCalls && currentToolCalls.length > 0 ? { tool_calls: currentToolCalls } : {})
-  },
-  ...toolResults
-];
-```
-
-**Change 4 — Better error logging after initial AI call (around line 1935)**
-
-```typescript
-assistantReply = aiData.choices[0].message.content || '';
-const toolCalls = aiData.choices[0].message.tool_calls;
-
-if (!assistantReply && (!toolCalls || toolCalls.length === 0)) {
-  console.warn('[AI-RESPONSE] Model returned empty content and no tool calls');
-}
-```
-
-## Summary
-
-| File | Changes |
-|------|---------|
-| `supabase/functions/whatsapp-messages/index.ts` | 4 changes: validate tool_calls, contextual fallback for purchase intent, resilient multi-round loop message construction, better error logging |
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
