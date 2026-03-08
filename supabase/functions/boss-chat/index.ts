@@ -746,11 +746,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "sales_report",
-          description: "Get a sales summary report from the BMS. Use when the boss asks about sales performance, revenue, or daily/weekly/monthly reports.",
+          description: "Get a sales report with optional date range. Use when the boss asks about sales performance, revenue, or what was sold.",
           parameters: {
             type: "object",
             properties: {
-              period: { type: "string", enum: ["today", "week", "month"], description: "Report period. Default: 'today'" }
+              start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
+              limit: { type: "integer", description: "Max results to return" }
             },
             required: []
           }
