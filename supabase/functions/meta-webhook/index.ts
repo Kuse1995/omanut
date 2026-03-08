@@ -80,6 +80,7 @@ async function processWebhook(body: any) {
     // ── Facebook Page events (comments + Messenger DMs) ──
     for (const entry of body.entry) {
       const pageId = entry.id;
+      const hasMessagingArray = Array.isArray(entry.messaging) && entry.messaging.length > 0;
 
       // Handle feed comments
       if (entry.changes) {
