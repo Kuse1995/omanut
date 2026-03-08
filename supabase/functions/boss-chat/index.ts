@@ -1484,6 +1484,150 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'get_order_status': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_order_status', params: { order_number: args.order_number, order_id: args.order_id, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const order = bmsData.data;
+                  const statusEmoji = { pending: '🕐', confirmed: '✅', processing: '⚙️', shipped: '🚚', delivered: '📦', cancelled: '❌' };
+                  result = { success: true, message: `📋 Order Status:\n\n🔖 ${order.order_number || args.order_number}\n${statusEmoji[order.status as keyof typeof statusEmoji] || '📋'} Status: ${order.status}\n👤 Customer: ${order.customer_name || 'N/A'}\n💰 Total: ${company.currency_prefix || 'K'}${order.total_amount || 'N/A'}\n📅 Created: ${order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}${order.items ? `\n📦 Items: ${order.items.length}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Order lookup failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] get_order_status error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'update_order_status': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Order update failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] update_order_status error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'cancel_order': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'cancel_order', params: { order_number: args.order_number, order_id: args.order_id, reason: args.reason, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `✅ Order Cancelled!\n\n🔖 Order: ${args.order_number || args.order_id}${args.reason ? `\n📝 Reason: ${args.reason}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Order cancellation failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] cancel_order error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_customer_history': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_customer_history', params: { customer_name: args.customer_name, customer_phone: args.customer_phone, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `👤 Customer History:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Customer lookup failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] get_customer_history error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_company_statistics': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_company_statistics', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `📊 Company Statistics:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Statistics failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] get_company_statistics error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'create_quotation': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'create_quotation', params: { client_name: args.client_name, items: args.items, client_phone: args.client_phone, client_email: args.client_email, notes: args.notes, tax_rate: args.tax_rate, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const q = bmsData.data || bmsData;
+                  result = { success: true, message: `✅ Quotation Created!\n\n📄 Quote #: ${q.quotation_number || 'N/A'}\n👤 Client: ${args.client_name}\n💰 Total: ${company.currency_prefix || 'K'}${q.total_amount || 'N/A'}${q.items ? `\n📦 Items: ${q.items.length}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Quotation creation failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] create_quotation error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'create_invoice': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'create_invoice', params: { client_name: args.client_name, items: args.items, client_phone: args.client_phone, client_email: args.client_email, due_date: args.due_date, notes: args.notes, tax_rate: args.tax_rate, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const inv = bmsData.data || bmsData;
+                  result = { success: true, message: `✅ Invoice Created!\n\n📄 Invoice #: ${inv.invoice_number || 'N/A'}\n👤 Client: ${args.client_name}\n💰 Total: ${company.currency_prefix || 'K'}${inv.total_amount || 'N/A'}${args.due_date ? `\n📅 Due: ${args.due_date}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Invoice creation failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] create_invoice error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
             case 'list_product_images': {
               const filterCategory = args.category || 'products';
               const { data: mediaItems, error: mediaErr } = await supabase
