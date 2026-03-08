@@ -866,6 +866,38 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "check_stock",
+          description: "Check real-time inventory stock levels and pricing for a product from the Business Management System. Use when the boss asks about stock, inventory, availability, or how many items are in stock.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name or partial name of the product to look up" }
+            },
+            required: ["product_name"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "record_sale",
+          description: "Record a completed sale in the Business Management System. Use when the boss confirms a sale or wants to log a transaction.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name of the product sold" },
+              quantity: { type: "integer", description: "Number of units sold" },
+              payment_method: { type: "string", description: "Payment method used (e.g., cash, mobile_money, card)" },
+              customer_name: { type: "string", description: "Name of the customer" },
+              customer_phone: { type: "string", description: "Phone number of the customer" }
+            },
+            required: ["product_name", "quantity"]
+          }
+        }
       }
     ];
 
