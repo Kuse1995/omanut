@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { geminiChatJSON } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,7 +21,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch all media with generic/missing descriptions
     const { data: mediaItems, error } = await supabase
       .from('company_media')
       .select('id, file_path, file_name, description, tags, category')
@@ -43,9 +43,20 @@ serve(async (req) => {
 
     for (const media of mediaItems) {
       try {
-        const imageUrl = `${supabaseUrl}/storage/v1/object/public/company-media/${media.file_path}`;
-        
-        const response = await geminiChat({
+        // Download image from storage
+        const { data: fileData, error: dlError } = await supabase.storage
+          .from('company-media')
+          .download(media.file_path);
+
+        if (dlError || !fileData) {
+          errors.push(`${media.file_name}: Download failed - ${dlError?.message}`);
+          continue;
+        }
+
+        const base64 = encodeBase64(new Uint8Array(await fileData.arrayBuffer()));
+        const mimeType = fileData.type || 'image/png';
+
+        const data = await geminiChatJSON({
           model: 'gemini-2.5-flash',
           messages: [{
             role: 'user',
@@ -61,25 +72,16 @@ Return a JSON object with:
 Be specific about what you SEE. Include all readable text, brand names, and visual details.
 Return ONLY valid JSON, no markdown.`
               },
-              { type: 'image_url', image_url: { url: imageUrl } }
+              {
+                type: 'image_url',
+                image_url: { url: `data:${mimeType};base64,${base64}` }
+              }
             ]
           }],
           temperature: 0.2,
           max_tokens: 500,
         });
 
-        if (!response.ok) {
-          const errText = await response.text();
-          errors.push(`${media.file_name}: API ${response.status}`);
-          console.error(`[REINDEX] Failed ${media.file_name}:`, errText);
-          // Rate limit? Wait a bit
-          if (response.status === 429) {
-            await new Promise(r => setTimeout(r, 5000));
-          }
-          continue;
-        }
-
-        const data = await response.json();
         const aiContent = data.choices?.[0]?.message?.content || '';
         const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
         
@@ -99,7 +101,7 @@ Return ONLY valid JSON, no markdown.`
         indexed++;
 
         // Small delay to avoid rate limits
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 500));
       } catch (e) {
         errors.push(`${media.file_name}: ${e instanceof Error ? e.message : 'Unknown'}`);
       }
@@ -108,9 +110,7 @@ Return ONLY valid JSON, no markdown.`
     console.log(`[REINDEX] Complete: ${indexed}/${mediaItems.length} indexed, ${errors.length} errors`);
 
     return new Response(JSON.stringify({ 
-      success: true, 
-      total: mediaItems.length,
-      indexed, 
+      success: true, total: mediaItems.length, indexed, 
       errors: errors.length > 0 ? errors : undefined 
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
