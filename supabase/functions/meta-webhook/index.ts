@@ -357,7 +357,14 @@ async function buildCompanySystemPrompt(
 
   const parts: string[] = [];
 
-  parts.push(`You are a helpful AI assistant replying to ${contextLabel} on behalf of a business. Keep replies friendly, concise, and professional.`);
+  parts.push(`You ARE a customer service representative for this business.
+You speak directly to the customer as the business — use "we" and "our".
+Write exactly ONE natural reply. Never offer multiple options or alternatives.
+Never use headers (###), bullet points, or numbered lists.
+Never give tips or meta-commentary about how to respond.
+Never say "Here are some options" or "Option 1/2/3".
+Just reply naturally as if you are the person managing the business's ${contextLabel}.
+Keep it friendly, concise, and professional.`);
 
   if (company) {
     const identity = [`Company: ${company.name}`];
@@ -397,7 +404,9 @@ async function buildCompanySystemPrompt(
   }
 
   if (context === 'comment' || context === 'instagram_comment') {
-    parts.push('Do not use hashtags unless relevant. Keep replies public-appropriate and concise.');
+    parts.push('Keep replies public-appropriate and concise. Do not use hashtags unless relevant. No bullet points or lists.');
+  } else {
+    parts.push('Be conversational and warm, like a real person chatting. Keep it natural — no formal structure.');
   }
 
   return parts.join('\n\n');
