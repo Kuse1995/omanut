@@ -1,54 +1,67 @@
 
 
-# Fix Finch Purchase Flow — Two Root Causes
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-When a customer asks to buy a product and requests a Lenco payment link, the AI either:
-1. Returns the generic fallback "Thank you for your patience. Someone will respond shortly."
-2. Previously returned "Thank you for your message. How can I help you today?" repeatedly
+## Problem Analysis
 
-## Root Causes
+Two issues identified in the `demo-session` edge function:
 
-### 1. `max_tool_rounds` is too low (2 vs 3 needed)
-Finch's `company_ai_overrides.max_tool_rounds` is set to **2**, but the autonomous checkout flow requires **3** sequential tool calls:
-- Round 1: `check_stock` (verify availability + get price)
-- Round 2: `record_sale` (log transaction + get receipt reference)
-- Round 3: `generate_payment_link` (create Lenco URL using reference)
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-The loop exits after round 2, leaving no payment link generated. The AI has no content to reply with, so the fallback fires.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-### 2. Fallback message is a vague handoff
-Finch's configured `fallback_message` is: *"Thank you for your patience. Someone will respond shortly."* — this makes it look like the AI gave up and handed off to a human, when in reality it just ran out of tool rounds.
+## Changes
 
-## Fix
+### File: `supabase/functions/demo-session/index.ts`
 
-### Database change — Update Finch's AI config
-```sql
-UPDATE company_ai_overrides 
-SET max_tool_rounds = 4,
-    fallback_message = 'I apologize for the delay. Could you please repeat your request? I''m here to help! 🙏'
-WHERE company_id = '5b9503c3-36e7-41a2-b64f-2657a8bf4e83';
-```
+**1. Tighten handoff evaluation prompt**
 
-### Code change — `supabase/functions/whatsapp-messages/index.ts`
-Add a minimum floor of **3** for `max_tool_rounds` when checkout tools are enabled, so the checkout chain can always complete regardless of database config:
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-```typescript
-// Line ~3116: After reading max_tool_rounds from config
-let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5);
+**2. Create tickets and queue items on handoff**
 
-// Ensure at least 3 rounds when checkout tools are active
-const hasCheckoutTools = enabledToolNames.includes('check_stock') && 
-                         enabledToolNames.includes('record_sale') && 
-                         enabledToolNames.includes('generate_payment_link');
-if (hasCheckoutTools && maxToolRounds < 3) {
-  console.log(`[TOOL-LOOP] Bumping max_tool_rounds from ${maxToolRounds} to 3 for checkout flow`);
-  maxToolRounds = 3;
-}
-```
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-| Target | Change |
-|--------|--------|
-| Database (`company_ai_overrides`) | Set `max_tool_rounds = 4` and improve fallback message for Finch |
-| `supabase/functions/whatsapp-messages/index.ts` | Add minimum floor of 3 tool rounds when checkout tools are enabled |
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 

@@ -3113,7 +3113,17 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     }
 
     // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
-    const maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    
+    // Ensure at least 3 rounds when checkout tools are active (check_stock -> record_sale -> generate_payment_link)
+    const enabledToolNames = (filteredTools || []).map((t: any) => t.function?.name).filter(Boolean);
+    const hasCheckoutTools = enabledToolNames.includes('check_stock') && 
+                             enabledToolNames.includes('record_sale') && 
+                             enabledToolNames.includes('generate_payment_link');
+    if (hasCheckoutTools && maxToolRounds < 3) {
+      console.log(`[TOOL-LOOP] Bumping max_tool_rounds from ${maxToolRounds} to 3 for checkout flow`);
+      maxToolRounds = 3;
+    }
     let currentRound = 0;
     let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
     
