@@ -895,8 +895,19 @@ async function processAIResponse(
           confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6
         };
         
-        const routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
-        selectedAgent = routingResult.agent;
+        let routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
+        let selectedAgentFromRouter = routingResult.agent;
+        
+        // ========== RUNTIME SAFETY OVERRIDE: Payment → Sales, never Boss ==========
+        const lowerUserMsg = userMessage.toLowerCase();
+        const isPaymentIntent = /\b(pay|payment|purchase|buy|checkout|order|send\s+payment\s+link|transfer|invoice)\b/i.test(lowerUserMsg);
+        if (selectedAgentFromRouter === 'boss' && isPaymentIntent) {
+          console.log(`[ROUTER] ⚡ SAFETY OVERRIDE: Router chose 'boss' for payment intent. Forcing 'sales'.`);
+          selectedAgentFromRouter = 'sales';
+          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously' };
+        }
+        
+        selectedAgent = selectedAgentFromRouter;
         routingReasoning = routingResult.reasoning;
         
         console.log(`[ROUTER] ✓ Classification complete - Selected agent: ${selectedAgent}, Confidence: ${routingResult.confidence}`);

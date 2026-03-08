@@ -836,33 +836,45 @@ serve(async (req) => {
 
     switch (messageType) {
       case 'generate': {
-        // PRODUCT-ANCHORED MODE: Try to find a product image to use as source
+        // STRICT REFERENCE-ONLY MODE: Only generate with a confident product match
         const productImage = await selectProductImageForPrompt(supabase, companyId, prompt);
         
-        let result: { imageUrl: string; enhancedPrompt: string };
-        let isProductAnchored = false;
-        
-        if (productImage) {
-          // Use product-anchored generation
-          const productImageUrl = getMediaPublicUrl(supabaseUrl, productImage.file_path);
-          console.log(`[IMAGE-GEN] Using product-anchored mode with product: ${productImage.file_name}`);
+        if (!productImage) {
+          // NO product match found — do NOT fall back to text-only generation
+          console.log('[IMAGE-GEN] No product match found. Blocking generation for branding safety.');
+          responseMessage = `⚠️ I couldn't find a matching product reference photo for "${prompt}".\n\nTo ensure brand accuracy, I only generate images using your uploaded product photos as references.\n\n📸 *To fix this:*\n• Say "Show my images" to see available product photos\n• Upload the product photo in the Admin Media Library\n• Then try your request again\n\nThis ensures every generated image stays true to your brand! 🎨`;
           
-          result = await generateProductAnchoredImage(
-            productImageUrl,
-            prompt,
-            context,
-            company.name,
-            productImage,
-            supabase,
-            supabaseUrl,
-            companyId
-          );
-          isProductAnchored = true;
-        } else {
-          // Fallback to text-only generation
-          console.log('[IMAGE-GEN] No product images found, using text-only generation');
-          result = await generateImage(prompt, context, company.name, company.business_type || 'business', supabase, supabaseUrl, companyId);
+          // Send text response (no image)
+          if (customerPhone) {
+            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+              const fromNumber = company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+              const formData = new URLSearchParams();
+              formData.append('From', fromNumber);
+              formData.append('To', `whatsapp:${customerPhone}`);
+              formData.append('Body', responseMessage);
+              await fetch(twilioUrl, { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
+            }
+          }
+          break;
         }
+        
+        // Product match found — use product-anchored generation
+        const productImageUrl = getMediaPublicUrl(supabaseUrl, productImage.file_path);
+        console.log(`[IMAGE-GEN] Using product-anchored mode with product: ${productImage.file_name}`);
+        
+        const result = await generateProductAnchoredImage(
+          productImageUrl,
+          prompt,
+          context,
+          company.name,
+          productImage,
+          supabase,
+          supabaseUrl,
+          companyId
+        );
         
         imageUrl = result.imageUrl;
         
@@ -872,7 +884,7 @@ serve(async (req) => {
           .insert({
             company_id: companyId,
             conversation_id: conversationId,
-            prompt: isProductAnchored ? `[Product: ${productImage?.file_name}] ${prompt}` : prompt,
+            prompt: `[Product: ${productImage.file_name}] ${prompt}`,
             image_url: imageUrl
           })
           .select()
@@ -881,7 +893,7 @@ serve(async (req) => {
         // Generate caption suggestion
         const captionResult = await generateCaption(prompt, context, company.name);
         
-        // Record for learning (initial)
+        // Record for learning
         await supabase.from('image_generation_feedback').insert({
           company_id: companyId,
           generated_image_id: savedImage?.id,
@@ -890,14 +902,10 @@ serve(async (req) => {
           image_url: imageUrl,
           caption_suggestion: captionResult.caption,
           posting_time_suggestion: null,
-          feedback_notes: isProductAnchored ? `Product-anchored: ${productImage?.file_name}` : null
+          feedback_notes: `Product-anchored: ${productImage.file_name}`
         });
         
-        const modeNote = isProductAnchored 
-          ? `\n\n📦 *Product used:* ${productImage?.description || productImage?.file_name}`
-          : '\n\n💡 *Tip:* Upload product images in the admin panel to enable product-locked mode!';
-        
-        responseMessage = `🎨 Here's your image!${modeNote}\n\n📝 *Suggested Caption:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map(h => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}\n\nReply 👍 if you like it or 👎 for a different style!`;
+        responseMessage = `🎨 Here's your image!\n\n📦 *Product used:* ${productImage.description || productImage.file_name}\n\n📝 *Suggested Caption:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map(h => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}\n\nReply 👍 if you like it or 👎 for a different style!`;
         
         // Send image via WhatsApp
         if (customerPhone) {
