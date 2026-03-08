@@ -21,10 +21,11 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   
   const complexTriggers = [
     /book|reserve|reservation|appointment|schedule/i,
-    /pay|payment|invoice|receipt|transaction/i,
+    /pay|payment|invoice|receipt|transaction|quotation|quote|estimate|proforma/i,
     /complain|problem|issue|wrong|disappointed|unhappy|frustrated/i,
     /why|how does|explain|tell me about|describe/i,
     /urgent|asap|immediately|emergency/i,
+    /order|variant|color|colour|size|track|cancel|history/i,
   ];
   
   const lowerMsg = message.toLowerCase().trim();
