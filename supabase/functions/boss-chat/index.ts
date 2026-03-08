@@ -1221,7 +1221,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
               } else {
                 // Set to approved — cron-publisher will handle it at scheduled_time
-                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
+                await freshSupabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
                 const scheduledDate = new Date(args.scheduled_time);
                 const localDate = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000); // GMT+2
                 result = {
