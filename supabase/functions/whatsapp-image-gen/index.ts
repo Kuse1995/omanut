@@ -482,14 +482,34 @@ async function runImagePipeline(
     attempt++;
     console.log(`[PIPELINE] Generation attempt ${attempt}/${maxRetries + 1}`);
 
-    // Determine input images: product reference + curated references
-    const inputImages = productMatch 
-      ? [getMediaPublicUrl(supabaseUrl, productMatch.file_path), ...referenceUrls.filter(u => u !== getMediaPublicUrl(supabaseUrl, productMatch.file_path))]
-      : referenceUrls;
+    // Determine input images: BMS product images (highest priority) → product reference → curated references
+    const inputImages: string[] = [];
+    
+    // Priority 1: BMS canonical product images
+    if (bmsImageUrls.length > 0) {
+      inputImages.push(...bmsImageUrls);
+      console.log(`[PIPELINE] Added ${bmsImageUrls.length} BMS product images as priority anchors`);
+    }
+    
+    // Priority 2: company_media product match
+    if (productMatch) {
+      const productUrl = getMediaPublicUrl(supabaseUrl, productMatch.file_path);
+      if (!inputImages.includes(productUrl)) {
+        inputImages.push(productUrl);
+      }
+    }
+    
+    // Priority 3: curated reference images (fill remaining slots)
+    for (const refUrl of referenceUrls) {
+      if (!inputImages.includes(refUrl)) {
+        inputImages.push(refUrl);
+      }
+    }
 
     // Build the generation prompt
     let genPrompt = currentPrompt;
-    if (productMatch) {
+    const hasProductAnchor = bmsImageUrls.length > 0 || productMatch;
+    if (hasProductAnchor) {
       genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep this product UNCHANGED — same label, logo, colors, shape, proportions. ONLY change the environment/background/lighting.\n\n${currentPrompt}`;
     }
 
