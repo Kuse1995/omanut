@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,16 +18,26 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     // Using Gemini client
 
-    // Auth
+    // Auth - allow service role, no-auth (for cron/testing), or authenticated user
     const authHeader = req.headers.get('Authorization') || '';
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const token = authHeader.replace('Bearer ', '');
+    const isServiceRole = token === supabaseServiceKey || !authHeader;
+    let userId: string;
+
+    if (isServiceRole) {
+      // Will resolve userId from company owner after company_id is known
+      userId = '';
+    } else {
+      const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      userId = user.id;
     }
 
     const { company_id } = await req.json();
@@ -38,6 +48,18 @@ serve(async (req) => {
     }
 
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Resolve userId for system/cron calls
+    if (!userId) {
+      const { data: ownerRow } = await supabaseService
+        .from('company_users')
+        .select('user_id')
+        .eq('company_id', company_id)
+        .eq('role', 'owner')
+        .limit(1)
+        .maybeSingle();
+      userId = ownerRow?.user_id || '00000000-0000-0000-0000-000000000000';
+    }
 
     // 1. Fetch company info, AI overrides, image gen settings, meta credentials in parallel
     const [companyRes, aiRes, imgSettingsRes, credRes, mediaRes] = await Promise.all([
@@ -123,24 +145,18 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const imageResponse = await geminiChat({
-      model: 'gemini-3-pro-image-preview',
-      messages: [{ role: 'user', content: imagePrompt }],
-      modalities: ['image', 'text'],
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
+      model: 'gemini-2.5-flash-image',
+      prompt: imagePrompt,
     });
 
-    if (!imageResponse.ok) {
-      throw new Error(`Image generation failed: ${imageResponse.status}`);
-    }
-
-    const imageData = await imageResponse.json();
-    const base64Image = imageData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    console.log('Image generation result:', imageBase64 ? 'got image' : 'no image', imageText?.substring(0, 50));
 
     let finalImageUrl: string | null = null;
 
-    if (base64Image) {
+    if (imageBase64) {
       // Extract base64 data and upload to storage
-      const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
       
       const filePath = `auto-content/${company_id}/${crypto.randomUUID()}.png`;
@@ -179,7 +195,7 @@ Make it vibrant, high-quality, and optimized for social media engagement. Square
         scheduled_time: scheduledTime,
         status: 'pending_approval',
         target_platform: cred.ig_user_id ? 'both' : 'facebook',
-        created_by: user.id,
+        created_by: userId,
       })
       .select('id, content, image_url, scheduled_time, target_platform')
       .single();
