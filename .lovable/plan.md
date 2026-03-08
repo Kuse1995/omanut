@@ -1,67 +1,85 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Phase 1: BMS Deep Integration — High-Impact Actions + Callbacks
 
-## Problem Analysis
+## Scope
 
-Two issues identified in the `demo-session` edge function:
+From your spec, Phase 1 covers:
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+**New BMS Actions (8 actions to add):**
+- `get_product_variants` (#4) — customer asks about colors/sizes
+- `create_order` (#8) — customer places an order via WhatsApp
+- `get_order_status` (#9) — both customer and boss check order status
+- `update_order_status` (#10) — boss marks order as shipped/delivered
+- `cancel_order` (#11) — customer or boss cancels an order
+- `get_customer_history` (#27) — purchase history lookup
+- `get_company_statistics` (#38) — impact stats
+- Enhanced `sales_report` (#30) — already exists, needs `date_from/date_to/group_by` params
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+**Already exist (no changes needed):**
+- `check_stock` (#1), `list_products` (#2), `get_product_details` (#3) — already in bms-agent
 
-## Changes
+**Callback System (5 callbacks):**
+- C1: Low stock alert → boss WhatsApp
+- C3: New order → boss WhatsApp
+- C4: Payment confirmed → boss + customer WhatsApp
+- C5: Order shipped → customer WhatsApp
+- C10: Daily sales summary → boss WhatsApp
 
-### File: `supabase/functions/demo-session/index.ts`
+## Files to Change
 
-**1. Tighten handoff evaluation prompt**
+### 1. `supabase/functions/bms-agent/index.ts`
+Add 7 new switch cases: `get_product_variants`, `create_order`, `get_order_status`, `update_order_status`, `cancel_order`, `get_customer_history`, `get_company_statistics`. Enhance `sales_report` to pass `date_from`, `date_to`, `group_by`. Update available_actions list.
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+### 2. `supabase/functions/whatsapp-messages/index.ts`
+- **Tool definitions** (~line 1810 area): Add `get_product_variants`, `create_order`, `get_order_status`, `cancel_order`, `get_customer_history`, `get_company_statistics` to `allToolDefinitions`
+- **Complexity classifier** (~line 22): Add `order|variant|color|size|track|cancel|history` to complex triggers
+- **Tool handlers** (~line 3000 area): Add `else if` blocks for each new tool that calls `bms-agent`
+- **Mandatory checkout tools** (~line 1819): Add `create_order`, `get_order_status` to auto-merged tools
 
-**2. Create tickets and queue items on handoff**
+### 3. `supabase/functions/boss-chat/index.ts`
+- **Tool definitions** (~line 744): Add `get_order_status`, `update_order_status`, `cancel_order`, `get_customer_history`, `get_company_statistics` tools
+- **Tool handlers** (~line 870 switch): Add cases that call `bms-agent` for each new tool
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+### 4. `supabase/functions/bms-callback/index.ts` (NEW)
+New edge function that receives webhook POSTs from the BMS when events occur (C1, C3, C4, C5, C10). Authenticates via `BMS_API_SECRET` header. For each event type:
+- Looks up the company's boss phone from `companies` table
+- Sends WhatsApp via `send-whatsapp-message` for boss notifications
+- Sends customer WhatsApp for customer-facing events (C4, C5)
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+### 5. `supabase/config.toml`
+Add `[functions.bms-callback]` with `verify_jwt = false` (webhook endpoint).
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+## Callback Webhook Design
 
-**3. Skip evaluation on short conversations**
+The BMS will POST to `https://<project>.supabase.co/functions/v1/bms-callback` with:
+```json
+{
+  "event": "low_stock",
+  "company_id": "...",
+  "data": { "product_name": "...", "current_stock": 5, "reorder_level": 10 }
+}
+```
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+Auth: `Authorization: Bearer <BMS_API_SECRET>` — same secret used for outbound calls, now bidirectional.
 
-### Summary of behavior after fix
+The callback handler maps each event to a WhatsApp message template and sends it to the appropriate recipient (boss phone from companies table, or customer phone from the event data).
 
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+## Implementation Order
 
-### Files
+| Step | What |
+|------|------|
+| 1 | Update `bms-agent/index.ts` with all 7 new actions |
+| 2 | Update `whatsapp-messages/index.ts` with tools + handlers for customer-facing actions |
+| 3 | Update `boss-chat/index.ts` with tools + handlers for boss-facing actions |
+| 4 | Create `bms-callback/index.ts` for inbound webhook events |
 
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+## What This Enables
+
+- Customer on WhatsApp: "I want to order 2 LifeStraw Go bottles" → AI creates order, sends confirmation
+- Customer: "Where is my order ORD-2026-0042?" → AI fetches status from BMS
+- Customer: "What colors does the LifeStraw Go come in?" → AI shows variants
+- Boss: "Mark order ORD-2026-0042 as shipped" → BMS updates, customer gets notified
+- BMS detects low stock → boss gets WhatsApp alert automatically
+- BMS receives new online order → boss gets WhatsApp notification
 
