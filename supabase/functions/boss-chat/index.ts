@@ -745,6 +745,120 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
+          name: "get_order_status",
+          description: "Check the status of a customer order. Use when the boss asks about a specific order's progress.",
+          parameters: {
+            type: "object",
+            properties: {
+              order_number: { type: "string", description: "The order number (e.g., ORD-2026-0042)" },
+              order_id: { type: "string", description: "The order ID if known" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "update_order_status",
+          description: "Update the status of a customer order (e.g., mark as shipped, delivered, processing). Use when the boss wants to change an order's status.",
+          parameters: {
+            type: "object",
+            properties: {
+              order_id: { type: "string", description: "The order ID" },
+              order_number: { type: "string", description: "The order number" },
+              status: { type: "string", description: "New status: pending, confirmed, processing, shipped, delivered, cancelled" },
+              notes: { type: "string", description: "Notes about the status change" }
+            },
+            required: ["status"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "cancel_order",
+          description: "Cancel a customer order. Use when the boss wants to cancel an order.",
+          parameters: {
+            type: "object",
+            properties: {
+              order_number: { type: "string", description: "The order number to cancel" },
+              order_id: { type: "string", description: "The order ID" },
+              reason: { type: "string", description: "Reason for cancellation" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_customer_history",
+          description: "Look up a customer's purchase history, orders, and invoices. Use when the boss asks about a specific customer's history.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Customer name to search" },
+              customer_phone: { type: "string", description: "Customer phone number" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_company_statistics",
+          description: "Get overall company statistics including total revenue, sales count, and impact metrics.",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "create_quotation",
+          description: "Create a quotation for a customer. Use when the boss wants to send a price quote or estimate.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Name of the client" },
+              items: { type: "array", items: { type: "object", properties: { description: { type: "string" }, quantity: { type: "integer" }, unit_price: { type: "number" } }, required: ["description", "quantity", "unit_price"] }, description: "Line items for the quotation" },
+              client_phone: { type: "string", description: "Client phone number" },
+              client_email: { type: "string", description: "Client email" },
+              notes: { type: "string", description: "Additional notes" },
+              tax_rate: { type: "number", description: "Tax rate percentage" }
+            },
+            required: ["client_name", "items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "create_invoice",
+          description: "Create an invoice for a customer. Use when the boss wants to generate a bill or invoice.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Name of the client" },
+              items: { type: "array", items: { type: "object", properties: { description: { type: "string" }, quantity: { type: "integer" }, unit_price: { type: "number" } }, required: ["description", "quantity", "unit_price"] }, description: "Line items for the invoice" },
+              client_phone: { type: "string", description: "Client phone number" },
+              client_email: { type: "string", description: "Client email" },
+              due_date: { type: "string", description: "Due date (YYYY-MM-DD)" },
+              notes: { type: "string", description: "Additional notes" },
+              tax_rate: { type: "number", description: "Tax rate percentage" }
+            },
+            required: ["client_name", "items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
           name: "list_product_images",
           description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
           parameters: {
