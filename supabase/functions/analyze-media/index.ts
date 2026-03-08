@@ -39,7 +39,7 @@ Return your response as JSON with this exact structure:
 
     // Call Gemini AI with vision
     const response = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       messages: [
         { role: 'system', content: systemPrompt },
         {

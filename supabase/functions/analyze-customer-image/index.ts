@@ -81,7 +81,7 @@ Respond with ONLY valid JSON (no markdown):
 }`;
 
     const response = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       messages: [
         { role: 'system', content: systemPrompt },
         {
