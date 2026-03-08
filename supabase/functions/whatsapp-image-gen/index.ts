@@ -505,46 +505,25 @@ async function editImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; editDescription: string }> {
-  // Using Gemini client
+  // Using native Gemini image generation API
   
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
-  const response = await geminiChat({
+  const { imageBase64, text: textResponse } = await geminiImageGenerate({
     model: 'gemini-3-pro-image-preview',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: editInstruction },
-          { type: 'image_url', image_url: { url: sourceImageUrl } }
-        ]
-      }
-    ],
-    modalities: ['image', 'text']
+    prompt: editInstruction,
+    inputImageUrls: [sourceImageUrl],
   });
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[IMAGE-EDIT] Error:', response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    throw new Error('Failed to edit image');
-  }
-  
-  const data = await response.json();
-  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  const textResponse = data.choices?.[0]?.message?.content || '';
-  
-  if (!base64ImageUrl) {
+  if (!imageBase64) {
+    console.error('[IMAGE-EDIT] No image returned from Gemini');
     throw new Error('No edited image generated');
   }
   
   // Upload base64 to storage and get public URL
-  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
   
   return { imageUrl, editDescription: textResponse || editPrompt };
 }
