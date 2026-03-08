@@ -1237,22 +1237,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
 
             case 'check_stock': {
-              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
-              if (!BMS_API_SECRET) {
-                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
-                break;
-              }
               try {
-                const bmsRes = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${BMS_API_SECRET}`,
-                  },
-                  body: JSON.stringify({ action: 'check_stock', product_name: args.product_name, company_id: company.id }),
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'check_stock', params: { product_name: args.product_name, company_id: company.id } }),
                 });
                 const bmsData = await bmsRes.json();
-                if (bmsRes.ok && bmsData.success) {
+                if (bmsData.success) {
                   const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
                   const formatted = items.map((item: any) => {
                     const stockEmoji = item.status === 'healthy' ? '🟢' : item.status === 'low' ? '🟡' : '🔴';
@@ -1260,7 +1252,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }).join('\n\n');
                   result = { success: true, message: `📦 Inventory Check:\n\n${formatted}` };
                 } else {
-                  result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || bmsData.message || 'Unknown error'}` };
+                  result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || 'Unknown error'}` };
                 }
               } catch (bmsErr) {
                 console.error('[BOSS-BMS] check_stock error:', bmsErr);
@@ -1270,38 +1262,62 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
 
             case 'record_sale': {
-              const BMS_API_SECRET2 = Deno.env.get('BMS_API_SECRET');
-              if (!BMS_API_SECRET2) {
-                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
-                break;
-              }
               try {
-                const bmsRes2 = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${BMS_API_SECRET2}`,
-                  },
-                  body: JSON.stringify({
-                    action: 'record_sale',
-                    product_name: args.product_name,
-                    quantity: args.quantity,
-                    payment_method: args.payment_method,
-                    customer_name: args.customer_name,
-                    customer_phone: args.customer_phone,
-                    company_id: company.id,
-                  }),
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'record_sale', params: { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name, customer_phone: args.customer_phone, company_id: company.id } }),
                 });
-                const bmsData2 = await bmsRes2.json();
-                if (bmsRes2.ok && bmsData2.success) {
-                  const saleInfo = bmsData2.data || bmsData2;
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const saleInfo = bmsData.data || bmsData;
                   result = { success: true, message: `✅ Sale Recorded!\n\n🛒 Product: ${args.product_name}\n📦 Qty: ${args.quantity}\n💳 Payment: ${args.payment_method || 'Not specified'}\n👤 Customer: ${args.customer_name || 'Walk-in'}${args.customer_phone ? `\n📞 Phone: ${args.customer_phone}` : ''}${saleInfo.total ? `\n💰 Total: ${company.currency_prefix || 'K'}${saleInfo.total}` : ''}${saleInfo.remaining_stock !== undefined ? `\n📊 Remaining Stock: ${saleInfo.remaining_stock}` : ''}` };
                 } else {
-                  result = { success: false, message: `❌ Failed to record sale: ${bmsData2.error || bmsData2.message || 'Unknown error'}` };
+                  result = { success: false, message: `❌ Failed to record sale: ${bmsData.error || 'Unknown error'}` };
                 }
-              } catch (bmsErr2) {
-                console.error('[BOSS-BMS] record_sale error:', bmsErr2);
-                result = { success: false, message: `❌ BMS connection error: ${bmsErr2 instanceof Error ? bmsErr2.message : String(bmsErr2)}` };
+              } catch (bmsErr) {
+                console.error('[BOSS-BMS] record_sale error:', bmsErr);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr instanceof Error ? bmsErr.message : String(bmsErr)}` };
+              }
+              break;
+            }
+
+            case 'update_stock': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'update_stock', params: { product_name: args.product_name, quantity: args.quantity, adjustment_type: args.adjustment_type, reason: args.reason, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `✅ Stock Updated!\n\n📦 Product: ${args.product_name}\n🔢 New quantity: ${args.quantity}\n📝 Type: ${args.adjustment_type || 'set'}${args.reason ? `\n💬 Reason: ${args.reason}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Stock update failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] update_stock error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'sales_report': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'sales_report', params: { period: args.period, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `📊 Sales Report (${args.period || 'today'}):\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-BMS] sales_report error:', err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
               }
               break;
             }

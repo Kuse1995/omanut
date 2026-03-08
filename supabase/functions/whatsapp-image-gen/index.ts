@@ -726,24 +726,21 @@ async function selectProductImageForPrompt(
   
   console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using multimodal vision selection`);
 
-  // Cross-reference with BMS inventory
+  // Cross-reference with BMS inventory via centralized bms-agent
   let bmsContext = '';
   try {
-    const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
-    if (BMS_API_SECRET) {
-      const bmsRes = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${BMS_API_SECRET}` },
-        body: JSON.stringify({ action: 'check_stock', product_name: prompt }),
-      });
-      if (bmsRes.ok) {
-        const bmsData = await bmsRes.json();
-        if (bmsData.success) {
-          const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
-          bmsContext = items.map((item: any) =>
-            `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'})`
-          ).join('\n');
-        }
+    const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+    });
+    if (bmsRes.ok) {
+      const bmsData = await bmsRes.json();
+      if (bmsData.success) {
+        const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+        bmsContext = items.map((item: any) =>
+          `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'}${item.image_urls?.length ? `, Images: ${item.image_urls.length}` : ''})`
+        ).join('\n');
       }
     }
   } catch (e) {
