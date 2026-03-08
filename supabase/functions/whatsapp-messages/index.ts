@@ -1785,17 +1785,28 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     // Determine which tools to include based on business type and database configuration
     let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
     
+    // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
+    if (!isSchool && !company.payments_disabled) {
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product'];
+      for (const tool of mandatoryCheckoutTools) {
+        if (!enabledToolNames.includes(tool)) {
+          enabledToolNames.push(tool);
+        }
+      }
+      console.log('[TOOLS] Auto-merged mandatory checkout tools into enabled set');
+    }
+    
     // Business-type-based tool restrictions
     if (isSchool) {
       // Schools should NOT have payment/product tools
-      const schoolExcludedTools = ['request_payment', 'deliver_digital_product'];
+      const schoolExcludedTools = ['request_payment', 'deliver_digital_product', 'check_stock', 'record_sale', 'generate_payment_link'];
       enabledToolNames = enabledToolNames.filter(t => !schoolExcludedTools.includes(t));
       console.log('[TOOLS] School business - excluded payment tools:', schoolExcludedTools);
     }
 
     // Companies with payments disabled (sell on external websites)
     if (company.payments_disabled) {
-      const paymentTools = ['request_payment', 'deliver_digital_product', 'lookup_product'];
+      const paymentTools = ['request_payment', 'deliver_digital_product', 'lookup_product', 'check_stock', 'record_sale', 'generate_payment_link'];
       enabledToolNames = enabledToolNames.filter(t => !paymentTools.includes(t));
       console.log('[TOOLS] Payments disabled for company - excluded payment tools:', paymentTools);
     }
