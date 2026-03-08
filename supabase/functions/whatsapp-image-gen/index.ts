@@ -649,7 +649,7 @@ async function generateSuggestions(
   const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     messages: [
       {
         role: 'system',
