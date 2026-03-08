@@ -64,5 +64,20 @@
 ### bms-callback/index.ts — New event
 - Added `new_contact` event handler (notifies boss of website inquiries)
 
+## Phase 2.5: PDF Document Generation — COMPLETED ✅
+
+### generate-document/index.ts — NEW edge function
+- Generates professionally branded A4 PDFs using pdf-lib
+- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
+- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
+- Auto-uploads to company-documents storage with 7-day signed URLs
+- Auto-sends PDFs to boss via WhatsApp (Twilio)
+- Invoices include payment info (MTN/Airtel mobile money numbers)
+
+### boss-chat/index.ts — generate_document tool added
+- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
+- AI fetches data first (via BMS tools), then calls generate_document with the results
+- System prompt updated with document generation instructions
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
