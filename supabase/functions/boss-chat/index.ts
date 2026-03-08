@@ -146,7 +146,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { From, Body, ProfileName } = await req.json();
+    const { From, Body, ProfileName, companyId } = await req.json();
 
     console.log('Management message received:', { From, Body, ProfileName });
 
@@ -157,12 +157,29 @@ serve(async (req) => {
     
     const normalizedFrom = normalizePhone(From || '');
 
-    // Find company by management phone
-    const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
-      .ilike('boss_phone', `%${normalizedFrom}%`)
-      .single();
+    // Find company - prefer companyId if provided (avoids duplicate boss_phone conflicts)
+    let company: any = null;
+    let companyError: any = null;
+
+    if (companyId) {
+      const result = await supabase
+        .from('companies')
+        .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
+        .eq('id', companyId)
+        .single();
+      company = result.data;
+      companyError = result.error;
+    } else {
+      // Fallback: find by management phone (may fail if multiple companies share same boss_phone)
+      const result = await supabase
+        .from('companies')
+        .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
+        .ilike('boss_phone', `%${normalizedFrom}%`)
+        .limit(1)
+        .maybeSingle();
+      company = result.data;
+      companyError = result.error;
+    }
 
     if (companyError || !company) {
       console.error('Management phone not found:', From);
