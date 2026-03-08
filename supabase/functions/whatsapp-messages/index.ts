@@ -1743,6 +1743,23 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["product_name", "quantity", "payment_method"]
           }
         }
+      },
+      generate_payment_link: {
+        type: "function",
+        function: {
+          name: "generate_payment_link",
+          description: "Generates a secure Lenco payment link for the customer to pay via Mobile Money (MTN, Airtel, Zamtel) or Card.",
+          parameters: {
+            type: "object",
+            properties: {
+              amount: { type: "number", description: "The total amount in ZMW to be paid" },
+              customer_name: { type: "string", description: "The name of the customer" },
+              customer_phone: { type: "string", description: "The phone number of the customer" },
+              reference: { type: "string", description: "The order number, receipt number, or a unique reference string for this transaction" }
+            },
+            required: ["amount", "customer_name", "customer_phone", "reference"]
+          }
+        }
       }
     };
 
