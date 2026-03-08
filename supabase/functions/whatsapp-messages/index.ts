@@ -3300,7 +3300,6 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               anyToolExecuted = true;
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Invoice creation unavailable' }) });
             }
-          }
 
           } else if (toolCall.function.name === 'generate_payment_link') {
             const args = JSON.parse(toolCall.function.arguments);
