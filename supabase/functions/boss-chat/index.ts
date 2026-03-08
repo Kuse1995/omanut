@@ -570,6 +570,13 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 - Customer segmentation data with engagement, intent, and conversion metrics
 - Action items and client insights
 - Business configuration and settings
+- REAL-TIME inventory and sales data via the Business Management System (BMS)
+
+10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
+   - Use check_stock to look up current stock levels and pricing for any product
+   - Use record_sale to log completed sales with customer details
+   - When the boss asks about stock, inventory, or product availability - use check_stock IMMEDIATELY
+   - When the boss confirms a sale or wants to record a transaction - use record_sale
 
 1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
@@ -857,6 +864,38 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               hours_back: { type: "integer", description: "How many hours back to look (default 24)" },
               platform_filter: { type: "string", enum: ["all", "whatsapp", "facebook", "instagram", "messenger"], description: "Filter by platform (default all)" }
             }
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "check_stock",
+          description: "Check real-time inventory stock levels and pricing for a product from the Business Management System. Use when the boss asks about stock, inventory, availability, or how many items are in stock.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name or partial name of the product to look up" }
+            },
+            required: ["product_name"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "record_sale",
+          description: "Record a completed sale in the Business Management System. Use when the boss confirms a sale or wants to log a transaction.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name of the product sold" },
+              quantity: { type: "integer", description: "Number of units sold" },
+              payment_method: { type: "string", description: "Payment method used (e.g., cash, mobile_money, card)" },
+              customer_name: { type: "string", description: "Name of the customer" },
+              customer_phone: { type: "string", description: "Phone number of the customer" }
+            },
+            required: ["product_name", "quantity"]
           }
         }
       }
@@ -1340,6 +1379,70 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   success: true, 
                   message: `🔥 HOT LEADS (last ${hoursBack}h)${platformFilter !== 'all' ? ` - ${platformFilter}` : ''}:\n\n${leadList}\n\n${leads.length} lead(s) found across all platforms.` 
                 };
+              }
+              break;
+            }
+
+            case 'check_stock': {
+              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_SECRET) {
+                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
+                break;
+              }
+              try {
+                const bmsRes = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${BMS_API_SECRET}`,
+                  },
+                  body: JSON.stringify({ action: 'check_stock', product_name: args.product_name, company_id: company.id }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsRes.ok && bmsData.success) {
+                  result = { success: true, message: `📦 Stock lookup result:\n${JSON.stringify(bmsData.data || bmsData, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || bmsData.message || 'Unknown error'}` };
+                }
+              } catch (bmsErr) {
+                console.error('[BOSS-BMS] check_stock error:', bmsErr);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr instanceof Error ? bmsErr.message : String(bmsErr)}` };
+              }
+              break;
+            }
+
+            case 'record_sale': {
+              const BMS_API_SECRET2 = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_SECRET2) {
+                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
+                break;
+              }
+              try {
+                const bmsRes2 = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${BMS_API_SECRET2}`,
+                  },
+                  body: JSON.stringify({
+                    action: 'record_sale',
+                    product_name: args.product_name,
+                    quantity: args.quantity,
+                    payment_method: args.payment_method,
+                    customer_name: args.customer_name,
+                    customer_phone: args.customer_phone,
+                    company_id: company.id,
+                  }),
+                });
+                const bmsData2 = await bmsRes2.json();
+                if (bmsRes2.ok && bmsData2.success) {
+                  result = { success: true, message: `✅ Sale recorded!\n${JSON.stringify(bmsData2.data || bmsData2, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Failed to record sale: ${bmsData2.error || bmsData2.message || 'Unknown error'}` };
+                }
+              } catch (bmsErr2) {
+                console.error('[BOSS-BMS] record_sale error:', bmsErr2);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr2 instanceof Error ? bmsErr2.message : String(bmsErr2)}` };
               }
               break;
             }

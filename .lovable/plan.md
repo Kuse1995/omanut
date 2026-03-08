@@ -1,34 +1,67 @@
 
 
-# Add BMS Tools (check_stock, record_sale) to Boss-Chat
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-The boss-chat function lacks BMS tools. When the boss asks about stock levels, the AI says it has no inventory access — even though the BMS bridge is fully configured and working in the customer-facing function.
+## Problem Analysis
+
+Two issues identified in the `demo-session` edge function:
+
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
 ## Changes
 
-### File: `supabase/functions/boss-chat/index.ts`
+### File: `supabase/functions/demo-session/index.ts`
 
-**1. Add two tools to the `managementTools` array** (after `get_hot_leads`, before the closing `]` at line 863):
+**1. Tighten handoff evaluation prompt**
 
-- `check_stock` — identical definition to whatsapp-messages (takes `product_name`)
-- `record_sale` — identical definition to whatsapp-messages (takes `product_name`, `quantity`, `payment_method`, `customer_name`, `customer_phone`)
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-**2. Add two cases to the tool execution `switch` block** (before the `default:` case at line 1347):
+**2. Create tickets and queue items on handoff**
 
-- `case 'check_stock'`: POST to `https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge` with `{ action: 'check_stock', product_name }` and `BMS_API_SECRET` auth header. Return stock data as result message.
-- `case 'record_sale'`: POST to same endpoint with `{ action: 'record_sale', product_name, quantity, payment_method, customer_name, customer_phone }`. Return sale confirmation as result message.
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-**3. Update the system prompt** (around line 564, in the "YOUR CAPABILITIES" section):
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-Add a new capability section:
-```
-10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
-   - Use check_stock to look up current stock levels and pricing for any product
-   - Use record_sale to log completed sales with customer details
-   - When the boss asks about stock, inventory, or product availability - use check_stock immediately
-```
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-### No other files changed
-The BMS API bridge and `BMS_API_SECRET` are already configured and working.
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
