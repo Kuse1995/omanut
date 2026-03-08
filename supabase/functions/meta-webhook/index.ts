@@ -854,10 +854,10 @@ async function generateAIReply(
   }
 
   const contextPrompts: Record<string, string> = {
-    comment: `A user named "${commenterName}" commented on our Facebook post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
-    messenger: `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a helpful reply.`,
-    instagram_comment: `A user named "${commenterName}" commented on our Instagram post:\n\n"${userMessage}"\n\nWrite a short, helpful reply.`,
-    instagram_dm: `A customer sent a direct message on Instagram:\n\n"${userMessage}"\n\nWrite a helpful reply.`,
+    comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    messenger: `Customer says: "${userMessage}"\n\nReply to them now.`,
+    instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    instagram_dm: `Customer says: "${userMessage}"\n\nReply to them now.`,
   };
 
   const userPrompt = contextPrompts[context] || contextPrompts.comment;
