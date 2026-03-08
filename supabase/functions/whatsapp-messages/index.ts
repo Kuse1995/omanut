@@ -3149,7 +3149,157 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               anyToolExecuted = true;
               toolExecutionContext.push('BMS record_sale failed');
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }) });
+          } else if (toolCall.function.name === 'get_product_variants') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] get_product_variants called for:', args.product_name);
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'get_product_variants', params: { product_name: args.product_name } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`fetched variants for "${args.product_name}"`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] get_product_variants error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }) });
             }
+
+          } else if (toolCall.function.name === 'create_order') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] create_order called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create_order', params: { customer_name: args.customer_name, customer_phone: args.customer_phone || customerPhone, customer_email: args.customer_email, items: args.items, payment_method: args.payment_method, delivery_address: args.delivery_address, notes: args.notes } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`created order for ${args.customer_name}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] create_order error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Order creation unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'get_order_status') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] get_order_status called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'get_order_status', params: { order_number: args.order_number, order_id: args.order_id } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`checked order status for ${args.order_number || args.order_id}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] get_order_status error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Order status unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'cancel_order') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] cancel_order called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'cancel_order', params: { order_number: args.order_number, order_id: args.order_id, reason: args.reason } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`cancelled order ${args.order_number || args.order_id}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] cancel_order error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Order cancellation unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'get_customer_history') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] get_customer_history called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'get_customer_history', params: { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`fetched customer history`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] get_customer_history error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Customer history unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'get_company_statistics') {
+            console.log('[BMS] get_company_statistics called');
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'get_company_statistics', params: {} }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push('fetched company statistics');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] get_company_statistics error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Company statistics unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'create_quotation') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] create_quotation called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create_quotation', params: { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`created quotation for ${args.customer_name}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] create_quotation error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Quotation creation unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'create_invoice') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] create_invoice called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create_invoice', params: { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`created invoice for ${args.customer_name}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] create_invoice error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Invoice creation unavailable' }) });
+            }
+          }
 
           } else if (toolCall.function.name === 'generate_payment_link') {
             const args = JSON.parse(toolCall.function.arguments);
