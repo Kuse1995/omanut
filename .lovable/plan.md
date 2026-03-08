@@ -1,67 +1,48 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Fix: WhatsApp Responses + Image Generation via Direct Gemini API
 
-## Problem Analysis
+## Three Root Causes Found
 
-Two issues identified in the `demo-session` edge function:
+### 1. WhatsApp messages still blocked by LOVABLE_API_KEY check
+Line 3323 of `whatsapp-messages/index.ts` still checks for `LOVABLE_API_KEY` and throws if missing — this runs BEFORE any AI call. Even though the AI calls were migrated to `geminiChat`, this gatekeeper check still kills the entire function.
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+### 2. Image generation routes through Lovable Gateway (402 credits)
+The shared `gemini-client.ts` routes ALL image models (anything with "image" in the name) through `lovableGatewayImageCall`, which requires `LOVABLE_API_KEY`. This means every image generation call hits the credit-limited gateway — even though text calls use `GEMINI_API_KEY` directly.
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+### 3. Image model names need updating
+The `whatsapp-image-gen` function uses `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`. The user wants `google/gemini-2.5-flash-image` (Nano banana 2) as the image model.
 
 ## Changes
 
-### File: `supabase/functions/demo-session/index.ts`
+### File: `supabase/functions/whatsapp-messages/index.ts`
 
-**1. Tighten handoff evaluation prompt**
+- **Remove the `LOVABLE_API_KEY` check** at lines 3323-3326. The function uses `geminiChat` which handles its own auth via `GEMINI_API_KEY`. This leftover check is what blocks Finch messages entirely.
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+### File: `supabase/functions/_shared/gemini-client.ts`
 
-**2. Create tickets and queue items on handoff**
+- **Route image models through direct Gemini API** instead of the Lovable Gateway. Use the native Gemini REST API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`) with `GEMINI_API_KEY`.
+- Parse the native Gemini response (which returns `inlineData` with base64 images) and reshape it into the OpenAI-compatible format that callers expect (with `images` array).
+- Remove the `lovableGatewayImageCall` function entirely — no more dependency on `LOVABLE_API_KEY` for anything.
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+### File: `supabase/functions/whatsapp-image-gen/index.ts`
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+- **Update model names** to use `gemini-2.5-flash-image` (Nano banana 2) for all image generation calls (currently using `gemini-3-pro-image-preview` and `gemini-2.5-flash-image-preview`).
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+## Result
 
-**3. Skip evaluation on short conversations**
+| Issue | Before | After |
+|-------|--------|-------|
+| Finch WhatsApp messages | Blocked by LOVABLE_API_KEY check | Works via GEMINI_API_KEY |
+| Image generation | Routes through Lovable Gateway (402) | Direct Gemini API via GEMINI_API_KEY |
+| Boss asks for posts with images | Images fail due to credit limit | Images generated via direct API |
+| Image model | Mixed models | Nano banana 2 (`gemini-2.5-flash-image`) |
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+### Files Modified
 
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/whatsapp-messages/index.ts` | Remove LOVABLE_API_KEY gatekeeper check |
+| `supabase/functions/_shared/gemini-client.ts` | Route image models through direct Gemini API, remove Lovable Gateway dependency |
+| `supabase/functions/whatsapp-image-gen/index.ts` | Update model to `gemini-2.5-flash-image` |
 
