@@ -1164,9 +1164,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               // Insert draft into scheduled_posts
-              // Use a placeholder UUID for created_by since boss doesn't have a dashboard user ID
+              // Create fresh Supabase client to avoid broken pipe after long image generation
+              const freshSupabase = createClient(
+                Deno.env.get('SUPABASE_URL')!,
+                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+              );
               const systemUserId = '00000000-0000-0000-0000-000000000000';
-              const { data: newPost, error: insertError } = await supabase
+              const { data: newPost, error: insertError } = await freshSupabase
                 .from('scheduled_posts')
                 .insert({
                   company_id: company.id,
