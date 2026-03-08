@@ -378,9 +378,16 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - Use get_outstanding_receivables to see unpaid invoices (who owes you)
    - Use get_outstanding_payables to see pending bills (what you owe)
    - Use profit_loss_report to generate P&L statements for any date range
-   - Use create_quotation and create_invoice for formal business documents
+    - Use create_quotation and create_invoice for formal business documents
+    - Use generate_document to create BEAUTIFUL branded PDF documents and send them via WhatsApp
 
-12. **HR & Attendance (BMS)**: You can track employee attendance.
+13. **Document Generation (PDF)**: You can create professional branded PDF documents!
+    - Use generate_document to turn ANY report or document into a polished PDF
+    - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
+    - WORKFLOW: First fetch the data (e.g., call sales_report or create_invoice), then pass the result to generate_document
+    - When the boss says "send me the sales report as PDF" or "I need an invoice PDF" - fetch data THEN generate_document
+    - PDFs include company branding, header, footer, and professional formatting
+    - PDFs are automatically sent to the boss via WhatsApp
    - Use clock_in when the boss says someone has arrived or started work
    - Use clock_out when an employee is leaving or finished for the day
    - The BMS automatically calculates work hours
@@ -975,6 +982,21 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               notes: { type: "string", description: "Optional notes" }
             },
             required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_document",
+          description: "Generate a professionally formatted PDF document and send it to the boss via WhatsApp. Use when the boss asks for a PDF, document, report, or says 'send me the invoice/quotation/report as PDF'. First fetch the data using the appropriate BMS tool (sales_report, profit_loss_report, etc.), then call this tool with the results.",
+          parameters: {
+            type: "object",
+            properties: {
+              document_type: { type: "string", enum: ["invoice", "quotation", "sales_report", "expense_report", "profit_loss", "receivables", "payables", "stock_report"], description: "Type of document to generate" },
+              data: { type: "object", description: "The document data. For invoices/quotations: { client_name, items: [{description, quantity, unit_price}], tax_rate, notes, valid_until }. For reports: pass the BMS response data directly." }
+            },
+            required: ["document_type", "data"]
           }
         }
       },
@@ -1918,6 +1940,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 }
               } catch (err) {
                 result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'generate_document': {
+              try {
+                const docRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ document_type: args.document_type, data: args.data, company_id: company.id, send_whatsapp: true }),
+                });
+                const docData = await docRes.json();
+                if (docData.success) {
+                  result = { success: true, message: `📄 ${args.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} PDF generated!\n\n${docData.whatsapp_sent ? '✅ Sent to your WhatsApp' : '📎 Download: ' + docData.pdf_url}` };
+                  if (docData.pdf_url) {
+                    toolMediaMessages.push({ body: docData.message, imageUrl: docData.pdf_url });
+                  }
+                } else {
+                  result = { success: false, message: `❌ PDF generation failed: ${docData.error}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-TOOL] generate_document error:', err);
+                result = { success: false, message: `❌ Document generation error: ${err instanceof Error ? err.message : String(err)}` };
               }
               break;
             }
