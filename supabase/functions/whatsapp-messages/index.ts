@@ -753,7 +753,6 @@ async function processAIResponse(
       // Generate 3 AI draft responses with different tones
       let aiDrafts: any[] = [];
       try {
-        {
           const draftResponse = await geminiChat({
             model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
             messages: [
