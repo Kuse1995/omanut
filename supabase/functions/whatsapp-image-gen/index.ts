@@ -467,6 +467,7 @@ async function runImagePipeline(
     supervisor_warnings: warnings,
     final_prompt: refinedPrompt,
     reference_count: referenceUrls.length,
+    bms_image_count: bmsImageUrls.length,
     style_dna_available: styleDNA.length > 0,
     model: 'gemini-3-pro-image-preview',
     pipeline_version: '6-agent-v1',
