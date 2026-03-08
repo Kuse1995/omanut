@@ -697,6 +697,37 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
+          name: "update_stock",
+          description: "Update stock quantity for a product in the BMS. Use when the boss wants to adjust inventory levels, restock, or correct quantities.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "Name of the product to update" },
+              quantity: { type: "integer", description: "New quantity or adjustment amount" },
+              adjustment_type: { type: "string", enum: ["set", "add", "subtract"], description: "How to apply the quantity: 'set' replaces, 'add' increases, 'subtract' decreases. Default: 'set'" },
+              reason: { type: "string", description: "Reason for the adjustment (e.g., 'restock', 'damaged', 'audit correction')" }
+            },
+            required: ["product_name", "quantity"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "sales_report",
+          description: "Get a sales summary report from the BMS. Use when the boss asks about sales performance, revenue, or daily/weekly/monthly reports.",
+          parameters: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Report period. Default: 'today'" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
           name: "list_product_images",
           description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
           parameters: {
