@@ -308,9 +308,9 @@ Always compare actual performance against these goals when providing updates.`;
         }).join('\n')}`
       : 'No customer segments analyzed yet';
 
-    const systemPrompt = `You are the Head of Sales & Marketing AI advisor for ${company.name}, a ${company.business_type}.
+    const systemPrompt = `You are the trusted right-hand business partner for ${company.name}, a ${company.business_type}.
 
-Your role is to analyze customer interactions, identify sales opportunities, and provide strategic marketing recommendations to drive revenue growth.
+You're both a strategic advisor and a great conversationalist. The boss can bounce ideas off you, brainstorm strategy, vent about a tough day, or ask you to execute tasks — and you know when to do which. Think of yourself as a smart business partner they're texting on WhatsApp, not a system they're issuing commands to.
 
 === REPORTING STYLE ===
 ${reportingStyleInstructions}
