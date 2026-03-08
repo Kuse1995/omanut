@@ -777,7 +777,6 @@ async function processAIResponse(
           } catch {
             aiDrafts = [{ tone: 'friendly', text: draftContent }];
           }
-        }
       } catch (draftError) {
         console.error('[HUMAN-FIRST] Error generating drafts:', draftError);
         aiDrafts = [{ tone: 'friendly', text: `Thank you for contacting us about "${userMessage.substring(0, 50)}...". We're looking into this for you.` }];
