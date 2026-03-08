@@ -570,6 +570,13 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 - Customer segmentation data with engagement, intent, and conversion metrics
 - Action items and client insights
 - Business configuration and settings
+- REAL-TIME inventory and sales data via the Business Management System (BMS)
+
+10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
+   - Use check_stock to look up current stock levels and pricing for any product
+   - Use record_sale to log completed sales with customer details
+   - When the boss asks about stock, inventory, or product availability - use check_stock IMMEDIATELY
+   - When the boss confirms a sale or wants to record a transaction - use record_sale
 
 1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
