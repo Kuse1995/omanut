@@ -1,20 +1,19 @@
 /**
  * Shared Gemini API client for all edge functions.
- * Routes ALL models (text + image) through direct Google Gemini API using GEMINI_API_KEY.
- *
- * Text models use the OpenAI-compatible endpoint.
- * Image generation models use the native Gemini REST API.
+ * 
+ * Text models → Gemini OpenAI-compatible endpoint (GEMINI_API_KEY)
+ * Image models → Lovable AI Gateway (LOVABLE_API_KEY)
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-const GEMINI_NATIVE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
+const LOVABLE_GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai)\//, '');
 }
 
-/** Check if a model is an image-generation model that needs the native API */
+/** Check if a model is an image-generation model that needs the Lovable Gateway */
 function isImageModel(model: string): boolean {
   const normalized = normalizeModel(model);
   return normalized.includes('image');
@@ -33,23 +32,21 @@ export interface GeminiChatOptions {
 }
 
 /**
- * Call Google Gemini API. Returns the same JSON shape as OpenAI chat completions.
- * For image models, uses native Gemini API and reshapes the response.
+ * Call AI API. Routes image models through Lovable AI Gateway, text models through direct Gemini.
  */
 export async function geminiChat(options: GeminiChatOptions): Promise<Response> {
+  const normalizedModel = normalizeModel(options.model);
+
+  if (isImageModel(normalizedModel)) {
+    return lovableGatewayImageCall(options);
+  }
+
+  // Text models use direct Gemini OpenAI-compatible endpoint
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
-  const normalizedModel = normalizeModel(options.model);
-
-  // Image generation models route through native Gemini API
-  if (isImageModel(normalizedModel)) {
-    return nativeGeminiImageCall(normalizedModel, options, apiKey);
-  }
-
-  // Text models use direct Gemini OpenAI-compatible endpoint
   const body: any = {
     model: normalizedModel,
     messages: options.messages,
@@ -91,104 +88,45 @@ export async function geminiChatJSON(options: GeminiChatOptions): Promise<any> {
       throw Object.assign(new Error('Rate limit exceeded. Please try again later.'), { status: 429 });
     }
     if (response.status === 402 || response.status === 403) {
-      throw Object.assign(new Error('API quota exceeded. Check your Gemini API plan.'), { status: 402 });
+      throw Object.assign(new Error('API quota exceeded. Check your API plan.'), { status: 402 });
     }
-    throw Object.assign(new Error(`Gemini API error: ${response.status}`), { status: response.status });
+    throw Object.assign(new Error(`API error: ${response.status}`), { status: response.status });
   }
 
   return response.json();
 }
 
 /**
- * Route image generation through native Gemini REST API.
- * Converts messages to Gemini native format, calls generateContent,
- * and reshapes the response to match OpenAI-compatible format with `images` array.
+ * Route image generation through Lovable AI Gateway.
+ * The gateway supports image models like gemini-3.1-flash-image and gemini-3-pro-image-preview.
+ * Returns OpenAI-compatible response with images array.
  */
-async function nativeGeminiImageCall(
-  model: string,
-  options: GeminiChatOptions,
-  apiKey: string,
-): Promise<Response> {
-  console.log(`[gemini-client] Routing image model "${model}" through native Gemini API`);
-
-  // Convert OpenAI-style messages to Gemini native format
-  const contents: any[] = [];
-  for (const msg of options.messages) {
-    if (msg.role === 'system') {
-      // System messages become user messages in Gemini native API
-      contents.push({
-        role: 'user',
-        parts: [{ text: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) }]
-      });
-      continue;
-    }
-
-    const role = msg.role === 'assistant' ? 'model' : 'user';
-
-    if (typeof msg.content === 'string') {
-      contents.push({ role, parts: [{ text: msg.content }] });
-    } else if (Array.isArray(msg.content)) {
-      // Multimodal content (text + images)
-      const parts: any[] = [];
-      for (const part of msg.content) {
-        if (part.type === 'text') {
-          parts.push({ text: part.text });
-        } else if (part.type === 'image_url') {
-          const url = part.image_url?.url || '';
-          if (url.startsWith('data:')) {
-            // Base64 inline data
-            const matches = url.match(/^data:([^;]+);base64,(.+)$/);
-            if (matches) {
-              parts.push({
-                inlineData: {
-                  mimeType: matches[1],
-                  data: matches[2]
-                }
-              });
-            }
-          } else {
-            // URL - fetch and convert to base64
-            try {
-              const imgResp = await fetch(url);
-              const imgBuffer = await imgResp.arrayBuffer();
-              const base64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
-              const contentType = imgResp.headers.get('content-type') || 'image/jpeg';
-              parts.push({
-                inlineData: {
-                  mimeType: contentType,
-                  data: base64
-                }
-              });
-            } catch (e) {
-              console.error('[gemini-client] Failed to fetch image URL:', e);
-              parts.push({ text: `[Image URL: ${url}]` });
-            }
-          }
-        }
-      }
-      contents.push({ role, parts });
-    }
+async function lovableGatewayImageCall(options: GeminiChatOptions): Promise<Response> {
+  const apiKey = Deno.env.get('LOVABLE_API_KEY');
+  if (!apiKey) {
+    throw new Error('LOVABLE_API_KEY is not configured');
   }
+
+  // Use the full model name with google/ prefix for the gateway
+  const model = options.model.includes('/') ? options.model : `google/${options.model}`;
+  
+  console.log(`[gemini-client] Routing image model "${model}" through Lovable AI Gateway`);
 
   const body: any = {
-    contents,
-    generationConfig: {
-      responseModalities: options.modalities || ['image', 'text'],
-    }
+    model,
+    messages: options.messages,
   };
 
-  if (options.temperature !== undefined) {
-    body.generationConfig.temperature = options.temperature;
-  }
-  if (options.max_tokens !== undefined) {
-    body.generationConfig.maxOutputTokens = options.max_tokens;
-  }
-
-  const url = `${GEMINI_NATIVE_URL}/${model}:generateContent?key=${apiKey}`;
+  if (options.modalities) body.modalities = options.modalities;
+  if (options.temperature !== undefined) body.temperature = options.temperature;
+  if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
 
   const fetchOptions: RequestInit = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(body),
   };
 
@@ -196,51 +134,5 @@ async function nativeGeminiImageCall(
     fetchOptions.signal = options.signal;
   }
 
-  const response = await fetch(url, fetchOptions);
-
-  if (!response.ok) {
-    // Pass through the error response as-is
-    return response;
-  }
-
-  // Parse native Gemini response and reshape to OpenAI-compatible format
-  const nativeData = await response.json();
-
-  const candidate = nativeData.candidates?.[0];
-  if (!candidate) {
-    return new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content: 'No response generated', images: [] } }]
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
-  let textContent = '';
-  const images: any[] = [];
-
-  for (const part of (candidate.content?.parts || [])) {
-    if (part.text) {
-      textContent += part.text;
-    } else if (part.inlineData) {
-      // Convert Gemini's inlineData to the expected format
-      const dataUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      images.push({
-        type: 'image_url',
-        image_url: { url: dataUrl }
-      });
-    }
-  }
-
-  const reshapedResponse = {
-    choices: [{
-      message: {
-        role: 'assistant',
-        content: textContent || 'Image generated successfully.',
-        images
-      }
-    }]
-  };
-
-  return new Response(JSON.stringify(reshapedResponse), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' }
-  });
+  return fetch(LOVABLE_GATEWAY_URL, fetchOptions);
 }
