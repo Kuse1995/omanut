@@ -25,7 +25,8 @@ serve(async (req) => {
     let userId: string;
 
     if (isServiceRole) {
-      userId = 'system';
+      // Will resolve userId from company owner after company_id is known
+      userId = '';
     } else {
       const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } },
