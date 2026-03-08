@@ -72,7 +72,7 @@ export async function geminiImageGenerate(options: {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
 
-  const model = normalizeModel(options.model || 'gemini-2.0-flash-exp');
+  const model = normalizeModel(options.model || 'gemini-2.5-flash-image');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
