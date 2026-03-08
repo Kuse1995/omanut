@@ -1651,7 +1651,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 if (bmsData.success) {
                   const d = bmsData.data;
                   const summary = d?.summary ? `\n\n📈 Summary:\n💰 Revenue: ${company.currency_prefix || 'K'}${d.summary.total_revenue || 0}\n📦 Quantity: ${d.summary.total_quantity || 0}\n🛒 Sales: ${d.summary.sales_count || 0}` : '';
-                  result = { success: true, message: `📊 Sales Report:${summary}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                  const salesItems = Array.isArray(d?.data) ? d.data : (Array.isArray(d?.sales) ? d.sales : []);
+                  const salesList = salesItems.length > 0
+                    ? '\n\n' + salesItems.slice(0, 15).map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || s.amount || 0}${s.customer_name ? ` (${s.customer_name})` : ''}`).join('\n')
+                    : '';
+                  result = { success: true, message: `📊 Sales Report:${summary}${salesList}` };
                 } else {
                   result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
                 }
