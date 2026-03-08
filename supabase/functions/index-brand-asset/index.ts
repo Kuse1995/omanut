@@ -42,9 +42,11 @@ async function analyzeImageBase64(base64: string, mimeType: string): Promise<{ d
   }
 
   const data = await response.json();
+  console.log('[INDEX] Raw Gemini response:', JSON.stringify(data).substring(0, 500));
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  console.log('[INDEX] Extracted text:', text.substring(0, 300));
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON in response');
+  if (!jsonMatch) throw new Error(`No JSON in response. Text was: "${text.substring(0, 200)}"`);
   return JSON.parse(jsonMatch[0]);
 }
 
