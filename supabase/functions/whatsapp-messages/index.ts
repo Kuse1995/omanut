@@ -1934,6 +1934,23 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["customer_name", "items"]
           }
         }
+      },
+      create_contact: {
+        type: "function",
+        function: {
+          name: "create_contact",
+          description: "Submit a contact inquiry on behalf of the customer. Use when a customer wants to leave a message for the business, submit a general inquiry, or send feedback via the contact form.",
+          parameters: {
+            type: "object",
+            properties: {
+              sender_name: { type: "string", description: "Name of the person submitting the inquiry" },
+              sender_email: { type: "string", description: "Email address of the person" },
+              message: { type: "string", description: "The inquiry or feedback message" },
+              sender_phone: { type: "string", description: "Phone number if provided" }
+            },
+            required: ["sender_name", "sender_email", "message"]
+          }
+        }
       }
     };
 
