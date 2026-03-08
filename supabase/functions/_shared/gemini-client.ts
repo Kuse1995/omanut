@@ -64,10 +64,12 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 /**
  * Generate images using the native Gemini API (not OpenAI-compatible).
  * The OpenAI chat/completions endpoint doesn't support image generation for these models.
+ * Supports optional input images for editing/product-anchored generation.
  */
 export async function geminiImageGenerate(options: {
   model?: string;
   prompt: string;
+  inputImageUrls?: string[];
 }): Promise<{ imageBase64: string | null; text: string | null }> {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -75,11 +77,39 @@ export async function geminiImageGenerate(options: {
   const model = normalizeModel(options.model || 'gemini-3-pro-image-preview');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+  // Build parts array: text + optional input images
+  const parts: any[] = [{ text: options.prompt }];
+
+  if (options.inputImageUrls && options.inputImageUrls.length > 0) {
+    for (const imageUrl of options.inputImageUrls) {
+      if (imageUrl.startsWith('data:')) {
+        // Base64 data URI
+        const match = imageUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (match) {
+          parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+        }
+      } else {
+        // Fetch remote image and convert to base64
+        try {
+          const imgResponse = await fetch(imageUrl);
+          if (imgResponse.ok) {
+            const imgBuffer = await imgResponse.arrayBuffer();
+            const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+            const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+            parts.push({ inlineData: { mimeType: contentType, data: imgBase64 } });
+          }
+        } catch (e) {
+          console.error(`Failed to fetch input image: ${imageUrl}`, e);
+        }
+      }
+    }
+  }
+
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: options.prompt }] }],
+      contents: [{ parts }],
       generationConfig: {
         responseModalities: ['TEXT', 'IMAGE'],
       },
@@ -93,12 +123,12 @@ export async function geminiImageGenerate(options: {
   }
 
   const data = await response.json();
-  const parts = data.candidates?.[0]?.content?.parts || [];
+  const responseParts = data.candidates?.[0]?.content?.parts || [];
 
   let imageBase64: string | null = null;
   let text: string | null = null;
 
-  for (const part of parts) {
+  for (const part of responseParts) {
     if (part.inlineData) {
       imageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }

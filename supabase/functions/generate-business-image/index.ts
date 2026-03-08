@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,38 +81,32 @@ serve(async (req) => {
 
     console.log('Generating image with prompt:', enhancedPrompt);
 
-    // Call Gemini AI for image generation
-    const response = await geminiChat({
+    // Call native Gemini API for image generation
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
       model: 'gemini-3-pro-image-preview',
-      messages: [
-        {
-          role: 'user',
-          content: enhancedPrompt
-        }
-      ],
-      modalities: ['image', 'text']
+      prompt: enhancedPrompt,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Gemini AI error:', response.status, errorText);
-      
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      throw new Error(`Gemini AI error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-    if (!imageUrl) {
+    if (!imageBase64) {
       throw new Error('No image generated');
     }
+
+    // Extract public URL by uploading to storage
+    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    const filePath = `generated/${userData.company_id}/${crypto.randomUUID()}.png`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from('company-media')
+      .upload(filePath, binaryData, { contentType: 'image/png', upsert: false });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      throw new Error('Failed to upload generated image');
+    }
+
+    const { data: publicData } = supabase.storage.from('company-media').getPublicUrl(filePath);
+    const imageUrl = publicData.publicUrl;
 
     // Save generated image record
     const { data: savedImage, error: saveError } = await supabase

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -412,38 +412,25 @@ async function generateImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
-  // Using Gemini client
+  // Using native Gemini image generation API
   
   // Enhance prompt with context
   const enhancedPrompt = `${context}\n\nCreate a professional marketing image for ${companyName} (${businessType}): ${prompt}. Ultra high resolution, professional quality, suitable for social media marketing.`;
   
   console.log('[IMAGE-GEN] Enhanced prompt:', enhancedPrompt.substring(0, 200));
   
-  const response = await geminiChat({
+  const { imageBase64, text: imageText } = await geminiImageGenerate({
     model: 'gemini-3-pro-image-preview',
-    messages: [{ role: 'user', content: enhancedPrompt }],
-    modalities: ['image', 'text']
+    prompt: enhancedPrompt,
   });
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[IMAGE-GEN] Error:', response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    throw new Error('Failed to generate image');
-  }
-  
-  const data = await response.json();
-  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  
-  if (!base64ImageUrl) {
+  if (!imageBase64) {
+    console.error('[IMAGE-GEN] No image returned from Gemini');
     throw new Error('No image generated');
   }
   
   // Upload base64 to storage and get public URL
-  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
   
   return { imageUrl, enhancedPrompt };
 }
@@ -491,39 +478,19 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Generating with product image from:', productImageUrl.substring(0, 80));
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
-  const response = await geminiChat({
+  const { imageBase64, text: imageText } = await geminiImageGenerate({
     model: 'gemini-3-pro-image-preview',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: enhancedPrompt },
-          { type: 'image_url', image_url: { url: productImageUrl } }
-        ]
-      }
-    ],
-    modalities: ['image', 'text']
+    prompt: enhancedPrompt,
+    inputImageUrls: [productImageUrl],
   });
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[PRODUCT-ANCHORED] Error:', response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    throw new Error('Failed to generate product image');
-  }
-  
-  const data = await response.json();
-  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  
-  if (!base64ImageUrl) {
+  if (!imageBase64) {
+    console.error('[PRODUCT-ANCHORED] No image returned from Gemini');
     throw new Error('No image generated');
   }
   
   // Upload base64 to storage and get public URL
-  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
   
   return { imageUrl, enhancedPrompt };
 }
@@ -538,46 +505,25 @@ async function editImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; editDescription: string }> {
-  // Using Gemini client
+  // Using native Gemini image generation API
   
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
-  const response = await geminiChat({
+  const { imageBase64, text: textResponse } = await geminiImageGenerate({
     model: 'gemini-3-pro-image-preview',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: editInstruction },
-          { type: 'image_url', image_url: { url: sourceImageUrl } }
-        ]
-      }
-    ],
-    modalities: ['image', 'text']
+    prompt: editInstruction,
+    inputImageUrls: [sourceImageUrl],
   });
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[IMAGE-EDIT] Error:', response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    throw new Error('Failed to edit image');
-  }
-  
-  const data = await response.json();
-  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  const textResponse = data.choices?.[0]?.message?.content || '';
-  
-  if (!base64ImageUrl) {
+  if (!imageBase64) {
+    console.error('[IMAGE-EDIT] No image returned from Gemini');
     throw new Error('No edited image generated');
   }
   
   // Upload base64 to storage and get public URL
-  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
   
   return { imageUrl, editDescription: textResponse || editPrompt };
 }
