@@ -3036,19 +3036,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         const secondController = new AbortController();
         const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
         
-        const secondResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
+        const secondResponse = await geminiChat({
+          model: selectedModel,
+          messages: messagesWithToolResults,
+          temperature: 1.0,
+          max_tokens: 2048,
           signal: secondController.signal,
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: messagesWithToolResults,
-            temperature: 1.0,
-            max_tokens: 2048
-          }),
         });
         
         clearTimeout(secondTimeoutId);
