@@ -1,67 +1,49 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Additional Agents to Strengthen the Image Generation Pipeline
 
-## Problem Analysis
+Beyond the already-planned **Prompt Optimizer** and **Supervisor Review** agents, here are agents that would meaningfully improve image quality and business value:
 
-Two issues identified in the `demo-session` edge function:
+## 1. Quality Assessment Agent (Post-Generation)
+**Purpose**: Evaluate the generated image *before* sending it to the customer.
+- Runs after `geminiImageGenerate` returns
+- Uses `gemini-3-flash-preview` vision to score the output on: prompt adherence (did it match the request?), brand accuracy (is the product/logo correct?), composition quality, text legibility
+- Returns `{ score: 0-10, pass: boolean, issues: string[] }`
+- If score < 7, auto-retries generation with a refined prompt (up to 2 retries) incorporating the issues found
+- Prevents bad images from reaching customers entirely
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+## 2. Reference Curator Agent (Pre-Generation)
+**Purpose**: Intelligently select and prepare reference materials beyond just product matching.
+- Current `selectProductImageForPrompt` only finds one product image
+- This agent would also pull: brand color palette, logo assets, previous high-rated images with similar prompts, competitor-avoid examples
+- Assembles a "reference pack" — multiple input images for the generator (product + logo + style reference)
+- Uses the existing `company_media` categories (Products, Promotional, Logos) to build a richer context
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+## 3. Style Memory Agent (Learning Loop)
+**Purpose**: Learn from feedback to improve future generations.
+- Analyzes the `image_generation_feedback` table (already exists with ratings)
+- Before any generation, queries top-rated images for this company and extracts what made them successful
+- Builds a "style DNA" summary: preferred lighting, color temperature, composition patterns, environments that performed well
+- Feeds this into the Prompt Optimizer as a "learned preferences" block
+- Periodically updates a `style_profile` field on `image_generation_settings`
 
-## Changes
+## 4. A/B Variant Agent (Multi-Output)
+**Purpose**: Generate 2-3 variations instead of one, letting the user pick.
+- After the supervisor approves the prompt, creates 2-3 prompt variations: same product/subject but different angles (e.g., lifestyle vs. studio, warm vs. cool tones)
+- Sends all variants to the customer as a gallery via WhatsApp
+- Tracks which variant gets selected → feeds back into Style Memory Agent
+- Only activates when the user's prompt is open-ended (not specific edits)
 
-### File: `supabase/functions/demo-session/index.ts`
+## Recommendation
 
-**1. Tighten handoff evaluation prompt**
+For maximum immediate impact, I'd prioritize in this order:
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+| Priority | Agent | Why |
+|----------|-------|-----|
+| 1 | **Quality Assessment** | Catches bad outputs before they reach the customer — biggest quality win |
+| 2 | **Reference Curator** | More reference context = better brand fidelity, uses existing media library |
+| 3 | **Style Memory** | Feedback loop already has data, just needs to be consumed |
+| 4 | **A/B Variant** | Nice-to-have, increases engagement but adds latency and cost |
 
-**2. Create tickets and queue items on handoff**
-
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+Want me to add any or all of these to the pipeline plan alongside the Prompt Optimizer and Supervisor?
 
