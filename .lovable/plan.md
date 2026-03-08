@@ -1,109 +1,67 @@
 
 
-# BMS Agent — Centralized Business Management System Gateway
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## What We're Building
+## Problem Analysis
 
-A dedicated `bms-agent` edge function that becomes the single entry point for all BMS operations. Three edge functions currently duplicate the same fetch logic to `bms-api-bridge` — we consolidate it into one agent and add new capabilities.
+Two issues identified in the `demo-session` edge function:
 
-## Current Duplication
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-| File | BMS actions | Lines of duplicated fetch logic |
-|------|------------|------|
-| `whatsapp-messages/index.ts` | `check_stock`, `record_sale`, `generate_payment_link`, `lookup_product` | ~120 lines (lines 2988-3100) |
-| `boss-chat/index.ts` | `check_stock`, `record_sale` | ~70 lines (lines 1239-1305) |
-| `whatsapp-image-gen/index.ts` | `check_stock` (product context lookup) | ~25 lines (lines 729-751) |
-
-All three hardcode the same external URL (`hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge`) and auth pattern.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
 ## Changes
 
-### 1. New: `supabase/functions/bms-agent/index.ts`
+### File: `supabase/functions/demo-session/index.ts`
 
-Centralized BMS gateway supporting these actions:
+**1. Tighten handoff evaluation prompt**
 
-| Action | Description | Callers |
-|--------|-------------|---------|
-| `check_stock` | Look up inventory + pricing | All three |
-| `record_sale` | Log a sale transaction | Customer, Boss |
-| `generate_payment_link` | Create Lenco payment URL | Customer, Boss |
-| `list_products` | Full product catalog | Customer, Boss |
-| `get_product_details` | Product info + `image_urls` field (ready for BMS images) | Image Gen, Customer |
-| `update_stock` | Adjust stock quantities | Boss only |
-| `sales_report` | Daily/weekly sales summary | Boss only |
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-Internal design:
-- Single `callBMS(action, params)` helper wrapping the external bridge URL + `BMS_API_SECRET`
-- Validates required params per action
-- Returns consistent `{ success, data, error }` envelope
-- `verify_jwt = false` (called internally by other edge functions via service role)
+**2. Create tickets and queue items on handoff**
 
-### 2. Update: `supabase/functions/whatsapp-messages/index.ts`
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-Replace inline BMS fetch blocks (~lines 2988-3100) for `check_stock`, `record_sale`, `generate_payment_link`, `lookup_product` with internal calls:
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-```typescript
-const bmsResult = await fetch(
-  `${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`,
-  {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'check_stock', params: { product_name: args.product_name } })
-  }
-);
-```
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-Each tool handler shrinks from ~30 lines to ~10.
+**3. Skip evaluation on short conversations**
 
-### 3. Update: `supabase/functions/boss-chat/index.ts`
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-- Replace inline `check_stock` and `record_sale` handlers (~lines 1239-1305) with calls to `bms-agent`
-- Add two new tool definitions: `update_stock` and `sales_report`
-- Update system prompt to mention new inventory management capabilities
+### Summary of behavior after fix
 
-### 4. Update: `supabase/functions/whatsapp-image-gen/index.ts`
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-Replace the inline BMS context fetch (~lines 729-751) with a call to `bms-agent` using `get_product_details`. This action will return `image_urls` when available from the BMS, enabling product-anchored image generation.
-
-### 5. Config: `supabase/config.toml`
-
-Add:
-```toml
-[functions.bms-agent]
-  verify_jwt = false
-```
-
-## Architecture After
-
-```text
-Customer (WhatsApp) ──→ whatsapp-messages ──┐
-Boss (WhatsApp)     ──→ boss-chat         ──┤──→ bms-agent ──→ External BMS Bridge
-Image Generation    ──→ whatsapp-image-gen ──┤
-External Agents     ──→ agent-api         ──┘
-```
-
-## `get_product_details` + Image URLs
-
-The `get_product_details` action calls the BMS bridge and returns:
-```json
-{
-  "name": "LifeStraw Family 2.0",
-  "price": 450,
-  "stock": 23,
-  "description": "...",
-  "image_urls": ["https://..."]  // from BMS when available
-}
-```
-
-The image gen pipeline will use `image_urls` as reference anchors for multimodal generation (converting them to `inlineData` format for Gemini). This is ready to work as soon as the BMS project exposes `image_url`/`image_urls` fields per the prompt provided earlier.
-
-## Files Summary
+### Files
 
 | Action | File |
 |--------|------|
-| Create | `supabase/functions/bms-agent/index.ts` |
-| Edit | `supabase/functions/whatsapp-messages/index.ts` |
-| Edit | `supabase/functions/boss-chat/index.ts` |
-| Edit | `supabase/functions/whatsapp-image-gen/index.ts` |
-| Edit | `supabase/config.toml` |
+| Edit | `supabase/functions/demo-session/index.ts` |
 

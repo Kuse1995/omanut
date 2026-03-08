@@ -109,3 +109,5 @@ project_id = "dzheddvoiauevcayifev"
   [functions.reindex-company-media]
     timeout = 120
     verify_jwt = false
+  [functions.bms-agent]
+    verify_jwt = false

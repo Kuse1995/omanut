@@ -2988,118 +2988,61 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           } else if (toolCall.function.name === 'check_stock') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BMS] check_stock called for:', args.product_name);
-            
             try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
-                },
-                body: JSON.stringify({ action: 'check_stock', product_name: args.product_name }),
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'check_stock', params: { product_name: args.product_name } }),
               });
-              
-              const bmsResult = await bmsResponse.json();
-              console.log('[BMS] check_stock result:', JSON.stringify(bmsResult));
-              
+              const bmsResult = await bmsRes.json();
               anyToolExecuted = true;
               toolExecutionContext.push(`checked BMS stock for "${args.product_name}"`);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify(bmsResult),
-              });
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
             } catch (error) {
               console.error('[BMS] check_stock error:', error);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }),
-              });
               anyToolExecuted = true;
               toolExecutionContext.push('BMS check_stock failed');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }) });
             }
 
           } else if (toolCall.function.name === 'record_sale') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BMS] record_sale called:', JSON.stringify(args));
-            
             try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
-                },
-                body: JSON.stringify({
-                  action: 'record_sale',
-                  product_name: args.product_name,
-                  quantity: args.quantity,
-                  payment_method: args.payment_method,
-                  customer_name: args.customer_name || null,
-                  customer_phone: args.customer_phone || null,
-                }),
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'record_sale', params: { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null } }),
               });
-              
-              const bmsResult = await bmsResponse.json();
-              console.log('[BMS] record_sale result:', JSON.stringify(bmsResult));
-              
+              const bmsResult = await bmsRes.json();
               anyToolExecuted = true;
               toolExecutionContext.push(`recorded sale in BMS: ${args.quantity}x ${args.product_name}`);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify(bmsResult),
-              });
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
             } catch (error) {
               console.error('[BMS] record_sale error:', error);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }),
-              });
               anyToolExecuted = true;
               toolExecutionContext.push('BMS record_sale failed');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }) });
             }
+
           } else if (toolCall.function.name === 'generate_payment_link') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BMS] generate_payment_link called:', JSON.stringify(args));
-            
             try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
-                },
-                body: JSON.stringify({
-                  action: 'generate_payment_link',
-                  amount: args.amount,
-                  customer_name: args.customer_name,
-                  customer_phone: args.customer_phone,
-                  reference: args.reference,
-                }),
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'generate_payment_link', params: { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference } }),
               });
-              
-              const bmsResult = await bmsResponse.json();
-              console.log('[BMS] generate_payment_link result:', JSON.stringify(bmsResult));
-              
+              const bmsResult = await bmsRes.json();
               anyToolExecuted = true;
               toolExecutionContext.push('payment link generated');
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify(bmsResult),
-              });
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
             } catch (error) {
               console.error('[BMS] generate_payment_link error:', error);
-              toolResults.push({
-                tool_call_id: toolCall.id,
-                role: "tool",
-                content: JSON.stringify({ error: error instanceof Error ? error.message : 'Payment link generation unavailable' }),
-              });
               anyToolExecuted = true;
               toolExecutionContext.push('BMS generate_payment_link failed');
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Payment link generation unavailable' }) });
             }
           }
         }
