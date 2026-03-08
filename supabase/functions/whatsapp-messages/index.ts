@@ -1743,6 +1743,23 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["product_name", "quantity", "payment_method"]
           }
         }
+      },
+      generate_payment_link: {
+        type: "function",
+        function: {
+          name: "generate_payment_link",
+          description: "Generates a secure Lenco payment link for the customer to pay via Mobile Money (MTN, Airtel, Zamtel) or Card.",
+          parameters: {
+            type: "object",
+            properties: {
+              amount: { type: "number", description: "The total amount in ZMW to be paid" },
+              customer_name: { type: "string", description: "The name of the customer" },
+              customer_phone: { type: "string", description: "The phone number of the customer" },
+              reference: { type: "string", description: "The order number, receipt number, or a unique reference string for this transaction" }
+            },
+            required: ["amount", "customer_name", "customer_phone", "reference"]
+          }
+        }
       }
     };
 
@@ -2962,6 +2979,46 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               });
               anyToolExecuted = true;
               toolExecutionContext.push('BMS record_sale failed');
+            }
+          } else if (toolCall.function.name === 'generate_payment_link') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] generate_payment_link called:', JSON.stringify(args));
+            
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}`,
+                },
+                body: JSON.stringify({
+                  action: 'generate_payment_link',
+                  amount: args.amount,
+                  customer_name: args.customer_name,
+                  customer_phone: args.customer_phone,
+                  reference: args.reference,
+                }),
+              });
+              
+              const bmsResult = await bmsResponse.json();
+              console.log('[BMS] generate_payment_link result:', JSON.stringify(bmsResult));
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push('payment link generated');
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify(bmsResult),
+              });
+            } catch (error) {
+              console.error('[BMS] generate_payment_link error:', error);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ error: error instanceof Error ? error.message : 'Payment link generation unavailable' }),
+              });
+              anyToolExecuted = true;
+              toolExecutionContext.push('BMS generate_payment_link failed');
             }
           }
               
