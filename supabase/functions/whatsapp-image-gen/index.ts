@@ -356,11 +356,7 @@ async function generateProductAnchoredImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using direct Gemini API via geminiChat
   
   // Create a strict product-anchored instruction
   const productDescription = productInfo.description || productInfo.file_name || 'this product';
