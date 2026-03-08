@@ -1842,27 +1842,20 @@ Trust ONLY the information provided in this system prompt.
     let aiData: any = null; // Store AI response for tool loop
 
     try {
-      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
+      const response = await geminiChat({
+        model: selectedModel,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+        tools: filteredTools,
+        tool_choice: "auto",
         signal: controller.signal,
-        body: JSON.stringify({
-          model: selectedModel,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-          tools: filteredTools,
-          tool_choice: "auto"
-        }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[BACKGROUND] Kimi AI error:', response.status, errorText);
-        throw new Error(`Kimi AI error: ${response.status}`);
+        console.error('[BACKGROUND] Gemini API error:', response.status, errorText);
+        throw new Error(`Gemini API error: ${response.status}`);
       }
 
       aiData = await response.json();
