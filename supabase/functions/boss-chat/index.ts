@@ -1760,7 +1760,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `📊 Company Statistics:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const stats = bmsData.data;
+                  const lines = Object.entries(stats).map(([key, val]) => {
+                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+                    return `• ${label}: ${typeof val === 'number' && key.includes('revenue') ? `${company.currency_prefix || 'K'}${val}` : val}`;
+                  }).join('\n');
+                  result = { success: true, message: `📊 Company Statistics:\n\n${lines}` };
                 } else {
                   result = { success: false, message: `❌ Statistics failed: ${bmsData.error || 'Unknown error'}` };
                 }
