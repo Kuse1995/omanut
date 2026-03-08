@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
+// LOVABLE_API_KEY removed — now using geminiChat() with GEMINI_API_KEY
 const DEMO_BOSS_PHONE = '+260972064502';
 
 Deno.serve(async (req) => {
