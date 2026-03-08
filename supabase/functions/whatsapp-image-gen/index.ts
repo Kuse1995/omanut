@@ -428,7 +428,8 @@ async function runImagePipeline(
   companyName: string,
   businessType: string,
   productMatch: ProductImage | null,
-  maxRetries: number = 2
+  maxRetries: number = 2,
+  bmsImageUrls: string[] = []
 ): Promise<{ imageUrl: string; enhancedPrompt: string; pipelineData: any }> {
   console.log('[PIPELINE] === Starting 6-Agent Image Generation Pipeline ===');
 
@@ -466,6 +467,7 @@ async function runImagePipeline(
     supervisor_warnings: warnings,
     final_prompt: refinedPrompt,
     reference_count: referenceUrls.length,
+    bms_image_count: bmsImageUrls.length,
     style_dna_available: styleDNA.length > 0,
     model: 'gemini-3-pro-image-preview',
     pipeline_version: '6-agent-v1',
@@ -481,14 +483,34 @@ async function runImagePipeline(
     attempt++;
     console.log(`[PIPELINE] Generation attempt ${attempt}/${maxRetries + 1}`);
 
-    // Determine input images: product reference + curated references
-    const inputImages = productMatch 
-      ? [getMediaPublicUrl(supabaseUrl, productMatch.file_path), ...referenceUrls.filter(u => u !== getMediaPublicUrl(supabaseUrl, productMatch.file_path))]
-      : referenceUrls;
+    // Determine input images: BMS product images (highest priority) → product reference → curated references
+    const inputImages: string[] = [];
+    
+    // Priority 1: BMS canonical product images
+    if (bmsImageUrls.length > 0) {
+      inputImages.push(...bmsImageUrls);
+      console.log(`[PIPELINE] Added ${bmsImageUrls.length} BMS product images as priority anchors`);
+    }
+    
+    // Priority 2: company_media product match
+    if (productMatch) {
+      const productUrl = getMediaPublicUrl(supabaseUrl, productMatch.file_path);
+      if (!inputImages.includes(productUrl)) {
+        inputImages.push(productUrl);
+      }
+    }
+    
+    // Priority 3: curated reference images (fill remaining slots)
+    for (const refUrl of referenceUrls) {
+      if (!inputImages.includes(refUrl)) {
+        inputImages.push(refUrl);
+      }
+    }
 
     // Build the generation prompt
     let genPrompt = currentPrompt;
-    if (productMatch) {
+    const hasProductAnchor = bmsImageUrls.length > 0 || productMatch;
+    if (hasProductAnchor) {
       genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep this product UNCHANGED — same label, logo, colors, shape, proportions. ONLY change the environment/background/lighting.\n\n${currentPrompt}`;
     }
 
@@ -708,7 +730,7 @@ async function selectProductImageForPrompt(
   supabase: any, 
   companyId: string, 
   prompt: string
-): Promise<ProductImage | null> {
+): Promise<{ product: ProductImage | null; bmsImageUrls: string[] }> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 
   const { data: productImages, error } = await supabase
@@ -719,9 +741,36 @@ async function selectProductImageForPrompt(
     .eq('media_type', 'image')
     .order('created_at', { ascending: false });
   
+  // Track BMS image URLs for later use as reference anchors
+  let bmsImageUrls: string[] = [];
+
   if (error || !productImages || productImages.length === 0) {
-    console.log('[PRODUCT-SELECT] No product images found');
-    return null;
+    console.log('[PRODUCT-SELECT] No product images in company_media, checking BMS only');
+    // Still try BMS for image URLs even without company_media products
+    try {
+      const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+      });
+      if (bmsRes.ok) {
+        const bmsData = await bmsRes.json();
+        if (bmsData.success) {
+          const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+          for (const item of items) {
+            if (item.image_url) bmsImageUrls.push(item.image_url);
+            if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
+          }
+          bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
+          if (bmsImageUrls.length > 0) {
+            console.log(`[PRODUCT-SELECT] Found ${bmsImageUrls.length} BMS product images (no company_media)`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[PRODUCT-SELECT] BMS-only lookup skipped:', e);
+    }
+    return { product: null, bmsImageUrls };
   }
   
   console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using multimodal vision selection`);
@@ -741,6 +790,15 @@ async function selectProductImageForPrompt(
         bmsContext = items.map((item: any) =>
           `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'}${item.image_urls?.length ? `, Images: ${item.image_urls.length}` : ''})`
         ).join('\n');
+        // Extract BMS image URLs as authoritative product references
+        for (const item of items) {
+          if (item.image_url) bmsImageUrls.push(item.image_url);
+          if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
+        }
+        bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
+        if (bmsImageUrls.length > 0) {
+          console.log(`[PRODUCT-SELECT] Extracted ${bmsImageUrls.length} BMS product image URLs`);
+        }
       }
     }
   } catch (e) {
@@ -812,13 +870,13 @@ INSTRUCTIONS:
           const idx = parseInt(numMatch[1], 10) - 1;
           if (idx >= 0 && idx < candidates.length) {
             console.log(`[PRODUCT-SELECT] Vision matched product #${idx + 1}: ${candidates[idx].file_name}`);
-            return candidates[idx];
+            return { product: candidates[idx], bmsImageUrls };
           }
         }
         const matched = candidates.find((img: ProductImage) => aiChoice.includes(img.id));
-        if (matched) return matched;
+        if (matched) return { product: matched, bmsImageUrls };
       }
-      return null;
+      return { product: null, bmsImageUrls };
     }
   } catch (e) {
     console.error('[PRODUCT-SELECT] Vision selection failed:', e);
@@ -835,7 +893,7 @@ INSTRUCTIONS:
     for (const word of promptWords) { if (searchText.includes(word)) score += 1; }
     if (score > bestScore) { bestScore = score; bestMatch = img; }
   }
-  return bestMatch;
+  return { product: bestMatch, bmsImageUrls };
 }
 
 // Get public URL for a storage file
@@ -1087,12 +1145,12 @@ serve(async (req) => {
     switch (messageType) {
       case 'generate': {
         // === 6-AGENT PIPELINE ===
-        const productImage = await selectProductImageForPrompt(supabase, companyId, prompt);
+        const { product: productImage, bmsImageUrls } = await selectProductImageForPrompt(supabase, companyId, prompt);
         
         const result = await runImagePipeline(
           supabase, supabaseUrl, companyId,
           prompt, company.name, company.business_type || 'business',
-          productImage
+          productImage, 2, bmsImageUrls
         );
         
         imageUrl = result.imageUrl;
