@@ -1220,7 +1220,448 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'update_ai_instructions': {
               const aiUpdateData: any = {};
               const aiChanges: string[] = [];
-    
+              if (args.system_instructions !== undefined) { aiUpdateData.system_instructions = args.system_instructions; aiChanges.push('System instructions'); }
+              if (args.qa_style !== undefined) { aiUpdateData.qa_style = args.qa_style; aiChanges.push('QA style'); }
+              if (args.banned_topics !== undefined) { aiUpdateData.banned_topics = args.banned_topics; aiChanges.push('Banned topics'); }
+              if (aiOverrides) {
+                await supabase.from('company_ai_overrides').update(aiUpdateData).eq('company_id', company.id);
+              } else {
+                await supabase.from('company_ai_overrides').insert({ company_id: company.id, ...aiUpdateData });
+              }
+              result = { success: true, message: `✅ AI instructions updated: ${aiChanges.join(', ')}` };
+              break;
+            }
+
+            case 'update_quick_reference':
+              await supabase.from('companies').update({ quick_reference_info: args.quick_reference_info }).eq('id', company.id);
+              result = { success: true, message: '✅ Quick reference info updated' };
+              break;
+
+            case 'get_all_customers': {
+              const { data: allConvs } = await supabase
+                .from('conversations')
+                .select('customer_name, phone, started_at, status')
+                .eq('company_id', company.id)
+                .not('phone', 'is', null)
+                .order('started_at', { ascending: false });
+              const customerMap = new Map();
+              for (const c of allConvs || []) {
+                if (!customerMap.has(c.phone)) customerMap.set(c.phone, c);
+              }
+              const customerList = Array.from(customerMap.values()).map((c: any) =>
+                `${c.customer_name || 'Unknown'} - ${c.phone}`
+              ).join('\n');
+              result = { success: true, message: customerList || 'No customers found' };
+              break;
+            }
+
+            case 'schedule_social_post': {
+              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+              // If needs image generation, do that first
+              let postImageUrl = args.image_url || null;
+              if (args.needs_image_generation && args.image_prompt) {
+                try {
+                  const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({
+                      companyId: company.id,
+                      customerPhone: '',
+                      conversationId: null,
+                      prompt: args.image_prompt,
+                      messageType: 'generate',
+                    }),
+                  });
+                  if (imgGenResponse.ok) {
+                    const imgResult = await imgGenResponse.json();
+                    if (imgResult.imageUrl) postImageUrl = imgResult.imageUrl;
+                  }
+                } catch (e) {
+                  console.error('Image gen for post failed:', e);
+                }
+              }
+
+              if (args.publish_now) {
+                // Publish immediately
+                const publishFn = args.target_platform === 'instagram' ? 'publish-meta-post' : 'publish-facebook-post';
+                const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/${publishFn}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({ companyId: company.id, content: args.content, imageUrl: postImageUrl }),
+                });
+                const publishResult = await publishResponse.json();
+                result = publishResult.success !== false
+                  ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` }
+                  : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
+              } else {
+                // Schedule for later
+                const scheduleResponse = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({
+                    companyId: company.id,
+                    content: args.content,
+                    scheduledTime: args.scheduled_time,
+                    imageUrl: postImageUrl,
+                    targetPlatform: args.target_platform || 'facebook',
+                    status: 'approved',
+                  }),
+                });
+                const schedResult = await scheduleResponse.json();
+                result = schedResult.error
+                  ? { success: false, message: `❌ Scheduling failed: ${schedResult.error}` }
+                  : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` };
+              }
+              break;
+            }
+
+            case 'update_agent_strategy': {
+              const strategyUpdate: any = {};
+              if (args.posts_per_week) strategyUpdate.posts_per_week = args.posts_per_week;
+              if (args.target_audience) strategyUpdate.target_audience = args.target_audience;
+              if (args.preferred_tone) strategyUpdate.preferred_tone = args.preferred_tone;
+              if (args.content_themes) strategyUpdate.content_themes = args.content_themes;
+              if (args.preferred_posting_days) strategyUpdate.preferred_posting_days = args.preferred_posting_days;
+              if (args.preferred_posting_time) strategyUpdate.preferred_posting_time = args.preferred_posting_time;
+              if (args.notes) strategyUpdate.notes = args.notes;
+
+              const { data: existing } = await supabase
+                .from('agent_settings')
+                .select('id')
+                .eq('company_id', company.id)
+                .maybeSingle();
+              if (existing) {
+                await supabase.from('agent_settings').update(strategyUpdate).eq('company_id', company.id);
+              } else {
+                await supabase.from('agent_settings').insert({ company_id: company.id, ...strategyUpdate });
+              }
+              result = { success: true, message: `✅ Strategy updated: ${Object.keys(strategyUpdate).join(', ')}` };
+              break;
+            }
+
+            case 'get_pending_posts': {
+              const { data: pendingPosts } = await supabase
+                .from('scheduled_posts')
+                .select('*')
+                .eq('company_id', company.id)
+                .in('status', ['pending_approval', 'draft'])
+                .order('created_at', { ascending: false })
+                .limit(10);
+              if (!pendingPosts?.length) {
+                result = { success: true, message: 'No pending posts to review! 🎉' };
+              } else {
+                const postsList = pendingPosts.map((p: any, i: number) =>
+                  `${i + 1}. ${p.content?.substring(0, 80)}...\n   📅 ${p.scheduled_time || 'No time set'} | ${p.target_platform || 'facebook'}${p.image_url ? ' | 🖼️' : ''}`
+                ).join('\n\n');
+                result = { success: true, message: `📋 ${pendingPosts.length} posts pending:\n\n${postsList}` };
+              }
+              break;
+            }
+
+            case 'review_pending_post': {
+              const { data: allPending } = await supabase
+                .from('scheduled_posts')
+                .select('*')
+                .eq('company_id', company.id)
+                .in('status', ['pending_approval', 'draft'])
+                .order('created_at', { ascending: false })
+                .limit(10);
+              const postId = args.post_id || (allPending && args.post_index ? allPending[args.post_index - 1]?.id : null);
+              if (!postId) {
+                result = { success: false, message: '❌ Could not find that post. Try get_pending_posts first.' };
+              } else if (args.action === 'approve') {
+                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', postId);
+                result = { success: true, message: '✅ Post approved and scheduled!' };
+              } else if (args.action === 'approve_and_publish') {
+                const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+                const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const post = allPending?.find((p: any) => p.id === postId);
+                if (post) {
+                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-facebook-post`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({ companyId: company.id, content: post.content, imageUrl: post.image_url }),
+                  });
+                  const pubResult = await publishResponse.json();
+                  await supabase.from('scheduled_posts').update({ status: 'published' }).eq('id', postId);
+                  result = { success: true, message: '✅ Post published immediately!' };
+                } else {
+                  result = { success: false, message: '❌ Post not found for publishing' };
+                }
+              } else if (args.action === 'edit') {
+                const editUpdate: any = {};
+                if (args.new_caption) editUpdate.content = args.new_caption;
+                if (args.new_scheduled_time) editUpdate.scheduled_time = args.new_scheduled_time;
+                if (args.new_image_url) editUpdate.image_url = args.new_image_url;
+                await supabase.from('scheduled_posts').update(editUpdate).eq('id', postId);
+                result = { success: true, message: '✅ Post updated!' };
+              } else if (args.action === 'reject') {
+                await supabase.from('scheduled_posts').update({ status: 'rejected' }).eq('id', postId);
+                result = { success: true, message: '✅ Post rejected and removed from queue.' };
+              } else {
+                result = { success: false, message: '❌ Unknown action. Use approve, edit, reject, or approve_and_publish.' };
+              }
+              break;
+            }
+
+            case 'get_hot_leads': {
+              const hoursBack = args.hours_back || 24;
+              const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+              let query = supabase
+                .from('conversations')
+                .select('customer_name, phone, platform, started_at, status, last_message_preview')
+                .eq('company_id', company.id)
+                .gte('started_at', cutoff)
+                .order('started_at', { ascending: false })
+                .limit(20);
+              if (args.platform_filter && args.platform_filter !== 'all') {
+                query = query.eq('platform', args.platform_filter);
+              }
+              const { data: leads } = await query;
+              if (!leads?.length) {
+                result = { success: true, message: `No new leads in the last ${hoursBack} hours.` };
+              } else {
+                const leadsList = leads.map((l: any, i: number) =>
+                  `${i + 1}. ${l.customer_name || 'Unknown'} (${l.phone || 'N/A'}) via ${l.platform}\n   "${l.last_message_preview?.substring(0, 60) || 'No preview'}..."`
+                ).join('\n\n');
+                result = { success: true, message: `🔥 ${leads.length} leads (last ${hoursBack}h):\n\n${leadsList}` };
+              }
+              break;
+            }
+
+            // ========== BMS TOOLS ==========
+            case 'check_stock':
+            case 'record_sale':
+            case 'update_stock':
+            case 'sales_report':
+            case 'get_order_status':
+            case 'update_order_status':
+            case 'cancel_order':
+            case 'get_customer_history':
+            case 'get_company_statistics':
+            case 'create_quotation':
+            case 'create_invoice':
+            case 'get_low_stock_items':
+            case 'record_expense':
+            case 'get_expenses':
+            case 'get_outstanding_receivables':
+            case 'get_outstanding_payables':
+            case 'profit_loss_report':
+            case 'clock_in':
+            case 'clock_out': {
+              const BMS_API_URL = Deno.env.get('BMS_API_URL');
+              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_URL || !BMS_API_SECRET) {
+                result = { success: false, message: '❌ BMS integration not configured.' };
+                break;
+              }
+              try {
+                const bmsResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                  },
+                  body: JSON.stringify({
+                    action: functionName,
+                    params: args,
+                    companyId: company.id,
+                  }),
+                });
+                const bmsResult = await bmsResponse.json();
+                if (bmsResult.success) {
+                  // Format BMS results with emoji indicators for boss
+                  let formatted = '';
+                  const d = bmsResult.data;
+                  switch (functionName) {
+                    case 'check_stock': {
+                      if (Array.isArray(d)) {
+                        formatted = d.map((p: any) => {
+                          const status = p.quantity <= 0 ? '🔴' : p.quantity <= (p.reorder_level || 5) ? '🟡' : '🟢';
+                          return `${status} ${p.name}: ${p.quantity} in stock @ ${company.currency_prefix}${p.selling_price}`;
+                        }).join('\n');
+                      } else if (d?.name) {
+                        const status = d.quantity <= 0 ? '🔴' : d.quantity <= (d.reorder_level || 5) ? '🟡' : '🟢';
+                        formatted = `${status} ${d.name}: ${d.quantity} in stock @ ${company.currency_prefix}${d.selling_price}`;
+                      } else {
+                        formatted = JSON.stringify(d);
+                      }
+                      break;
+                    }
+                    case 'record_sale':
+                      formatted = `✅ Sale recorded!\n${d.product_name || args.product_name} x${args.quantity}\nTotal: ${company.currency_prefix}${d.total_amount || 'N/A'}`;
+                      break;
+                    case 'update_stock':
+                      formatted = `✅ Stock updated for ${args.product_name}\nNew quantity: ${d.new_quantity ?? 'updated'}`;
+                      break;
+                    case 'get_low_stock_items':
+                      if (Array.isArray(d) && d.length > 0) {
+                        formatted = d.map((p: any) => `⚠️ ${p.name}: ${p.quantity} left (reorder at ${p.reorder_level})`).join('\n');
+                      } else {
+                        formatted = '✅ All stock levels are healthy!';
+                      }
+                      break;
+                    default:
+                      formatted = typeof d === 'string' ? d : JSON.stringify(d, null, 2);
+                  }
+                  result = { success: true, message: formatted };
+                } else {
+                  result = { success: false, message: `❌ BMS error: ${bmsResult.error || 'Unknown error'}` };
+                }
+              } catch (bmsErr: any) {
+                console.error(`[BOSS-BMS] ${functionName} error:`, bmsErr);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr.message}` };
+              }
+              break;
+            }
+
+            case 'generate_document': {
+              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+              try {
+                const docResponse = await fetch(`${SUPABASE_URL}/functions/v1/generate-document`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({
+                    companyId: company.id,
+                    documentType: args.document_type,
+                    data: args.data,
+                    bossPhone: company.boss_phone,
+                  }),
+                });
+                const docResult = await docResponse.json();
+                result = docResult.success
+                  ? { success: true, message: `✅ ${args.document_type.replace(/_/g, ' ').toUpperCase()} PDF generated and sent to your WhatsApp!` }
+                  : { success: false, message: `❌ Document generation failed: ${docResult.error || 'Unknown error'}` };
+              } catch (docErr: any) {
+                result = { success: false, message: `❌ Document generation error: ${docErr.message}` };
+              }
+              break;
+            }
+
+            case 'list_product_images': {
+              const category = args.category || 'products';
+              const { data: mediaItems } = await supabase
+                .from('company_media')
+                .select('file_name, description, tags, category')
+                .eq('company_id', company.id)
+                .eq('category', category)
+                .order('created_at', { ascending: false })
+                .limit(20);
+              if (!mediaItems?.length) {
+                result = { success: true, message: `No ${category} images found in the media library.` };
+              } else {
+                const list = mediaItems.map((m: any, i: number) =>
+                  `${i + 1}. ${m.file_name}${m.description ? ` - ${m.description}` : ''}${m.tags?.length ? ` [${m.tags.join(', ')}]` : ''}`
+                ).join('\n');
+                result = { success: true, message: `📸 ${mediaItems.length} ${category} images:\n\n${list}` };
+              }
+              break;
+            }
+
+            case 'generate_image':
+            case 'edit_image': {
+              const imageSettings = Array.isArray(company.image_generation_settings)
+                ? company.image_generation_settings[0]
+                : company.image_generation_settings;
+
+              if (!imageSettings?.enabled) {
+                result = { success: false, message: 'Image generation is not enabled for your company. Please enable it in the admin settings first.' };
+                break;
+              }
+
+              const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+              const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
+              const imgPrompt = functionName === 'generate_image' ? args.prompt : args.instructions;
+
+              const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
+                body: JSON.stringify({
+                  companyId: company.id,
+                  customerPhone: '',
+                  conversationId: null,
+                  prompt: imgPrompt,
+                  messageType,
+                }),
+              });
+
+              if (!imageGenResponse.ok) {
+                const errorText = await imageGenResponse.text();
+                console.error(`[BOSS-TOOL-${functionName}] Error:`, errorText);
+                result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
+              } else {
+                const imageGenResult = await imageGenResponse.json();
+                result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                if (imageGenResult.imageUrl) {
+                  toolImageUrl = imageGenResult.imageUrl;
+                  toolMediaMessages.push({
+                    body: imageGenResult.message || '🎨 Here is your generated image!',
+                    imageUrl: imageGenResult.imageUrl
+                  });
+                }
+              }
+              break;
+            }
+
+            case 'show_image_gallery': {
+              const { data: recentImages } = await supabase
+                .from('generated_images')
+                .select('prompt, image_url, created_at, status')
+                .eq('company_id', company.id)
+                .order('created_at', { ascending: false })
+                .limit(5);
+              if (!recentImages?.length) {
+                result = { success: true, message: 'No images generated yet. Ask me to create one!' };
+              } else {
+                const gallery = recentImages.map((img: any, i: number) =>
+                  `${i + 1}. "${img.prompt.substring(0, 60)}..." (${img.status}) - ${new Date(img.created_at).toLocaleDateString()}`
+                ).join('\n');
+                result = { success: true, message: `🖼️ Recent images:\n\n${gallery}` };
+                // Send the most recent image
+                if (recentImages[0]?.image_url) {
+                  toolImageUrl = recentImages[0].image_url;
+                  toolMediaMessages.push({
+                    body: '🖼️ Your most recent image:',
+                    imageUrl: recentImages[0].image_url
+                  });
+                }
+              }
+              break;
+            }
+
+            default:
+              result = { success: false, message: `Unknown tool: ${functionName}` };
+          }
+
+          // Push tool result as a message for multi-round context
+          conversationMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: typeof result.message === 'string' ? result.message : JSON.stringify(result)
+          });
+
+        } catch (error) {
+          console.error(`Tool execution error for ${functionName}:`, error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          conversationMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `❌ Error: ${errorMsg}`
+          });
+        }
+      }
+
+      // If this was the last round and we still have tool calls, use whatever text we have
+      if (round === MAX_TOOL_ROUNDS - 1) {
+        aiResponse = aiResponse || 'I completed the requested operations. Let me know if you need anything else!';
+        console.log(`[BOSS-CHAT] Max rounds reached, returning with current response`);
+      }
+    }
+
     console.log('Final AI response:', aiResponse.substring(0, 100) + '...');
 
     // Log management conversation
@@ -1243,7 +1684,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
       responsePayload.mediaMessages = toolMediaMessages;
     }
-    
+
     return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
