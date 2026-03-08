@@ -32,7 +32,7 @@ async function analyzeImageBase64(base64: string, mimeType: string): Promise<{ d
           { inlineData: { mimeType, data: base64 } }
         ]
       }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 500 },
+      generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
     }),
   });
 
