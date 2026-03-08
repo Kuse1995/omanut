@@ -29,6 +29,40 @@
 - Authenticated via BMS_API_SECRET
 - Sends WhatsApp notifications to boss and/or customer via Twilio
 
+# Phase 2: Operations, Finance & HR — COMPLETED ✅
+
+## What Was Built
+
+### bms-agent/index.ts — 10 new actions added
+- `get_low_stock_items` — products below reorder level
+- `record_expense` — log business expenses
+- `get_expenses` — expense history with filters
+- `get_outstanding_receivables` — unpaid invoices
+- `get_outstanding_payables` — pending vendor bills
+- `profit_loss_report` — P&L with date range
+- `clock_in` — employee attendance start
+- `clock_out` — employee attendance end
+- `create_contact` — website contact form submissions
+- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
+- Added `tracking_number` to `update_order_status`
+
+### boss-chat/index.ts — 9 new tool definitions + handlers
+- `get_low_stock_items` — inventory warnings
+- `record_expense` — expense tracking
+- `get_expenses` — expense reporting
+- `get_outstanding_receivables` — accounts receivable
+- `get_outstanding_payables` — accounts payable
+- `profit_loss_report` — financial performance
+- `clock_in` / `clock_out` — HR attendance
+- Updated `sales_report` tool to use `start_date`/`end_date`
+- Updated system prompt with Finance & HR capabilities
+
+### whatsapp-messages/index.ts — Customer-facing
+- Added `create_contact` tool definition + handler
+- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+
+### bms-callback/index.ts — New event
+- Added `new_contact` event handler (notifies boss of website inquiries)
+
 ## Next Phases (Pending)
-- Phase 2: Operations (purchase orders, expenses, receivables/payables)
-- Phase 3: Full Coverage (HR, agents/distributors, assets, website/content)
+- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
