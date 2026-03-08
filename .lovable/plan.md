@@ -1,67 +1,38 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Migrate Remaining Edge Functions from Lovable AI Gateway to Direct Gemini API
 
-## Problem Analysis
+## Problem
+You already migrated most functions to use the shared `gemini-client.ts` (which calls Gemini directly via `GEMINI_API_KEY`), but two functions still call `ai.gateway.lovable.dev` with `LOVABLE_API_KEY` -- which is why you're hitting 402 "not enough credits" errors.
 
-Two issues identified in the `demo-session` edge function:
+## Functions Still Using Lovable Gateway
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+| Function | Locations | Description |
+|----------|-----------|-------------|
+| `whatsapp-messages/index.ts` | 4 `fetch()` calls (lines ~220, ~765, ~1860, ~3061) | Main WhatsApp handler -- routing, drafts, AI reply, tool follow-up |
+| `demo-session/index.ts` | 1 `fetch()` call (line ~668) | Demo session AI |
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+**Already migrated** (no changes needed): `boss-chat`, `meta-webhook`, `research-company`, `ai-playground`, `supervisor-agent`, and 13 others.
 
 ## Changes
 
-### File: `supabase/functions/demo-session/index.ts`
+### 1. `supabase/functions/whatsapp-messages/index.ts`
 
-**1. Tighten handoff evaluation prompt**
+- Add `import { geminiChat } from "../_shared/gemini-client.ts";` at the top
+- Replace all 4 direct `fetch('https://ai.gateway.lovable.dev/...')` calls with `geminiChat()`:
+  - **Line ~220** (routeToAgent fallback): Replace Lovable gateway fetch with `geminiChat({ model: routingModel, messages, temperature, max_tokens })`
+  - **Line ~765** (draft generation): Replace with `geminiChat({ model, messages, temperature, max_tokens })`
+  - **Line ~1860** (main AI reply): Replace with `geminiChat({ model: selectedModel, messages, temperature, max_tokens, tools, tool_choice })` 
+  - **Line ~3061** (tool follow-up): Replace with `geminiChat({ model: selectedModel, messages, temperature, max_tokens })`
+- Remove the `LOVABLE_API_KEY` checks/references that are no longer needed (the `gemini-client` handles auth internally)
+- Fix the misleading error labels ("Kimi AI error" -> "Gemini API error")
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+### 2. `supabase/functions/demo-session/index.ts`
 
-**2. Create tickets and queue items on handoff**
+- Add `import { geminiChat } from "../_shared/gemini-client.ts";`
+- Replace the Lovable gateway fetch (line ~668) with `geminiChat({ model, messages, temperature })`
+- Remove `LOVABLE_API_KEY` reference
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
-
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
-
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
-
-**3. Skip evaluation on short conversations**
-
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
-
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+## Result
+All AI calls will route through `GEMINI_API_KEY` (direct to Google) instead of `LOVABLE_API_KEY` (Lovable Gateway), eliminating the 402 credit errors completely.
 
