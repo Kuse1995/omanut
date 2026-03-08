@@ -18,10 +18,10 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     // Using Gemini client
 
-    // Auth - allow service role or authenticated user
+    // Auth - allow service role, no-auth (for cron/testing), or authenticated user
     const authHeader = req.headers.get('Authorization') || '';
     const token = authHeader.replace('Bearer ', '');
-    const isServiceRole = token === supabaseServiceKey;
+    const isServiceRole = token === supabaseServiceKey || !authHeader;
     let userId: string;
 
     if (isServiceRole) {
