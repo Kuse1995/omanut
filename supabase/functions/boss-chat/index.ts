@@ -1957,8 +1957,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
 
             case 'generate_image':
-            case 'edit_image':
-            case 'show_image_gallery': {
+            case 'edit_image': {
               // Check if image generation is enabled
               const imageSettings = Array.isArray(company.image_generation_settings)
                 ? company.image_generation_settings[0]
