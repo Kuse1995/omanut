@@ -1,39 +1,67 @@
 
 
-# Fix Meta Webhook AI: Stop Consultant-Style Replies
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Root Cause
-The system prompt (lines 360-367) is correct, but the **user-facing prompt** (lines 856-861) undermines it:
+## Problem Analysis
 
-```
-messenger: `A customer sent a direct message on Facebook Messenger:\n\n"${userMessage}"\n\nWrite a helpful reply.`
-```
+Two issues identified in the `demo-session` edge function:
 
-The phrase "Write a helpful reply" makes the model think it's being asked to **advise on writing**, not to **be the business replying**. This is why it outputs "When a customer says hello, the best approach is..." instead of actually greeting the customer.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-## Fix
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-### `supabase/functions/meta-webhook/index.ts`
+## Changes
 
-**Lines 856-861** — Rewrite the `contextPrompts` to frame the AI as the business directly replying, not writing about replying:
+### File: `supabase/functions/demo-session/index.ts`
 
-```typescript
-const contextPrompts: Record<string, string> = {
-  comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
-  messenger: `Customer says: "${userMessage}"\n\nReply to them now.`,
-  instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
-  instagram_dm: `Customer says: "${userMessage}"\n\nReply to them now.`,
-};
-```
+**1. Tighten handoff evaluation prompt**
 
-Key changes:
-- Remove "A user named..." / "A customer sent..." framing — too detached
-- Change "Write a helpful reply" → "Reply to them now" — direct action, not meta-instruction
-- Shorter prompts reduce the model's tendency to elaborate
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-Then **redeploy** the function.
+**2. Create tickets and queue items on handoff**
 
-| File | Change |
-|------|--------|
-| `supabase/functions/meta-webhook/index.ts` | Rewrite user prompts (lines 856-861) to be direct reply instructions |
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
