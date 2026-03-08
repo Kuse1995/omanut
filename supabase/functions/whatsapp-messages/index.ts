@@ -4046,7 +4046,7 @@ serve(async (req) => {
             
             // Call boss-chat function
             const { data: bossData, error: bossError } = await supabase.functions.invoke('boss-chat', {
-              body: { From, Body, ProfileName: formData.get('ProfileName') }
+              body: { From, Body, ProfileName: formData.get('ProfileName'), companyId: company.id }
             });
             
             if (bossError || !bossData?.response) {
