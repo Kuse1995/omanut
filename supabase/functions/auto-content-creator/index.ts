@@ -132,26 +132,18 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const imageResponse = await geminiChat({
-      model: 'gemini-2.5-flash-image',
-      messages: [{ role: 'user', content: imagePrompt }],
-      modalities: ['image', 'text'],
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
+      model: 'gemini-2.0-flash-exp',
+      prompt: imagePrompt,
     });
 
-    if (!imageResponse.ok) {
-      const errBody = await imageResponse.text();
-      console.error(`Image generation failed (${imageResponse.status}):`, errBody);
-      throw new Error(`Image generation failed: ${imageResponse.status}`);
-    }
-
-    const imageData = await imageResponse.json();
-    const base64Image = imageData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    console.log('Image generation result:', imageBase64 ? 'got image' : 'no image', imageText?.substring(0, 50));
 
     let finalImageUrl: string | null = null;
 
-    if (base64Image) {
+    if (imageBase64) {
       // Extract base64 data and upload to storage
-      const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
       
       const filePath = `auto-content/${company_id}/${crypto.randomUUID()}.png`;
