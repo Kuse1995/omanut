@@ -848,7 +848,7 @@ INSTRUCTIONS:
           const idx = parseInt(numMatch[1], 10) - 1;
           if (idx >= 0 && idx < candidates.length) {
             console.log(`[PRODUCT-SELECT] Vision matched product #${idx + 1}: ${candidates[idx].file_name}`);
-            return candidates[idx];
+            return { product: candidates[idx], bmsImageUrls };
           }
         }
         const matched = candidates.find((img: ProductImage) => aiChoice.includes(img.id));
