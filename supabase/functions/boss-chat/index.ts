@@ -1284,12 +1284,47 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
 
               if (args.publish_now) {
-                // Publish immediately
-                const publishFn = args.target_platform === 'instagram' ? 'publish-meta-post' : 'publish-facebook-post';
-                const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/${publishFn}`, {
+                // Publish immediately: insert to scheduled_posts then publish via publish-meta-post
+                const targetPlatform = args.target_platform || 'facebook';
+                
+                // Step 1: Get page_id from meta_credentials
+                const { data: metaCred } = await supabase
+                  .from('meta_credentials')
+                  .select('page_id')
+                  .eq('company_id', company.id)
+                  .limit(1)
+                  .maybeSingle();
+                
+                if (!metaCred?.page_id) {
+                  result = { success: false, message: '❌ No Meta page connected. Please connect your Facebook/Instagram page first.' };
+                  break;
+                }
+                
+                // Step 2: Insert scheduled_posts row with status='approved'
+                const { data: insertedPost, error: insertErr } = await supabase
+                  .from('scheduled_posts')
+                  .insert({
+                    company_id: company.id,
+                    page_id: metaCred.page_id,
+                    content: args.content,
+                    image_url: postImageUrl,
+                    target_platform: targetPlatform,
+                    status: 'approved',
+                    scheduled_time: new Date().toISOString(),
+                  })
+                  .select('id')
+                  .single();
+                
+                if (insertErr || !insertedPost) {
+                  result = { success: false, message: `❌ Failed to create post: ${insertErr?.message || 'Unknown error'}` };
+                  break;
+                }
+                
+                // Step 3: Call publish-meta-post with the post_id
+                const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                  body: JSON.stringify({ companyId: company.id, content: args.content, imageUrl: postImageUrl }),
+                  body: JSON.stringify({ post_id: insertedPost.id }),
                 });
                 const publishResult = await publishResponse.json();
                 result = publishResult.success !== false
