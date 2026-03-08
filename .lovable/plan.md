@@ -1,81 +1,67 @@
 
 
-# Fix AI Repeating Greetings on Every Message
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-The AI keeps repeating greeting text because conversation history is passed as a single `user`-role message containing raw transcript text. The model doesn't recognize which parts are its own previous replies, so it "resets" and greets again with each new message.
+## Problem Analysis
 
-## Root Cause
-In `supabase/functions/whatsapp-messages/index.ts` (line ~1437-1447):
+Two issues identified in the `demo-session` edge function:
 
-```text
-// Current: entire transcript dumped as one "user" message
-messages = [
-  { role: 'system', content: instructions },
-  { role: 'user', content: 'Previous conversation:\nCustomer: hi\nAssistant: Welcome to Finch!...' },  // ← AI can't tell this is its own output
-  { role: 'user', content: 'send me the direct purchase link' }
-]
-```
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-The model sees everything as user input, loses context of what it already said, and re-greets.
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-## Fix
+## Changes
 
-### `supabase/functions/whatsapp-messages/index.ts`
+### File: `supabase/functions/demo-session/index.ts`
 
-**Change 1** — Replace the transcript-as-single-message approach (lines ~1437-1453) with properly structured `user`/`assistant` alternating messages parsed from the transcript:
+**1. Tighten handoff evaluation prompt**
 
-```typescript
-// Parse transcript into proper user/assistant messages
-const transcriptLines = conversation.transcript.split('\n').filter((line: string) => line.trim());
-const parsedMessages: Array<{ role: string; content: string }> = [];
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-for (const line of transcriptLines) {
-  const customerMatch = line.match(/^Customer:\s*(.+)/i);
-  const assistantMatch = line.match(/^Assistant:\s*(.+)/i);
-  if (customerMatch) {
-    parsedMessages.push({ role: 'user', content: customerMatch[1] });
-  } else if (assistantMatch) {
-    parsedMessages.push({ role: 'assistant', content: assistantMatch[1] });
-  }
-}
+**2. Create tickets and queue items on handoff**
 
-// Take last 20 messages for context
-const recentMessages = parsedMessages.slice(-20);
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-const messages = [
-  { role: 'system', content: instructions },
-  ...recentMessages,
-  // Add current message (only if not already the last parsed message)
-];
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-// Add current user message + image context
-const fullUserMessage = imageAnalysisContext
-  ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}`
-  : userMessage;
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-// Avoid duplicating if transcript already contains this message
-const lastParsed = recentMessages[recentMessages.length - 1];
-if (!lastParsed || lastParsed.role !== 'user' || lastParsed.content !== userMessage) {
-  messages.push({ role: 'user', content: fullUserMessage });
-}
-```
+**3. Skip evaluation on short conversations**
 
-**Change 2** — Add an explicit anti-repetition directive to the system prompt (around line ~1402, after the existing "NO REPETITIVE QUESTIONS" block):
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-```text
-13. NEVER REPEAT YOUR GREETING:
-    - If you already greeted the customer in this conversation, do NOT greet again
-    - Check conversation history — if you see your own "Welcome" or greeting message, skip the greeting
-    - Jump straight to answering the customer's current question
-```
+### Summary of behavior after fix
 
-This ensures:
-- The AI sees its own previous replies as `assistant` messages (proper chat format)
-- The model naturally continues the conversation instead of restarting
-- An explicit instruction reinforces no greeting repetition
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-| File | Change |
-|------|--------|
-| `supabase/functions/whatsapp-messages/index.ts` | Parse transcript into proper user/assistant message roles; add anti-greeting-repetition instruction |
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
