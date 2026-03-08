@@ -37,6 +37,41 @@ async function callBMS(action: string, params: Record<string, any>): Promise<{ s
   }
 }
 
+function respond(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const AVAILABLE_ACTIONS = [
+  "check_stock",
+  "record_sale",
+  "generate_payment_link",
+  "list_products",
+  "get_product_details",
+  "get_product_variants",
+  "update_stock",
+  "sales_report",
+  "create_order",
+  "get_order_status",
+  "update_order_status",
+  "cancel_order",
+  "get_customer_history",
+  "get_company_statistics",
+  "create_quotation",
+  "create_invoice",
+  "get_low_stock_items",
+  "record_expense",
+  "get_expenses",
+  "get_outstanding_receivables",
+  "get_outstanding_payables",
+  "profit_loss_report",
+  "clock_in",
+  "clock_out",
+  "create_contact",
+];
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -46,10 +81,7 @@ Deno.serve(async (req) => {
     const { action, params = {} } = await req.json();
 
     if (!action) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Missing 'action' field" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return respond({ success: false, error: "Missing 'action' field" }, 400);
     }
 
     console.log(`[BMS-AGENT] Action: ${action}, Params:`, JSON.stringify(params));
@@ -78,6 +110,8 @@ Deno.serve(async (req) => {
           payment_method: params.payment_method || null,
           customer_name: params.customer_name || null,
           customer_phone: params.customer_phone || null,
+          customer_email: params.customer_email || null,
+          notes: params.notes || null,
           company_id: params.company_id,
         });
         break;
@@ -99,6 +133,9 @@ Deno.serve(async (req) => {
 
       case "list_products": {
         result = await callBMS("list_products", {
+          category: params.category || null,
+          status: params.status || null,
+          limit: params.limit || null,
           company_id: params.company_id,
         });
         break;
@@ -108,13 +145,11 @@ Deno.serve(async (req) => {
         if (!params.product_name) {
           return respond({ success: false, error: "product_name is required" }, 400);
         }
-        // Fetch from BMS — the BMS bridge returns product info including image_urls when available
         result = await callBMS("get_product_details", {
           product_name: params.product_name,
           company_id: params.company_id,
         });
 
-        // If BMS doesn't support get_product_details yet, fall back to check_stock
         if (!result.success && result.error?.includes("Unknown action")) {
           console.log("[BMS-AGENT] get_product_details not supported, falling back to check_stock");
           result = await callBMS("check_stock", {
@@ -141,10 +176,9 @@ Deno.serve(async (req) => {
 
       case "sales_report": {
         result = await callBMS("sales_report", {
-          period: params.period || "today",
-          date_from: params.date_from || null,
-          date_to: params.date_to || null,
-          group_by: params.group_by || null,
+          start_date: params.start_date || params.date_from || null,
+          end_date: params.end_date || params.date_to || null,
+          limit: params.limit || null,
           company_id: params.company_id,
         });
         break;
@@ -200,6 +234,7 @@ Deno.serve(async (req) => {
           order_id: params.order_id,
           order_number: params.order_number || null,
           status: params.status,
+          tracking_number: params.tracking_number || null,
           notes: params.notes || null,
           company_id: params.company_id,
         });
@@ -226,8 +261,6 @@ Deno.serve(async (req) => {
         result = await callBMS("get_customer_history", {
           customer_name: params.customer_name || null,
           customer_phone: params.customer_phone || null,
-          date_from: params.date_from || null,
-          date_to: params.date_to || null,
           company_id: params.company_id,
         });
         break;
@@ -251,7 +284,7 @@ Deno.serve(async (req) => {
           client_phone: params.client_phone || null,
           notes: params.notes || null,
           tax_rate: params.tax_rate || null,
-          validity_days: params.validity_days || null,
+          valid_until: params.valid_until || null,
           company_id: params.company_id,
         });
         break;
@@ -269,7 +302,108 @@ Deno.serve(async (req) => {
           due_date: params.due_date || null,
           tax_rate: params.tax_rate || null,
           notes: params.notes || null,
-          payment_terms: params.payment_terms || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      // ========== PHASE 2: NEW ACTIONS ==========
+
+      case "get_low_stock_items": {
+        result = await callBMS("get_low_stock_items", {
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "record_expense": {
+        if (!params.category || !params.vendor_name || !params.amount_zmw) {
+          return respond({ success: false, error: "category, vendor_name, and amount_zmw are required" }, 400);
+        }
+        result = await callBMS("record_expense", {
+          category: params.category,
+          vendor_name: params.vendor_name,
+          amount_zmw: params.amount_zmw,
+          date_incurred: params.date_incurred || null,
+          notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_expenses": {
+        result = await callBMS("get_expenses", {
+          start_date: params.start_date || null,
+          end_date: params.end_date || null,
+          category: params.category || null,
+          limit: params.limit || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_outstanding_receivables": {
+        result = await callBMS("get_outstanding_receivables", {
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_outstanding_payables": {
+        result = await callBMS("get_outstanding_payables", {
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "profit_loss_report": {
+        if (!params.start_date || !params.end_date) {
+          return respond({ success: false, error: "start_date and end_date are required" }, 400);
+        }
+        result = await callBMS("profit_loss_report", {
+          start_date: params.start_date,
+          end_date: params.end_date,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "clock_in": {
+        if (!params.employee_name && !params.employee_id) {
+          return respond({ success: false, error: "employee_name or employee_id is required" }, 400);
+        }
+        result = await callBMS("clock_in", {
+          employee_name: params.employee_name || null,
+          employee_id: params.employee_id || null,
+          notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "clock_out": {
+        if (!params.employee_name && !params.employee_id) {
+          return respond({ success: false, error: "employee_name or employee_id is required" }, 400);
+        }
+        result = await callBMS("clock_out", {
+          employee_name: params.employee_name || null,
+          employee_id: params.employee_id || null,
+          notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "create_contact": {
+        if (!params.sender_name || !params.sender_email || !params.message) {
+          return respond({ success: false, error: "sender_name, sender_email, and message are required" }, 400);
+        }
+        result = await callBMS("create_contact", {
+          sender_name: params.sender_name,
+          sender_email: params.sender_email,
+          message: params.message,
+          sender_phone: params.sender_phone || null,
+          source_page: params.source_page || null,
           company_id: params.company_id,
         });
         break;
@@ -279,24 +413,7 @@ Deno.serve(async (req) => {
         return respond({
           success: false,
           error: `Unknown action: ${action}`,
-          available_actions: [
-            "check_stock",
-            "record_sale",
-            "generate_payment_link",
-            "list_products",
-            "get_product_details",
-            "get_product_variants",
-            "update_stock",
-            "sales_report",
-            "create_order",
-            "get_order_status",
-            "update_order_status",
-            "cancel_order",
-            "get_customer_history",
-            "get_company_statistics",
-            "create_quotation",
-            "create_invoice",
-          ],
+          available_actions: AVAILABLE_ACTIONS,
         }, 400);
     }
 
@@ -310,10 +427,3 @@ Deno.serve(async (req) => {
     );
   }
 });
-
-function respond(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}

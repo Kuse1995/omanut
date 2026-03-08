@@ -184,6 +184,12 @@ Deno.serve(async (req) => {
         break;
       }
 
+      case "new_contact": {
+        const { name, email, subject, message: contactMessage } = data || {};
+        message = `📩 NEW CONTACT INQUIRY\n\n👤 ${name || "Unknown"}\n📧 ${email || "N/A"}${subject ? `\n📋 Subject: ${subject}` : ""}\n\n💬 ${contactMessage || "No message"}`;
+        break;
+      }
+
       default:
         console.log(`[BMS-CALLBACK] Unknown event: ${event}`);
         return new Response(
