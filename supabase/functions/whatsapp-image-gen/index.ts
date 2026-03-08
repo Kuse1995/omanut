@@ -1123,12 +1123,12 @@ serve(async (req) => {
     switch (messageType) {
       case 'generate': {
         // === 6-AGENT PIPELINE ===
-        const productImage = await selectProductImageForPrompt(supabase, companyId, prompt);
+        const { product: productImage, bmsImageUrls } = await selectProductImageForPrompt(supabase, companyId, prompt);
         
         const result = await runImagePipeline(
           supabase, supabaseUrl, companyId,
           prompt, company.name, company.business_type || 'business',
-          productImage
+          productImage, 2, bmsImageUrls
         );
         
         imageUrl = result.imageUrl;
