@@ -61,6 +61,8 @@ const AVAILABLE_ACTIONS = [
   "get_company_statistics",
   "create_quotation",
   "create_invoice",
+  "list_quotations",
+  "list_invoices",
   "get_low_stock_items",
   "record_expense",
   "get_expenses",
@@ -302,6 +304,30 @@ Deno.serve(async (req) => {
           due_date: params.due_date || null,
           tax_rate: params.tax_rate || null,
           notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "list_quotations": {
+        result = await callBMS("list_quotations", {
+          client_name: params.client_name || null,
+          status: params.status || null,
+          start_date: params.start_date || null,
+          end_date: params.end_date || null,
+          limit: params.limit || 10,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "list_invoices": {
+        result = await callBMS("list_invoices", {
+          client_name: params.client_name || null,
+          status: params.status || null,
+          start_date: params.start_date || null,
+          end_date: params.end_date || null,
+          limit: params.limit || 10,
           company_id: params.company_id,
         });
         break;

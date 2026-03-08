@@ -379,18 +379,23 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - Use get_outstanding_payables to see pending bills (what you owe)
    - Use profit_loss_report to generate P&L statements for any date range
     - Use create_quotation and create_invoice for formal business documents
+    - Use list_quotations and list_invoices to retrieve past documents by client name
     - Use generate_document to create BEAUTIFUL branded PDF documents and send them via WhatsApp
+
+12. **HR & Attendance (BMS)**: You can track employee attendance.
+    - Use clock_in when the boss says someone has arrived or started work
+    - Use clock_out when an employee is leaving or finished for the day
+    - The BMS automatically calculates work hours
 
 13. **Document Generation (PDF)**: You can create professional branded PDF documents!
     - Use generate_document to turn ANY report or document into a polished PDF
     - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-    - WORKFLOW: First fetch the data (e.g., call sales_report or create_invoice), then pass the result to generate_document
-    - When the boss says "send me the sales report as PDF" or "I need an invoice PDF" - fetch data THEN generate_document
+    - WORKFLOW: First fetch the data, then pass the result to generate_document
+    - "send me the sales report as PDF" → call sales_report → then generate_document with the result
+    - "send me the last quotation for X as PDF" → call list_quotations with client_name → then generate_document with quotation type and the data
     - PDFs include company branding, header, footer, and professional formatting
     - PDFs are automatically sent to the boss via WhatsApp
-   - Use clock_in when the boss says someone has arrived or started work
-   - Use clock_out when an employee is leaving or finished for the day
-   - The BMS automatically calculates work hours
+    - NEVER dump raw JSON to the boss. Always format data nicely or generate a PDF.
 
 1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
@@ -876,6 +881,70 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               tax_rate: { type: "number", description: "Tax rate percentage" }
             },
             required: ["client_name", "items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_quotations",
+          description: "List past quotations from BMS. Use when the boss asks to see, find, or retrieve an existing quotation. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_invoices",
+          description: "List past invoices from BMS. Use when the boss asks to see, find, or retrieve an existing invoice. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_quotations",
+          description: "List past quotations from BMS. Use when the boss asks to see, find, or retrieve an existing quotation — especially before generating a PDF. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_invoices",
+          description: "List past invoices from BMS. Use when the boss asks to see, find, or retrieve an existing invoice. Can filter by client name.",
+          parameters: {
+            type: "object",
+            properties: {
+              client_name: { type: "string", description: "Filter by client name" },
+              status: { type: "string", description: "Filter by status" },
+              limit: { type: "integer", description: "Max results (default 10)" }
+            },
+            required: []
           }
         }
       },
@@ -1619,7 +1688,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 if (bmsData.success) {
                   const d = bmsData.data;
                   const summary = d?.summary ? `\n\n📈 Summary:\n💰 Revenue: ${company.currency_prefix || 'K'}${d.summary.total_revenue || 0}\n📦 Quantity: ${d.summary.total_quantity || 0}\n🛒 Sales: ${d.summary.sales_count || 0}` : '';
-                  result = { success: true, message: `📊 Sales Report:${summary}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                  const salesItems = Array.isArray(d?.data) ? d.data : (Array.isArray(d?.sales) ? d.sales : []);
+                  const salesList = salesItems.length > 0
+                    ? '\n\n' + salesItems.slice(0, 15).map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || s.amount || 0}${s.customer_name ? ` (${s.customer_name})` : ''}`).join('\n')
+                    : '';
+                  result = { success: true, message: `📊 Sales Report:${summary}${salesList}` };
                 } else {
                   result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
                 }
@@ -1701,7 +1774,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `👤 Customer History:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const hist = bmsData.data;
+                  const salesList = Array.isArray(hist?.sales) && hist.sales.length > 0
+                    ? hist.sales.map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || 0} (${s.date || s.created_at?.slice(0, 10) || 'N/A'})`).join('\n')
+                    : 'No sales found';
+                  const ordersList = Array.isArray(hist?.orders) && hist.orders.length > 0
+                    ? hist.orders.map((o: any, i: number) => `${i + 1}. #${o.order_number || 'N/A'} — ${o.status || 'pending'} — ${company.currency_prefix || 'K'}${o.total_amount || 0}`).join('\n')
+                    : 'No orders found';
+                  result = { success: true, message: `👤 Customer History: ${args.customer_name || args.customer_phone}\n\n🛒 Sales (${hist?.total_sales || 0}):\n${salesList}\n\n📦 Orders (${hist?.total_orders || 0}):\n${ordersList}\n\n💰 Total Spent: ${company.currency_prefix || 'K'}${hist?.total_spent || 0}` };
                 } else {
                   result = { success: false, message: `❌ Customer lookup failed: ${bmsData.error || 'Unknown error'}` };
                 }
@@ -1721,7 +1801,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `📊 Company Statistics:\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const stats = bmsData.data;
+                  const lines = Object.entries(stats).map(([key, val]) => {
+                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+                    return `• ${label}: ${typeof val === 'number' && key.includes('revenue') ? `${company.currency_prefix || 'K'}${val}` : val}`;
+                  }).join('\n');
+                  result = { success: true, message: `📊 Company Statistics:\n\n${lines}` };
                 } else {
                   result = { success: false, message: `❌ Statistics failed: ${bmsData.error || 'Unknown error'}` };
                 }
@@ -1770,6 +1855,66 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               } catch (err) {
                 console.error('[BOSS-BMS] create_invoice error:', err);
                 result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'list_quotations':
+            case 'list_invoices': {
+              const isQuotation = functionName === 'list_quotations';
+              const action = isQuotation ? 'list_quotations' : 'list_invoices';
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action, params: { client_name: args.client_name, status: args.status, limit: args.limit, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const items = Array.isArray(bmsData.data?.data) ? bmsData.data.data : (Array.isArray(bmsData.data) ? bmsData.data : []);
+                  if (items.length === 0) {
+                    result = { success: true, message: `📋 No ${isQuotation ? 'quotations' : 'invoices'} found${args.client_name ? ` for "${args.client_name}"` : ''}.` };
+                  } else {
+                    const label = isQuotation ? 'Quotations' : 'Invoices';
+                    const list = items.map((item: any, i: number) => {
+                      const num = item.quotation_number || item.invoice_number || item.reference || `#${i + 1}`;
+                      const client = item.client_name || item.customer_name || 'Unknown';
+                      const total = item.total_amount || item.total || 0;
+                      const date = item.created_at?.slice(0, 10) || item.date || '';
+                      const status = item.status || '';
+                      return `${i + 1}. 📄 ${num} — ${client}\n   💰 ${currency}${total} | 📅 ${date}${status ? ` | ${status}` : ''}`;
+                    }).join('\n\n');
+                    result = { success: true, message: `📋 ${label}${args.client_name ? ` for "${args.client_name}"` : ''}:\n\n${list}` };
+                  }
+                } else {
+                  result = { success: false, message: `❌ ${isQuotation ? 'Quotation' : 'Invoice'} lookup failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error(`[BOSS-BMS] ${action} error:`, err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'generate_document': {
+              try {
+                const docRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ document_type: args.document_type, data: args.data, company_id: company.id, send_whatsapp: true }),
+                });
+                const docData = await docRes.json();
+                if (docData.success) {
+                  result = { success: true, message: `📄 ${args.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} PDF generated!\n\n${docData.whatsapp_sent ? '✅ Sent to your WhatsApp' : '📎 Download: ' + docData.pdf_url}` };
+                  if (docData.pdf_url) {
+                    toolMediaMessages.push({ body: docData.message, imageUrl: docData.pdf_url });
+                  }
+                } else {
+                  result = { success: false, message: `❌ PDF generation failed: ${docData.error}` };
+                }
+              } catch (err) {
+                console.error('[BOSS-TOOL] generate_document error:', err);
+                result = { success: false, message: `❌ Document generation error: ${err instanceof Error ? err.message : String(err)}` };
               }
               break;
             }
