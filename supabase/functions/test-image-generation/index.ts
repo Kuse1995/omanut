@@ -193,7 +193,7 @@ serve(async (req) => {
     // Using Gemini client
 
     let enhancedPrompt: string;
-    let aiRequestBody: any;
+    let inputImageUrls: string[] = [];
 
     if (productImage && productImageUrl) {
       // PRODUCT-ANCHORED MODE
@@ -223,75 +223,37 @@ ${context}
 
 Place THIS EXACT product into the requested environment while preserving ALL branding elements.`;
 
-      aiRequestBody = {
-        model: "gemini-3-pro-image-preview",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: enhancedPrompt },
-              { type: "image_url", image_url: { url: productImageUrl } }
-            ]
-          }
-        ],
-        modalities: ["image", "text"]
-      };
+      inputImageUrls = [productImageUrl];
     } else {
       // TEXT-ONLY MODE
       enhancedPrompt = context 
         ? `${context}. User request: ${prompt}` 
-        : prompt;
-      
-      aiRequestBody = {
-        model: "gemini-3-pro-image-preview",
-        messages: [
-          {
-            role: "user",
-            content: `Generate a professional, high-quality image for a business: ${enhancedPrompt}`
-          }
-        ],
-        modalities: ["image", "text"]
-      };
+        : `Generate a professional, high-quality image for a business: ${prompt}`;
     }
 
     console.log(`[test-image-generation] Enhanced prompt (first 300 chars): ${enhancedPrompt.substring(0, 300)}`);
 
-    const aiResponse = await geminiChat(aiRequestBody);
+    try {
+      const { imageBase64, text: imageText } = await geminiImageGenerate({
+        model: 'gemini-3-pro-image-preview',
+        prompt: enhancedPrompt,
+        inputImageUrls: inputImageUrls.length > 0 ? inputImageUrls : undefined,
+      });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error("[test-image-generation] AI API error:", aiResponse.status, errorText);
-      
-      if (aiResponse.status === 429) {
+      if (!imageBase64) {
+        console.error("[test-image-generation] No image returned from Gemini");
         return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: "No image generated" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+
+      console.log("[test-image-generation] Image generated, uploading to storage...");
       
-      return new Response(
-        JSON.stringify({ error: "Failed to generate image" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const aiData = await aiResponse.json();
-    const base64ImageUrl = aiData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-    if (!base64ImageUrl) {
-      console.error("[test-image-generation] No image in response:", aiData);
-      return new Response(
-        JSON.stringify({ error: "No image generated" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    console.log("[test-image-generation] Image generated, uploading to storage...");
-    
-    // Upload base64 to storage and get public URL
-    const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
-    
-    console.log("[test-image-generation] Image uploaded successfully:", imageUrl.substring(0, 80));
+      // Upload base64 to storage and get public URL
+      const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
+      
+      console.log("[test-image-generation] Image uploaded successfully:", imageUrl.substring(0, 80));
 
     // Save the generated image to the database as a draft
     const savedPrompt = productImage 
