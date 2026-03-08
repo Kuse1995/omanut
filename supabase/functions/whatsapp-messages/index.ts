@@ -248,8 +248,9 @@ Respond with ONLY valid JSON (no markdown):
     // Fallback to simple keyword matching
     const lowerMsg = userMessage.toLowerCase();
     
-    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt/)) {
-      return { agent: 'boss', reasoning: 'Payment keyword detected', confidence: 0.9 };
+    // Payment/purchase keywords → SALES (not boss!) - AI has full checkout authority
+    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
+      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected - sales handles checkout', confidence: 0.9 };
     }
     
     if (lowerMsg.match(/problem|issue|wrong|broken|not working|help|disappointed|frustrated|complaint/)) {
