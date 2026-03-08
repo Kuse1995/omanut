@@ -1,103 +1,67 @@
 
-Goal: fix 3 production issues together:
-1) payment-link requests still trigger handover,
-2) checkout toolchain does not complete reliably,
-3) product images are inaccurate and must stay reference-locked.
 
-What I found in current codebase
-- Handover is happening before checkout starts:
-  - `routeToAgent()` still classifies payment keywords as `boss` and fallback hard-routes `pay|payment|...` to `boss`.
-  - Confirmed in live data: `agent_performance` shows `agent_type='boss'` for “send a payment link”.
-- Checkout tools are not consistently available:
-  - `company_ai_overrides.enabled_tools` currently contains only:
-    `create_reservation, get_date_info, check_availability, send_media, lookup_product`
-  - So `check_stock`, `record_sale`, `generate_payment_link` are often excluded at runtime.
-- Prompt conflict still exists:
-  - System instructions still include legacy `request_payment` flow in multiple places, conflicting with the new BMS + payment-link flow.
-- Tool loop is single-pass:
-  - After first tool execution, second AI call is made **without tools**, so it cannot continue multi-step checkout if the model didn’t call all tools in round 1.
-- Image accuracy issue root cause:
-  - Product matcher relies mostly on filename/description/tags; current product media has generic descriptions and empty tags.
-  - If no match, code falls back to text-only generation, which breaks branding consistency.
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-Implementation plan
+## Problem Analysis
 
-1) Remove payment-from-router handover path (hard fix)
-- File: `supabase/functions/whatsapp-messages/index.ts`
-- Update `routeToAgent` prompt:
-  - `BOSS` should be only true critical escalation (abuse/legal/fraud/threat/safety), not standard payment/purchase.
-- Update fallback classifier:
-  - payment/purchase keywords route to `sales`, not `boss`.
-- Add runtime safety override:
-  - if router returns `boss` but message is standard purchase/payment intent, force `selectedAgent='sales'` and log override reason.
+Two issues identified in the `demo-session` edge function:
 
-2) Guarantee checkout tools are always enabled where needed
-- File: `supabase/functions/whatsapp-messages/index.ts`
-- In tool filtering:
-  - For non-school and `payments_disabled !== true`, auto-merge mandatory checkout tools into enabled set:
-    - `check_stock`, `record_sale`, `generate_payment_link` (and keep `lookup_product`).
-  - Keep school restrictions intact.
-- This avoids dependence on stale `enabled_tools` arrays in DB.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-3) Replace conflicting payment instructions with one authoritative checkout policy
-- File: `supabase/functions/whatsapp-messages/index.ts`
-- Remove/replace legacy `request_payment` guidance sections in the main system prompt block.
-- Keep one strict flow only:
-  - check stock -> record sale -> generate payment link -> send link.
-- Keep explicit “no escalation for normal purchase/payment.”
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-4) Make tool orchestration multi-round (so chain can complete)
-- File: `supabase/functions/whatsapp-messages/index.ts`
-- Refactor tool handling into iterative loop using configured `max_tool_rounds` (with safe cap).
-- Each round:
-  - call model with tools,
-  - execute tool calls,
-  - append tool results,
-  - call model again **with tools still available** until no more tool calls or round limit reached.
-- This enables reliable autonomous chaining (instead of hoping all 3 tools are called in one shot).
+## Changes
 
-5) Normalize BMS tool outputs for model readability + deterministic payment-link fallback
-- File: `supabase/functions/whatsapp-messages/index.ts`
-- For `check_stock`, `record_sale`, `generate_payment_link`:
-  - pass `company_id` in bridge payload for consistency with other integrations.
-  - normalize returned tool JSON (flat keys like `success`, `receipt_number`, `payment_url`, `amount`, `currency`).
-- Add final response guard:
-  - if checkout tools succeeded and `payment_url` exists, ensure customer reply includes the link even if model reply is vague.
+### File: `supabase/functions/demo-session/index.ts`
 
-6) Enforce strict reference-only generation for branding
-- File: `supabase/functions/whatsapp-image-gen/index.ts`
-- For `messageType='generate'`:
-  - remove text-only fallback when product matching fails.
-  - if no confident product match -> return a clear instruction instead of generating:
-    - ask boss to view/select product references first (no generic generation).
-- Upgrade matcher quality:
-  - use multimodal product selection (candidate images + prompt + BMS match context), returning `{selected_id, confidence}`.
-  - require confidence threshold; below threshold => no generation.
-  - remove naive keyword fallback that currently picks wrong items.
-- Ensure output always uses selected uploaded reference image as anchor when generation proceeds.
+**1. Tighten handoff evaluation prompt**
 
-7) Tighten boss workflow around product references
-- File: `supabase/functions/boss-chat/index.ts`
-- Keep `list_product_images`, but update guidance so low-confidence generation replies explicitly direct boss to “show product images” first.
-- Ensure messaging states generation is blocked until a reference match is confident (branding lock).
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-Technical details (concise)
-- No schema change required for core fix.
-- Existing secrets already present (`BMS_API_SECRET`, `GEMINI_API_KEY`).
-- Security model unchanged (service-role in backend functions only).
-- Preserve school/payment-disabled business guardrails.
+**2. Create tickets and queue items on handoff**
 
-Validation plan (end-to-end)
-1) Payment flow test (customer):
-   - “I want to buy one LifeStraw Family, send payment link”
-   - Expect: no handover message, no pause/human_takeover, and reply contains valid Lenco `payment_url`.
-2) Toolchain test:
-   - Confirm logs show `check_stock` -> `record_sale` -> `generate_payment_link` sequence (may be multi-round).
-3) Data/state test:
-   - `conversations.active_agent` stays `sales`; `is_paused_for_human=false`.
-4) Image strictness test:
-   - Ask for product image with ambiguous prompt.
-   - Expect: if uncertain, no generation; assistant asks to use reference list.
-5) Image accuracy test:
-   - Ask for known uploaded product.
-   - Expect: generation is anchored to selected reference only (no generic substitute).
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
+
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+
+**3. Skip evaluation on short conversations**
+
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+
+### Summary of behavior after fix
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
+

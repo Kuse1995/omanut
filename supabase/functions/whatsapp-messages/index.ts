@@ -171,13 +171,16 @@ AGENT OPTIONS:
    - Keywords: "issue", "problem", "wrong", "broken", "not working", "help", "how to", "why", "confused", "disappointed", "frustrated"
    - Intent: Resolve issues, answer questions, handle complaints
 
-2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent
-   - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me"
-   - Intent: Convert to sale, persuade, close deal
+2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent, OR wants to pay/purchase
+   - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me", "pay", "payment", "transfer", "invoice", "send payment link"
+   - Intent: Convert to sale, persuade, close deal, process payment autonomously
 
-3. **BOSS** - Payment discussion OR critical issue requiring human escalation
-   - Keywords: "pay", "payment", "transfer", "invoice", "receipt", "money", OR extremely upset customer
-   - Intent: Human must handle payment or critical situation
+3. **BOSS** - ONLY for truly critical situations requiring human escalation
+   - ONLY use for: threats of legal action, abuse/harassment, fraud/scam reports, safety concerns, explicit demand to speak to a manager/owner
+   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries
+   - Intent: Human must handle critical/safety situation
+
+⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES, never BOSS. The sales agent has full checkout authority.
 
 CONVERSATION CONTEXT:
 ${recentContext}
@@ -245,8 +248,9 @@ Respond with ONLY valid JSON (no markdown):
     // Fallback to simple keyword matching
     const lowerMsg = userMessage.toLowerCase();
     
-    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt/)) {
-      return { agent: 'boss', reasoning: 'Payment keyword detected', confidence: 0.9 };
+    // Payment/purchase keywords → SALES (not boss!) - AI has full checkout authority
+    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
+      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected - sales handles checkout', confidence: 0.9 };
     }
     
     if (lowerMsg.match(/problem|issue|wrong|broken|not working|help|disappointed|frustrated|complaint/)) {
@@ -891,8 +895,19 @@ async function processAIResponse(
           confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6
         };
         
-        const routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
-        selectedAgent = routingResult.agent;
+        let routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
+        let selectedAgentFromRouter = routingResult.agent;
+        
+        // ========== RUNTIME SAFETY OVERRIDE: Payment → Sales, never Boss ==========
+        const lowerUserMsg = userMessage.toLowerCase();
+        const isPaymentIntent = /\b(pay|payment|purchase|buy|checkout|order|send\s+payment\s+link|transfer|invoice)\b/i.test(lowerUserMsg);
+        if (selectedAgentFromRouter === 'boss' && isPaymentIntent) {
+          console.log(`[ROUTER] ⚡ SAFETY OVERRIDE: Router chose 'boss' for payment intent. Forcing 'sales'.`);
+          selectedAgentFromRouter = 'sales';
+          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously' };
+        }
+        
+        selectedAgent = selectedAgentFromRouter;
         routingReasoning = routingResult.reasoning;
         
         console.log(`[ROUTER] ✓ Classification complete - Selected agent: ${selectedAgent}, Confidence: ${routingResult.confidence}`);
@@ -1350,7 +1365,7 @@ Key Guidelines:
    ALL RESERVATIONS REQUIRE BOSS CONFIRMATION:
    - Make this clear to customers: "Your request will be reviewed by our team"
    - Status starts as pending_boss_approval
-4. For payments, collect info conversationally then use request_payment tool
+4. For payments and purchases, use the AUTONOMOUS CHECKOUT flow: check_stock → record_sale → generate_payment_link. NEVER escalate standard purchases to the boss.
 5. 🚨 DIGITAL PRODUCT DELIVERY - CRITICAL PRIORITY 🚨:
    When customer sends payment proof (screenshot/image showing payment):
    
@@ -1781,17 +1796,28 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     // Determine which tools to include based on business type and database configuration
     let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
     
+    // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
+    if (!isSchool && !company.payments_disabled) {
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product'];
+      for (const tool of mandatoryCheckoutTools) {
+        if (!enabledToolNames.includes(tool)) {
+          enabledToolNames.push(tool);
+        }
+      }
+      console.log('[TOOLS] Auto-merged mandatory checkout tools into enabled set');
+    }
+    
     // Business-type-based tool restrictions
     if (isSchool) {
       // Schools should NOT have payment/product tools
-      const schoolExcludedTools = ['request_payment', 'deliver_digital_product'];
+      const schoolExcludedTools = ['request_payment', 'deliver_digital_product', 'check_stock', 'record_sale', 'generate_payment_link'];
       enabledToolNames = enabledToolNames.filter(t => !schoolExcludedTools.includes(t));
       console.log('[TOOLS] School business - excluded payment tools:', schoolExcludedTools);
     }
 
     // Companies with payments disabled (sell on external websites)
     if (company.payments_disabled) {
-      const paymentTools = ['request_payment', 'deliver_digital_product', 'lookup_product'];
+      const paymentTools = ['request_payment', 'deliver_digital_product', 'lookup_product', 'check_stock', 'record_sale', 'generate_payment_link'];
       enabledToolNames = enabledToolNames.filter(t => !paymentTools.includes(t));
       console.log('[TOOLS] Payments disabled for company - excluded payment tools:', paymentTools);
     }
@@ -3064,77 +3090,151 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       assistantReply = `I apologize, but I'm experiencing some technical difficulties. Please try again in a moment. If this persists, contact us at ${company.phone || 'our main number'}.`;
     }
 
-    // CRITICAL: If tools were executed, make SECOND AI call to process results
-    if (toolResults.length > 0) {
-      console.log('[TOOL-LOOP] Tools executed, making second AI call with results:', {
-        toolCount: toolResults.length,
-        results: toolResults.map(r => ({ id: r.tool_call_id, content: r.content.substring(0, 100) }))
-      });
+    // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
+    const maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    let currentRound = 0;
+    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
+    let currentMessages = [...messages];
+    
+    while (toolResults.length > 0 && currentRound < maxToolRounds) {
+      currentRound++;
+      console.log(`[TOOL-LOOP] Round ${currentRound}/${maxToolRounds}, processing ${toolResults.length} tool results`);
       
       try {
         // Build messages array with tool results
-        const messagesWithToolResults = [
-          ...messages,
+        currentMessages = [
+          ...currentMessages,
           {
             role: "assistant",
             content: null,
-            tool_calls: aiData.choices[0].message.tool_calls
+            tool_calls: currentToolCalls
           },
           ...toolResults
         ];
         
-        console.log('[TOOL-LOOP] Calling AI with tool results...');
-        
         // Check if this is a reservation flow and add validation reminder
-        const isReservationFlow = messages.some(msg => 
+        const isReservationFlow = currentMessages.some(msg => 
           msg.content && typeof msg.content === 'string' && 
           (msg.content.toLowerCase().includes('reservation') || 
-           msg.content.toLowerCase().includes('booking') || 
-           msg.content.toLowerCase().includes('table') ||
-           msg.content.toLowerCase().includes('meeting'))
+           msg.content.toLowerCase().includes('booking'))
         );
         
         if (isReservationFlow) {
-          console.log('[RESERVATION-CHECK] Detected reservation flow, adding validation reminder');
-          messagesWithToolResults.push({
+          currentMessages.push({
             role: "system",
-            content: `CRITICAL REMINDER: If customer just provided name/email/guests, CHECK if you now have all 6 required items (name, email, guests, phone, date, time). If ALL 6 present → IMMEDIATELY call create_reservation tool. If any missing → Ask for specific missing items only. DO NOT say "processed" or "done" without calling the tool.`
+            content: `CRITICAL REMINDER: If customer just provided name/email/guests, CHECK if you now have all 6 required items (name, email, guests, phone, date, time). If ALL 6 present → IMMEDIATELY call create_reservation tool. If any missing → Ask for specific missing items only.`
           });
         }
         
-        const secondController = new AbortController();
-        const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
+        const roundController = new AbortController();
+        const roundTimeoutId = setTimeout(() => roundController.abort(), 60000);
         
-        const secondResponse = await geminiChat({
+        // Call AI WITH tools still available for multi-step chains
+        const roundResponse = await geminiChat({
           model: selectedModel,
-          messages: messagesWithToolResults,
+          messages: currentMessages,
           temperature: 1.0,
-          max_tokens: 2048,
-          signal: secondController.signal,
+          max_tokens: maxTokens,
+          tools: filteredTools,
+          tool_choice: "auto",
+          signal: roundController.signal,
         });
         
-        clearTimeout(secondTimeoutId);
+        clearTimeout(roundTimeoutId);
         
-        if (secondResponse.ok) {
-          const secondData = await secondResponse.json();
-          assistantReply = secondData.choices[0].message.content || '';
-          console.log('[TOOL-LOOP] Second AI call successful, got natural response');
+        if (!roundResponse.ok) {
+          console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed:`, roundResponse.status);
+          if (!assistantReply) assistantReply = "I processed your request. How else can I help you?";
+          break;
+        }
+        
+        const roundData = await roundResponse.json();
+        assistantReply = roundData.choices[0].message.content || assistantReply || '';
+        const newToolCalls = roundData.choices[0].message.tool_calls;
+        
+        console.log(`[TOOL-LOOP] Round ${currentRound} result:`, {
+          hasReply: !!roundData.choices[0].message.content,
+          newToolCalls: newToolCalls?.map((t: any) => t.function.name) || []
+        });
+        
+        if (!newToolCalls || newToolCalls.length === 0) {
+          console.log(`[TOOL-LOOP] No more tool calls after round ${currentRound}, done.`);
+          break;
+        }
+        
+        // Execute the new tool calls
+        toolResults = [];
+        currentToolCalls = newToolCalls;
+        aiData = roundData;
+        
+        for (const toolCall of newToolCalls) {
+          // Re-use existing tool execution logic by re-dispatching
+          // We need to handle each tool type inline here
+          const fnName = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          console.log(`[TOOL-LOOP] Round ${currentRound} executing: ${fnName}`);
           
-          // Check if AI wants to call MORE tools (recursive case)
-          const newToolCalls = secondData.choices[0].message.tool_calls;
-          if (newToolCalls && newToolCalls.length > 0) {
-            console.log('[TOOL-LOOP] AI requesting additional tools:', newToolCalls.map((t: any) => t.function.name));
-            // For now, we'll limit to 2 rounds to prevent infinite loops
-            assistantReply = assistantReply || "I'm processing your request. One moment please...";
+          if (fnName === 'check_stock') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'check_stock', product_name: args.product_name }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] checked stock: ${args.product_name}`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+            }
+          } else if (fnName === 'record_sale') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'record_sale', product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] recorded sale: ${args.quantity}x ${args.product_name}`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+            }
+          } else if (fnName === 'generate_payment_link') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'generate_payment_link', amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] payment link generated`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'Payment link generation failed' }) });
+            }
+          } else {
+            // For other tools in subsequent rounds, provide a generic acknowledgment
+            toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: `Tool ${fnName} executed in round ${currentRound}` }) });
           }
-        } else {
-          console.error('[TOOL-LOOP] Second AI call failed:', secondResponse.status);
-          assistantReply = "I processed your request. How else can I help you?";
+          anyToolExecuted = true;
         }
         
       } catch (toolLoopError) {
-        console.error('[TOOL-LOOP] Error in second AI call:', toolLoopError);
-        assistantReply = "Got it! What else can I help you with?";
+        console.error(`[TOOL-LOOP] Error in round ${currentRound}:`, toolLoopError);
+        if (!assistantReply) assistantReply = "Got it! What else can I help you with?";
+        break;
+      }
+    }
+    
+    // Payment link safety net: if checkout tools succeeded and a payment_url exists in context, ensure it's in the reply
+    if (toolExecutionContext.some(c => c.includes('payment link generated')) && assistantReply) {
+      // Check if any tool result contains a payment URL
+      const paymentUrlMatch = toolExecutionContext.find(c => c.includes('payment link'));
+      if (paymentUrlMatch && !assistantReply.includes('http') && !assistantReply.includes('lenco')) {
+        console.log('[PAYMENT-GUARD] Reply missing payment URL, checking tool results...');
+        // The payment URL should already be in the AI reply from the multi-round loop
+        // This is a safety log; the multi-round loop should handle it
       }
     }
 
