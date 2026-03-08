@@ -719,9 +719,36 @@ async function selectProductImageForPrompt(
     .eq('media_type', 'image')
     .order('created_at', { ascending: false });
   
+  // Track BMS image URLs for later use as reference anchors
+  let bmsImageUrls: string[] = [];
+
   if (error || !productImages || productImages.length === 0) {
-    console.log('[PRODUCT-SELECT] No product images found');
-    return null;
+    console.log('[PRODUCT-SELECT] No product images in company_media, checking BMS only');
+    // Still try BMS for image URLs even without company_media products
+    try {
+      const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+      });
+      if (bmsRes.ok) {
+        const bmsData = await bmsRes.json();
+        if (bmsData.success) {
+          const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+          for (const item of items) {
+            if (item.image_url) bmsImageUrls.push(item.image_url);
+            if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
+          }
+          bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
+          if (bmsImageUrls.length > 0) {
+            console.log(`[PRODUCT-SELECT] Found ${bmsImageUrls.length} BMS product images (no company_media)`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[PRODUCT-SELECT] BMS-only lookup skipped:', e);
+    }
+    return { product: null, bmsImageUrls };
   }
   
   console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using multimodal vision selection`);
