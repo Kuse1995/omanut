@@ -836,27 +836,56 @@ serve(async (req) => {
 
     switch (messageType) {
       case 'generate': {
-        // STRICT REFERENCE-ONLY MODE: Only generate with a confident product match
+        // SMART REFERENCE MODE: Try product match first, fall back to creative generation
         const productImage = await selectProductImageForPrompt(supabase, companyId, prompt);
         
         if (!productImage) {
-          // NO product match found — do NOT fall back to text-only generation
-          console.log('[IMAGE-GEN] No product match found. Blocking generation for branding safety.');
-          responseMessage = `⚠️ I couldn't find a matching product reference photo for "${prompt}".\n\nTo ensure brand accuracy, I only generate images using your uploaded product photos as references.\n\n📸 *To fix this:*\n• Say "Show my images" to see available product photos\n• Upload the product photo in the Admin Media Library\n• Then try your request again\n\nThis ensures every generated image stays true to your brand! 🎨`;
+          // No product match — fall back to text-only generation with brand context
+          console.log('[IMAGE-GEN] No product match found. Using text-only generation with brand context.');
           
-          // Send text response (no image)
+          const fallbackResult = await generateImage(
+            prompt,
+            context,
+            company.name,
+            company.business_type || 'business',
+            supabase,
+            supabaseUrl,
+            companyId
+          );
+          
+          imageUrl = fallbackResult.imageUrl;
+          
+          // Save to generated_images
+          const { data: fallbackSavedImage } = await supabase
+            .from('generated_images')
+            .insert({
+              company_id: companyId,
+              conversation_id: conversationId,
+              prompt: prompt,
+              image_url: imageUrl
+            })
+            .select()
+            .single();
+          
+          // Generate caption suggestion
+          const fallbackCaption = await generateCaption(prompt, context, company.name);
+          
+          // Record for learning
+          await supabase.from('image_generation_feedback').insert({
+            company_id: companyId,
+            generated_image_id: fallbackSavedImage?.id,
+            prompt,
+            image_url: imageUrl,
+            enhanced_prompt: fallbackResult.enhancedPrompt,
+            caption_suggestion: fallbackCaption.caption,
+            posting_time_suggestion: fallbackCaption.bestTime
+          });
+          
+          responseMessage = `🎨 Here's your generated image!\n\n📝 *Suggested caption:*\n${fallbackCaption.caption}\n\n${fallbackCaption.hashtags.map((t: string) => '#' + t).join(' ')}\n\n⏰ Best time to post: ${fallbackCaption.bestTime}\n\n💡 _Tip: Upload product photos in the Media Library for even more accurate branded images!_`;
+          
+          // Send via WhatsApp
           if (customerPhone) {
-            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
-              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-              const fromNumber = company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
-              const formData = new URLSearchParams();
-              formData.append('From', fromNumber);
-              formData.append('To', `whatsapp:${customerPhone}`);
-              formData.append('Body', responseMessage);
-              await fetch(twilioUrl, { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
-            }
+            await sendWhatsAppImage(customerPhone, imageUrl, responseMessage, company);
           }
           break;
         }
