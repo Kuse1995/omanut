@@ -1467,6 +1467,41 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'list_product_images': {
+              const filterCategory = args.category || 'products';
+              const { data: mediaItems, error: mediaErr } = await supabase
+                .from('company_media')
+                .select('id, file_name, description, tags, file_path, category')
+                .eq('company_id', company.id)
+                .eq('category', filterCategory)
+                .eq('media_type', 'image')
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              if (mediaErr || !mediaItems || mediaItems.length === 0) {
+                result = { success: true, message: `📭 No ${filterCategory} images found in your media library.\n\nUpload product photos in the admin panel to enable product-anchored image generation!` };
+              } else {
+                const SUPABASE_URL_MEDIA = Deno.env.get('SUPABASE_URL')!;
+                const mediaList = mediaItems.map((m: any, i: number) => {
+                  const url = `${SUPABASE_URL_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
+                  return `${i + 1}. ${m.file_name}\n   ${m.description || 'No description'}\n   Tags: ${m.tags?.join(', ') || 'none'}\n   🔗 ${url}`;
+                }).join('\n\n');
+
+                result = { success: true, message: `📸 Your ${filterCategory} images (${mediaItems.length} total):\n\n${mediaList}\n\nThese are the reference photos the AI uses when generating product images.` };
+
+                // Also send each image via WhatsApp for visual reference
+                const SUPABASE_URL_FOR_MEDIA = Deno.env.get('SUPABASE_URL')!;
+                mediaItems.slice(0, 5).forEach((m: any, i: number) => {
+                  const imgUrl = `${SUPABASE_URL_FOR_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
+                  toolMediaMessages.push({
+                    body: `📸 ${i + 1}. ${m.file_name}\n${m.description || ''}\nTags: ${m.tags?.join(', ') || 'none'}`,
+                    imageUrl: imgUrl
+                  });
+                });
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
