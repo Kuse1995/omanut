@@ -26,6 +26,9 @@ import NotFound from "./pages/NotFound";
 import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 import PitchBanking from "./pages/PitchBanking";
 import PitchAgentDemo from "./pages/PitchAgentDemo";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
+import DataDeletion from "./pages/DataDeletion";
 
 const queryClient = new QueryClient();
 
