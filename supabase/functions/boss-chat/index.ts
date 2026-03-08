@@ -66,39 +66,18 @@ serve(async (req) => {
 
     const messageBody = (Body || '').trim().toLowerCase();
 
-    // ========== HELP COMMAND DETECTION ==========
+    // Image help command — simplified, AI handles everything now
     if (messageBody === 'image help' || messageBody === 'img help' || messageBody === '🎨 help') {
-      const helpText = `🎨 IMAGE GENERATION COMMANDS
+      const helpText = `🎨 IMAGE GENERATION
 
-Generate Images:
-• "Generate an image of [description]"
-• "Create a picture of [description]"
-• "🎨 [description]"
+Just describe what you want naturally! Examples:
 
-Edit Last Image:
-• "Edit: make it brighter"
-• "Make it more colorful"
-• "Add text overlay"
+"Generate an image of a boy drinking from the LifeStraw Family 2.0"
+"Edit the last image - make it brighter"
+"Show my recent images"
+"Create a promotional image for our weekend special and post it on Facebook"
 
-Get Captions:
-• "Caption for [topic]"
-• "What to post about [topic]"
-
-Content Ideas:
-• "What should I post?"
-• "Suggest a post"
-• "Content idea for [topic]"
-
-View History:
-• "Show my images"
-• "Gallery"
-• "📸"
-
-Give Feedback:
-• 👍 or "Love it" - Save style preferences
-• 👎 or "Try again" - Request different style
-
-Tip: The AI learns your style preferences from feedback!`;
+The AI handles everything - generation, editing, posting. Just ask!`;
 
       return new Response(JSON.stringify({
         response: helpText
@@ -106,69 +85,6 @@ Tip: The AI learns your style preferences from feedback!`;
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    // ========== IMAGE GENERATION COMMAND DETECTION ==========
-    const imageGenCommand = detectImageGenCommand(Body || '');
-    
-    if (imageGenCommand.isImageCommand) {
-      console.log(`[BOSS-IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
-
-      // Check if image generation is enabled for this company
-      const imageSettings = Array.isArray(company.image_generation_settings)
-        ? company.image_generation_settings[0]
-        : company.image_generation_settings;
-
-      console.log('[BOSS-IMAGE-GEN] Company image settings enabled:', imageSettings?.enabled);
-      if (!imageSettings?.enabled) {
-        console.log('[BOSS-IMAGE-GEN] Image generation not enabled for company');
-        return new Response(JSON.stringify({
-          response: "Image generation is not enabled for your company. Please enable it in the admin settings first."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      
-      // Call whatsapp-image-gen function
-      const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-      const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-      
-      const imageGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-        },
-        body: JSON.stringify({
-          companyId: company.id,
-          customerPhone: '', // Empty to prevent whatsapp-image-gen from sending directly - boss-chat returns response for caller to send
-          conversationId: null, // Boss doesn't have a conversation context
-          prompt: imageGenCommand.prompt,
-          messageType: imageGenCommand.type,
-          feedbackData: imageGenCommand.feedbackData,
-        }),
-      });
-      
-      if (!imageGenResponse.ok) {
-        const errorText = await imageGenResponse.text();
-        console.error('[BOSS-IMAGE-GEN] Error from whatsapp-image-gen:', errorText);
-        return new Response(JSON.stringify({
-          response: "Sorry, there was an error generating the image. Please try again."
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-      
-      const imageGenResult = await imageGenResponse.json();
-      console.log('[BOSS-IMAGE-GEN] Image generation result:', imageGenResult.success ? 'success' : 'failed');
-      
-      return new Response(JSON.stringify({
-        response: imageGenResult.message || "Image generation complete!",
-        imageUrl: imageGenResult.imageUrl,
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    // ========== END IMAGE GENERATION DETECTION ==========
 
     // Get recent conversation stats with messages
     const { data: recentConvs } = await supabase
