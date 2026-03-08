@@ -3262,9 +3262,21 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
-    // Ensure we have a response
+    // Ensure we have a response — use contextual fallback instead of generic greeting
     if (!assistantReply || assistantReply.trim() === '') {
-      assistantReply = "Thank you for your message. How can I help you today?";
+      if (anyToolExecuted && toolExecutionContext.length > 0) {
+        assistantReply = "I've processed your request. Is there anything else I can help you with?";
+        console.log('[FALLBACK] Tools executed but no reply generated. Context:', toolExecutionContext);
+      } else {
+        const lowerUserMsg = userMessage.toLowerCase();
+        const isPurchaseIntent = /buy|purchase|order|payment link|pay|price/i.test(lowerUserMsg);
+        if (isPurchaseIntent) {
+          assistantReply = "I'd love to help you with your purchase! Could you let me know which product you're interested in? I can then provide you with the details and payment link.";
+        } else {
+          assistantReply = fallbackMessage || "Thank you for your message. How can I help you today?";
+        }
+        console.log('[FALLBACK] No AI response generated, using contextual fallback');
+      }
     }
 
     // ========== RESPONSE VALIDATION LAYER ==========
