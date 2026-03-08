@@ -1,83 +1,81 @@
-# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## What Was Built
 
-### bms-agent/index.ts — 9 new actions added
-- `get_product_variants` — colors/sizes for products
-- `create_order` — customer order placement
-- `get_order_status` — order tracking
-- `update_order_status` — boss updates order status
-- `cancel_order` — cancel orders
-- `get_customer_history` — purchase history lookup
-- `get_company_statistics` — impact stats
-- `create_quotation` — formal price quotes
-- `create_invoice` — invoice generation
-- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
+# Fix Three Critical Bugs: Image Generation, Social Posting, PDF Generation
 
-### whatsapp-messages/index.ts — Customer-facing tools
-- 9 new tool definitions for customer AI
-- Complexity classifier updated with order/variant/quote/invoice triggers
-- Mandatory checkout tools expanded
-- Tool handlers for all new BMS actions
+## Problems Identified
 
-### boss-chat/index.ts — Boss-facing tools
-- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
-- Tool handlers with formatted emoji responses
+### 1. Image Generation — Stack Overflow on Large Images
+**Root Cause**: In `gemini-client.ts` line 97, the code uses:
+```javascript
+btoa(String.fromCharCode(...new Uint8Array(imgBuffer)))
+```
+The spread operator `...` exceeds JavaScript's argument limit (~65K) for large images, causing `RangeError: Maximum call stack size exceeded`.
 
-### bms-callback/index.ts — NEW webhook endpoint
-- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
-- Authenticated via BMS_API_SECRET
-- Sends WhatsApp notifications to boss and/or customer via Twilio
+### 2. Social Media Posting — Wrong Endpoint for Facebook
+**Root Cause**: In `boss-chat/index.ts` line 1288, when `publish_now` is true:
+```javascript
+const publishFn = args.target_platform === 'instagram' ? 'publish-meta-post' : 'publish-facebook-post';
+```
+This uses the old `publish-facebook-post` function which expects a completely different schema (`scheduled_post_id` + `facebook_scheduled_posts` table) than what boss-chat provides (`companyId`, `content`, `imageUrl`).
 
-# Phase 2: Operations, Finance & HR — COMPLETED ✅
+### 3. PDF Generation — Parameter Schema Mismatch
+**Root Cause**: In `boss-chat/index.ts` lines 1527-1531, the call to `generate-document` sends:
+```javascript
+{ companyId, documentType, data, bossPhone }
+```
+But `generate-document/index.ts` line 56 expects:
+```javascript
+{ document_type, data, company_id, send_whatsapp }
+```
+The camelCase vs snake_case mismatch causes silent failures.
 
-## What Was Built
+---
 
-### bms-agent/index.ts — 10 new actions added
-- `get_low_stock_items` — products below reorder level
-- `record_expense` — log business expenses
-- `get_expenses` — expense history with filters
-- `get_outstanding_receivables` — unpaid invoices
-- `get_outstanding_payables` — pending vendor bills
-- `profit_loss_report` — P&L with date range
-- `clock_in` — employee attendance start
-- `clock_out` — employee attendance end
-- `create_contact` — website contact form submissions
-- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
-- Added `tracking_number` to `update_order_status`
+## Fixes
 
-### boss-chat/index.ts — 9 new tool definitions + handlers
-- `get_low_stock_items` — inventory warnings
-- `record_expense` — expense tracking
-- `get_expenses` — expense reporting
-- `get_outstanding_receivables` — accounts receivable
-- `get_outstanding_payables` — accounts payable
-- `profit_loss_report` — financial performance
-- `clock_in` / `clock_out` — HR attendance
-- Updated `sales_report` tool to use `start_date`/`end_date`
-- Updated system prompt with Finance & HR capabilities
+### Fix 1: Memory-Safe Base64 Conversion
+**File**: `supabase/functions/_shared/gemini-client.ts`
 
-### whatsapp-messages/index.ts — Customer-facing
-- Added `create_contact` tool definition + handler
-- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+Replace the problematic line 97 with a chunked approach that processes the buffer in safe batches:
+```javascript
+// Convert in chunks to avoid stack overflow on large images
+const bytes = new Uint8Array(imgBuffer);
+let imgBase64 = '';
+const chunkSize = 32768;
+for (let i = 0; i < bytes.length; i += chunkSize) {
+  const chunk = bytes.subarray(i, i + chunkSize);
+  imgBase64 += String.fromCharCode.apply(null, [...chunk]);
+}
+imgBase64 = btoa(imgBase64);
+```
 
-### bms-callback/index.ts — New event
-- Added `new_contact` event handler (notifies boss of website inquiries)
+### Fix 2: Use Correct Publishing Endpoint
+**File**: `supabase/functions/boss-chat/index.ts`
 
-## Phase 2.5: PDF Document Generation — COMPLETED ✅
+Line 1288: Always use `publish-meta-post` for immediate publishing:
+```javascript
+const publishFn = 'publish-meta-post';
+```
 
-### generate-document/index.ts — NEW edge function
-- Generates professionally branded A4 PDFs using pdf-lib
-- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
-- Auto-uploads to company-documents storage with 7-day signed URLs
-- Auto-sends PDFs to boss via WhatsApp (Twilio)
-- Invoices include payment info (MTN/Airtel mobile money numbers)
+And change the payload at line 1291-1293 to match what `publish-meta-post` expects (insert via scheduled_posts table, then publish):
+- First insert a scheduled_posts row with status='approved'
+- Then call publish-meta-post with the `post_id`
 
-### boss-chat/index.ts — generate_document tool added
-- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
-- AI fetches data first (via BMS tools), then calls generate_document with the results
-- System prompt updated with document generation instructions
+### Fix 3: Correct Parameter Naming
+**File**: `supabase/functions/boss-chat/index.ts`
 
-## Next Phases (Pending)
-- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
+Lines 1527-1532: Change from camelCase to snake_case:
+```javascript
+body: JSON.stringify({
+  company_id: company.id,
+  document_type: args.document_type,
+  data: args.data,
+  send_whatsapp: true,
+}),
+```
+
+---
+
+## Deployment
+- Redeploy `boss-chat`, `gemini-client.ts` (shared), and any functions importing it (like `whatsapp-image-gen`)
+
