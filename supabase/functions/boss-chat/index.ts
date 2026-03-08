@@ -1400,7 +1400,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsRes.ok && bmsData.success) {
-                  result = { success: true, message: `📦 Stock lookup result:\n${JSON.stringify(bmsData.data || bmsData, null, 2)}` };
+                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+                  const formatted = items.map((item: any) => {
+                    const stockEmoji = item.status === 'healthy' ? '🟢' : item.status === 'low' ? '🟡' : '🔴';
+                    return `${stockEmoji} ${item.name || item.product_name || 'Unknown'}\n   Stock: ${item.current_stock ?? 'N/A'} units\n   Price: ${company.currency_prefix || 'K'}${item.unit_price ?? 'N/A'}\n   SKU: ${item.sku || 'N/A'}\n   Reorder Level: ${item.reorder_level ?? 'N/A'}`;
+                  }).join('\n\n');
+                  result = { success: true, message: `📦 Inventory Check:\n\n${formatted}` };
                 } else {
                   result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || bmsData.message || 'Unknown error'}` };
                 }
