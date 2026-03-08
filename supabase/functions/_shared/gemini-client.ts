@@ -62,6 +62,55 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 }
 
 /**
+ * Generate images using the native Gemini API (not OpenAI-compatible).
+ * The OpenAI chat/completions endpoint doesn't support image generation for these models.
+ */
+export async function geminiImageGenerate(options: {
+  model?: string;
+  prompt: string;
+}): Promise<{ imageBase64: string | null; text: string | null }> {
+  const apiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
+  const model = normalizeModel(options.model || 'gemini-2.0-flash-exp');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: options.prompt }] }],
+      generationConfig: {
+        responseModalities: ['TEXT', 'IMAGE'],
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`Gemini image gen error (${response.status}):`, errText);
+    throw Object.assign(new Error(`Image generation failed: ${response.status}`), { status: response.status });
+  }
+
+  const data = await response.json();
+  const parts = data.candidates?.[0]?.content?.parts || [];
+
+  let imageBase64: string | null = null;
+  let text: string | null = null;
+
+  for (const part of parts) {
+    if (part.inlineData) {
+      imageBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+    }
+    if (part.text) {
+      text = part.text;
+    }
+  }
+
+  return { imageBase64, text };
+}
+
+/**
  * Convenience wrapper that returns parsed JSON response (non-streaming).
  */
 export async function geminiChatJSON(options: GeminiChatOptions): Promise<any> {
