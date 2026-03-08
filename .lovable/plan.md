@@ -1,67 +1,56 @@
 
 
-# Plan: Fix Demo Handoff Notifications and Ticket Logging
+# Unified Supervisor Architecture for Boss Chat
 
-## Problem Analysis
+## Problem
 
-Two issues identified in the `demo-session` edge function:
+Right now `boss-chat` has **two separate brains**:
 
-### Issue 1: Over-aggressive boss notifications
-The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
+1. **Hardcoded command detection** (lines 11-136, 196-296) — regex patterns that intercept image commands *before* the AI model ever sees them, routing directly to `whatsapp-image-gen`
+2. **AI model with tools** (lines 960-1533) — the actual Gemini-powered supervisor that handles everything else via tool calling
 
-### Issue 2: Handoffs not creating tickets or queue items
-When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
+This means image generation bypasses the supervisor entirely. The boss is effectively talking to a dumb regex parser for images and a smart AI for everything else. The experience feels fragmented.
+
+## Solution: Let the Supervisor Handle Everything
+
+Remove the hardcoded `detectImageGenCommand()` interception from `boss-chat`. Instead, give the AI model an `generate_image` tool (and an `edit_image` tool) so it can decide when to call image generation as part of its normal reasoning flow.
+
+```text
+BEFORE:
+  Boss Message → Regex Check → [match?] → whatsapp-image-gen (bypasses AI)
+                             → [no match] → AI Model → Tools
+
+AFTER:
+  Boss Message → AI Model (Supervisor) → Tools (including generate_image, edit_image, show_gallery)
+```
 
 ## Changes
 
-### File: `supabase/functions/demo-session/index.ts`
+### `supabase/functions/boss-chat/index.ts`
 
-**1. Tighten handoff evaluation prompt**
+1. **Remove the `detectImageGenCommand()` function** and its call (lines 11-136, 237-296). Remove the image generation interception block entirely.
 
-Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
-- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
-- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
-- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
-- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
+2. **Add 3 new tools** to `managementTools` array:
+   - `generate_image` — takes `prompt` string, calls `whatsapp-image-gen` with `messageType: 'generate'`
+   - `edit_image` — takes `instructions` string, calls `whatsapp-image-gen` with `messageType: 'edit'`
+   - `show_image_gallery` — no params, calls `whatsapp-image-gen` with `messageType: 'history'`
 
-**2. Create tickets and queue items on handoff**
+3. **Add tool handlers** in the `switch (functionName)` block for these 3 tools — same logic currently in the interception block (lines 257-295), just moved into tool execution.
 
-After the handoff decision is made and before sending the boss WhatsApp notification, insert:
+4. **Update system prompt** (line 618-634) — remove the instruction telling the boss to use special commands. Instead tell the AI: "You can generate images directly using the generate_image tool. When the boss asks for any image, use this tool with a detailed prompt."
 
-- A `support_tickets` row with:
-  - `company_id`, `customer_name`, `customer_phone`
-  - `issue_summary` from the AI's `result.summary`
-  - `issue_category` derived from the handoff type (complaint, order, booking)
-  - `priority` from `extracted_data.urgency` mapped to ticket priority
-  - `status`: "open"
-  - `recommended_department` based on category
-  - `conversation_id` linked to the demo conversation
+5. **Keep the `image help` response** (lines 196-234) but simplify it — the boss can now just describe what they want naturally.
 
-- An `agent_queue` row with:
-  - `company_id`, `ticket_id` (from the ticket just created)
-  - `conversation_id`, `customer_name`, `customer_phone`
-  - `priority` matching the ticket
-  - `status`: "waiting"
-  - `department` from recommended department
-  - `ai_summary` from the handoff summary
-  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
+## What This Achieves
 
-**3. Skip evaluation on short conversations**
+- Boss talks to **one AI** that understands context and delegates internally
+- "Generate an image of a boy drinking from the LifeStraw Family 2.0 in a Zambian living room and post it on Facebook and Instagram" becomes a **single conversation turn** where the AI chains: `generate_image` → `schedule_social_post` (with the generated image URL)
+- No more fragmented regex parsing — the AI's intent detection is far superior
+- The supervisor can combine image generation with other actions (schedule post, draft caption) in one multi-tool turn
 
-Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
+## Files Changed
 
-### Summary of behavior after fix
-
-| Scenario | Before | After |
-|----------|--------|-------|
-| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
-| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
-| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
-| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
-
-### Files
-
-| Action | File |
-|--------|------|
-| Edit | `supabase/functions/demo-session/index.ts` |
+| File | Change |
+|------|--------|
+| `supabase/functions/boss-chat/index.ts` | Remove `detectImageGenCommand()` interception; add `generate_image`, `edit_image`, `show_image_gallery` tools; update system prompt |
 
