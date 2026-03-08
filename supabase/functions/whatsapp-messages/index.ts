@@ -1942,7 +1942,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     
     // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
     if (!isSchool && !company.payments_disabled) {
-      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product'];
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice'];
       for (const tool of mandatoryCheckoutTools) {
         if (!enabledToolNames.includes(tool)) {
           enabledToolNames.push(tool);
