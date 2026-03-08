@@ -708,7 +708,7 @@ async function selectProductImageForPrompt(
   supabase: any, 
   companyId: string, 
   prompt: string
-): Promise<ProductImage | null> {
+): Promise<{ product: ProductImage | null; bmsImageUrls: string[] }> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 
   const { data: productImages, error } = await supabase
