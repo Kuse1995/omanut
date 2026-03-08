@@ -898,6 +898,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["product_name", "quantity"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_product_images",
+          description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Optional filter: 'products', 'promotional', 'logos', etc. Defaults to 'products'." }
+            },
+            required: []
+          }
+        }
       }
     ];
 

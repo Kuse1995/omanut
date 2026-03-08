@@ -232,7 +232,7 @@ async function buildMediaContext(supabase: any, companyId: string): Promise<stri
   return context;
 }
 
-// Select the best product image based on prompt keywords
+// AI-powered product selection using Gemini Flash + BMS cross-reference
 async function selectProductImageForPrompt(
   supabase: any, 
   companyId: string, 
@@ -252,45 +252,104 @@ async function selectProductImageForPrompt(
     return null;
   }
   
-  console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images`);
-  
-  const promptLower = prompt.toLowerCase();
-  const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
-  
-  // Score each product image based on keyword matches
-  let bestMatch: ProductImage | null = null;
-  let bestScore = 0;
-  
-  for (const img of productImages) {
-    let score = 0;
-    const searchText = [
-      img.file_name || '',
-      img.description || '',
-      ...(img.tags || [])
-    ].join(' ').toLowerCase();
-    
-    for (const word of promptWords) {
-      if (searchText.includes(word)) {
-        score += 1;
+  console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using AI selection`);
+
+  // Cross-reference with BMS inventory for real product names/SKUs
+  let bmsContext = '';
+  try {
+    const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
+    if (BMS_API_SECRET) {
+      const bmsRes = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${BMS_API_SECRET}`,
+        },
+        body: JSON.stringify({ action: 'check_stock', product_name: prompt }),
+      });
+      if (bmsRes.ok) {
+        const bmsData = await bmsRes.json();
+        if (bmsData.success) {
+          const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+          bmsContext = items.map((item: any) =>
+            `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'})`
+          ).join('\n');
+          console.log('[PRODUCT-SELECT] BMS context:', bmsContext);
+        }
       }
     }
-    
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = img;
+  } catch (e) {
+    console.log('[PRODUCT-SELECT] BMS lookup skipped:', e);
+  }
+
+  // Build the product catalog for AI
+  const catalogText = productImages.map((img: ProductImage, i: number) =>
+    `${i + 1}. ID: ${img.id}, Name: "${img.file_name}", Tags: [${img.tags?.join(', ') || 'none'}], Description: "${img.description || 'No description'}"`
+  ).join('\n');
+
+  // Ask Gemini Flash to pick the best match
+  const selectionPrompt = `You are a product matcher. Given a user's image generation request, select the BEST matching product image from the catalog below.
+
+USER REQUEST: "${prompt}"
+
+AVAILABLE PRODUCT IMAGES:
+${catalogText}
+
+${bmsContext ? `\nINVENTORY DATA:\n${bmsContext}` : ''}
+
+INSTRUCTIONS:
+- Match based on product name, tags, and description similarity to the user's request
+- Consider partial name matches, abbreviations, and synonyms
+- If BMS inventory data is available, use the exact product name from BMS to improve matching
+- If NO product reasonably matches the request, respond with "NONE"
+- Respond with ONLY the product ID (UUID) or "NONE". No explanation.`;
+
+  try {
+    const response = await geminiChat({
+      model: 'gemini-2.5-flash',
+      messages: [{ role: 'user', content: selectionPrompt }],
+      temperature: 0.1,
+      max_tokens: 100,
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const aiChoice = (data.choices?.[0]?.message?.content || '').trim();
+      console.log(`[PRODUCT-SELECT] AI selected: ${aiChoice}`);
+
+      if (aiChoice && aiChoice !== 'NONE') {
+        // Find the product by ID
+        const matched = productImages.find((img: ProductImage) => aiChoice.includes(img.id));
+        if (matched) {
+          console.log(`[PRODUCT-SELECT] AI matched product: ${matched.file_name}`);
+          return matched;
+        }
+      }
+      console.log('[PRODUCT-SELECT] AI found no match');
+      return null;
     }
+  } catch (e) {
+    console.error('[PRODUCT-SELECT] AI selection failed, falling back:', e);
   }
-  
-  // If no keyword match, return the most recent product image as default
-  if (!bestMatch && productImages.length > 0) {
-    bestMatch = productImages[0];
-    console.log('[PRODUCT-SELECT] No keyword match, using most recent product');
+
+  // Fallback: simple keyword matching if AI fails
+  const promptLower = prompt.toLowerCase();
+  const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
+  let bestMatch: ProductImage | null = null;
+  let bestScore = 0;
+
+  for (const img of productImages) {
+    let score = 0;
+    const searchText = [img.file_name || '', img.description || '', ...(img.tags || [])].join(' ').toLowerCase();
+    for (const word of promptWords) {
+      if (searchText.includes(word)) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; bestMatch = img; }
   }
-  
+
   if (bestMatch) {
-    console.log(`[PRODUCT-SELECT] Selected product: ${bestMatch.file_name} (score: ${bestScore})`);
+    console.log(`[PRODUCT-SELECT] Fallback matched: ${bestMatch.file_name} (score: ${bestScore})`);
   }
-  
   return bestMatch;
 }
 
