@@ -3149,6 +3149,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               anyToolExecuted = true;
               toolExecutionContext.push('BMS record_sale failed');
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'BMS system unavailable' }) });
+            }
           } else if (toolCall.function.name === 'get_product_variants') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BMS] get_product_variants called for:', args.product_name);
