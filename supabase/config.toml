@@ -7,7 +7,7 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = true
   [functions.auto-content-creator]
     timeout = 60
-    verify_jwt = true
+    verify_jwt = false
   [functions.analyze-ai-quality]
     verify_jwt = true
   [functions.analyze-and-followup]
