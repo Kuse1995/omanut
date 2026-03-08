@@ -65,12 +65,22 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
       const { error: uploadError } = await supabase.storage.from('company-media').upload(filePath, file, { upsert: true });
       if (uploadError) { toast.error(`Upload failed: ${uploadError.message}`); continue; }
       
-      const { error: dbError } = await supabase.from('company_media').insert({
+      const { data: dbData, error: dbError } = await supabase.from('company_media').insert({
         company_id: companyId, file_name: file.name, file_path: filePath, file_type: file.type,
         file_size: file.size, media_type: 'image', category: uploadCategory as MediaCategory
-      });
+      }).select('id').single();
       if (dbError) { toast.error(`Save failed: ${dbError.message}`); continue; }
       successCount++;
+      
+      // Fire-and-forget: auto-index with AI vision
+      if (dbData?.id) {
+        supabase.functions.invoke('index-brand-asset', {
+          body: { media_id: dbData.id, company_id: companyId }
+        }).then(({ error: indexErr }) => {
+          if (indexErr) console.error('Auto-index failed:', indexErr);
+          else console.log('Auto-indexed:', file.name);
+        });
+      }
     }
     
     if (successCount > 0) { toast.success(`${successCount} asset(s) uploaded`); onAssetsChange(); }

@@ -103,3 +103,8 @@ project_id = "dzheddvoiauevcayifev"
   [functions.whatsapp-voice]
     timeout = 60
     verify_jwt = false
+  [functions.index-brand-asset]
+    verify_jwt = false
+  [functions.reindex-company-media]
+    timeout = 120
+    verify_jwt = false

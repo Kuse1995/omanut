@@ -1,59 +1,67 @@
 
 
-# Fix Product Image Matching for Finch
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-Finch's product images all have:
-- **Description**: "Product image for AI generation" (identical for all)
-- **Tags**: empty `[]`
-- **File names**: UUIDs like `c7fcb095-bd3d-4d56-8baa-f2e4b0c93ef9.png`
+## Problem Analysis
 
-The vision matcher sends these to Gemini with a catalog like:
-```text
-1. Name: "c7fcb095-bd3d-4d56-8baa-f2e4b0c93ef9.png", Tags: [none], Description: "Product image for AI generation"
-2. Name: "275a4a33-9390-4620-af95-e04957ef212c.png", Tags: [none], Description: "Product image for AI generation"
-...
-```
+Two issues identified in the `demo-session` edge function:
 
-The keyword pre-filter picks random images since nothing matches, and the vision model has no product context to supplement visual matching.
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-## Solution: Auto-Index Products on Upload
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-### 1. New edge function: `supabase/functions/index-brand-asset/index.ts`
+## Changes
 
-When a product image is uploaded, call Gemini Vision to analyze it and auto-populate `description` and `tags` on the `company_media` row.
+### File: `supabase/functions/demo-session/index.ts`
 
-- Takes `media_id` and `company_id`
-- Fetches the image from storage
-- Sends to `gemini-2.5-flash` with a prompt like: "Describe this product image in detail. What is the product? What brand/text/labels are visible? What colors and shapes? Return JSON with `description` (1-2 sentences) and `tags` (array of keywords)."
-- Updates `company_media` row with the AI-generated description and tags
+**1. Tighten handoff evaluation prompt**
 
-### 2. Update `src/components/admin/BrandAssetLibrary.tsx`
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-After each successful upload + DB insert, fire-and-forget call to `index-brand-asset` to auto-analyze the image. No UI blocking — the analysis happens in the background.
+**2. Create tickets and queue items on handoff**
 
-### 3. New edge function: `supabase/functions/reindex-company-media/index.ts`
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-Batch re-index function that analyzes ALL existing product images for a company that still have the generic "Product image for AI generation" description. This fixes Finch's existing 10 images immediately.
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-- Fetches all `company_media` rows with generic descriptions
-- Processes each through Gemini Vision
-- Updates descriptions and tags
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-### 4. Strengthen vision matcher prompt in `whatsapp-image-gen/index.ts`
+**3. Skip evaluation on short conversations**
 
-Update the `selectProductImageForPrompt` selection prompt to:
-- Explicitly instruct: "Ignore text metadata if it's generic. Rely ENTIRELY on what you see in each image."
-- Add: "Look for: product labels, brand names printed on packaging, product shape, color, size, and type."
-- When metadata is all generic (detected by checking if all descriptions are identical), add a note: "WARNING: Text metadata is unreliable for these products. Use ONLY visual analysis."
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-## Files Changed
+### Summary of behavior after fix
 
-| File | Change |
-|------|--------|
-| `supabase/functions/index-brand-asset/index.ts` | New — auto-analyze uploaded product images with Gemini Vision |
-| `supabase/functions/reindex-company-media/index.ts` | New — batch re-index existing images with generic descriptions |
-| `src/components/admin/BrandAssetLibrary.tsx` | Call `index-brand-asset` after upload |
-| `supabase/functions/whatsapp-image-gen/index.ts` | Strengthen vision matcher prompt for poor-metadata scenarios |
-| `supabase/config.toml` | Add new function entries |
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
+
+### Files
+
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
