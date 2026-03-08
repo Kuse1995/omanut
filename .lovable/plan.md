@@ -1,72 +1,67 @@
 
 
-# Make Boss Chat Conversational for Non-Technical Users
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-Every capability section says "use tool IMMEDIATELY" and responses are capped at "2-4 lines." A non-technical boss who wants to brainstorm or discuss gets tool calls fired at them instead of a real conversation.
+## Problem Analysis
 
-## Design Principle
-**Talk first, act on clear intent.** The AI should feel like texting a smart business partner — not issuing commands to a system.
+Two issues identified in the `demo-session` edge function:
 
-## Changes: `supabase/functions/boss-chat/index.ts`
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-### 1. Rewrite role definition (line 311)
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-From: `"Head of Sales & Marketing AI advisor"`
+## Changes
 
-To: A trusted business partner who can both think and execute. Emphasize that this is a person the boss can bounce ideas off, not just a tool dispatcher.
+### File: `supabase/functions/demo-session/index.ts`
 
-### 2. Add intent-reading rules (before line 437)
+**1. Tighten handoff evaluation prompt**
 
-New `CONVERSATION vs ACTION` block:
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-```text
-READING THE BOSS'S INTENT:
-- Thinking out loud ("I'm considering...", "what do you think about...", "should we...") 
-  → ENGAGE. Share your perspective. Ask a follow-up. Do NOT call tools yet.
-- Asking for information ("how are sales?", "what did we sell?", "any pending posts?") 
-  → Use tools to fetch data, then discuss the results naturally.
-- Clear directive ("post this", "check stock on X", "approve post 2", "schedule for 10am") 
-  → Execute immediately with tools.
-- Sharing news or frustration ("sales were slow today", "a customer complained") 
-  → Acknowledge genuinely, offer insight, THEN suggest an action.
+**2. Create tickets and queue items on handoff**
 
-When unsure → lean toward conversation. It's better to confirm than to execute the wrong thing.
-```
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-### 3. Relax brevity rule (line 439)
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-From: `"Keep responses SHORT. 2-4 lines for simple answers."`
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-To: `"Match your length to the moment. Quick confirmations stay short (2-4 lines). Strategy discussions, brainstorming, or explaining results — take the space needed to be genuinely helpful. Never write walls of text, but don't cut yourself off mid-thought either."`
+**3. Skip evaluation on short conversations**
 
-### 4. Add warmth guidelines (after line 450)
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-```text
-- Be personable and warm. This is a WhatsApp conversation, not a report.
-- When the boss shares an idea, acknowledge it genuinely before adding your take.
-- Ask ONE clarifying question when intent is unclear rather than guessing wrong.
-- Use natural language ("That could work really well because..." not "Recommendation: implement X").
-```
+### Summary of behavior after fix
 
-### 5. Keep proactive drafting behavior
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-The existing content scheduling flow (lines 386-406) stays exactly as-is — that's good UX. We only soften the trigger: instead of firing on ANY mention of marketing, fire when the boss clearly wants to create content vs. just discussing strategy.
+### Files
 
-Add a qualifier to line 386:
-```text
-When the boss mentions marketing AND seems ready to act (not just brainstorming)...
-```
-
-## What stays the same
-- All tool definitions unchanged
-- All data access unchanged  
-- Proactive caption drafting (just with better intent detection)
-- Formatting rules (no markdown, emoji-light)
-- Timezone handling
-
-## Files
 | Action | File |
 |--------|------|
-| Edit | `supabase/functions/boss-chat/index.ts` (system prompt only, ~15 lines changed) |
+| Edit | `supabase/functions/demo-session/index.ts` |
 
