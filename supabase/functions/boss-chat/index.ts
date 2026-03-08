@@ -1575,11 +1575,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'sales_report', params: { period: args.period, company_id: company.id } }),
+                  body: JSON.stringify({ action: 'sales_report', params: { start_date: args.start_date, end_date: args.end_date, limit: args.limit, company_id: company.id } }),
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `📊 Sales Report (${args.period || 'today'}):\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const d = bmsData.data;
+                  const summary = d?.summary ? `\n\n📈 Summary:\n💰 Revenue: ${company.currency_prefix || 'K'}${d.summary.total_revenue || 0}\n📦 Quantity: ${d.summary.total_quantity || 0}\n🛒 Sales: ${d.summary.sales_count || 0}` : '';
+                  result = { success: true, message: `📊 Sales Report:${summary}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
                 } else {
                   result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
                 }
