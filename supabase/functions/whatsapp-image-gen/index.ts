@@ -852,7 +852,7 @@ INSTRUCTIONS:
           }
         }
         const matched = candidates.find((img: ProductImage) => aiChoice.includes(img.id));
-        if (matched) return matched;
+        if (matched) return { product: matched, bmsImageUrls };
       }
       return null;
     }
