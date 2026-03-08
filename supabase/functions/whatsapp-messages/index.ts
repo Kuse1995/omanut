@@ -150,7 +150,6 @@ async function routeToAgent(
 ): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
   // Use configured values or defaults
   const routingModel = config?.routingModel || 'deepseek-chat';
