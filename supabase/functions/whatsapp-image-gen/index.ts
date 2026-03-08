@@ -768,6 +768,15 @@ async function selectProductImageForPrompt(
         bmsContext = items.map((item: any) =>
           `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'}${item.image_urls?.length ? `, Images: ${item.image_urls.length}` : ''})`
         ).join('\n');
+        // Extract BMS image URLs as authoritative product references
+        for (const item of items) {
+          if (item.image_url) bmsImageUrls.push(item.image_url);
+          if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
+        }
+        bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
+        if (bmsImageUrls.length > 0) {
+          console.log(`[PRODUCT-SELECT] Extracted ${bmsImageUrls.length} BMS product image URLs`);
+        }
       }
     }
   } catch (e) {
