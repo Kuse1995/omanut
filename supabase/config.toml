@@ -111,3 +111,5 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.bms-agent]
     verify_jwt = false
+  [functions.bms-callback]
+    verify_jwt = false
