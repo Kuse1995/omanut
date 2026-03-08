@@ -133,12 +133,14 @@ The image should match this caption: "${caption}"
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
     const imageResponse = await geminiChat({
-      model: 'gemini-3-pro-image-preview',
+      model: 'gemini-2.0-flash-exp',
       messages: [{ role: 'user', content: imagePrompt }],
       modalities: ['image', 'text'],
     });
 
     if (!imageResponse.ok) {
+      const errBody = await imageResponse.text();
+      console.error(`Image generation failed (${imageResponse.status}):`, errBody);
       throw new Error(`Image generation failed: ${imageResponse.status}`);
     }
 
