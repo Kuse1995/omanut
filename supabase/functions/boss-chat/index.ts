@@ -1964,7 +1964,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 ? company.image_generation_settings[0]
                 : company.image_generation_settings;
 
-              if (!imageSettings?.enabled && functionName !== 'show_image_gallery') {
+              if (!imageSettings?.enabled) {
                 result = { success: false, message: 'Image generation is not enabled for your company. Please enable it in the admin settings first.' };
                 break;
               }
@@ -1972,9 +1972,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-              const messageType = functionName === 'generate_image' ? 'generate'
-                : functionName === 'edit_image' ? 'edit'
-                : 'history';
+              const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
               
               const imgPrompt = functionName === 'generate_image' ? args.prompt
                 : functionName === 'edit_image' ? args.instructions
