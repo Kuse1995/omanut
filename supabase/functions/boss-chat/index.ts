@@ -981,6 +981,21 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
+          name: "generate_document",
+          description: "Generate a professionally formatted PDF document and send it to the boss via WhatsApp. Use when the boss asks for a PDF, document, report, or says 'send me the invoice/quotation/report as PDF'. First fetch the data using the appropriate BMS tool (sales_report, profit_loss_report, etc.), then call this tool with the results.",
+          parameters: {
+            type: "object",
+            properties: {
+              document_type: { type: "string", enum: ["invoice", "quotation", "sales_report", "expense_report", "profit_loss", "receivables", "payables", "stock_report"], description: "Type of document to generate" },
+              data: { type: "object", description: "The document data. For invoices/quotations: { client_name, items: [{description, quantity, unit_price}], tax_rate, notes, valid_until }. For reports: pass the BMS response data directly." }
+            },
+            required: ["document_type", "data"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
           name: "list_product_images",
           description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
           parameters: {
