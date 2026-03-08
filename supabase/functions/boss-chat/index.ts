@@ -379,7 +379,7 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - Use get_outstanding_payables to see pending bills (what you owe)
    - Use profit_loss_report to generate P&L statements for any date range
    - Use create_quotation and create_invoice for formal business documents
-    - Use generate_document to create BEAUTIFUL branded PDF documents and send them via WhatsApp
+     - Use generate_document to create BEAUTIFUL branded PDF documents and send them via WhatsApp
 
 12. **HR & Attendance (BMS)**: You can track employee attendance.
     - Use clock_in when the boss says someone has arrived or started work
@@ -387,14 +387,31 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
     - The BMS automatically calculates work hours
 
 13. **Document Generation (PDF)**: You can create professional branded PDF documents!
-    - Use generate_document to turn ANY report or document into a polished PDF
-    - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-    - WORKFLOW: First fetch the data, then pass the result to generate_document
-    - "send me the sales report as PDF" → call sales_report → then generate_document with the result
-    - "create a quotation for X" → call create_quotation → then generate_document with quotation type and the data
-    - PDFs include company branding, header, footer, and professional formatting
-    - PDFs are automatically sent to the boss via WhatsApp
-    - NEVER dump raw JSON to the boss. Always format data nicely or generate a PDF.
+     - Use generate_document to turn ANY report or document into a polished PDF
+     - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
+     - WORKFLOW: First fetch the data, then pass the result to generate_document
+     - "send me the sales report as PDF" → call sales_report → then generate_document with the result
+     - "create a quotation for X" → call create_quotation → then generate_document with quotation type and the data
+     - PDFs include company branding, header, footer, and professional formatting
+     - PDFs are automatically sent to the boss via WhatsApp
+     - NEVER dump raw JSON to the boss. Always format data nicely or generate a PDF.
+
+MULTI-STEP TOOL CHAINING (CRITICAL):
+You can call multiple tools across multiple rounds. After each tool call, you receive the result and can use it to make subsequent tool calls. You MUST complete the full workflow in one conversation turn. Examples:
+
+QUOTATION WORKFLOW:
+1. Boss says "create a quotation for Company X, 4 LifeStraw Max"
+2. YOU call check_stock for "LifeStraw Max" to get current unit price
+3. YOU receive the stock data with the price
+4. YOU call create_quotation with the correct unit_price from step 3
+5. YOU call generate_document with the quotation data to create a PDF
+6. YOU respond with a confirmation message
+
+INVOICE WORKFLOW: Same pattern - check_stock for prices → create_invoice → generate_document
+
+SALES REPORT PDF: sales_report → generate_document
+
+NEVER stop after just fetching data. If the boss asked you to CREATE something, complete ALL steps (fetch data → create document → generate PDF if needed).
 
 1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
@@ -1094,50 +1111,69 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       ...(h.response ? [{ role: 'assistant' as const, content: h.response }] : [])
     ]);
 
-    const response = await geminiChat({
-      model: primaryModel,
-      messages: [
-        { role: 'system', content: finalSystemPrompt },
-        ...historyMessages,
-        { role: 'user', content: Body }
-      ],
-      temperature,
-      max_tokens: maxTokens,
-      tools: managementTools
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('Lovable AI API error:', data);
-      throw new Error(`Lovable AI error: ${data.error?.message || 'Unknown error'}`);
-    }
-    
-    if (!data.choices?.[0]?.message) {
-      console.error('No message in AI response:', data);
-      throw new Error('Invalid AI response format');
-    }
-    
-    const aiMessage = data.choices[0].message;
-    let aiResponse = aiMessage.content || '';
+    // ========== MULTI-ROUND TOOL EXECUTION LOOP ==========
+    // Allows AI to chain tools: e.g. check_stock → create_quotation → generate_document
+    const MAX_TOOL_ROUNDS = 5;
+    let conversationMessages: any[] = [
+      { role: 'system', content: finalSystemPrompt },
+      ...historyMessages,
+      { role: 'user', content: Body }
+    ];
+    let aiResponse = '';
     let toolImageUrl: string | null = null;
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
 
-    // Handle tool calls if present
-    if (aiMessage.tool_calls && aiMessage.tool_calls.length > 0) {
-      console.log('Tool calls detected:', aiMessage.tool_calls.length);
-      
-      const toolResults = [];
-      
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      console.log(`[BOSS-CHAT] Tool round ${round + 1}/${MAX_TOOL_ROUNDS}`);
+
+      const response = await geminiChat({
+        model: primaryModel,
+        messages: conversationMessages,
+        temperature,
+        max_tokens: maxTokens,
+        tools: managementTools
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Lovable AI API error:', data);
+        throw new Error(`Lovable AI error: ${data.error?.message || 'Unknown error'}`);
+      }
+
+      if (!data.choices?.[0]?.message) {
+        console.error('No message in AI response:', data);
+        throw new Error('Invalid AI response format');
+      }
+
+      const aiMessage = data.choices[0].message;
+
+      // No tool calls — this is the final text response
+      if (!aiMessage.tool_calls || aiMessage.tool_calls.length === 0) {
+        aiResponse = aiMessage.content || '';
+        console.log(`[BOSS-CHAT] Final response after ${round + 1} round(s)`);
+        break;
+      }
+
+      // Has tool calls — execute them and feed results back
+      console.log(`[BOSS-CHAT] Round ${round + 1}: ${aiMessage.tool_calls.length} tool call(s)`);
+
+      // Append the assistant message (with tool_calls) to conversation
+      conversationMessages.push({
+        role: 'assistant',
+        content: aiMessage.content || null,
+        tool_calls: aiMessage.tool_calls
+      });
+
       for (const toolCall of aiMessage.tool_calls) {
         const functionName = toolCall.function.name;
         const args = JSON.parse(toolCall.function.arguments);
-        
-        console.log('Executing tool:', functionName, args);
-        
+
+        console.log(`[BOSS-CHAT] Executing tool: ${functionName}`, args);
+
+        let result = { success: false, message: '' };
+
         try {
-          let result = { success: false, message: '' };
-          
           switch (functionName) {
             case 'update_business_hours':
               const oldHours = company.hours;
@@ -1163,28 +1199,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               result = { success: true, message: `✅ Branches updated\nFrom: ${oldBranches}\nTo: ${args.branches}` };
               break;
               
-            case 'update_payment_info':
+            case 'update_payment_info': {
               const updateData: any = {};
-              const changes = [];
-              if (args.mtn_number) {
-                updateData.payment_number_mtn = args.mtn_number;
-                changes.push(`MTN: ${args.mtn_number}`);
-              }
-              if (args.airtel_number) {
-                updateData.payment_number_airtel = args.airtel_number;
-                changes.push(`Airtel: ${args.airtel_number}`);
-              }
-              if (args.zamtel_number) {
-                updateData.payment_number_zamtel = args.zamtel_number;
-                changes.push(`Zamtel: ${args.zamtel_number}`);
-              }
-              if (args.payment_instructions) {
-                updateData.payment_instructions = args.payment_instructions;
-                changes.push(`Instructions updated`);
-              }
+              const changes: string[] = [];
+              if (args.mtn_number) { updateData.payment_number_mtn = args.mtn_number; changes.push(`MTN: ${args.mtn_number}`); }
+              if (args.airtel_number) { updateData.payment_number_airtel = args.airtel_number; changes.push(`Airtel: ${args.airtel_number}`); }
+              if (args.zamtel_number) { updateData.payment_number_zamtel = args.zamtel_number; changes.push(`Zamtel: ${args.zamtel_number}`); }
+              if (args.payment_instructions) { updateData.payment_instructions = args.payment_instructions; changes.push(`Instructions updated`); }
               await supabase.from('companies').update(updateData).eq('id', company.id);
               result = { success: true, message: `✅ Payment info updated\n${changes.join('\n')}` };
               break;
+            }
               
             case 'update_voice_style':
               const oldVoice = company.voice_style;
@@ -1192,863 +1217,352 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               result = { success: true, message: `✅ Voice style updated\nFrom: ${oldVoice}\nTo: ${args.voice_style}` };
               break;
               
-            case 'update_ai_instructions':
+            case 'update_ai_instructions': {
               const aiUpdateData: any = {};
-              const aiChanges = [];
-              if (args.system_instructions !== undefined) {
-                aiUpdateData.system_instructions = args.system_instructions;
-                aiChanges.push('System instructions');
-              }
-              if (args.qa_style !== undefined) {
-                aiUpdateData.qa_style = args.qa_style;
-                aiChanges.push('Q&A style');
-              }
-              if (args.banned_topics !== undefined) {
-                aiUpdateData.banned_topics = args.banned_topics;
-                aiChanges.push('Banned topics');
-              }
-              
-              // Check if override exists, insert or update
-              const { data: existing } = await supabase
-                .from('company_ai_overrides')
-                .select('id')
-                .eq('company_id', company.id)
-                .single();
-                
-              if (existing) {
+              const aiChanges: string[] = [];
+              if (args.system_instructions !== undefined) { aiUpdateData.system_instructions = args.system_instructions; aiChanges.push('System instructions'); }
+              if (args.qa_style !== undefined) { aiUpdateData.qa_style = args.qa_style; aiChanges.push('QA style'); }
+              if (args.banned_topics !== undefined) { aiUpdateData.banned_topics = args.banned_topics; aiChanges.push('Banned topics'); }
+              if (aiOverrides) {
                 await supabase.from('company_ai_overrides').update(aiUpdateData).eq('company_id', company.id);
               } else {
                 await supabase.from('company_ai_overrides').insert({ company_id: company.id, ...aiUpdateData });
               }
-              
-              result = { success: true, message: `✅ AI instructions updated\nChanged: ${aiChanges.join(', ')}` };
+              result = { success: true, message: `✅ AI instructions updated: ${aiChanges.join(', ')}` };
               break;
-              
+            }
+
             case 'update_quick_reference':
-              const oldRef = company.quick_reference_info;
               await supabase.from('companies').update({ quick_reference_info: args.quick_reference_info }).eq('id', company.id);
-              result = { success: true, message: `✅ Quick reference updated` };
+              result = { success: true, message: '✅ Quick reference info updated' };
               break;
 
-            case 'get_all_customers':
-              const { data: allCustomers } = await supabase
+            case 'get_all_customers': {
+              const { data: allConvs } = await supabase
                 .from('conversations')
-                .select('customer_name, phone, created_at, status')
+                .select('customer_name, phone, started_at, status')
                 .eq('company_id', company.id)
-                .order('created_at', { ascending: false });
-              
-              const customerList = allCustomers?.map((c: any) => 
-                `${c.customer_name || 'Unknown'} - ${c.phone || 'N/A'} (${c.status}, ${new Date(c.created_at).toLocaleDateString()})`
-              ).join('\n') || 'No customers';
-              
-              result = { 
-                success: true, 
-                message: `Complete Customer Database (${allCustomers?.length || 0} total conversations, ${uniquePhones.size} unique customers):\n\n${customerList}` 
-              };
+                .not('phone', 'is', null)
+                .order('started_at', { ascending: false });
+              const customerMap = new Map();
+              for (const c of allConvs || []) {
+                if (!customerMap.has(c.phone)) customerMap.set(c.phone, c);
+              }
+              const customerList = Array.from(customerMap.values()).map((c: any) =>
+                `${c.customer_name || 'Unknown'} - ${c.phone}`
+              ).join('\n');
+              result = { success: true, message: customerList || 'No customers found' };
               break;
+            }
 
-            case 'schedule_social_post':
-            case 'schedule_facebook_post': {
-              const targetPlatform = args.target_platform || 'facebook';
-              const isPublishNow = args.publish_now === true;
-              const { data: metaCred } = await supabase
-                .from('meta_credentials')
-                .select('page_id')
-                .eq('company_id', company.id)
-                .limit(1)
-                .maybeSingle();
+            case 'schedule_social_post': {
+              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-              if (!metaCred?.page_id) {
-                result = { success: false, message: '❌ No Facebook page connected for this company. Please set up Meta credentials first.' };
-                break;
-              }
-
-              let imageUrl = args.image_url || null;
-
-              // If boss wants image generation, call whatsapp-image-gen
-              if (args.needs_image_generation && !imageUrl) {
-                const imageSettings = Array.isArray(company.image_generation_settings)
-                  ? company.image_generation_settings[0]
-                  : company.image_generation_settings;
-
-                if (imageSettings?.enabled) {
-                  try {
-                    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-                    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-                    const imgRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                      },
-                      body: JSON.stringify({
-                        companyId: company.id,
-                        customerPhone: '',
-                        conversationId: null,
-                        prompt: args.image_prompt || `Create a brand-aligned image for this Facebook post: ${args.content}`,
-                        messageType: 'generate',
-                      }),
-                    });
-                    if (imgRes.ok) {
-                      const imgResult = await imgRes.json();
-                      imageUrl = imgResult.imageUrl || null;
-                      console.log('[BOSS-SCHEDULE] Generated image URL:', imageUrl);
-                    }
-                  } catch (imgErr) {
-                    console.error('[BOSS-SCHEDULE] Image generation error:', imgErr);
+              // If needs image generation, do that first
+              let postImageUrl = args.image_url || null;
+              if (args.needs_image_generation && args.image_prompt) {
+                try {
+                  const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({
+                      companyId: company.id,
+                      customerPhone: '',
+                      conversationId: null,
+                      prompt: args.image_prompt,
+                      messageType: 'generate',
+                    }),
+                  });
+                  if (imgGenResponse.ok) {
+                    const imgResult = await imgGenResponse.json();
+                    if (imgResult.imageUrl) postImageUrl = imgResult.imageUrl;
                   }
+                } catch (e) {
+                  console.error('Image gen for post failed:', e);
                 }
               }
 
-              // Insert draft into scheduled_posts
-              // Create fresh Supabase client to avoid broken pipe after long image generation
-              const freshSupabase = createClient(
-                Deno.env.get('SUPABASE_URL')!,
-                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-              );
-              const systemUserId = '00000000-0000-0000-0000-000000000000';
-              const { data: newPost, error: insertError } = await freshSupabase
-                .from('scheduled_posts')
-                .insert({
-                  company_id: company.id,
-                  page_id: metaCred.page_id,
-                  content: args.content,
-                  scheduled_time: isPublishNow ? new Date().toISOString() : (args.scheduled_time || new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()),
-                  image_url: imageUrl,
-                  status: 'draft',
-                  created_by: systemUserId,
-                  target_platform: targetPlatform,
-                })
-                .select('id')
-                .single();
-
-              if (insertError || !newPost) {
-                console.error('[BOSS-SCHEDULE] Insert error:', insertError);
-                result = { success: false, message: `❌ Failed to create post draft: ${insertError?.message || 'Unknown error'}` };
-                break;
-              }
-
-              const platformLabel = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
-
-              if (isPublishNow) {
-                // Publish immediately via publish-meta-post
-                const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-                const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-                const pubRes = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
+              if (args.publish_now) {
+                // Publish immediately
+                const publishFn = args.target_platform === 'instagram' ? 'publish-meta-post' : 'publish-facebook-post';
+                const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/${publishFn}`, {
                   method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                  },
-                  body: JSON.stringify({ post_id: newPost.id }),
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({ companyId: company.id, content: args.content, imageUrl: postImageUrl }),
                 });
-                const pubResult = await pubRes.json();
-                if (!pubRes.ok || !pubResult.success) {
-                  result = { success: false, message: `❌ Post draft created but publishing failed: ${pubResult.error || 'Unknown error'}` };
-                  break;
-                }
-                result = {
-                  success: true,
-                  message: `✅ ${platformLabel} post published!\n\n📝 Content: ${args.content}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}\n🆔 Meta Post ID: ${pubResult.meta_post_id}`
-                };
-                // Append media message for WhatsApp delivery
-                toolMediaMessages.push({
-                  body: `✅ Published to ${platformLabel}:\n\n${args.content}`,
-                  imageUrl: imageUrl || null
-                });
+                const publishResult = await publishResponse.json();
+                result = publishResult.success !== false
+                  ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` }
+                  : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
               } else {
-                // Set to approved — cron-publisher will handle it at scheduled_time
-                await freshSupabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', newPost.id);
-                const scheduledDate = new Date(args.scheduled_time);
-                const localDate = new Date(scheduledDate.getTime() + 2 * 60 * 60 * 1000); // GMT+2
-                result = {
-                  success: true,
-                  message: `✅ ${platformLabel} post approved & scheduled!\n\n📝 Content: ${args.content}\n📅 Scheduled for: ${localDate.toLocaleString()}\n📱 Platform: ${platformLabel}\n${imageUrl ? '🖼️ Image attached' : ''}`
-                };
-                // Append media message for WhatsApp delivery
-                toolMediaMessages.push({
-                  body: `✅ Scheduled for ${platformLabel} (${localDate.toLocaleDateString()} at ${localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}):\n\n${args.content}`,
-                  imageUrl: imageUrl || null
+                // Schedule for later
+                const scheduleResponse = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({
+                    companyId: company.id,
+                    content: args.content,
+                    scheduledTime: args.scheduled_time,
+                    imageUrl: postImageUrl,
+                    targetPlatform: args.target_platform || 'facebook',
+                    status: 'approved',
+                  }),
                 });
+                const schedResult = await scheduleResponse.json();
+                result = schedResult.error
+                  ? { success: false, message: `❌ Scheduling failed: ${schedResult.error}` }
+                  : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` };
               }
               break;
             }
-              
+
             case 'update_agent_strategy': {
               const strategyUpdate: any = {};
-              const stratChanges: string[] = [];
-              if (args.posts_per_week !== undefined) { strategyUpdate.posts_per_week = args.posts_per_week; stratChanges.push(`Posts/week: ${args.posts_per_week}`); }
-              if (args.target_audience !== undefined) { strategyUpdate.target_audience = args.target_audience; stratChanges.push(`Audience: ${args.target_audience}`); }
-              if (args.preferred_tone !== undefined) { strategyUpdate.preferred_tone = args.preferred_tone; stratChanges.push(`Tone: ${args.preferred_tone}`); }
-              if (args.content_themes !== undefined) { strategyUpdate.content_themes = args.content_themes; stratChanges.push(`Themes: ${args.content_themes.join(', ')}`); }
-              if (args.preferred_posting_days !== undefined) { strategyUpdate.preferred_posting_days = args.preferred_posting_days; stratChanges.push(`Days: ${args.preferred_posting_days.join(', ')}`); }
-              if (args.preferred_posting_time !== undefined) { strategyUpdate.preferred_posting_time = args.preferred_posting_time; stratChanges.push(`Time: ${args.preferred_posting_time}`); }
-              if (args.notes !== undefined) { strategyUpdate.notes = args.notes; stratChanges.push(`Notes updated`); }
+              if (args.posts_per_week) strategyUpdate.posts_per_week = args.posts_per_week;
+              if (args.target_audience) strategyUpdate.target_audience = args.target_audience;
+              if (args.preferred_tone) strategyUpdate.preferred_tone = args.preferred_tone;
+              if (args.content_themes) strategyUpdate.content_themes = args.content_themes;
+              if (args.preferred_posting_days) strategyUpdate.preferred_posting_days = args.preferred_posting_days;
+              if (args.preferred_posting_time) strategyUpdate.preferred_posting_time = args.preferred_posting_time;
+              if (args.notes) strategyUpdate.notes = args.notes;
 
-              const { data: existingSettings } = await supabase
+              const { data: existing } = await supabase
                 .from('agent_settings')
                 .select('id')
                 .eq('company_id', company.id)
                 .maybeSingle();
-
-              if (existingSettings) {
-                await supabase.from('agent_settings').update({ ...strategyUpdate, updated_at: new Date().toISOString() }).eq('company_id', company.id);
+              if (existing) {
+                await supabase.from('agent_settings').update(strategyUpdate).eq('company_id', company.id);
               } else {
                 await supabase.from('agent_settings').insert({ company_id: company.id, ...strategyUpdate });
               }
-              result = { success: true, message: `✅ Social media strategy updated!\n${stratChanges.join('\n')}` };
+              result = { success: true, message: `✅ Strategy updated: ${Object.keys(strategyUpdate).join(', ')}` };
               break;
             }
 
             case 'get_pending_posts': {
               const { data: pendingPosts } = await supabase
                 .from('scheduled_posts')
-                .select('id, content, image_url, scheduled_time, target_platform, created_at')
+                .select('*')
                 .eq('company_id', company.id)
-                .eq('status', 'pending_approval')
-                .order('scheduled_time', { ascending: true });
-
-              if (!pendingPosts || pendingPosts.length === 0) {
-                result = { success: true, message: '📭 No posts pending approval right now. The queue is empty!' };
+                .in('status', ['pending_approval', 'draft'])
+                .order('created_at', { ascending: false })
+                .limit(10);
+              if (!pendingPosts?.length) {
+                result = { success: true, message: 'No pending posts to review! 🎉' };
               } else {
-                // Build per-post media messages array for multi-image WhatsApp delivery
-                const pendingMediaMessages: { body: string; imageUrl: string | null }[] = pendingPosts.map((p: any, i: number) => {
-                  const time = new Date(p.scheduled_time);
-                  const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000); // GMT+2
-                  const caption = `Post ${i + 1}/${pendingPosts.length}:\n\n${p.content}\n\n📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n📱 ${p.target_platform}`;
-                  return { body: caption, imageUrl: p.image_url || null };
-                });
-                // Add concluding prompt
-                pendingMediaMessages.push({ body: `📋 ${pendingPosts.length} post(s) shown above.\n\nWhich of these would you like to edit or approve?\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".`, imageUrl: null });
-                
-                // Merge into toolMediaMessages accumulator
-                toolMediaMessages.push(...pendingMediaMessages);
-                
-                const postList = pendingPosts.map((p: any, i: number) => {
-                  const time = new Date(p.scheduled_time);
-                  const localTime = new Date(time.getTime() + 2 * 60 * 60 * 1000);
-                  return `${i + 1}. 📝 "${p.content.substring(0, 80)}${p.content.length > 80 ? '...' : ''}"\n   📅 ${localTime.toLocaleDateString()} at ${localTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}\n   📱 ${p.target_platform}\n   ${p.image_url ? '🖼️ Has image' : '📄 Text only'}`;
-                }).join('\n\n');
-                result = { ...result, success: true, message: `📋 ${pendingPosts.length} post(s) pending approval:\n\n${postList}\n\nReply with "approve post [number]", "edit post [number]", or "reject post [number]".` };
+                const postsList = pendingPosts.map((p: any, i: number) =>
+                  `${i + 1}. ${p.content?.substring(0, 80)}...\n   📅 ${p.scheduled_time || 'No time set'} | ${p.target_platform || 'facebook'}${p.image_url ? ' | 🖼️' : ''}`
+                ).join('\n\n');
+                result = { success: true, message: `📋 ${pendingPosts.length} posts pending:\n\n${postsList}` };
               }
               break;
             }
 
             case 'review_pending_post': {
-              // Get pending posts to resolve index
-              let targetPostId = args.post_id;
-              if (!targetPostId && args.post_index) {
-                const { data: pendingForReview } = await supabase
-                  .from('scheduled_posts')
-                  .select('id')
-                  .eq('company_id', company.id)
-                  .eq('status', 'pending_approval')
-                  .order('scheduled_time', { ascending: true });
-
-                if (!pendingForReview || args.post_index > pendingForReview.length || args.post_index < 1) {
-                  result = { success: false, message: `❌ Post #${args.post_index} not found. Use "show pending posts" to see the current list.` };
-                  break;
-                }
-                targetPostId = pendingForReview[args.post_index - 1].id;
-              }
-
-              if (!targetPostId) {
-                result = { success: false, message: '❌ Please specify which post to review (e.g., "approve post 1").' };
-                break;
-              }
-
-              if (args.action === 'approve') {
-                // Set to approved — cron-publisher will publish at scheduled_time
-                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', targetPostId);
-                result = { success: true, message: `✅ Post approved! It will be published automatically at the scheduled time.` };
-              } else if (args.action === 'edit') {
-                const editData: any = {};
-                const editChanges: string[] = [];
-                if (args.new_caption) { editData.content = args.new_caption; editChanges.push('Caption updated'); }
-                if (args.new_scheduled_time) { editData.scheduled_time = args.new_scheduled_time; editChanges.push('Time updated'); }
-                if (args.new_image_url) { editData.image_url = args.new_image_url; editChanges.push('Image updated'); }
-                await supabase.from('scheduled_posts').update(editData).eq('id', targetPostId);
-                result = { success: true, message: `✏️ Post updated!\n${editChanges.join('\n')}\n\nSay "approve post" when ready to schedule it.` };
+              const { data: allPending } = await supabase
+                .from('scheduled_posts')
+                .select('*')
+                .eq('company_id', company.id)
+                .in('status', ['pending_approval', 'draft'])
+                .order('created_at', { ascending: false })
+                .limit(10);
+              const postId = args.post_id || (allPending && args.post_index ? allPending[args.post_index - 1]?.id : null);
+              if (!postId) {
+                result = { success: false, message: '❌ Could not find that post. Try get_pending_posts first.' };
+              } else if (args.action === 'approve') {
+                await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', postId);
+                result = { success: true, message: '✅ Post approved and scheduled!' };
               } else if (args.action === 'approve_and_publish') {
-                // Approve and publish immediately
-                await supabase.from('scheduled_posts').update({ status: 'scheduled' }).eq('id', targetPostId);
-                const SUPABASE_URL3 = Deno.env.get('SUPABASE_URL')!;
-                const SRK3 = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-                const pubRes = await fetch(`${SUPABASE_URL3}/functions/v1/publish-meta-post`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SRK3}` },
-                  body: JSON.stringify({ post_id: targetPostId }),
-                });
-                const pubResult = await pubRes.json();
-                if (pubRes.ok && pubResult.success) {
-                  result = { success: true, message: `✅ Post approved and published NOW!\n🆔 Meta Post ID: ${pubResult.meta_post_id}` };
+                const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+                const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+                const post = allPending?.find((p: any) => p.id === postId);
+                if (post) {
+                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-facebook-post`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({ companyId: company.id, content: post.content, imageUrl: post.image_url }),
+                  });
+                  const pubResult = await publishResponse.json();
+                  await supabase.from('scheduled_posts').update({ status: 'published' }).eq('id', postId);
+                  result = { success: true, message: '✅ Post published immediately!' };
                 } else {
-                  result = { success: false, message: `⚠️ Post approved but publishing failed: ${pubResult.error || 'Unknown error'}. You can retry with "publish post".` };
+                  result = { success: false, message: '❌ Post not found for publishing' };
                 }
+              } else if (args.action === 'edit') {
+                const editUpdate: any = {};
+                if (args.new_caption) editUpdate.content = args.new_caption;
+                if (args.new_scheduled_time) editUpdate.scheduled_time = args.new_scheduled_time;
+                if (args.new_image_url) editUpdate.image_url = args.new_image_url;
+                await supabase.from('scheduled_posts').update(editUpdate).eq('id', postId);
+                result = { success: true, message: '✅ Post updated!' };
               } else if (args.action === 'reject') {
-                await supabase.from('scheduled_posts').update({ status: 'failed' }).eq('id', targetPostId);
-                result = { success: true, message: '🗑️ Post rejected and removed from the queue.' };
+                await supabase.from('scheduled_posts').update({ status: 'rejected' }).eq('id', postId);
+                result = { success: true, message: '✅ Post rejected and removed from queue.' };
               } else {
-                result = { success: false, message: '❌ Unknown action. Use approve, edit, or reject.' };
+                result = { success: false, message: '❌ Unknown action. Use approve, edit, reject, or approve_and_publish.' };
               }
               break;
             }
 
             case 'get_hot_leads': {
               const hoursBack = args.hours_back || 24;
-              const platformFilter = args.platform_filter || 'all';
               const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
-              
               let query = supabase
                 .from('conversations')
-                .select('id, customer_name, phone, platform, started_at, last_message_preview, unread_count, status')
+                .select('customer_name, phone, platform, started_at, status, last_message_preview')
                 .eq('company_id', company.id)
                 .gte('started_at', cutoff)
                 .order('started_at', { ascending: false })
                 .limit(20);
-              
-              if (platformFilter === 'facebook') {
-                query = query.or('phone.ilike.fb:%,phone.ilike.fbdm:%');
-              } else if (platformFilter === 'instagram') {
-                query = query.or('phone.ilike.ig:%,phone.ilike.igdm:%');
-              } else if (platformFilter === 'messenger') {
-                query = query.ilike('phone', 'fbdm:%');
-              } else if (platformFilter === 'whatsapp') {
-                query = query.ilike('phone', 'whatsapp:%');
+              if (args.platform_filter && args.platform_filter !== 'all') {
+                query = query.eq('platform', args.platform_filter);
               }
-              
               const { data: leads } = await query;
-              
-              if (!leads || leads.length === 0) {
-                result = { success: true, message: `No leads found in the last ${hoursBack} hours${platformFilter !== 'all' ? ` for ${platformFilter}` : ''}.` };
+              if (!leads?.length) {
+                result = { success: true, message: `No new leads in the last ${hoursBack} hours.` };
               } else {
-                const platformIcon = (phone: string) => {
-                  if (phone?.startsWith('fbdm:')) return '💬';
-                  if (phone?.startsWith('fb:')) return '📘';
-                  if (phone?.startsWith('igdm:')) return '📸';
-                  if (phone?.startsWith('ig:')) return '📷';
-                  return '📱';
-                };
-                
-                const leadList = leads.map((l: any, i: number) => {
-                  const icon = platformIcon(l.phone || '');
-                  const name = l.customer_name || 'Unknown';
-                  const preview = l.last_message_preview ? `"${l.last_message_preview.slice(0, 80)}"` : 'No preview';
-                  const time = new Date(l.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  return `${i + 1}. ${icon} ${name}\n   ${preview}\n   ${time} | ${l.status}${l.unread_count ? ` | ${l.unread_count} unread` : ''}`;
-                }).join('\n\n');
-                
-                result = { 
-                  success: true, 
-                  message: `🔥 HOT LEADS (last ${hoursBack}h)${platformFilter !== 'all' ? ` - ${platformFilter}` : ''}:\n\n${leadList}\n\n${leads.length} lead(s) found across all platforms.` 
-                };
+                const leadsList = leads.map((l: any, i: number) =>
+                  `${i + 1}. ${l.customer_name || 'Unknown'} (${l.phone || 'N/A'}) via ${l.platform}\n   "${l.last_message_preview?.substring(0, 60) || 'No preview'}..."`
+                ).join('\n\n');
+                result = { success: true, message: `🔥 ${leads.length} leads (last ${hoursBack}h):\n\n${leadsList}` };
               }
               break;
             }
 
-            case 'check_stock': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'check_stock', params: { product_name: args.product_name, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
-                  const formatted = items.map((item: any) => {
-                    const stockEmoji = item.status === 'healthy' ? '🟢' : item.status === 'low' ? '🟡' : '🔴';
-                    return `${stockEmoji} ${item.name || item.product_name || 'Unknown'}\n   Stock: ${item.current_stock ?? 'N/A'} units\n   Price: ${company.currency_prefix || 'K'}${item.unit_price ?? 'N/A'}\n   SKU: ${item.sku || 'N/A'}\n   Reorder Level: ${item.reorder_level ?? 'N/A'}`;
-                  }).join('\n\n');
-                  result = { success: true, message: `📦 Inventory Check:\n\n${formatted}` };
-                } else {
-                  result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (bmsErr) {
-                console.error('[BOSS-BMS] check_stock error:', bmsErr);
-                result = { success: false, message: `❌ BMS connection error: ${bmsErr instanceof Error ? bmsErr.message : String(bmsErr)}` };
-              }
-              break;
-            }
-
-            case 'record_sale': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'record_sale', params: { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name, customer_phone: args.customer_phone, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const saleInfo = bmsData.data || bmsData;
-                  result = { success: true, message: `✅ Sale Recorded!\n\n🛒 Product: ${args.product_name}\n📦 Qty: ${args.quantity}\n💳 Payment: ${args.payment_method || 'Not specified'}\n👤 Customer: ${args.customer_name || 'Walk-in'}${args.customer_phone ? `\n📞 Phone: ${args.customer_phone}` : ''}${saleInfo.total ? `\n💰 Total: ${company.currency_prefix || 'K'}${saleInfo.total}` : ''}${saleInfo.remaining_stock !== undefined ? `\n📊 Remaining Stock: ${saleInfo.remaining_stock}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Failed to record sale: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (bmsErr) {
-                console.error('[BOSS-BMS] record_sale error:', bmsErr);
-                result = { success: false, message: `❌ BMS connection error: ${bmsErr instanceof Error ? bmsErr.message : String(bmsErr)}` };
-              }
-              break;
-            }
-
-            case 'update_stock': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'update_stock', params: { product_name: args.product_name, quantity: args.quantity, adjustment_type: args.adjustment_type, reason: args.reason, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  result = { success: true, message: `✅ Stock Updated!\n\n📦 Product: ${args.product_name}\n🔢 New quantity: ${args.quantity}\n📝 Type: ${args.adjustment_type || 'set'}${args.reason ? `\n💬 Reason: ${args.reason}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Stock update failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] update_stock error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'sales_report': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'sales_report', params: { start_date: args.start_date, end_date: args.end_date, limit: args.limit, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  const summary = d?.summary ? `\n\n📈 Summary:\n💰 Revenue: ${company.currency_prefix || 'K'}${d.summary.total_revenue || 0}\n📦 Quantity: ${d.summary.total_quantity || 0}\n🛒 Sales: ${d.summary.sales_count || 0}` : '';
-                  const salesItems = Array.isArray(d?.data) ? d.data : (Array.isArray(d?.sales) ? d.sales : []);
-                  const salesList = salesItems.length > 0
-                    ? '\n\n' + salesItems.slice(0, 15).map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || s.amount || 0}${s.customer_name ? ` (${s.customer_name})` : ''}`).join('\n')
-                    : '';
-                  result = { success: true, message: `📊 Sales Report:${summary}${salesList}` };
-                } else {
-                  result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] sales_report error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_order_status': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_order_status', params: { order_number: args.order_number, order_id: args.order_id, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const order = bmsData.data;
-                  const statusEmoji = { pending: '🕐', confirmed: '✅', processing: '⚙️', shipped: '🚚', delivered: '📦', cancelled: '❌' };
-                  result = { success: true, message: `📋 Order Status:\n\n🔖 ${order.order_number || args.order_number}\n${statusEmoji[order.status as keyof typeof statusEmoji] || '📋'} Status: ${order.status}\n👤 Customer: ${order.customer_name || 'N/A'}\n💰 Total: ${company.currency_prefix || 'K'}${order.total_amount || 'N/A'}\n📅 Created: ${order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}${order.items ? `\n📦 Items: ${order.items.length}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Order lookup failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] get_order_status error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'update_order_status': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, tracking_number: args.tracking_number, notes: args.notes, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.tracking_number ? `\n🚚 Tracking: ${args.tracking_number}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Order update failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] update_order_status error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'cancel_order': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'cancel_order', params: { order_number: args.order_number, order_id: args.order_id, reason: args.reason, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  result = { success: true, message: `✅ Order Cancelled!\n\n🔖 Order: ${args.order_number || args.order_id}${args.reason ? `\n📝 Reason: ${args.reason}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Order cancellation failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] cancel_order error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_customer_history': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_customer_history', params: { customer_name: args.customer_name, customer_phone: args.customer_phone, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const hist = bmsData.data;
-                  const salesList = Array.isArray(hist?.sales) && hist.sales.length > 0
-                    ? hist.sales.map((s: any, i: number) => `${i + 1}. ${s.product_name || 'Product'} x${s.quantity || 1} — ${company.currency_prefix || 'K'}${s.total || 0} (${s.date || s.created_at?.slice(0, 10) || 'N/A'})`).join('\n')
-                    : 'No sales found';
-                  const ordersList = Array.isArray(hist?.orders) && hist.orders.length > 0
-                    ? hist.orders.map((o: any, i: number) => `${i + 1}. #${o.order_number || 'N/A'} — ${o.status || 'pending'} — ${company.currency_prefix || 'K'}${o.total_amount || 0}`).join('\n')
-                    : 'No orders found';
-                  result = { success: true, message: `👤 Customer History: ${args.customer_name || args.customer_phone}\n\n🛒 Sales (${hist?.total_sales || 0}):\n${salesList}\n\n📦 Orders (${hist?.total_orders || 0}):\n${ordersList}\n\n💰 Total Spent: ${company.currency_prefix || 'K'}${hist?.total_spent || 0}` };
-                } else {
-                  result = { success: false, message: `❌ Customer lookup failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] get_customer_history error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_company_statistics': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_company_statistics', params: { company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const stats = bmsData.data;
-                  const lines = Object.entries(stats).map(([key, val]) => {
-                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
-                    return `• ${label}: ${typeof val === 'number' && key.includes('revenue') ? `${company.currency_prefix || 'K'}${val}` : val}`;
-                  }).join('\n');
-                  result = { success: true, message: `📊 Company Statistics:\n\n${lines}` };
-                } else {
-                  result = { success: false, message: `❌ Statistics failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] get_company_statistics error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'create_quotation': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'create_quotation', params: { client_name: args.client_name, items: args.items, client_phone: args.client_phone, client_email: args.client_email, notes: args.notes, tax_rate: args.tax_rate, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const q = bmsData.data || bmsData;
-                  result = { success: true, message: `✅ Quotation Created!\n\n📄 Quote #: ${q.quotation_number || 'N/A'}\n👤 Client: ${args.client_name}\n💰 Total: ${company.currency_prefix || 'K'}${q.total_amount || 'N/A'}${q.items ? `\n📦 Items: ${q.items.length}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Quotation creation failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] create_quotation error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'create_invoice': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'create_invoice', params: { client_name: args.client_name, items: args.items, client_phone: args.client_phone, client_email: args.client_email, due_date: args.due_date, notes: args.notes, tax_rate: args.tax_rate, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const inv = bmsData.data || bmsData;
-                  result = { success: true, message: `✅ Invoice Created!\n\n📄 Invoice #: ${inv.invoice_number || 'N/A'}\n👤 Client: ${args.client_name}\n💰 Total: ${company.currency_prefix || 'K'}${inv.total_amount || 'N/A'}${args.due_date ? `\n📅 Due: ${args.due_date}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Invoice creation failed: ${bmsData.error || 'Unknown error'}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-BMS] create_invoice error:', err);
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-
-            case 'generate_document': {
-              try {
-                const docRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ document_type: args.document_type, data: args.data, company_id: company.id, send_whatsapp: true }),
-                });
-                const docData = await docRes.json();
-                if (docData.success) {
-                  result = { success: true, message: `📄 ${args.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} PDF generated!\n\n${docData.whatsapp_sent ? '✅ Sent to your WhatsApp' : '📎 Download: ' + docData.pdf_url}` };
-                  if (docData.pdf_url) {
-                    toolMediaMessages.push({ body: docData.message, imageUrl: docData.pdf_url });
-                  }
-                } else {
-                  result = { success: false, message: `❌ PDF generation failed: ${docData.error}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-TOOL] generate_document error:', err);
-                result = { success: false, message: `❌ Document generation error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_low_stock_items': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_low_stock_items', params: { company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
-                  if (items.length === 0 || !items[0]) {
-                    result = { success: true, message: '✅ All stock levels are healthy! No items below reorder level.' };
-                  } else {
-                    const formatted = items.map((item: any) => {
-                      const emoji = item.current_stock === 0 ? '🔴' : '🟡';
-                      return `${emoji} ${item.name || item.product_name}\n   Stock: ${item.current_stock ?? '?'} | Reorder: ${item.reorder_level ?? '?'}`;
-                    }).join('\n\n');
-                    result = { success: true, message: `⚠️ Low Stock Items (${items.length}):\n\n${formatted}` };
-                  }
-                } else {
-                  result = { success: false, message: `❌ Low stock check failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'record_expense': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'record_expense', params: { category: args.category, vendor_name: args.vendor_name, amount_zmw: args.amount_zmw, date_incurred: args.date_incurred, notes: args.notes, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  result = { success: true, message: `✅ Expense Recorded!\n\n📂 Category: ${args.category}\n🏪 Vendor: ${args.vendor_name}\n💰 Amount: ${company.currency_prefix || 'K'}${args.amount_zmw}${args.date_incurred ? `\n📅 Date: ${args.date_incurred}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Expense recording failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_expenses': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_expenses', params: { start_date: args.start_date, end_date: args.end_date, category: args.category, limit: args.limit, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  const total = d?.total_expenses ? `\n💰 Total: ${company.currency_prefix || 'K'}${d.total_expenses}` : '';
-                  result = { success: true, message: `📊 Expenses:${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
-                } else {
-                  result = { success: false, message: `❌ Expense lookup failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_outstanding_receivables': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_outstanding_receivables', params: { company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  const total = d?.total_outstanding ? `\n💰 Total Outstanding: ${company.currency_prefix || 'K'}${d.total_outstanding}` : '';
-                  result = { success: true, message: `📋 Outstanding Receivables (Who owes you):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
-                } else {
-                  result = { success: false, message: `❌ Receivables lookup failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'get_outstanding_payables': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'get_outstanding_payables', params: { company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  const total = d?.total_payable ? `\n💰 Total Payable: ${company.currency_prefix || 'K'}${d.total_payable}` : '';
-                  result = { success: true, message: `📋 Outstanding Payables (What you owe):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
-                } else {
-                  result = { success: false, message: `❌ Payables lookup failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'profit_loss_report': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'profit_loss_report', params: { start_date: args.start_date, end_date: args.end_date, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  result = { success: true, message: `📊 Profit & Loss Report\n📅 ${args.start_date} to ${args.end_date}\n\n💰 Revenue: ${company.currency_prefix || 'K'}${d?.total_revenue || 0}\n📉 Expenses: ${company.currency_prefix || 'K'}${d?.total_expenses || 0}\n${(d?.net_profit || 0) >= 0 ? '✅' : '🔴'} Net Profit: ${company.currency_prefix || 'K'}${d?.net_profit || 0}\n📊 Margin: ${d?.profit_margin || 0}%\n🛒 Sales Count: ${d?.sales_count || 0}${d?.expense_breakdown ? `\n\n📂 Expense Breakdown:\n${Object.entries(d.expense_breakdown).map(([k, v]) => `  • ${k}: ${company.currency_prefix || 'K'}${v}`).join('\n')}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ P&L report failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
-            case 'clock_in': {
-              try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'clock_in', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
-                });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  result = { success: true, message: `✅ Clocked In!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_in ? new Date(d.clock_in).toLocaleTimeString() : 'Now'}${args.notes ? `\n📝 ${args.notes}` : ''}` };
-                } else {
-                  result = { success: false, message: `❌ Clock-in failed: ${bmsData.error}` };
-                }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              break;
-            }
-
+            // ========== BMS TOOLS ==========
+            case 'check_stock':
+            case 'record_sale':
+            case 'update_stock':
+            case 'sales_report':
+            case 'get_order_status':
+            case 'update_order_status':
+            case 'cancel_order':
+            case 'get_customer_history':
+            case 'get_company_statistics':
+            case 'create_quotation':
+            case 'create_invoice':
+            case 'get_low_stock_items':
+            case 'record_expense':
+            case 'get_expenses':
+            case 'get_outstanding_receivables':
+            case 'get_outstanding_payables':
+            case 'profit_loss_report':
+            case 'clock_in':
             case 'clock_out': {
+              const BMS_API_URL = Deno.env.get('BMS_API_URL');
+              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_URL || !BMS_API_SECRET) {
+                result = { success: false, message: '❌ BMS integration not configured.' };
+                break;
+              }
               try {
-                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                const bmsResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'clock_out', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                  },
+                  body: JSON.stringify({
+                    action: functionName,
+                    params: args,
+                    companyId: company.id,
+                  }),
                 });
-                const bmsData = await bmsRes.json();
-                if (bmsData.success) {
-                  const d = bmsData.data;
-                  result = { success: true, message: `✅ Clocked Out!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_out ? new Date(d.clock_out).toLocaleTimeString() : 'Now'}${d?.work_hours ? `\n⏱️ Hours: ${d.work_hours}` : ''}${args.notes ? `\n📝 ${args.notes}` : ''}` };
+                const bmsResult = await bmsResponse.json();
+                if (bmsResult.success) {
+                  // Format BMS results with emoji indicators for boss
+                  let formatted = '';
+                  const d = bmsResult.data;
+                  switch (functionName) {
+                    case 'check_stock': {
+                      if (Array.isArray(d)) {
+                        formatted = d.map((p: any) => {
+                          const status = p.quantity <= 0 ? '🔴' : p.quantity <= (p.reorder_level || 5) ? '🟡' : '🟢';
+                          return `${status} ${p.name}: ${p.quantity} in stock @ ${company.currency_prefix}${p.selling_price}`;
+                        }).join('\n');
+                      } else if (d?.name) {
+                        const status = d.quantity <= 0 ? '🔴' : d.quantity <= (d.reorder_level || 5) ? '🟡' : '🟢';
+                        formatted = `${status} ${d.name}: ${d.quantity} in stock @ ${company.currency_prefix}${d.selling_price}`;
+                      } else {
+                        formatted = JSON.stringify(d);
+                      }
+                      break;
+                    }
+                    case 'record_sale':
+                      formatted = `✅ Sale recorded!\n${d.product_name || args.product_name} x${args.quantity}\nTotal: ${company.currency_prefix}${d.total_amount || 'N/A'}`;
+                      break;
+                    case 'update_stock':
+                      formatted = `✅ Stock updated for ${args.product_name}\nNew quantity: ${d.new_quantity ?? 'updated'}`;
+                      break;
+                    case 'get_low_stock_items':
+                      if (Array.isArray(d) && d.length > 0) {
+                        formatted = d.map((p: any) => `⚠️ ${p.name}: ${p.quantity} left (reorder at ${p.reorder_level})`).join('\n');
+                      } else {
+                        formatted = '✅ All stock levels are healthy!';
+                      }
+                      break;
+                    default:
+                      formatted = typeof d === 'string' ? d : JSON.stringify(d, null, 2);
+                  }
+                  result = { success: true, message: formatted };
                 } else {
-                  result = { success: false, message: `❌ Clock-out failed: ${bmsData.error}` };
+                  result = { success: false, message: `❌ BMS error: ${bmsResult.error || 'Unknown error'}` };
                 }
-              } catch (err) {
-                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              } catch (bmsErr: any) {
+                console.error(`[BOSS-BMS] ${functionName} error:`, bmsErr);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr.message}` };
               }
               break;
             }
 
             case 'generate_document': {
+              const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
               try {
-                const docRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
+                const docResponse = await fetch(`${SUPABASE_URL}/functions/v1/generate-document`, {
                   method: 'POST',
-                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ document_type: args.document_type, data: args.data, company_id: company.id, send_whatsapp: true }),
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                  body: JSON.stringify({
+                    companyId: company.id,
+                    documentType: args.document_type,
+                    data: args.data,
+                    bossPhone: company.boss_phone,
+                  }),
                 });
-                const docData = await docRes.json();
-                if (docData.success) {
-                  result = { success: true, message: `📄 ${args.document_type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())} PDF generated!\n\n${docData.whatsapp_sent ? '✅ Sent to your WhatsApp' : '📎 Download: ' + docData.pdf_url}` };
-                  if (docData.pdf_url) {
-                    toolMediaMessages.push({ body: docData.message, imageUrl: docData.pdf_url });
-                  }
-                } else {
-                  result = { success: false, message: `❌ PDF generation failed: ${docData.error}` };
-                }
-              } catch (err) {
-                console.error('[BOSS-TOOL] generate_document error:', err);
-                result = { success: false, message: `❌ Document generation error: ${err instanceof Error ? err.message : String(err)}` };
+                const docResult = await docResponse.json();
+                result = docResult.success
+                  ? { success: true, message: `✅ ${args.document_type.replace(/_/g, ' ').toUpperCase()} PDF generated and sent to your WhatsApp!` }
+                  : { success: false, message: `❌ Document generation failed: ${docResult.error || 'Unknown error'}` };
+              } catch (docErr: any) {
+                result = { success: false, message: `❌ Document generation error: ${docErr.message}` };
               }
               break;
             }
 
-            case 'show_media_library': {
-              const filterCategory = args.category || 'products';
-              const { data: mediaItems, error: mediaErr } = await supabase
+            case 'list_product_images': {
+              const category = args.category || 'products';
+              const { data: mediaItems } = await supabase
                 .from('company_media')
-                .select('id, file_name, description, tags, file_path, category')
+                .select('file_name, description, tags, category')
                 .eq('company_id', company.id)
-                .eq('category', filterCategory)
-                .eq('media_type', 'image')
+                .eq('category', category)
                 .order('created_at', { ascending: false })
                 .limit(20);
-
-              if (mediaErr || !mediaItems || mediaItems.length === 0) {
-                result = { success: true, message: `📭 No ${filterCategory} images found in your media library.\n\nUpload product photos in the admin panel to enable product-anchored image generation!` };
+              if (!mediaItems?.length) {
+                result = { success: true, message: `No ${category} images found in the media library.` };
               } else {
-                const SUPABASE_URL_MEDIA = Deno.env.get('SUPABASE_URL')!;
-                const mediaList = mediaItems.map((m: any, i: number) => {
-                  const url = `${SUPABASE_URL_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
-                  return `${i + 1}. ${m.file_name}\n   ${m.description || 'No description'}\n   Tags: ${m.tags?.join(', ') || 'none'}\n   🔗 ${url}`;
-                }).join('\n\n');
-
-                result = { success: true, message: `📸 Your ${filterCategory} images (${mediaItems.length} total):\n\n${mediaList}\n\nThese are the reference photos the AI uses when generating product images.` };
-
-                // Also send each image via WhatsApp for visual reference
-                const SUPABASE_URL_FOR_MEDIA = Deno.env.get('SUPABASE_URL')!;
-                mediaItems.slice(0, 5).forEach((m: any, i: number) => {
-                  const imgUrl = `${SUPABASE_URL_FOR_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
-                  toolMediaMessages.push({
-                    body: `📸 ${i + 1}. ${m.file_name}\n${m.description || ''}\nTags: ${m.tags?.join(', ') || 'none'}`,
-                    imageUrl: imgUrl
-                  });
-                });
+                const list = mediaItems.map((m: any, i: number) =>
+                  `${i + 1}. ${m.file_name}${m.description ? ` - ${m.description}` : ''}${m.tags?.length ? ` [${m.tags.join(', ')}]` : ''}`
+                ).join('\n');
+                result = { success: true, message: `📸 ${mediaItems.length} ${category} images:\n\n${list}` };
               }
               break;
             }
 
             case 'generate_image':
             case 'edit_image': {
-              // Check if image generation is enabled
               const imageSettings = Array.isArray(company.image_generation_settings)
                 ? company.image_generation_settings[0]
                 : company.image_generation_settings;
@@ -2060,19 +1574,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
               const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
               const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
-              
-              const imgPrompt = functionName === 'generate_image' ? args.prompt
-                : functionName === 'edit_image' ? args.instructions
-                : '';
+              const imgPrompt = functionName === 'generate_image' ? args.prompt : args.instructions;
 
               const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${SUPABASE_SRK_IMG}`,
-                },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
                 body: JSON.stringify({
                   companyId: company.id,
                   customerPhone: '',
@@ -2088,11 +1595,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
               } else {
                 const imageGenResult = await imageGenResponse.json();
-                console.log(`[BOSS-TOOL-${functionName}] Result:`, imageGenResult.success ? 'success' : 'failed');
-                
                 result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
-                
-                // If an image was generated, include it in media messages for WhatsApp delivery
                 if (imageGenResult.imageUrl) {
                   toolImageUrl = imageGenResult.imageUrl;
                   toolMediaMessages.push({
@@ -2104,25 +1607,61 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'show_image_gallery': {
+              const { data: recentImages } = await supabase
+                .from('generated_images')
+                .select('prompt, image_url, created_at, status')
+                .eq('company_id', company.id)
+                .order('created_at', { ascending: false })
+                .limit(5);
+              if (!recentImages?.length) {
+                result = { success: true, message: 'No images generated yet. Ask me to create one!' };
+              } else {
+                const gallery = recentImages.map((img: any, i: number) =>
+                  `${i + 1}. "${img.prompt.substring(0, 60)}..." (${img.status}) - ${new Date(img.created_at).toLocaleDateString()}`
+                ).join('\n');
+                result = { success: true, message: `🖼️ Recent images:\n\n${gallery}` };
+                // Send the most recent image
+                if (recentImages[0]?.image_url) {
+                  toolImageUrl = recentImages[0].image_url;
+                  toolMediaMessages.push({
+                    body: '🖼️ Your most recent image:',
+                    imageUrl: recentImages[0].image_url
+                  });
+                }
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
-          
-          toolResults.push(result.message);
-          
-          // mediaMessages are now accumulated directly in toolMediaMessages above
-          
+
+          // Push tool result as a message for multi-round context
+          conversationMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: typeof result.message === 'string' ? result.message : JSON.stringify(result)
+          });
+
         } catch (error) {
           console.error(`Tool execution error for ${functionName}:`, error);
           const errorMsg = error instanceof Error ? error.message : String(error);
-          toolResults.push(`❌ Error updating ${functionName}: ${errorMsg}`);
+          conversationMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `❌ Error: ${errorMsg}`
+          });
         }
       }
-      
-      // Combine tool results with AI response
-      aiResponse = toolResults.join('\n\n') + (aiResponse ? '\n\n' + aiResponse : '');
+
+      // If this was the last round and we still have tool calls, use whatever text we have
+      if (round === MAX_TOOL_ROUNDS - 1) {
+        aiResponse = aiResponse || 'I completed the requested operations. Let me know if you need anything else!';
+        console.log(`[BOSS-CHAT] Max rounds reached, returning with current response`);
+      }
     }
-    
+
     console.log('Final AI response:', aiResponse.substring(0, 100) + '...');
 
     // Log management conversation
@@ -2145,7 +1684,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
       responsePayload.mediaMessages = toolMediaMessages;
     }
-    
+
     return new Response(JSON.stringify(responsePayload), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
