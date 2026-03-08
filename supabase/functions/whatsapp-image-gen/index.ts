@@ -478,39 +478,19 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Generating with product image from:', productImageUrl.substring(0, 80));
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
-  const response = await geminiChat({
+  const { imageBase64, text: imageText } = await geminiImageGenerate({
     model: 'gemini-3-pro-image-preview',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: enhancedPrompt },
-          { type: 'image_url', image_url: { url: productImageUrl } }
-        ]
-      }
-    ],
-    modalities: ['image', 'text']
+    prompt: enhancedPrompt,
+    inputImageUrls: [productImageUrl],
   });
   
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('[PRODUCT-ANCHORED] Error:', response.status, errorText);
-    
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a moment.');
-    }
-    throw new Error('Failed to generate product image');
-  }
-  
-  const data = await response.json();
-  const base64ImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-  
-  if (!base64ImageUrl) {
+  if (!imageBase64) {
+    console.error('[PRODUCT-ANCHORED] No image returned from Gemini');
     throw new Error('No image generated');
   }
   
   // Upload base64 to storage and get public URL
-  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, base64ImageUrl, companyId);
+  const imageUrl = await uploadBase64ToStorage(supabase, supabaseUrl, imageBase64, companyId);
   
   return { imageUrl, enhancedPrompt };
 }
