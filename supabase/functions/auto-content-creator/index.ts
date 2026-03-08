@@ -188,7 +188,7 @@ Make it vibrant, high-quality, and optimized for social media engagement. Square
         scheduled_time: scheduledTime,
         status: 'pending_approval',
         target_platform: cred.ig_user_id ? 'both' : 'facebook',
-        created_by: user.id,
+        created_by: userId,
       })
       .select('id, content, image_url, scheduled_time, target_platform')
       .single();
