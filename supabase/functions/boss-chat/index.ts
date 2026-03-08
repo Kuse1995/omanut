@@ -1560,10 +1560,10 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
                   body: JSON.stringify({
-                    companyId: company.id,
-                    documentType: args.document_type,
+                    company_id: company.id,
+                    document_type: args.document_type,
                     data: args.data,
-                    bossPhone: company.boss_phone,
+                    send_whatsapp: true,
                   }),
                 });
                 const docResult = await docResponse.json();

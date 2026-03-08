@@ -89,12 +89,20 @@ export async function geminiImageGenerate(options: {
           parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
         }
       } else {
-        // Fetch remote image and convert to base64
+        // Fetch remote image and convert to base64 (chunked to avoid stack overflow)
         try {
           const imgResponse = await fetch(imageUrl);
           if (imgResponse.ok) {
             const imgBuffer = await imgResponse.arrayBuffer();
-            const imgBase64 = btoa(String.fromCharCode(...new Uint8Array(imgBuffer)));
+            // Convert in chunks to avoid RangeError on large images
+            const bytes = new Uint8Array(imgBuffer);
+            let imgBase64 = '';
+            const chunkSize = 32768;
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              const chunk = bytes.subarray(i, i + chunkSize);
+              imgBase64 += String.fromCharCode.apply(null, [...chunk]);
+            }
+            imgBase64 = btoa(imgBase64);
             const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
             parts.push({ inlineData: { mimeType: contentType, data: imgBase64 } });
           }
