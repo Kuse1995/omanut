@@ -3130,8 +3130,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           ...currentMessages,
           {
             role: "assistant",
-            content: null,
-            tool_calls: currentToolCalls
+            content: assistantReply || null,
+            ...(currentToolCalls && currentToolCalls.length > 0 ? { tool_calls: currentToolCalls } : {})
           },
           ...toolResults
         ];
