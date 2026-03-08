@@ -474,7 +474,7 @@ async function processAIResponse(
 ) {
   console.log('[BACKGROUND] Starting AI processing for conversation:', conversationId);
   
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  // AI calls use geminiChat() with GEMINI_API_KEY
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

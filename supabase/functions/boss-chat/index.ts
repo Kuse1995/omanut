@@ -857,7 +857,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       ? `${systemPrompt}\n\n=== CUSTOM BOSS AGENT INSTRUCTIONS ===\n${bossAgentPrompt}`
       : systemPrompt;
     
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    // AI calls use geminiChat() with GEMINI_API_KEY
     
     console.log('Boss chat request:', { 
       companyName: company.name, 
