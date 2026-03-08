@@ -1400,7 +1400,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsRes.ok && bmsData.success) {
-                  result = { success: true, message: `📦 Stock lookup result:\n${JSON.stringify(bmsData.data || bmsData, null, 2)}` };
+                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+                  const formatted = items.map((item: any) => {
+                    const stockEmoji = item.status === 'healthy' ? '🟢' : item.status === 'low' ? '🟡' : '🔴';
+                    return `${stockEmoji} ${item.name || item.product_name || 'Unknown'}\n   Stock: ${item.current_stock ?? 'N/A'} units\n   Price: ${company.currency_prefix || 'K'}${item.unit_price ?? 'N/A'}\n   SKU: ${item.sku || 'N/A'}\n   Reorder Level: ${item.reorder_level ?? 'N/A'}`;
+                  }).join('\n\n');
+                  result = { success: true, message: `📦 Inventory Check:\n\n${formatted}` };
                 } else {
                   result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || bmsData.message || 'Unknown error'}` };
                 }
@@ -1436,7 +1441,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
                 const bmsData2 = await bmsRes2.json();
                 if (bmsRes2.ok && bmsData2.success) {
-                  result = { success: true, message: `✅ Sale recorded!\n${JSON.stringify(bmsData2.data || bmsData2, null, 2)}` };
+                  const saleInfo = bmsData2.data || bmsData2;
+                  result = { success: true, message: `✅ Sale Recorded!\n\n🛒 Product: ${args.product_name}\n📦 Qty: ${args.quantity}\n💳 Payment: ${args.payment_method || 'Not specified'}\n👤 Customer: ${args.customer_name || 'Walk-in'}${args.customer_phone ? `\n📞 Phone: ${args.customer_phone}` : ''}${saleInfo.total ? `\n💰 Total: ${company.currency_prefix || 'K'}${saleInfo.total}` : ''}${saleInfo.remaining_stock !== undefined ? `\n📊 Remaining Stock: ${saleInfo.remaining_stock}` : ''}` };
                 } else {
                   result = { success: false, message: `❌ Failed to record sale: ${bmsData2.error || bmsData2.message || 'Unknown error'}` };
                 }
