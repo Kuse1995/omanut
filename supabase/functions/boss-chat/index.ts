@@ -707,6 +707,46 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: []
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_image",
+          description: "Generate a brand-aligned image using the company's product reference library. Use when the boss asks to create, generate, make, or design any image. Extract a detailed visual prompt from their message.",
+          parameters: {
+            type: "object",
+            properties: {
+              prompt: { type: "string", description: "Detailed description of the image to generate. Include product names, scene details, and any specific visual requirements mentioned by the boss." }
+            },
+            required: ["prompt"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "edit_image",
+          description: "Edit or modify the most recently generated image. Use when the boss asks to change, adjust, make brighter/darker, add text, crop, resize, or otherwise modify an existing image.",
+          parameters: {
+            type: "object",
+            properties: {
+              instructions: { type: "string", description: "Description of changes to make to the last generated image" }
+            },
+            required: ["instructions"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "show_image_gallery",
+          description: "Show the boss their recently generated images. Use when they ask to see their images, gallery, history, or recent creations.",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }
       }
     ];
 
