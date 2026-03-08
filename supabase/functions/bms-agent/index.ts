@@ -61,6 +61,8 @@ const AVAILABLE_ACTIONS = [
   "get_company_statistics",
   "create_quotation",
   "create_invoice",
+  "list_quotations",
+  "list_invoices",
   "get_low_stock_items",
   "record_expense",
   "get_expenses",
