@@ -1818,6 +1818,43 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'list_quotations':
+            case 'list_invoices': {
+              const isQuotation = functionName === 'list_quotations';
+              const action = isQuotation ? 'list_quotations' : 'list_invoices';
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action, params: { client_name: args.client_name, status: args.status, limit: args.limit, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const items = Array.isArray(bmsData.data?.data) ? bmsData.data.data : (Array.isArray(bmsData.data) ? bmsData.data : []);
+                  if (items.length === 0) {
+                    result = { success: true, message: `📋 No ${isQuotation ? 'quotations' : 'invoices'} found${args.client_name ? ` for "${args.client_name}"` : ''}.` };
+                  } else {
+                    const label = isQuotation ? 'Quotations' : 'Invoices';
+                    const list = items.map((item: any, i: number) => {
+                      const num = item.quotation_number || item.invoice_number || item.reference || `#${i + 1}`;
+                      const client = item.client_name || item.customer_name || 'Unknown';
+                      const total = item.total_amount || item.total || 0;
+                      const date = item.created_at?.slice(0, 10) || item.date || '';
+                      const status = item.status || '';
+                      return `${i + 1}. 📄 ${num} — ${client}\n   💰 ${currency}${total} | 📅 ${date}${status ? ` | ${status}` : ''}`;
+                    }).join('\n\n');
+                    result = { success: true, message: `📋 ${label}${args.client_name ? ` for "${args.client_name}"` : ''}:\n\n${list}` };
+                  }
+                } else {
+                  result = { success: false, message: `❌ ${isQuotation ? 'Quotation' : 'Invoice'} lookup failed: ${bmsData.error || 'Unknown error'}` };
+                }
+              } catch (err) {
+                console.error(`[BOSS-BMS] ${action} error:`, err);
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
             case 'get_low_stock_items': {
               try {
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
