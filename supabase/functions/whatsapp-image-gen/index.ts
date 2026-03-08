@@ -492,7 +492,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
   const response = await geminiChat({
-    model: 'gemini-3.1-flash-image',
+    model: 'gemini-3-pro-image-preview',
     messages: [
       {
         role: 'user',
