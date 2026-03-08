@@ -2899,6 +2899,25 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 if (keywords.some((k: string) => k.length > 3 && refInfo.toLowerCase().includes(k))) {
                   recommendations.push({ type: 'info', content: refInfo.substring(0, 300) });
                 }
+              }
+              
+              anyToolExecuted = true;
+              toolExecutionContext.push(`found ${recommendations.length} service recommendations`);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: true,
+                  recommendations,
+                  total_products: products?.length || 0,
+                  message: recommendations.length > 0 ? 'Found relevant services' : 'No exact matches, but here are available services'
+                })
+              });
+              
+            } catch (error) {
+              console.error('[RECOMMEND] Exception:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
+            }
           } else if (toolCall.function.name === 'lookup_product') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[LOOKUP-PRODUCT] Searching for:', args.query);
