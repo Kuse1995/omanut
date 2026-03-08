@@ -351,7 +351,7 @@ INSTRUCTIONS:
   try {
     console.log(`[PRODUCT-SELECT] Sending ${candidates.length} product images to Gemini Vision for multimodal matching`);
     const response = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
       max_tokens: 50,
