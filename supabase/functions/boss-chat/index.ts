@@ -1383,6 +1383,70 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'check_stock': {
+              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_SECRET) {
+                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
+                break;
+              }
+              try {
+                const bmsRes = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${BMS_API_SECRET}`,
+                  },
+                  body: JSON.stringify({ action: 'check_stock', product_name: args.product_name, company_id: company.id }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsRes.ok && bmsData.success) {
+                  result = { success: true, message: `📦 Stock lookup result:\n${JSON.stringify(bmsData.data || bmsData, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ BMS lookup failed: ${bmsData.error || bmsData.message || 'Unknown error'}` };
+                }
+              } catch (bmsErr) {
+                console.error('[BOSS-BMS] check_stock error:', bmsErr);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr instanceof Error ? bmsErr.message : String(bmsErr)}` };
+              }
+              break;
+            }
+
+            case 'record_sale': {
+              const BMS_API_SECRET2 = Deno.env.get('BMS_API_SECRET');
+              if (!BMS_API_SECRET2) {
+                result = { success: false, message: '❌ BMS API not configured. Please set BMS_API_SECRET.' };
+                break;
+              }
+              try {
+                const bmsRes2 = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${BMS_API_SECRET2}`,
+                  },
+                  body: JSON.stringify({
+                    action: 'record_sale',
+                    product_name: args.product_name,
+                    quantity: args.quantity,
+                    payment_method: args.payment_method,
+                    customer_name: args.customer_name,
+                    customer_phone: args.customer_phone,
+                    company_id: company.id,
+                  }),
+                });
+                const bmsData2 = await bmsRes2.json();
+                if (bmsRes2.ok && bmsData2.success) {
+                  result = { success: true, message: `✅ Sale recorded!\n${JSON.stringify(bmsData2.data || bmsData2, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Failed to record sale: ${bmsData2.error || bmsData2.message || 'Unknown error'}` };
+                }
+              } catch (bmsErr2) {
+                console.error('[BOSS-BMS] record_sale error:', bmsErr2);
+                result = { success: false, message: `❌ BMS connection error: ${bmsErr2 instanceof Error ? bmsErr2.message : String(bmsErr2)}` };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
