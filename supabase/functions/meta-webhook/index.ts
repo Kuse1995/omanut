@@ -163,7 +163,7 @@ async function processWebhook(body: any) {
           // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
           // (Instagram messages use the ig_user_id as recipient, not the page_id).
           const recipientId = event.recipient?.id;
-          const isInstagramDM = linkedIgUserId && recipientId === linkedIgUserId;
+          const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
 
           if (isInstagramDM) {
             console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
