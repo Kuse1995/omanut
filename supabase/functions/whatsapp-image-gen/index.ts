@@ -376,7 +376,7 @@ async function generateImage(
   console.log('[IMAGE-GEN] Enhanced prompt:', enhancedPrompt.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image',
+    model: 'gemini-3.1-flash-image',
     messages: [{ role: 'user', content: enhancedPrompt }],
     modalities: ['image', 'text']
   });
@@ -448,7 +448,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image',
+    model: 'gemini-3.1-flash-image',
     messages: [
       {
         role: 'user',
@@ -501,7 +501,7 @@ async function editImage(
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image',
+    model: 'gemini-3.1-flash-image',
     messages: [
       {
         role: 'user',
