@@ -317,7 +317,7 @@ async function generateImage(
   console.log('[IMAGE-GEN] Enhanced prompt:', enhancedPrompt.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-3-pro-image-preview',
+    model: 'gemini-2.5-flash-image',
     messages: [{ role: 'user', content: enhancedPrompt }],
     modalities: ['image', 'text']
   });
@@ -356,11 +356,7 @@ async function generateProductAnchoredImage(
   supabaseUrl: string,
   companyId: string
 ): Promise<{ imageUrl: string; enhancedPrompt: string }> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    throw new Error('LOVABLE_API_KEY not configured');
-  }
+  // Using direct Gemini API via geminiChat
   
   // Create a strict product-anchored instruction
   const productDescription = productInfo.description || productInfo.file_name || 'this product';
@@ -393,7 +389,7 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
   console.log('[PRODUCT-ANCHORED] Environment prompt:', prompt);
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image-preview',
+    model: 'gemini-2.5-flash-image',
     messages: [
       {
         role: 'user',
@@ -446,7 +442,7 @@ async function editImage(
   console.log('[IMAGE-EDIT] Edit instruction:', editInstruction.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash-image-preview',
+    model: 'gemini-2.5-flash-image',
     messages: [
       {
         role: 'user',
