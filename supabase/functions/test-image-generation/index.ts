@@ -255,55 +255,67 @@ Place THIS EXACT product into the requested environment while preserving ALL bra
       
       console.log("[test-image-generation] Image uploaded successfully:", imageUrl.substring(0, 80));
 
-    // Save the generated image to the database as a draft
-    const savedPrompt = productImage 
-      ? `[Product: ${productImage.file_name}] ${prompt}`
-      : prompt;
-    
-    const brandAssetsUsed = productImage ? [productImage.id] : [];
-    const generationParams = {
-      original_prompt: prompt,
-      enhanced_prompt: enhancedPrompt,
-      product_mode: !!productImage,
-      product_id: productImage?.id || null,
-      model: "gemini-3-pro-image-preview",
-      context: context || null
-    };
-    
-    const { data: savedImage, error: saveError } = await supabase
-      .from("generated_images")
-      .insert({
-        company_id: companyId,
-        prompt: savedPrompt,
-        image_url: imageUrl,
-        status: 'draft', // Always save as draft
-        brand_assets_used: brandAssetsUsed,
-        generation_params: generationParams
-      })
-      .select()
-      .single();
-
-    if (saveError) {
-      console.error("[test-image-generation] Failed to save image:", saveError);
-      // Still return the image even if save fails
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        image_url: imageUrl,
-        image_id: savedImage?.id,
-        prompt: prompt,
+      // Save the generated image to the database as a draft
+      const savedPrompt = productImage 
+        ? `[Product: ${productImage.file_name}] ${prompt}`
+        : prompt;
+      
+      const brandAssetsUsed = productImage ? [productImage.id] : [];
+      const generationParams = {
+        original_prompt: prompt,
         enhanced_prompt: enhancedPrompt,
         product_mode: !!productImage,
-        product_used: productImage ? {
-          id: productImage.id,
-          name: productImage.file_name,
-          description: productImage.description
-        } : null
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+        product_id: productImage?.id || null,
+        model: "gemini-3-pro-image-preview",
+        context: context || null
+      };
+      
+      const { data: savedImage, error: saveError } = await supabase
+        .from("generated_images")
+        .insert({
+          company_id: companyId,
+          prompt: savedPrompt,
+          image_url: imageUrl,
+          status: 'draft',
+          brand_assets_used: brandAssetsUsed,
+          generation_params: generationParams
+        })
+        .select()
+        .single();
+
+      if (saveError) {
+        console.error("[test-image-generation] Failed to save image:", saveError);
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          image_url: imageUrl,
+          image_id: savedImage?.id,
+          prompt: prompt,
+          enhanced_prompt: enhancedPrompt,
+          product_mode: !!productImage,
+          product_used: productImage ? {
+            id: productImage.id,
+            name: productImage.file_name,
+            description: productImage.description
+          } : null
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } catch (genError: any) {
+      console.error("[test-image-generation] Generation error:", genError);
+      if (genError.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: genError.message || "Failed to generate image" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
   } catch (error) {
     console.error("[test-image-generation] Error:", error);
     return new Response(
