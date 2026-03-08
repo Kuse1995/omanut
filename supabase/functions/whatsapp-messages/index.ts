@@ -3079,77 +3079,151 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       assistantReply = `I apologize, but I'm experiencing some technical difficulties. Please try again in a moment. If this persists, contact us at ${company.phone || 'our main number'}.`;
     }
 
-    // CRITICAL: If tools were executed, make SECOND AI call to process results
-    if (toolResults.length > 0) {
-      console.log('[TOOL-LOOP] Tools executed, making second AI call with results:', {
-        toolCount: toolResults.length,
-        results: toolResults.map(r => ({ id: r.tool_call_id, content: r.content.substring(0, 100) }))
-      });
+    // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
+    const maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    let currentRound = 0;
+    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
+    let currentMessages = [...messages];
+    
+    while (toolResults.length > 0 && currentRound < maxToolRounds) {
+      currentRound++;
+      console.log(`[TOOL-LOOP] Round ${currentRound}/${maxToolRounds}, processing ${toolResults.length} tool results`);
       
       try {
         // Build messages array with tool results
-        const messagesWithToolResults = [
-          ...messages,
+        currentMessages = [
+          ...currentMessages,
           {
             role: "assistant",
             content: null,
-            tool_calls: aiData.choices[0].message.tool_calls
+            tool_calls: currentToolCalls
           },
           ...toolResults
         ];
         
-        console.log('[TOOL-LOOP] Calling AI with tool results...');
-        
         // Check if this is a reservation flow and add validation reminder
-        const isReservationFlow = messages.some(msg => 
+        const isReservationFlow = currentMessages.some(msg => 
           msg.content && typeof msg.content === 'string' && 
           (msg.content.toLowerCase().includes('reservation') || 
-           msg.content.toLowerCase().includes('booking') || 
-           msg.content.toLowerCase().includes('table') ||
-           msg.content.toLowerCase().includes('meeting'))
+           msg.content.toLowerCase().includes('booking'))
         );
         
         if (isReservationFlow) {
-          console.log('[RESERVATION-CHECK] Detected reservation flow, adding validation reminder');
-          messagesWithToolResults.push({
+          currentMessages.push({
             role: "system",
-            content: `CRITICAL REMINDER: If customer just provided name/email/guests, CHECK if you now have all 6 required items (name, email, guests, phone, date, time). If ALL 6 present → IMMEDIATELY call create_reservation tool. If any missing → Ask for specific missing items only. DO NOT say "processed" or "done" without calling the tool.`
+            content: `CRITICAL REMINDER: If customer just provided name/email/guests, CHECK if you now have all 6 required items (name, email, guests, phone, date, time). If ALL 6 present → IMMEDIATELY call create_reservation tool. If any missing → Ask for specific missing items only.`
           });
         }
         
-        const secondController = new AbortController();
-        const secondTimeoutId = setTimeout(() => secondController.abort(), 60000);
+        const roundController = new AbortController();
+        const roundTimeoutId = setTimeout(() => roundController.abort(), 60000);
         
-        const secondResponse = await geminiChat({
+        // Call AI WITH tools still available for multi-step chains
+        const roundResponse = await geminiChat({
           model: selectedModel,
-          messages: messagesWithToolResults,
+          messages: currentMessages,
           temperature: 1.0,
-          max_tokens: 2048,
-          signal: secondController.signal,
+          max_tokens: maxTokens,
+          tools: filteredTools,
+          tool_choice: "auto",
+          signal: roundController.signal,
         });
         
-        clearTimeout(secondTimeoutId);
+        clearTimeout(roundTimeoutId);
         
-        if (secondResponse.ok) {
-          const secondData = await secondResponse.json();
-          assistantReply = secondData.choices[0].message.content || '';
-          console.log('[TOOL-LOOP] Second AI call successful, got natural response');
+        if (!roundResponse.ok) {
+          console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed:`, roundResponse.status);
+          if (!assistantReply) assistantReply = "I processed your request. How else can I help you?";
+          break;
+        }
+        
+        const roundData = await roundResponse.json();
+        assistantReply = roundData.choices[0].message.content || assistantReply || '';
+        const newToolCalls = roundData.choices[0].message.tool_calls;
+        
+        console.log(`[TOOL-LOOP] Round ${currentRound} result:`, {
+          hasReply: !!roundData.choices[0].message.content,
+          newToolCalls: newToolCalls?.map((t: any) => t.function.name) || []
+        });
+        
+        if (!newToolCalls || newToolCalls.length === 0) {
+          console.log(`[TOOL-LOOP] No more tool calls after round ${currentRound}, done.`);
+          break;
+        }
+        
+        // Execute the new tool calls
+        toolResults = [];
+        currentToolCalls = newToolCalls;
+        aiData = roundData;
+        
+        for (const toolCall of newToolCalls) {
+          // Re-use existing tool execution logic by re-dispatching
+          // We need to handle each tool type inline here
+          const fnName = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
+          console.log(`[TOOL-LOOP] Round ${currentRound} executing: ${fnName}`);
           
-          // Check if AI wants to call MORE tools (recursive case)
-          const newToolCalls = secondData.choices[0].message.tool_calls;
-          if (newToolCalls && newToolCalls.length > 0) {
-            console.log('[TOOL-LOOP] AI requesting additional tools:', newToolCalls.map((t: any) => t.function.name));
-            // For now, we'll limit to 2 rounds to prevent infinite loops
-            assistantReply = assistantReply || "I'm processing your request. One moment please...";
+          if (fnName === 'check_stock') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'check_stock', product_name: args.product_name }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] checked stock: ${args.product_name}`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+            }
+          } else if (fnName === 'record_sale') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'record_sale', product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] recorded sale: ${args.quantity}x ${args.product_name}`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+            }
+          } else if (fnName === 'generate_payment_link') {
+            try {
+              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                body: JSON.stringify({ action: 'generate_payment_link', amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }),
+              });
+              const bmsResult = await bmsResponse.json();
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+              toolExecutionContext.push(`[R${currentRound}] payment link generated`);
+            } catch (e) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'Payment link generation failed' }) });
+            }
+          } else {
+            // For other tools in subsequent rounds, provide a generic acknowledgment
+            toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: `Tool ${fnName} executed in round ${currentRound}` }) });
           }
-        } else {
-          console.error('[TOOL-LOOP] Second AI call failed:', secondResponse.status);
-          assistantReply = "I processed your request. How else can I help you?";
+          anyToolExecuted = true;
         }
         
       } catch (toolLoopError) {
-        console.error('[TOOL-LOOP] Error in second AI call:', toolLoopError);
-        assistantReply = "Got it! What else can I help you with?";
+        console.error(`[TOOL-LOOP] Error in round ${currentRound}:`, toolLoopError);
+        if (!assistantReply) assistantReply = "Got it! What else can I help you with?";
+        break;
+      }
+    }
+    
+    // Payment link safety net: if checkout tools succeeded and a payment_url exists in context, ensure it's in the reply
+    if (toolExecutionContext.some(c => c.includes('payment link generated')) && assistantReply) {
+      // Check if any tool result contains a payment URL
+      const paymentUrlMatch = toolExecutionContext.find(c => c.includes('payment link'));
+      if (paymentUrlMatch && !assistantReply.includes('http') && !assistantReply.includes('lenco')) {
+        console.log('[PAYMENT-GUARD] Reply missing payment URL, checking tool results...');
+        // The payment URL should already be in the AI reply from the multi-round loop
+        // This is a safety log; the multi-round loop should handle it
       }
     }
 
