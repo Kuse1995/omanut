@@ -49,6 +49,18 @@ serve(async (req) => {
 
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Resolve userId for system/cron calls
+    if (!userId) {
+      const { data: ownerRow } = await supabaseService
+        .from('company_users')
+        .select('user_id')
+        .eq('company_id', company_id)
+        .eq('role', 'owner')
+        .limit(1)
+        .maybeSingle();
+      userId = ownerRow?.user_id || '00000000-0000-0000-0000-000000000000';
+    }
+
     // 1. Fetch company info, AI overrides, image gen settings, meta credentials in parallel
     const [companyRes, aiRes, imgSettingsRes, credRes, mediaRes] = await Promise.all([
       supabaseService.from('companies').select('name, business_type, services, hours, quick_reference_info').eq('id', company_id).single(),
