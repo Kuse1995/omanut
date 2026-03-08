@@ -728,76 +728,77 @@ async function handleInstagramComment(
   }
 }
 
-// ── Handle Instagram DM ──
+// ── Handle Instagram DM (PAUSED — receive-only, pending Meta App Review) ──
 async function handleInstagramDM(
   supabase: any,
   igUserId: string,
   senderId: string,
   messageText: string,
 ) {
+  console.log(`[IG DM] Received from ${senderId}: "${messageText.slice(0, 80)}" — auto-reply PAUSED (pending Meta App Review)`);
+
   const cred = await getIgCredentials(supabase, igUserId);
   if (!cred) return;
 
-  const { access_token, ai_system_prompt, company_id: companyId } = cred;
+  const { company_id: companyId } = cred;
 
-  const systemPrompt = companyId
-    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_dm')
-    : ai_system_prompt || '';
+  // Save the incoming message for visibility in the dashboard, but do NOT generate or send a reply
+  if (companyId) {
+    try {
+      const phoneKey = `igdm:${senderId}`;
+      const { data: existingConv } = await supabase
+        .from('conversations')
+        .select('id, unread_count')
+        .eq('company_id', companyId)
+        .eq('phone', phoneKey)
+        .limit(1)
+        .maybeSingle();
 
-  // Load conversation history for context
-  const phoneKey = `igdm:${senderId}`;
-  const history = await loadConversationHistory(supabase, companyId, phoneKey);
+      let conversationId: string;
 
-  const aiReply = await generateAIReply(messageText, 'Customer', systemPrompt, 'instagram_dm', history);
-  if (!aiReply) {
-    console.error('AI returned empty reply for IG DM, skipping');
-    return;
-  }
+      if (existingConv) {
+        conversationId = existingConv.id;
+        await supabase
+          .from('conversations')
+          .update({
+            last_message_preview: messageText.slice(0, 100),
+            unread_count: (existingConv.unread_count || 0) + 1,
+            status: 'active',
+          })
+          .eq('id', conversationId);
+      } else {
+        const { data: newConv } = await supabase
+          .from('conversations')
+          .insert({
+            company_id: companyId,
+            phone: phoneKey,
+            customer_name: 'Instagram User',
+            platform: 'instagram_dm',
+            status: 'active',
+            last_message_preview: messageText.slice(0, 100),
+            unread_count: 1,
+          })
+          .select('id')
+          .single();
+        conversationId = newConv?.id;
+      }
 
-  console.log(`IG DM AI reply for ${senderId}: "${aiReply.slice(0, 100)}..."`);
-
-  // Send reply via Instagram Messaging API
-  const igResponse = await fetch(
-    `https://graph.facebook.com/v25.0/me/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recipient: { id: senderId },
-        message: { text: aiReply },
-      }),
-    },
-  );
-
-  if (!igResponse.ok) {
-    const errorData = await igResponse.text();
-    console.error(`Instagram DM API error (${igResponse.status}):`, errorData);
-    return;
-  }
-
-  const result = await igResponse.json();
-  console.log(`IG DM reply sent! Message ID: ${result.message_id}`);
-
-  try {
-    if (companyId) {
-      await saveInteraction(
-        supabase,
-        companyId,
-        `igdm:${senderId}`,
-        'instagram_dm',
-        'Instagram User',
-        messageText,
-        aiReply,
-        { source: 'instagram_dm', sender_id: senderId },
-        { source: 'instagram_dm', message_id: result.message_id },
-      );
+      if (conversationId) {
+        await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          role: 'user',
+          content: messageText,
+          message_metadata: { source: 'instagram_dm', sender_id: senderId },
+        });
+        console.log(`[IG DM] Saved incoming message to conversation ${conversationId} (no reply sent)`);
+      }
+    } catch (dbErr) {
+      console.error('[IG DM] Error saving incoming message to DB:', dbErr);
     }
-  } catch (dbErr) {
-    console.error('Error saving IG DM interaction to DB:', dbErr);
   }
+
+  // Auto-reply is paused — do NOT call Instagram Messaging API
+  return;
 }
 
 // ── Load conversation history for DMs ──
