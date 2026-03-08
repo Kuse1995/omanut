@@ -859,6 +859,112 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       {
         type: "function",
         function: {
+          name: "get_low_stock_items",
+          description: "Get all products that are at or below their reorder level. Use when the boss asks about low stock, items to reorder, or inventory warnings.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "record_expense",
+          description: "Record a business expense in the BMS. Use when the boss mentions spending, paying a supplier, or recording a cost.",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Expense category (e.g., rent, utilities, supplies, transport)" },
+              vendor_name: { type: "string", description: "Name of the vendor or supplier" },
+              amount_zmw: { type: "number", description: "Amount in ZMW" },
+              date_incurred: { type: "string", description: "Date of expense (YYYY-MM-DD). Defaults to today." },
+              notes: { type: "string", description: "Additional notes about the expense" }
+            },
+            required: ["category", "vendor_name", "amount_zmw"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_expenses",
+          description: "Get a list of recorded expenses. Use when the boss asks about spending, costs, or expense history.",
+          parameters: {
+            type: "object",
+            properties: {
+              start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
+              category: { type: "string", description: "Filter by expense category" },
+              limit: { type: "integer", description: "Max results to return" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_outstanding_receivables",
+          description: "Get unpaid invoices and total outstanding receivables. Use when the boss asks who owes them money, unpaid invoices, or accounts receivable.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_outstanding_payables",
+          description: "Get pending vendor bills and total outstanding payables. Use when the boss asks what bills are due, what they owe, or accounts payable.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "profit_loss_report",
+          description: "Generate a profit and loss report for a date range. Use when the boss asks about profitability, P&L, net profit, or financial performance.",
+          parameters: {
+            type: "object",
+            properties: {
+              start_date: { type: "string", description: "Start date (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date (YYYY-MM-DD)" }
+            },
+            required: ["start_date", "end_date"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "clock_in",
+          description: "Clock in an employee for attendance tracking. Use when the boss says someone has arrived or started work.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Name of the employee" },
+              employee_id: { type: "string", description: "Employee ID if known" },
+              notes: { type: "string", description: "Optional notes (e.g., late arrival reason)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "clock_out",
+          description: "Clock out an employee. Use when the boss says someone is leaving or has finished work.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Name of the employee" },
+              employee_id: { type: "string", description: "Employee ID if known" },
+              notes: { type: "string", description: "Optional notes" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
           name: "list_product_images",
           description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
           parameters: {
