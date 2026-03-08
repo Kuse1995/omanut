@@ -61,6 +61,9 @@ const App = () => (
           <Route path="/billing" element={<Billing />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/data-deletion" element={<DataDeletion />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
