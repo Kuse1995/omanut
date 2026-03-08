@@ -1736,7 +1736,176 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
-            case 'list_product_images': {
+            case 'get_low_stock_items': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_low_stock_items', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+                  if (items.length === 0 || !items[0]) {
+                    result = { success: true, message: '✅ All stock levels are healthy! No items below reorder level.' };
+                  } else {
+                    const formatted = items.map((item: any) => {
+                      const emoji = item.current_stock === 0 ? '🔴' : '🟡';
+                      return `${emoji} ${item.name || item.product_name}\n   Stock: ${item.current_stock ?? '?'} | Reorder: ${item.reorder_level ?? '?'}`;
+                    }).join('\n\n');
+                    result = { success: true, message: `⚠️ Low Stock Items (${items.length}):\n\n${formatted}` };
+                  }
+                } else {
+                  result = { success: false, message: `❌ Low stock check failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'record_expense': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'record_expense', params: { category: args.category, vendor_name: args.vendor_name, amount_zmw: args.amount_zmw, date_incurred: args.date_incurred, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `✅ Expense Recorded!\n\n📂 Category: ${args.category}\n🏪 Vendor: ${args.vendor_name}\n💰 Amount: ${company.currency_prefix || 'K'}${args.amount_zmw}${args.date_incurred ? `\n📅 Date: ${args.date_incurred}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Expense recording failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_expenses': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_expenses', params: { start_date: args.start_date, end_date: args.end_date, category: args.category, limit: args.limit, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_expenses ? `\n💰 Total: ${company.currency_prefix || 'K'}${d.total_expenses}` : '';
+                  result = { success: true, message: `📊 Expenses:${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Expense lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_outstanding_receivables': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_outstanding_receivables', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_outstanding ? `\n💰 Total Outstanding: ${company.currency_prefix || 'K'}${d.total_outstanding}` : '';
+                  result = { success: true, message: `📋 Outstanding Receivables (Who owes you):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Receivables lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_outstanding_payables': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_outstanding_payables', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_payable ? `\n💰 Total Payable: ${company.currency_prefix || 'K'}${d.total_payable}` : '';
+                  result = { success: true, message: `📋 Outstanding Payables (What you owe):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Payables lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'profit_loss_report': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'profit_loss_report', params: { start_date: args.start_date, end_date: args.end_date, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `📊 Profit & Loss Report\n📅 ${args.start_date} to ${args.end_date}\n\n💰 Revenue: ${company.currency_prefix || 'K'}${d?.total_revenue || 0}\n📉 Expenses: ${company.currency_prefix || 'K'}${d?.total_expenses || 0}\n${(d?.net_profit || 0) >= 0 ? '✅' : '🔴'} Net Profit: ${company.currency_prefix || 'K'}${d?.net_profit || 0}\n📊 Margin: ${d?.profit_margin || 0}%\n🛒 Sales Count: ${d?.sales_count || 0}${d?.expense_breakdown ? `\n\n📂 Expense Breakdown:\n${Object.entries(d.expense_breakdown).map(([k, v]) => `  • ${k}: ${company.currency_prefix || 'K'}${v}`).join('\n')}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ P&L report failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'clock_in': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'clock_in', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `✅ Clocked In!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_in ? new Date(d.clock_in).toLocaleTimeString() : 'Now'}${args.notes ? `\n📝 ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Clock-in failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'clock_out': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'clock_out', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `✅ Clocked Out!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_out ? new Date(d.clock_out).toLocaleTimeString() : 'Now'}${d?.work_hours ? `\n⏱️ Hours: ${d.work_hours}` : ''}${args.notes ? `\n📝 ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Clock-out failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
               const filterCategory = args.category || 'products';
               const { data: mediaItems, error: mediaErr } = await supabase
                 .from('company_media')
