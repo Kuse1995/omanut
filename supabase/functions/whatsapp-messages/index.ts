@@ -26,6 +26,7 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
     /why|how does|explain|tell me about|describe/i,
     /urgent|asap|immediately|emergency/i,
     /order|variant|color|colour|size|track|cancel|history/i,
+    /expense|payable|receivable|contact|inquiry|enquiry/i,
   ];
   
   const lowerMsg = message.toLowerCase().trim();
@@ -1933,6 +1934,23 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["customer_name", "items"]
           }
         }
+      },
+      create_contact: {
+        type: "function",
+        function: {
+          name: "create_contact",
+          description: "Submit a contact inquiry on behalf of the customer. Use when a customer wants to leave a message for the business, submit a general inquiry, or send feedback via the contact form.",
+          parameters: {
+            type: "object",
+            properties: {
+              sender_name: { type: "string", description: "Name of the person submitting the inquiry" },
+              sender_email: { type: "string", description: "Email address of the person" },
+              message: { type: "string", description: "The inquiry or feedback message" },
+              sender_phone: { type: "string", description: "Phone number if provided" }
+            },
+            required: ["sender_name", "sender_email", "message"]
+          }
+        }
       }
     };
 
@@ -3299,6 +3317,25 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               console.error('[BMS] create_invoice error:', error);
               anyToolExecuted = true;
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Invoice creation unavailable' }) });
+            }
+
+          } else if (toolCall.function.name === 'create_contact') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[BMS] create_contact called:', JSON.stringify(args));
+            try {
+              const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create_contact', params: { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone } }),
+              });
+              const bmsResult = await bmsRes.json();
+              anyToolExecuted = true;
+              toolExecutionContext.push(`submitted contact inquiry for ${args.sender_name}`);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+            } catch (error) {
+              console.error('[BMS] create_contact error:', error);
+              anyToolExecuted = true;
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: error instanceof Error ? error.message : 'Contact submission unavailable' }) });
             }
 
           } else if (toolCall.function.name === 'generate_payment_link') {

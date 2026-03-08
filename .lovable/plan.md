@@ -1,76 +1,68 @@
+# Phase 1: BMS Deep Integration — COMPLETED ✅
 
+## What Was Built
 
-# Phase 2: Operations, Finance & HR — Complete BMS Coverage
+### bms-agent/index.ts — 9 new actions added
+- `get_product_variants` — colors/sizes for products
+- `create_order` — customer order placement
+- `get_order_status` — order tracking
+- `update_order_status` — boss updates order status
+- `cancel_order` — cancel orders
+- `get_customer_history` — purchase history lookup
+- `get_company_statistics` — impact stats
+- `create_quotation` — formal price quotes
+- `create_invoice` — invoice generation
+- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
 
-## Gap Analysis
+### whatsapp-messages/index.ts — Customer-facing tools
+- 9 new tool definitions for customer AI
+- Complexity classifier updated with order/variant/quote/invoice triggers
+- Mandatory checkout tools expanded
+- Tool handlers for all new BMS actions
 
-Comparing the BMS API reference against current implementation, these actions are **missing**:
+### boss-chat/index.ts — Boss-facing tools
+- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
+- Tool handlers with formatted emoji responses
 
-| # | Action | Category | Target |
-|---|--------|----------|--------|
-| 1 | `record_multi_sale` | Sales | Boss |
-| 2 | `get_low_stock_items` | Inventory | Boss |
-| 3 | `record_expense` | Finance | Boss |
-| 4 | `get_expenses` | Finance | Boss |
-| 5 | `get_outstanding_receivables` | Finance | Boss |
-| 6 | `get_outstanding_payables` | Finance | Boss |
-| 7 | `profit_loss_report` | Finance | Boss |
-| 8 | `clock_in` | HR | Boss |
-| 9 | `clock_out` | HR | Boss |
-| 10 | `create_contact` | Website | Customer |
+### bms-callback/index.ts — NEW webhook endpoint
+- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
+- Authenticated via BMS_API_SECRET
+- Sends WhatsApp notifications to boss and/or customer via Twilio
 
-Also need fixes:
-- `sales_report` uses `date_from/date_to` but BMS expects `start_date/end_date`
-- `update_order_status` missing `tracking_number` param
-- `bms-callback` missing `new_contact` event handler
+# Phase 2: Operations, Finance & HR — COMPLETED ✅
 
-## Files to Change
+## What Was Built
 
-### 1. `supabase/functions/bms-agent/index.ts`
-Add 10 new switch cases with validation. Fix `sales_report` param names (`start_date`/`end_date`). Add `tracking_number` to `update_order_status`. Update `available_actions` list.
+### bms-agent/index.ts — 10 new actions added
+- `get_low_stock_items` — products below reorder level
+- `record_expense` — log business expenses
+- `get_expenses` — expense history with filters
+- `get_outstanding_receivables` — unpaid invoices
+- `get_outstanding_payables` — pending vendor bills
+- `profit_loss_report` — P&L with date range
+- `clock_in` — employee attendance start
+- `clock_out` — employee attendance end
+- `create_contact` — website contact form submissions
+- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
+- Added `tracking_number` to `update_order_status`
 
-### 2. `supabase/functions/boss-chat/index.ts`
-- Add 9 new tool definitions (all boss-only): `record_multi_sale`, `get_low_stock_items`, `record_expense`, `get_expenses`, `get_outstanding_receivables`, `get_outstanding_payables`, `profit_loss_report`, `clock_in`, `clock_out`
-- Add tool handlers with formatted emoji responses for each
-- Update system prompt capabilities section
+### boss-chat/index.ts — 9 new tool definitions + handlers
+- `get_low_stock_items` — inventory warnings
+- `record_expense` — expense tracking
+- `get_expenses` — expense reporting
+- `get_outstanding_receivables` — accounts receivable
+- `get_outstanding_payables` — accounts payable
+- `profit_loss_report` — financial performance
+- `clock_in` / `clock_out` — HR attendance
+- Updated `sales_report` tool to use `start_date`/`end_date`
+- Updated system prompt with Finance & HR capabilities
 
-### 3. `supabase/functions/whatsapp-messages/index.ts`
-- Add `create_contact` tool definition (customer-facing: "Submit a contact inquiry")
-- Add handler that calls bms-agent
-- Update complexity classifier regex to include `expense|invoice|payable|receivable|contact|inquiry`
+### whatsapp-messages/index.ts — Customer-facing
+- Added `create_contact` tool definition + handler
+- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
 
-### 4. `supabase/functions/bms-callback/index.ts`
-- Add `new_contact` event handler (notifies boss of new website inquiry)
+### bms-callback/index.ts — New event
+- Added `new_contact` event handler (notifies boss of website inquiries)
 
-### 5. `.lovable/plan.md`
-- Update to mark Phase 2 complete
-
-## New Action Details
-
-**`record_multi_sale`**: Required: `items[]`, `customer_name`, `payment_method`. Optional: `customer_email`, `customer_phone`, `notes`, `receipt_number`.
-
-**`get_low_stock_items`**: No required params. Returns products below reorder level.
-
-**`record_expense`**: Required: `category`, `vendor_name`, `amount_zmw`. Optional: `date_incurred`, `notes`.
-
-**`get_expenses`**: Optional: `start_date`, `end_date`, `category`, `limit`.
-
-**`get_outstanding_receivables`**: No params. Returns unpaid invoices + total.
-
-**`get_outstanding_payables`**: No params. Returns pending vendor bills + total.
-
-**`profit_loss_report`**: Required: `start_date`, `end_date`. Returns revenue, expenses, net profit, margin.
-
-**`clock_in` / `clock_out`**: Required: `employee_name` OR `employee_id`. Optional: `notes`.
-
-**`create_contact`**: Required: `sender_name`, `sender_email`, `message`. Optional: `sender_phone`, `source_page`.
-
-## Implementation Order
-
-| Step | What |
-|------|------|
-| 1 | Update `bms-agent/index.ts` — add 10 actions + fix param names |
-| 2 | Update `boss-chat/index.ts` — add 9 tools + handlers |
-| 3 | Update `whatsapp-messages/index.ts` — add `create_contact` tool |
-| 4 | Update `bms-callback/index.ts` — add `new_contact` event |
-
+## Next Phases (Pending)
+- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)

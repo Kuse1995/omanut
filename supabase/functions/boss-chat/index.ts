@@ -366,10 +366,24 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    - Use check_stock to look up current stock levels and pricing for any product
    - Use record_sale to log completed sales with customer details
    - Use update_stock to adjust inventory quantities (restock, corrections, damage write-offs)
-   - Use sales_report to get daily/weekly/monthly sales summaries
+   - Use sales_report to get sales summaries with date range filters
+   - Use get_low_stock_items to see which products need restocking
    - When the boss asks about stock, inventory, or product availability - use check_stock IMMEDIATELY
    - When the boss confirms a sale or wants to record a transaction - use record_sale
    - When the boss asks "how are sales?" or "what did we sell today?" - use sales_report
+
+11. **Finance & Accounting (BMS)**: You have access to financial management tools.
+   - Use record_expense to log business expenses (rent, supplies, transport, etc.)
+   - Use get_expenses to view expense history with date/category filters
+   - Use get_outstanding_receivables to see unpaid invoices (who owes you)
+   - Use get_outstanding_payables to see pending bills (what you owe)
+   - Use profit_loss_report to generate P&L statements for any date range
+   - Use create_quotation and create_invoice for formal business documents
+
+12. **HR & Attendance (BMS)**: You can track employee attendance.
+   - Use clock_in when the boss says someone has arrived or started work
+   - Use clock_out when an employee is leaving or finished for the day
+   - The BMS automatically calculates work hours
 
 1. **Sales Analysis**: Calculate conversion rates (currently ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%), identify hot leads from the ${uniquePhones.size} unique customers, spot sales patterns, and revenue opportunities.
 
@@ -732,11 +746,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "sales_report",
-          description: "Get a sales summary report from the BMS. Use when the boss asks about sales performance, revenue, or daily/weekly/monthly reports.",
+          description: "Get a sales report with optional date range. Use when the boss asks about sales performance, revenue, or what was sold.",
           parameters: {
             type: "object",
             properties: {
-              period: { type: "string", enum: ["today", "week", "month"], description: "Report period. Default: 'today'" }
+              start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
+              limit: { type: "integer", description: "Max results to return" }
             },
             required: []
           }
@@ -853,6 +869,112 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               tax_rate: { type: "number", description: "Tax rate percentage" }
             },
             required: ["client_name", "items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_low_stock_items",
+          description: "Get all products that are at or below their reorder level. Use when the boss asks about low stock, items to reorder, or inventory warnings.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "record_expense",
+          description: "Record a business expense in the BMS. Use when the boss mentions spending, paying a supplier, or recording a cost.",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Expense category (e.g., rent, utilities, supplies, transport)" },
+              vendor_name: { type: "string", description: "Name of the vendor or supplier" },
+              amount_zmw: { type: "number", description: "Amount in ZMW" },
+              date_incurred: { type: "string", description: "Date of expense (YYYY-MM-DD). Defaults to today." },
+              notes: { type: "string", description: "Additional notes about the expense" }
+            },
+            required: ["category", "vendor_name", "amount_zmw"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_expenses",
+          description: "Get a list of recorded expenses. Use when the boss asks about spending, costs, or expense history.",
+          parameters: {
+            type: "object",
+            properties: {
+              start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
+              category: { type: "string", description: "Filter by expense category" },
+              limit: { type: "integer", description: "Max results to return" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_outstanding_receivables",
+          description: "Get unpaid invoices and total outstanding receivables. Use when the boss asks who owes them money, unpaid invoices, or accounts receivable.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_outstanding_payables",
+          description: "Get pending vendor bills and total outstanding payables. Use when the boss asks what bills are due, what they owe, or accounts payable.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "profit_loss_report",
+          description: "Generate a profit and loss report for a date range. Use when the boss asks about profitability, P&L, net profit, or financial performance.",
+          parameters: {
+            type: "object",
+            properties: {
+              start_date: { type: "string", description: "Start date (YYYY-MM-DD)" },
+              end_date: { type: "string", description: "End date (YYYY-MM-DD)" }
+            },
+            required: ["start_date", "end_date"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "clock_in",
+          description: "Clock in an employee for attendance tracking. Use when the boss says someone has arrived or started work.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Name of the employee" },
+              employee_id: { type: "string", description: "Employee ID if known" },
+              notes: { type: "string", description: "Optional notes (e.g., late arrival reason)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "clock_out",
+          description: "Clock out an employee. Use when the boss says someone is leaving or has finished work.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Name of the employee" },
+              employee_id: { type: "string", description: "Employee ID if known" },
+              notes: { type: "string", description: "Optional notes" }
+            },
+            required: []
           }
         }
       },
@@ -1469,11 +1591,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'sales_report', params: { period: args.period, company_id: company.id } }),
+                  body: JSON.stringify({ action: 'sales_report', params: { start_date: args.start_date, end_date: args.end_date, limit: args.limit, company_id: company.id } }),
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `📊 Sales Report (${args.period || 'today'}):\n\n${JSON.stringify(bmsData.data, null, 2)}` };
+                  const d = bmsData.data;
+                  const summary = d?.summary ? `\n\n📈 Summary:\n💰 Revenue: ${company.currency_prefix || 'K'}${d.summary.total_revenue || 0}\n📦 Quantity: ${d.summary.total_quantity || 0}\n🛒 Sales: ${d.summary.sales_count || 0}` : '';
+                  result = { success: true, message: `📊 Sales Report:${summary}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
                 } else {
                   result = { success: false, message: `❌ Sales report failed: ${bmsData.error || 'Unknown error'}` };
                 }
@@ -1511,11 +1635,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, notes: args.notes, company_id: company.id } }),
+                  body: JSON.stringify({ action: 'update_order_status', params: { order_id: args.order_id, order_number: args.order_number, status: args.status, tracking_number: args.tracking_number, notes: args.notes, company_id: company.id } }),
                 });
                 const bmsData = await bmsRes.json();
                 if (bmsData.success) {
-                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
+                  result = { success: true, message: `✅ Order Updated!\n\n🔖 Order: ${args.order_number || args.order_id}\n📋 New Status: ${args.status}${args.tracking_number ? `\n🚚 Tracking: ${args.tracking_number}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
                 } else {
                   result = { success: false, message: `❌ Order update failed: ${bmsData.error || 'Unknown error'}` };
                 }
@@ -1628,7 +1752,176 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
-            case 'list_product_images': {
+            case 'get_low_stock_items': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_low_stock_items', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+                  if (items.length === 0 || !items[0]) {
+                    result = { success: true, message: '✅ All stock levels are healthy! No items below reorder level.' };
+                  } else {
+                    const formatted = items.map((item: any) => {
+                      const emoji = item.current_stock === 0 ? '🔴' : '🟡';
+                      return `${emoji} ${item.name || item.product_name}\n   Stock: ${item.current_stock ?? '?'} | Reorder: ${item.reorder_level ?? '?'}`;
+                    }).join('\n\n');
+                    result = { success: true, message: `⚠️ Low Stock Items (${items.length}):\n\n${formatted}` };
+                  }
+                } else {
+                  result = { success: false, message: `❌ Low stock check failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'record_expense': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'record_expense', params: { category: args.category, vendor_name: args.vendor_name, amount_zmw: args.amount_zmw, date_incurred: args.date_incurred, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  result = { success: true, message: `✅ Expense Recorded!\n\n📂 Category: ${args.category}\n🏪 Vendor: ${args.vendor_name}\n💰 Amount: ${company.currency_prefix || 'K'}${args.amount_zmw}${args.date_incurred ? `\n📅 Date: ${args.date_incurred}` : ''}${args.notes ? `\n📝 Notes: ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Expense recording failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_expenses': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_expenses', params: { start_date: args.start_date, end_date: args.end_date, category: args.category, limit: args.limit, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_expenses ? `\n💰 Total: ${company.currency_prefix || 'K'}${d.total_expenses}` : '';
+                  result = { success: true, message: `📊 Expenses:${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Expense lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_outstanding_receivables': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_outstanding_receivables', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_outstanding ? `\n💰 Total Outstanding: ${company.currency_prefix || 'K'}${d.total_outstanding}` : '';
+                  result = { success: true, message: `📋 Outstanding Receivables (Who owes you):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Receivables lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'get_outstanding_payables': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'get_outstanding_payables', params: { company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  const total = d?.total_payable ? `\n💰 Total Payable: ${company.currency_prefix || 'K'}${d.total_payable}` : '';
+                  result = { success: true, message: `📋 Outstanding Payables (What you owe):${total}\n\n${JSON.stringify(d?.data || d, null, 2)}` };
+                } else {
+                  result = { success: false, message: `❌ Payables lookup failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'profit_loss_report': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'profit_loss_report', params: { start_date: args.start_date, end_date: args.end_date, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `📊 Profit & Loss Report\n📅 ${args.start_date} to ${args.end_date}\n\n💰 Revenue: ${company.currency_prefix || 'K'}${d?.total_revenue || 0}\n📉 Expenses: ${company.currency_prefix || 'K'}${d?.total_expenses || 0}\n${(d?.net_profit || 0) >= 0 ? '✅' : '🔴'} Net Profit: ${company.currency_prefix || 'K'}${d?.net_profit || 0}\n📊 Margin: ${d?.profit_margin || 0}%\n🛒 Sales Count: ${d?.sales_count || 0}${d?.expense_breakdown ? `\n\n📂 Expense Breakdown:\n${Object.entries(d.expense_breakdown).map(([k, v]) => `  • ${k}: ${company.currency_prefix || 'K'}${v}`).join('\n')}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ P&L report failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'clock_in': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'clock_in', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `✅ Clocked In!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_in ? new Date(d.clock_in).toLocaleTimeString() : 'Now'}${args.notes ? `\n📝 ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Clock-in failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
+            case 'clock_out': {
+              try {
+                const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'clock_out', params: { employee_name: args.employee_name, employee_id: args.employee_id, notes: args.notes, company_id: company.id } }),
+                });
+                const bmsData = await bmsRes.json();
+                if (bmsData.success) {
+                  const d = bmsData.data;
+                  result = { success: true, message: `✅ Clocked Out!\n\n👤 ${args.employee_name || args.employee_id}\n⏰ Time: ${d?.clock_out ? new Date(d.clock_out).toLocaleTimeString() : 'Now'}${d?.work_hours ? `\n⏱️ Hours: ${d.work_hours}` : ''}${args.notes ? `\n📝 ${args.notes}` : ''}` };
+                } else {
+                  result = { success: false, message: `❌ Clock-out failed: ${bmsData.error}` };
+                }
+              } catch (err) {
+                result = { success: false, message: `❌ BMS connection error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              break;
+            }
+
               const filterCategory = args.category || 'products';
               const { data: mediaItems, error: mediaErr } = await supabase
                 .from('company_media')
