@@ -420,7 +420,7 @@ async function generateImage(
   console.log('[IMAGE-GEN] Enhanced prompt:', enhancedPrompt.substring(0, 200));
   
   const response = await geminiChat({
-    model: 'gemini-3.1-flash-image',
+    model: 'gemini-3-pro-image-preview',
     messages: [{ role: 'user', content: enhancedPrompt }],
     modalities: ['image', 'text']
   });
