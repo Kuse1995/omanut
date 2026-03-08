@@ -1341,6 +1341,67 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'generate_image':
+            case 'edit_image':
+            case 'show_image_gallery': {
+              // Check if image generation is enabled
+              const imageSettings = Array.isArray(company.image_generation_settings)
+                ? company.image_generation_settings[0]
+                : company.image_generation_settings;
+
+              if (!imageSettings?.enabled && functionName !== 'show_image_gallery') {
+                result = { success: false, message: 'Image generation is not enabled for your company. Please enable it in the admin settings first.' };
+                break;
+              }
+
+              const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
+              const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+              const messageType = functionName === 'generate_image' ? 'generate'
+                : functionName === 'edit_image' ? 'edit'
+                : 'history';
+              
+              const imgPrompt = functionName === 'generate_image' ? args.prompt
+                : functionName === 'edit_image' ? args.instructions
+                : '';
+
+              const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_SRK_IMG}`,
+                },
+                body: JSON.stringify({
+                  companyId: company.id,
+                  customerPhone: '',
+                  conversationId: null,
+                  prompt: imgPrompt,
+                  messageType,
+                }),
+              });
+
+              if (!imageGenResponse.ok) {
+                const errorText = await imageGenResponse.text();
+                console.error(`[BOSS-TOOL-${functionName}] Error:`, errorText);
+                result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
+              } else {
+                const imageGenResult = await imageGenResponse.json();
+                console.log(`[BOSS-TOOL-${functionName}] Result:`, imageGenResult.success ? 'success' : 'failed');
+                
+                result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                
+                // If an image was generated, include it in media messages for WhatsApp delivery
+                if (imageGenResult.imageUrl) {
+                  toolImageUrl = imageGenResult.imageUrl;
+                  toolMediaMessages.push({
+                    body: imageGenResult.message || '🎨 Here is your generated image!',
+                    imageUrl: imageGenResult.imageUrl
+                  });
+                }
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
