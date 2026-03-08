@@ -541,9 +541,10 @@ async function handleComment(
 
   console.log(`AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
 
-  // Wait 15 seconds to appear more human
-  console.log(`Waiting 15 seconds before posting reply to ${commentId}...`);
-  await new Promise(resolve => setTimeout(resolve, 15000));
+  // Randomized delay (45-120s) to appear more human and reduce Meta bot-detection
+  const delayMs = Math.floor(Math.random() * 75000) + 45000;
+  console.log(`Waiting ${Math.round(delayMs/1000)}s before posting reply to ${commentId}...`);
+  await new Promise(resolve => setTimeout(resolve, delayMs));
 
   const fbResponse = await fetch(
     `https://graph.facebook.com/v25.0/${commentId}/comments`,
@@ -684,9 +685,10 @@ async function handleInstagramComment(
 
   console.log(`IG AI reply for ${commentId}: "${aiReply.slice(0, 100)}..."`);
 
-  // Wait 15 seconds to appear more human
-  console.log(`Waiting 15 seconds before posting IG reply to ${commentId}...`);
-  await new Promise(resolve => setTimeout(resolve, 15000));
+  // Randomized delay (45-120s) to appear more human and reduce Meta bot-detection
+  const delayMs = Math.floor(Math.random() * 75000) + 45000;
+  console.log(`Waiting ${Math.round(delayMs/1000)}s before posting IG reply to ${commentId}...`);
+  await new Promise(resolve => setTimeout(resolve, delayMs));
 
   const igResponse = await fetch(
     `https://graph.facebook.com/v25.0/${commentId}/replies`,
