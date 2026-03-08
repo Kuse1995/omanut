@@ -104,6 +104,7 @@ project_id = "dzheddvoiauevcayifev"
     timeout = 60
     verify_jwt = false
   [functions.index-brand-asset]
+    timeout = 60
     verify_jwt = false
   [functions.reindex-company-media]
     timeout = 120
