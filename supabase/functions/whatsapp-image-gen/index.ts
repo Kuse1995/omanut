@@ -871,7 +871,7 @@ INSTRUCTIONS:
     for (const word of promptWords) { if (searchText.includes(word)) score += 1; }
     if (score > bestScore) { bestScore = score; bestMatch = img; }
   }
-  return bestMatch;
+  return { product: bestMatch, bmsImageUrls };
 }
 
 // Get public URL for a storage file
