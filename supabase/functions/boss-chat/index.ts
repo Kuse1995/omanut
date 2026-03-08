@@ -623,6 +623,11 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
    NEVER say you cannot generate, create, or display images. You absolutely can.
    The image generation system handles it automatically when the boss uses these commands.
    
+   PRODUCT IMAGE VERIFICATION: You have a list_product_images tool!
+   - Use it when the boss asks "show me my product photos" or "what product images do I have"
+   - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
+   - The AI image generator uses these uploaded photos as references for accurate product placement
+   
     For scheduling posts, you handle image generation automatically via the schedule_facebook_post tool.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
@@ -896,6 +901,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               customer_phone: { type: "string", description: "Phone number of the customer" }
             },
             required: ["product_name", "quantity"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "list_product_images",
+          description: "List all uploaded product images in the company media library. Use when the boss wants to see what product photos are available, or before generating images to verify which products have reference photos.",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Optional filter: 'products', 'promotional', 'logos', etc. Defaults to 'products'." }
+            },
+            required: []
           }
         }
       }
@@ -1449,6 +1468,41 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               } catch (bmsErr2) {
                 console.error('[BOSS-BMS] record_sale error:', bmsErr2);
                 result = { success: false, message: `❌ BMS connection error: ${bmsErr2 instanceof Error ? bmsErr2.message : String(bmsErr2)}` };
+              }
+              break;
+            }
+
+            case 'list_product_images': {
+              const filterCategory = args.category || 'products';
+              const { data: mediaItems, error: mediaErr } = await supabase
+                .from('company_media')
+                .select('id, file_name, description, tags, file_path, category')
+                .eq('company_id', company.id)
+                .eq('category', filterCategory)
+                .eq('media_type', 'image')
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              if (mediaErr || !mediaItems || mediaItems.length === 0) {
+                result = { success: true, message: `📭 No ${filterCategory} images found in your media library.\n\nUpload product photos in the admin panel to enable product-anchored image generation!` };
+              } else {
+                const SUPABASE_URL_MEDIA = Deno.env.get('SUPABASE_URL')!;
+                const mediaList = mediaItems.map((m: any, i: number) => {
+                  const url = `${SUPABASE_URL_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
+                  return `${i + 1}. ${m.file_name}\n   ${m.description || 'No description'}\n   Tags: ${m.tags?.join(', ') || 'none'}\n   🔗 ${url}`;
+                }).join('\n\n');
+
+                result = { success: true, message: `📸 Your ${filterCategory} images (${mediaItems.length} total):\n\n${mediaList}\n\nThese are the reference photos the AI uses when generating product images.` };
+
+                // Also send each image via WhatsApp for visual reference
+                const SUPABASE_URL_FOR_MEDIA = Deno.env.get('SUPABASE_URL')!;
+                mediaItems.slice(0, 5).forEach((m: any, i: number) => {
+                  const imgUrl = `${SUPABASE_URL_FOR_MEDIA}/storage/v1/object/public/company-media/${m.file_path}`;
+                  toolMediaMessages.push({
+                    body: `📸 ${i + 1}. ${m.file_name}\n${m.description || ''}\nTags: ${m.tags?.join(', ') || 'none'}`,
+                    imageUrl: imgUrl
+                  });
+                });
               }
               break;
             }

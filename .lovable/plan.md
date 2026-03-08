@@ -1,76 +1,67 @@
 
 
-# Smart Product Lookup for Image Generation
+# Plan: Fix Demo Handoff Notifications and Ticket Logging
 
-## Problem
-When the boss asks to generate an image of a specific product (e.g., "Generate an image of LifeStraw Family"), the system uses naive keyword matching (`selectProductImageForPrompt`) to find the product photo in `company_media`. This frequently picks the wrong item because it just counts word overlaps in filenames/tags. The AI image generator then produces inaccurate results because it's anchored to the wrong product photo.
+## Problem Analysis
 
-Additionally, the boss has no way to browse uploaded product images to verify what's available.
+Two issues identified in the `demo-session` edge function:
 
-## Solution
+### Issue 1: Over-aggressive boss notifications
+The `evaluateAndHandoff` function runs after every single message and uses an AI evaluation agent. The handoff prompt's "soft handoff" criteria are too broad — phrases like "Customer has a complaint that requires real-world resolution" and "Customer is negotiating a deal" cause the AI evaluator to trigger on routine questions (e.g., "how do I withdraw money?"). The word "why" is even listed in the complexity classifier as a complex trigger, but the real problem is the handoff evaluation prompt itself.
 
-### 1. Replace keyword matching with AI-powered product selection
-**File: `supabase/functions/whatsapp-image-gen/index.ts`**
+### Issue 2: Handoffs not creating tickets or queue items
+When a handoff IS triggered, the function only sends a WhatsApp message to the boss (`sendWhatsAppToBoss`). It never inserts rows into `support_tickets` or `agent_queue` tables. Since the `demo-live-feed` endpoint reads from those tables, the pitch page's Tickets and Queue tabs remain empty.
 
-Replace `selectProductImageForPrompt` with an AI-powered function that:
-- Fetches all product images from `company_media` (category = 'products')
-- Also queries BMS via `bms-api-bridge` (`check_stock`) to get real product names, SKUs, and details
-- Sends the boss's prompt + the list of available products (names, descriptions, tags, BMS data) to Gemini Flash as a structured tool call
-- Gemini returns the exact product ID match (or "none" if no match)
-- This ensures accurate product selection even with vague or partial names
+## Changes
 
-### 2. Add `list_products` tool to boss-chat
-**File: `supabase/functions/boss-chat/index.ts`**
+### File: `supabase/functions/demo-session/index.ts`
 
-Add a new tool `list_product_images` to `managementTools`:
-- No required parameters (optional `category` filter)
-- Queries `company_media` for the company's uploaded product images
-- Returns a formatted list showing: name, description, tags, and the image URL
-- Lets the boss say "Show me my product images" to see what's available before requesting generation
+**1. Tighten handoff evaluation prompt**
 
-### 3. Add BMS product cross-reference to image generation
-**File: `supabase/functions/whatsapp-image-gen/index.ts`**
+Update the `evaluateAndHandoff` function's evaluation prompt to be much stricter:
+- Remove "complaint that requires real-world resolution" from soft handoff (too vague — the AI answering "how to withdraw" gets flagged as complaint-adjacent)
+- Add explicit "NO HANDOFF" examples: answering FAQs, explaining processes, providing information about services
+- Require at least 3 messages before any soft handoff evaluation (skip evaluation on early messages)
+- Add a minimum conversation depth check — don't evaluate if fewer than 4 messages total
 
-In the `generate` case, before selecting a product image:
-- Call `bms-api-bridge` with `check_stock` using the product name from the prompt
-- Use the BMS response (exact product name, SKU) to improve the AI product-matching prompt
-- This connects inventory data with the media library for precise matching
+**2. Create tickets and queue items on handoff**
 
-### 4. Update boss system prompt
-**File: `supabase/functions/boss-chat/index.ts`**
+After the handoff decision is made and before sending the boss WhatsApp notification, insert:
 
-Add to the system prompt capabilities:
-- "Use `list_product_images` to show the boss their uploaded product photos before generating images"
-- "When the boss asks to generate an image, suggest they check available product photos first if results have been inaccurate"
+- A `support_tickets` row with:
+  - `company_id`, `customer_name`, `customer_phone`
+  - `issue_summary` from the AI's `result.summary`
+  - `issue_category` derived from the handoff type (complaint, order, booking)
+  - `priority` from `extracted_data.urgency` mapped to ticket priority
+  - `status`: "open"
+  - `recommended_department` based on category
+  - `conversation_id` linked to the demo conversation
 
-## Technical Details
+- An `agent_queue` row with:
+  - `company_id`, `ticket_id` (from the ticket just created)
+  - `conversation_id`, `customer_name`, `customer_phone`
+  - `priority` matching the ticket
+  - `status`: "waiting"
+  - `department` from recommended department
+  - `ai_summary` from the handoff summary
+  - `sla_deadline` set to 15 minutes from now (for demo urgency feel)
 
-**AI product selection prompt (replaces keyword matching):**
-```
-Given this user request: "[boss prompt]"
-And these available product images:
-1. ID: abc, Name: "LifeStraw Family", Tags: [water filter, family], Description: "Blue water purifier"
-2. ID: def, Name: "LifeStraw Go", Tags: [water bottle, portable], Description: "Personal water bottle"
+**3. Skip evaluation on short conversations**
 
-BMS inventory match: "Lifestraw Family" (SKU: LSF, Stock: 90)
+Add a guard at the top of `evaluateAndHandoff`: if the conversation has fewer than 4 messages (2 exchanges), return immediately without evaluating. This prevents first-message or second-message false positives.
 
-Which product image ID best matches? Return the ID or "none".
-```
+### Summary of behavior after fix
 
-**`list_product_images` tool response format:**
-```
-📸 Your Product Images (5 total):
+| Scenario | Before | After |
+|----------|--------|-------|
+| Customer asks "how do I withdraw?" | Boss gets notified | AI answers, no notification |
+| Customer asks 3 FAQs | Boss gets 3 notifications | No notifications |
+| Customer files complaint after 3+ exchanges | Boss gets WhatsApp only | Boss gets WhatsApp + ticket created + queue item visible on pitch page |
+| Customer completes a booking | Boss gets WhatsApp only | Boss gets WhatsApp + ticket + queue item on pitch page |
 
-1. LifeStraw Family
-   Tags: water filter, family, purifier
-   🔗 [View Image]
+### Files
 
-2. LifeStraw Go
-   Tags: bottle, portable, hiking
-   🔗 [View Image]
-```
-
-**Files changed:**
-- `supabase/functions/whatsapp-image-gen/index.ts` — Replace `selectProductImageForPrompt` with AI-powered selection + BMS cross-reference
-- `supabase/functions/boss-chat/index.ts` — Add `list_product_images` tool + handler + system prompt update
+| Action | File |
+|--------|------|
+| Edit | `supabase/functions/demo-session/index.ts` |
 
