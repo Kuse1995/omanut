@@ -3097,7 +3097,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
     
     // Ensure at least 3 rounds when checkout tools are active (check_stock -> record_sale -> generate_payment_link)
-    const enabledToolNames = (filteredTools || []).map((t: any) => t.function?.name).filter(Boolean);
+    const checkoutToolNames = (filteredTools || []).map((t: any) => t.function?.name).filter(Boolean);
     const hasCheckoutTools = enabledToolNames.includes('check_stock') && 
                              enabledToolNames.includes('record_sale') && 
                              enabledToolNames.includes('generate_payment_link');
