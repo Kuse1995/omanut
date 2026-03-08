@@ -351,7 +351,7 @@ INSTRUCTIONS:
   try {
     console.log(`[PRODUCT-SELECT] Sending ${candidates.length} product images to Gemini Vision for multimodal matching`);
     const response = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
       max_tokens: 50,
@@ -590,7 +590,7 @@ async function generateCaption(
   const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     messages: [
       {
         role: 'system',
@@ -649,7 +649,7 @@ async function generateSuggestions(
   const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     messages: [
       {
         role: 'system',
