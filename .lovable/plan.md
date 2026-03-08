@@ -1,83 +1,22 @@
-# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## What Was Built
 
-### bms-agent/index.ts — 9 new actions added
-- `get_product_variants` — colors/sizes for products
-- `create_order` — customer order placement
-- `get_order_status` — order tracking
-- `update_order_status` — boss updates order status
-- `cancel_order` — cancel orders
-- `get_customer_history` — purchase history lookup
-- `get_company_statistics` — impact stats
-- `create_quotation` — formal price quotes
-- `create_invoice` — invoice generation
-- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
+# Fix: BMS Bridge Doesn't Support `list_quotations` / `list_invoices`
 
-### whatsapp-messages/index.ts — Customer-facing tools
-- 9 new tool definitions for customer AI
-- Complexity classifier updated with order/variant/quote/invoice triggers
-- Mandatory checkout tools expanded
-- Tool handlers for all new BMS actions
+## Root Cause
 
-### boss-chat/index.ts — Boss-facing tools
-- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
-- Tool handlers with formatted emoji responses
+The error is **not** in our code — our `bms-agent` forwards `list_quotations` to the external BMS API bridge (`hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge`), but that remote bridge returns `"Unknown action: list_quotations"`. The remote BMS system simply doesn't have this endpoint yet.
 
-### bms-callback/index.ts — NEW webhook endpoint
-- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
-- Authenticated via BMS_API_SECRET
-- Sends WhatsApp notifications to boss and/or customer via Twilio
+## Fix
 
-# Phase 2: Operations, Finance & HR — COMPLETED ✅
+Since the external BMS doesn't support listing past quotations/invoices, we need a graceful fallback in `boss-chat`:
 
-## What Was Built
+1. **In `boss-chat/index.ts`** — Update the `list_quotations` / `list_invoices` handler (line ~1857): When the BMS returns "Unknown action", instead of showing the raw error, return a helpful message like:
+   > "📋 The BMS doesn't support retrieving past quotations yet. I can create a new quotation for this client instead — just tell me the items and amounts."
 
-### bms-agent/index.ts — 10 new actions added
-- `get_low_stock_items` — products below reorder level
-- `record_expense` — log business expenses
-- `get_expenses` — expense history with filters
-- `get_outstanding_receivables` — unpaid invoices
-- `get_outstanding_payables` — pending vendor bills
-- `profit_loss_report` — P&L with date range
-- `clock_in` — employee attendance start
-- `clock_out` — employee attendance end
-- `create_contact` — website contact form submissions
-- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
-- Added `tracking_number` to `update_order_status`
+2. **Update the system prompt** (line ~395): Change the PDF workflow instruction so the AI knows to fall back to `create_quotation` if `list_quotations` is unavailable, then generate the PDF from that result.
 
-### boss-chat/index.ts — 9 new tool definitions + handlers
-- `get_low_stock_items` — inventory warnings
-- `record_expense` — expense tracking
-- `get_expenses` — expense reporting
-- `get_outstanding_receivables` — accounts receivable
-- `get_outstanding_payables` — accounts payable
-- `profit_loss_report` — financial performance
-- `clock_in` / `clock_out` — HR attendance
-- Updated `sales_report` tool to use `start_date`/`end_date`
-- Updated system prompt with Finance & HR capabilities
+3. **Optionally remove `list_quotations` and `list_invoices`** from the tool definitions entirely (lines 888-917) to prevent the AI from calling an action that will always fail. Instead, the PDF workflow for quotations would be: `create_quotation` → `generate_document`.
 
-### whatsapp-messages/index.ts — Customer-facing
-- Added `create_contact` tool definition + handler
-- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+### Recommended approach
+Remove `list_quotations`/`list_invoices` tools and their handlers since the BMS doesn't support them. Update the system prompt to instruct: "To send a quotation PDF, first use `create_quotation` to create it, then `generate_document` to generate and send the PDF." This avoids a dead-end tool call entirely.
 
-### bms-callback/index.ts — New event
-- Added `new_contact` event handler (notifies boss of website inquiries)
-
-## Phase 2.5: PDF Document Generation — COMPLETED ✅
-
-### generate-document/index.ts — NEW edge function
-- Generates professionally branded A4 PDFs using pdf-lib
-- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
-- Auto-uploads to company-documents storage with 7-day signed URLs
-- Auto-sends PDFs to boss via WhatsApp (Twilio)
-- Invoices include payment info (MTN/Airtel mobile money numbers)
-
-### boss-chat/index.ts — generate_document tool added
-- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
-- AI fetches data first (via BMS tools), then calls generate_document with the results
-- System prompt updated with document generation instructions
-
-## Next Phases (Pending)
-- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
