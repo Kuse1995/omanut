@@ -1922,6 +1922,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'show_media_library': {
               const filterCategory = args.category || 'products';
               const { data: mediaItems, error: mediaErr } = await supabase
                 .from('company_media')
