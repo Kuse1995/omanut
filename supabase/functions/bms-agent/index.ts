@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
         result = await callBMS("update_stock", {
           product_name: params.product_name,
           quantity: params.quantity,
-          adjustment_type: params.adjustment_type || "set", // "set", "add", "subtract"
+          adjustment_type: params.adjustment_type || "set",
           reason: params.reason || null,
           company_id: params.company_id,
         });
@@ -141,7 +141,135 @@ Deno.serve(async (req) => {
 
       case "sales_report": {
         result = await callBMS("sales_report", {
-          period: params.period || "today", // "today", "week", "month"
+          period: params.period || "today",
+          date_from: params.date_from || null,
+          date_to: params.date_to || null,
+          group_by: params.group_by || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_product_variants": {
+        if (!params.product_id && !params.product_name) {
+          return respond({ success: false, error: "product_id or product_name is required" }, 400);
+        }
+        result = await callBMS("get_product_variants", {
+          product_id: params.product_id || null,
+          product_name: params.product_name || null,
+          variant_type: params.variant_type || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "create_order": {
+        if (!params.customer_name || !params.customer_phone || !params.items) {
+          return respond({ success: false, error: "customer_name, customer_phone, and items are required" }, 400);
+        }
+        result = await callBMS("create_order", {
+          customer_name: params.customer_name,
+          customer_phone: params.customer_phone,
+          customer_email: params.customer_email || null,
+          items: params.items,
+          payment_method: params.payment_method || null,
+          delivery_address: params.delivery_address || null,
+          notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_order_status": {
+        if (!params.order_number && !params.order_id) {
+          return respond({ success: false, error: "order_number or order_id is required" }, 400);
+        }
+        result = await callBMS("get_order_status", {
+          order_number: params.order_number || null,
+          order_id: params.order_id || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "update_order_status": {
+        if (!params.order_id || !params.status) {
+          return respond({ success: false, error: "order_id and status are required" }, 400);
+        }
+        result = await callBMS("update_order_status", {
+          order_id: params.order_id,
+          order_number: params.order_number || null,
+          status: params.status,
+          notes: params.notes || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "cancel_order": {
+        if (!params.order_id && !params.order_number) {
+          return respond({ success: false, error: "order_id or order_number is required" }, 400);
+        }
+        result = await callBMS("cancel_order", {
+          order_id: params.order_id || null,
+          order_number: params.order_number || null,
+          reason: params.reason || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_customer_history": {
+        if (!params.customer_name && !params.customer_phone) {
+          return respond({ success: false, error: "customer_name or customer_phone is required" }, 400);
+        }
+        result = await callBMS("get_customer_history", {
+          customer_name: params.customer_name || null,
+          customer_phone: params.customer_phone || null,
+          date_from: params.date_from || null,
+          date_to: params.date_to || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "get_company_statistics": {
+        result = await callBMS("get_company_statistics", {
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "create_quotation": {
+        if (!params.client_name || !params.items) {
+          return respond({ success: false, error: "client_name and items are required" }, 400);
+        }
+        result = await callBMS("create_quotation", {
+          client_name: params.client_name,
+          items: params.items,
+          client_email: params.client_email || null,
+          client_phone: params.client_phone || null,
+          notes: params.notes || null,
+          tax_rate: params.tax_rate || null,
+          validity_days: params.validity_days || null,
+          company_id: params.company_id,
+        });
+        break;
+      }
+
+      case "create_invoice": {
+        if (!params.client_name || !params.items) {
+          return respond({ success: false, error: "client_name and items are required" }, 400);
+        }
+        result = await callBMS("create_invoice", {
+          client_name: params.client_name,
+          items: params.items,
+          client_email: params.client_email || null,
+          client_phone: params.client_phone || null,
+          due_date: params.due_date || null,
+          tax_rate: params.tax_rate || null,
+          notes: params.notes || null,
+          payment_terms: params.payment_terms || null,
           company_id: params.company_id,
         });
         break;
@@ -157,8 +285,17 @@ Deno.serve(async (req) => {
             "generate_payment_link",
             "list_products",
             "get_product_details",
+            "get_product_variants",
             "update_stock",
             "sales_report",
+            "create_order",
+            "get_order_status",
+            "update_order_status",
+            "cancel_order",
+            "get_customer_history",
+            "get_company_statistics",
+            "create_quotation",
+            "create_invoice",
           ],
         }, 400);
     }
