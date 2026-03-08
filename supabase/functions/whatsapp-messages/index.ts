@@ -1808,6 +1808,131 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["amount", "customer_name", "customer_phone", "reference"]
           }
         }
+      },
+      get_product_variants: {
+        type: "function",
+        function: {
+          name: "get_product_variants",
+          description: "Gets available variants (colors, sizes) for a specific product. Use when a customer asks about available colors, sizes, or options for a product.",
+          parameters: {
+            type: "object",
+            properties: {
+              product_name: { type: "string", description: "The name of the product to get variants for" }
+            },
+            required: ["product_name"]
+          }
+        }
+      },
+      create_order: {
+        type: "function",
+        function: {
+          name: "create_order",
+          description: "Creates a new order for the customer with delivery. Use when a customer wants to place an order, buy products with delivery, or checkout. Collect customer name, phone, items, and delivery address before calling.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Full name of the customer" },
+              customer_phone: { type: "string", description: "Phone number of the customer" },
+              customer_email: { type: "string", description: "Email address if provided" },
+              items: { type: "array", items: { type: "object", properties: { product_name: { type: "string" }, quantity: { type: "integer" } }, required: ["product_name", "quantity"] }, description: "Array of items to order" },
+              payment_method: { type: "string", description: "Payment method: cash, mobile_money, bank_transfer, card" },
+              delivery_address: { type: "string", description: "Delivery address for the order" },
+              notes: { type: "string", description: "Any special instructions" }
+            },
+            required: ["customer_name", "customer_phone", "items"]
+          }
+        }
+      },
+      get_order_status: {
+        type: "function",
+        function: {
+          name: "get_order_status",
+          description: "Checks the status of an existing order. Use when a customer asks about their order status, tracking, or delivery progress.",
+          parameters: {
+            type: "object",
+            properties: {
+              order_number: { type: "string", description: "The order number (e.g., ORD-2026-0042)" },
+              order_id: { type: "string", description: "The order ID if known" }
+            },
+            required: []
+          }
+        }
+      },
+      cancel_order: {
+        type: "function",
+        function: {
+          name: "cancel_order",
+          description: "Cancels an existing order. Use when a customer wants to cancel their order. Confirm with the customer before calling.",
+          parameters: {
+            type: "object",
+            properties: {
+              order_number: { type: "string", description: "The order number to cancel" },
+              order_id: { type: "string", description: "The order ID if known" },
+              reason: { type: "string", description: "Reason for cancellation" }
+            },
+            required: []
+          }
+        }
+      },
+      get_customer_history: {
+        type: "function",
+        function: {
+          name: "get_customer_history",
+          description: "Retrieves purchase history for the current customer. Use when a customer asks about their previous orders, purchases, or transaction history.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Customer name to look up" },
+              customer_phone: { type: "string", description: "Customer phone number to look up" }
+            },
+            required: []
+          }
+        }
+      },
+      get_company_statistics: {
+        type: "function",
+        function: {
+          name: "get_company_statistics",
+          description: "Gets company impact and statistics. Use when a customer asks about the company's impact, how many people helped, or general company stats.",
+          parameters: {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }
+      },
+      create_quotation: {
+        type: "function",
+        function: {
+          name: "create_quotation",
+          description: "Creates a quotation/price estimate for the customer with itemized products and prices. Use when a customer asks for a quote, estimate, or formal pricing.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Name of the customer requesting the quote" },
+              items: { type: "array", items: { type: "object", properties: { product_name: { type: "string" }, quantity: { type: "integer" }, unit_price: { type: "number" } }, required: ["product_name", "quantity", "unit_price"] }, description: "Array of items for the quotation" },
+              notes: { type: "string", description: "Additional notes for the quotation" }
+            },
+            required: ["customer_name", "items"]
+          }
+        }
+      },
+      create_invoice: {
+        type: "function",
+        function: {
+          name: "create_invoice",
+          description: "Creates a formal invoice for the customer. Use after a sale is confirmed and the customer needs an invoice or receipt document.",
+          parameters: {
+            type: "object",
+            properties: {
+              customer_name: { type: "string", description: "Name of the customer" },
+              items: { type: "array", items: { type: "object", properties: { description: { type: "string" }, quantity: { type: "integer" }, unit_price: { type: "number" } }, required: ["description", "quantity", "unit_price"] }, description: "Array of line items for the invoice" },
+              notes: { type: "string", description: "Additional notes" },
+              due_days: { type: "integer", description: "Number of days until payment is due (default 30)" }
+            },
+            required: ["customer_name", "items"]
+          }
+        }
       }
     };
 
