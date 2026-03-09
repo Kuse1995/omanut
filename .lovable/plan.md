@@ -1,83 +1,61 @@
-# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## What Was Built
 
-### bms-agent/index.ts — 9 new actions added
-- `get_product_variants` — colors/sizes for products
-- `create_order` — customer order placement
-- `get_order_status` — order tracking
-- `update_order_status` — boss updates order status
-- `cancel_order` — cancel orders
-- `get_customer_history` — purchase history lookup
-- `get_company_statistics` — impact stats
-- `create_quotation` — formal price quotes
-- `create_invoice` — invoice generation
-- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
+# Strict Image Quality Rating System
 
-### whatsapp-messages/index.ts — Customer-facing tools
-- 9 new tool definitions for customer AI
-- Complexity classifier updated with order/variant/quote/invoice triggers
-- Mandatory checkout tools expanded
-- Tool handlers for all new BMS actions
+## Problem
 
-### boss-chat/index.ts — Boss-facing tools
-- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
-- Tool handlers with formatted emoji responses
+The current Quality Assessment Agent (Agent 5 in `whatsapp-image-gen/index.ts`) has these weaknesses:
+- Pass threshold is **7/10** — too lenient for brand/product accuracy failures
+- Brand accuracy only gets "double weight" in the overall score but a 5/10 on brand accuracy can still pass
+- On assessment failure, the fallback returns `score: 7, pass: true` — auto-passing without evaluation
+- No hard-fail rules — an image with terrible logo accuracy but great composition can still pass
 
-### bms-callback/index.ts — NEW webhook endpoint
-- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
-- Authenticated via BMS_API_SECRET
-- Sends WhatsApp notifications to boss and/or customer via Twilio
+## Solution
 
-# Phase 2: Operations, Finance & HR — COMPLETED ✅
+### 1. Strict Rating Criteria with Hard-Fail Rules
 
-## What Was Built
+Update the Quality Assessment Agent prompt and logic with:
 
-### bms-agent/index.ts — 10 new actions added
-- `get_low_stock_items` — products below reorder level
-- `record_expense` — log business expenses
-- `get_expenses` — expense history with filters
-- `get_outstanding_receivables` — unpaid invoices
-- `get_outstanding_payables` — pending vendor bills
-- `profit_loss_report` — P&L with date range
-- `clock_in` — employee attendance start
-- `clock_out` — employee attendance end
-- `create_contact` — website contact form submissions
-- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
-- Added `tracking_number` to `update_order_status`
+**Scoring criteria (each 0-10):**
+| Criterion | Weight | Hard-Fail Threshold |
+|-----------|--------|-------------------|
+| Product Accuracy | 3x | Below 8 = automatic fail |
+| Brand/Logo Accuracy | 3x | Below 8 = automatic fail |
+| Prompt Adherence | 2x | Below 6 = automatic fail |
+| Composition | 1x | No hard-fail |
+| Quality (resolution/artifacts) | 1x | Below 5 = automatic fail |
+| Marketing Value | 1x | No hard-fail |
 
-### boss-chat/index.ts — 9 new tool definitions + handlers
-- `get_low_stock_items` — inventory warnings
-- `record_expense` — expense tracking
-- `get_expenses` — expense reporting
-- `get_outstanding_receivables` — accounts receivable
-- `get_outstanding_payables` — accounts payable
-- `profit_loss_report` — financial performance
-- `clock_in` / `clock_out` — HR attendance
-- Updated `sales_report` tool to use `start_date`/`end_date`
-- Updated system prompt with Finance & HR capabilities
+**Pass rules:**
+- Weighted average must be **8.0 or above** (up from 7)
+- Product Accuracy or Brand/Logo Accuracy below 8 = **automatic fail regardless of overall score**
+- Any single criterion below 4 = automatic fail
 
-### whatsapp-messages/index.ts — Customer-facing
-- Added `create_contact` tool definition + handler
-- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+### 2. Update `qualityAssessmentAgent` function
 
-### bms-callback/index.ts — New event
-- Added `new_contact` event handler (notifies boss of website inquiries)
+- Rewrite the system prompt with the strict criteria table
+- Add hard-fail logic in code after parsing the scores
+- Change fallback from `score: 7, pass: true` to `score: 5, pass: false` (force retry on assessment failure)
+- Add detailed reasoning requirements so the agent explains exactly what's wrong
 
-## Phase 2.5: PDF Document Generation — COMPLETED ✅
+### 3. Update `supervisorReviewAgent` prompt
 
-### generate-document/index.ts — NEW edge function
-- Generates professionally branded A4 PDFs using pdf-lib
-- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
-- Auto-uploads to company-documents storage with 7-day signed URLs
-- Auto-sends PDFs to boss via WhatsApp (Twilio)
-- Invoices include payment info (MTN/Airtel mobile money numbers)
+Add explicit instructions to check for:
+- Competitor brand names in the prompt
+- Missing product-specific details (label text, colors, packaging shape)
+- Generic descriptions that could lead to off-brand results
 
-### boss-chat/index.ts — generate_document tool added
-- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
-- AI fetches data first (via BMS tools), then calls generate_document with the results
-- System prompt updated with document generation instructions
+### 4. Increase retry budget
 
-## Next Phases (Pending)
-- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
+Change `maxRetries` default from 2 to 3 — stricter criteria means more retries may be needed.
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `supabase/functions/whatsapp-image-gen/index.ts` | Rewrite `qualityAssessmentAgent` prompt + scoring logic, update `supervisorReviewAgent`, increase retry budget |
+
+## No database changes needed
+
+The scoring criteria are enforced in the edge function logic, not stored in the database.
+
