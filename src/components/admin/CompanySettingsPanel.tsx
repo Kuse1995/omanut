@@ -274,6 +274,11 @@ export const CompanySettingsPanel = () => {
 
           <Separator className="my-8" />
 
+          {/* BMS Integration */}
+          <BmsIntegrationCard companyId={selectedCompany.id} />
+
+          <Separator className="my-8" />
+
           <ApiKeysSection />
 
           <Separator className="my-8" />
