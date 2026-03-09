@@ -336,7 +336,7 @@ async function buildCompanySystemPrompt(
   const [companyResult, overridesResult, docsResult] = await Promise.all([
     supabase
       .from('companies')
-      .select('name, business_type, services, quick_reference_info')
+      .select('name, business_type, services, quick_reference_info, payments_disabled')
       .eq('id', companyId)
       .single(),
     supabase
@@ -371,6 +371,48 @@ Keep it friendly, concise, and professional.`);
     if (company.business_type) identity.push(`Business type: ${company.business_type}`);
     if (company.services) identity.push(`Services: ${company.services}`);
     parts.push(`=== COMPANY IDENTITY ===\n${identity.join('\n')}`);
+  }
+
+  // ========== BMS LIVE DATA (HIGHEST PRIORITY) ==========
+  // Pre-fetch real-time product/stock data from BMS for accurate replies
+  if (company && !company.payments_disabled) {
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      
+      const bmsResponse = await fetch(`${supabaseUrl}/functions/v1/bms-agent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${serviceKey}`,
+        },
+        body: JSON.stringify({
+          action: 'list_products',
+          params: { company_id: companyId }
+        }),
+      });
+
+      if (bmsResponse.ok) {
+        const bmsData = await bmsResponse.json();
+        if (bmsData.success && bmsData.data) {
+          const products = Array.isArray(bmsData.data) ? bmsData.data : bmsData.data.products || [];
+          if (products.length > 0) {
+            const productList = products.slice(0, 50).map((p: any) => {
+              const parts = [`${p.name || p.product_name}`];
+              if (p.price != null) parts.push(`Price: ${p.currency || ''}${p.price}`);
+              if (p.stock != null || p.quantity != null) parts.push(`Stock: ${p.stock ?? p.quantity}`);
+              if (p.category) parts.push(`Category: ${p.category}`);
+              return `- ${parts.join(' | ')}`;
+            }).join('\n');
+            
+            parts.push(`=== LIVE PRODUCT & PRICING DATA (from BMS - HIGHEST PRIORITY) ===\nThis is REAL-TIME data. Always use these prices and stock levels over any other source.\n${productList}`);
+            console.log(`[meta-webhook] BMS data loaded: ${products.length} products for company ${companyId}`);
+          }
+        }
+      }
+    } catch (bmsErr) {
+      console.error('[meta-webhook] BMS data fetch failed (non-blocking):', bmsErr);
+    }
   }
 
   if (overrides) {
