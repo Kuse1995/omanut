@@ -1567,9 +1567,21 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }),
                 });
                 const docResult = await docResponse.json();
-                result = docResult.success
-                  ? { success: true, message: `✅ ${args.document_type.replace(/_/g, ' ').toUpperCase()} PDF generated and sent to your WhatsApp!` }
-                  : { success: false, message: `❌ Document generation failed: ${docResult.error || 'Unknown error'}` };
+                if (docResult.success) {
+                  const docLabel = args.document_type.replace(/_/g, ' ').toUpperCase();
+                  if (docResult.whatsapp_sent) {
+                    result = { success: true, message: `✅ ${docLabel} PDF generated and sent to your WhatsApp!` };
+                  } else {
+                    // PDF generated but WhatsApp delivery failed - provide fallback link
+                    result = { 
+                      success: true, 
+                      message: `✅ ${docLabel} PDF generated!\n\n⚠️ Couldn't deliver to WhatsApp, but you can download it here:\n${docResult.pdf_url}`,
+                      pdf_url: docResult.pdf_url
+                    };
+                  }
+                } else {
+                  result = { success: false, message: `❌ Document generation failed: ${docResult.error || 'Unknown error'}` };
+                }
               } catch (docErr: any) {
                 result = { success: false, message: `❌ Document generation error: ${docErr.message}` };
               }

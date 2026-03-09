@@ -95,12 +95,14 @@ serve(async (req) => {
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
       
       const formData = new URLSearchParams();
+      // Normalize From number - ensure whatsapp: prefix exactly once
       const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
         ? company.whatsapp_number 
         : `whatsapp:${company.whatsapp_number}`;
-      const toNumber = company.boss_phone.startsWith('whatsapp:')
-        ? company.boss_phone
-        : `whatsapp:${company.boss_phone}`;
+      
+      // Normalize To number - strip any existing whatsapp: prefix, ensure E.164 with +, then add whatsapp:
+      const cleanBossPhone = company.boss_phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+      const toNumber = `whatsapp:${cleanBossPhone}`;
       
       formData.append('From', fromNumber);
       formData.append('To', toNumber);

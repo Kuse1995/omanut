@@ -503,17 +503,31 @@ serve(async (req) => {
       try {
         const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
         const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
-        const fromNumber = company.twilio_number || company.whatsapp_number;
+        
+        // Prefer whatsapp_number, fallback to twilio_number
+        const rawFromNumber = company.whatsapp_number || company.twilio_number;
 
-        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && fromNumber) {
-          const bossPhone = company.boss_phone.startsWith("+") ? company.boss_phone : `+${company.boss_phone}`;
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && rawFromNumber) {
+          // Normalize boss phone to E.164 with + prefix
+          const bossPhone = company.boss_phone.replace(/^whatsapp:/, "").replace(/^\+?/, "+");
+          
+          // Normalize From number - ensure whatsapp: prefix exactly once
+          const fromNumber = rawFromNumber.startsWith("whatsapp:") 
+            ? rawFromNumber 
+            : `whatsapp:${rawFromNumber}`;
+          
+          // To number with whatsapp: prefix
+          const toNumber = `whatsapp:${bossPhone}`;
+          
           const docLabel = document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
 
           const formData = new URLSearchParams();
-          formData.append("To", `whatsapp:${bossPhone}`);
-          formData.append("From", `whatsapp:${fromNumber}`);
+          formData.append("To", toNumber);
+          formData.append("From", fromNumber);
           formData.append("Body", `📄 ${docLabel} — ${company.name}\n\nYour document is ready! Download it here:`);
           formData.append("MediaUrl", pdfUrl);
+
+          console.log(`[GENERATE-DOC] Twilio send: From=${fromNumber.slice(0,20)}..., To=${toNumber}`);
 
           const twilioRes = await fetch(
             `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
@@ -532,8 +546,10 @@ serve(async (req) => {
             console.log("[GENERATE-DOC] PDF sent to boss via WhatsApp");
           } else {
             const errText = await twilioRes.text();
-            console.error("[GENERATE-DOC] Twilio send error:", errText);
+            console.error("[GENERATE-DOC] Twilio send error:", twilioRes.status, errText);
           }
+        } else {
+          console.log("[GENERATE-DOC] Missing Twilio credentials or WhatsApp number for company");
         }
       } catch (whatsappErr) {
         console.error("[GENERATE-DOC] WhatsApp delivery error:", whatsappErr);

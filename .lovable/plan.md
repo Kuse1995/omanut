@@ -1,60 +1,83 @@
+# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## Explore (what’s actually failing)
-- The PDF **is being generated and uploaded** successfully (confirmed by logs: `[GENERATE-DOC] PDF generated...`).
-- The failure is in the **WhatsApp delivery step** inside `supabase/functions/generate-document/index.ts`.
-- Current code builds the Twilio “From” like this:
-  - `const fromNumber = company.twilio_number || company.whatsapp_number;`
-  - `formData.append("From", \`whatsapp:${fromNumber}\`)`
-- If `company.whatsapp_number` is already stored as `whatsapp:+...` (common in this codebase), this becomes:
-  - `From = whatsapp:whatsapp:+...` → Twilio rejects it as invalid.
-- Additionally, `boss-chat` currently **always claims** “PDF generated and sent to your WhatsApp” even when `whatsapp_sent` is false, so the UX is misleading.
+## What Was Built
 
-## Design (how we should handle WhatsApp numbers)
-Use the same normalization pattern already used elsewhere (e.g. `send-boss-notification`, `send-whatsapp-message`):
-- If number starts with `whatsapp:` → keep as-is
-- Else → prefix with `whatsapp:`
-Also prefer `company.whatsapp_number` for WhatsApp sending, falling back to `company.twilio_number` only if needed.
+### bms-agent/index.ts — 9 new actions added
+- `get_product_variants` — colors/sizes for products
+- `create_order` — customer order placement
+- `get_order_status` — order tracking
+- `update_order_status` — boss updates order status
+- `cancel_order` — cancel orders
+- `get_customer_history` — purchase history lookup
+- `get_company_statistics` — impact stats
+- `create_quotation` — formal price quotes
+- `create_invoice` — invoice generation
+- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
 
-## Plan (implementation steps)
-### 1) Fix Twilio “From” formatting in `generate-document`
-**File:** `supabase/functions/generate-document/index.ts`
+### whatsapp-messages/index.ts — Customer-facing tools
+- 9 new tool definitions for customer AI
+- Complexity classifier updated with order/variant/quote/invoice triggers
+- Mandatory checkout tools expanded
+- Tool handlers for all new BMS actions
 
-- Change WhatsApp delivery block to:
-  - Prefer `company.whatsapp_number` (then fallback to `company.twilio_number`)
-  - Normalize `From` like:
-    - `from = raw.startsWith("whatsapp:") ? raw : "whatsapp:" + raw`
-  - Keep existing boss phone normalization to E.164 `+...`, then `To = whatsapp:+...`
-- Add a small log line (safe) showing normalized `From`/`To` (masked or partial) and Twilio status code to make future debugging immediate.
+### boss-chat/index.ts — Boss-facing tools
+- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
+- Tool handlers with formatted emoji responses
 
-### 2) Make boss chat response truthful + provide fallback link
-**File:** `supabase/functions/boss-chat/index.ts` (tool handler: `generate_document`)
+### bms-callback/index.ts — NEW webhook endpoint
+- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
+- Authenticated via BMS_API_SECRET
+- Sends WhatsApp notifications to boss and/or customer via Twilio
 
-- After calling `generate-document`, use returned fields:
-  - `docResult.whatsapp_sent`
-  - `docResult.pdf_url`
-- Response rules:
-  - If `success && whatsapp_sent`: keep current “sent to WhatsApp” message.
-  - If `success && !whatsapp_sent`: say “PDF generated but couldn’t be delivered to WhatsApp” + include the `pdf_url` so the boss can download immediately.
-  - If `!success`: keep failure message with `docResult.error`.
+# Phase 2: Operations, Finance & HR — COMPLETED ✅
 
-### 3) (Optional but recommended) Align other boss-message sends with E.164 formatting
-**File:** `supabase/functions/send-boss-notification/index.ts` (and any other Twilio sends that use `boss_phone`)
-- Ensure `To` always uses `whatsapp:+{number}` (add `+` when missing), same as `generate-document` already does.
-- This prevents intermittent delivery failures for any boss notifications, not just PDFs.
+## What Was Built
 
-## Testing (end-to-end)
-1) Trigger “create a quotation” from Boss WhatsApp.
-2) Confirm:
-   - Boss receives a WhatsApp message with the PDF attachment (or at least a working link if Twilio media fails).
-   - `generate-document` logs show Twilio request is `200` (or show a clear error cause).
-   - Boss-chat no longer claims “sent” when it wasn’t.
+### bms-agent/index.ts — 10 new actions added
+- `get_low_stock_items` — products below reorder level
+- `record_expense` — log business expenses
+- `get_expenses` — expense history with filters
+- `get_outstanding_receivables` — unpaid invoices
+- `get_outstanding_payables` — pending vendor bills
+- `profit_loss_report` — P&L with date range
+- `clock_in` — employee attendance start
+- `clock_out` — employee attendance end
+- `create_contact` — website contact form submissions
+- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
+- Added `tracking_number` to `update_order_status`
 
-## Files involved
-- `supabase/functions/generate-document/index.ts` (primary fix)
-- `supabase/functions/boss-chat/index.ts` (correct messaging + fallback)
-- (Optional hardening) `supabase/functions/send-boss-notification/index.ts`
+### boss-chat/index.ts — 9 new tool definitions + handlers
+- `get_low_stock_items` — inventory warnings
+- `record_expense` — expense tracking
+- `get_expenses` — expense reporting
+- `get_outstanding_receivables` — accounts receivable
+- `get_outstanding_payables` — accounts payable
+- `profit_loss_report` — financial performance
+- `clock_in` / `clock_out` — HR attendance
+- Updated `sales_report` tool to use `start_date`/`end_date`
+- Updated system prompt with Finance & HR capabilities
 
-## Expected outcome
-- PDFs continue generating as before.
-- WhatsApp delivery succeeds consistently (no more invalid `From` formatting).
-- Even if WhatsApp delivery fails for other reasons (media fetch, provider limits), the boss still gets a usable download link and accurate status.
+### whatsapp-messages/index.ts — Customer-facing
+- Added `create_contact` tool definition + handler
+- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+
+### bms-callback/index.ts — New event
+- Added `new_contact` event handler (notifies boss of website inquiries)
+
+## Phase 2.5: PDF Document Generation — COMPLETED ✅
+
+### generate-document/index.ts — NEW edge function
+- Generates professionally branded A4 PDFs using pdf-lib
+- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
+- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
+- Auto-uploads to company-documents storage with 7-day signed URLs
+- Auto-sends PDFs to boss via WhatsApp (Twilio)
+- Invoices include payment info (MTN/Airtel mobile money numbers)
+
+### boss-chat/index.ts — generate_document tool added
+- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
+- AI fetches data first (via BMS tools), then calls generate_document with the results
+- System prompt updated with document generation instructions
+
+## Next Phases (Pending)
+- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
