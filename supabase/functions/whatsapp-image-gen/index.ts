@@ -285,13 +285,19 @@ COMPANY: ${companyName} (${businessType})
 ${productMatch ? `PRODUCT: ${productMatch.description || productMatch.file_name}` : 'No specific product'}
 ${styleDNA ? `BRAND GUIDELINES:\n${styleDNA}` : ''}
 
-REVIEW CHECKLIST:
+REVIEW CHECKLIST — STRICT:
 1. BRAND ACCURACY: Does the prompt correctly reference the company and product? No competitor names or wrong branding?
+   - REJECT if any competitor brand name appears in the prompt
+   - REJECT if the company name is misspelled or wrong
 2. PRODUCT FIDELITY: If a product is involved, does the prompt ensure the product stays unchanged?
-3. QUALITY MARKERS: Does the prompt include sufficient detail for high-quality output?
-4. SAFETY: No inappropriate, offensive, or misleading content?
-5. COMPOSITION: Is the described layout/composition practical and visually appealing?
-6. STYLE CONSISTENCY: Does it align with the brand's visual identity and past successful images?
+   - CHECK that label text, packaging colors, bottle/container shape, and logo placement are explicitly described
+   - If product-specific details are missing (e.g., just "a bottle" instead of "a green bottle with the XYZ label"), ADD them
+3. ANTI-GENERIC CHECK: Is the prompt specific enough to avoid generic stock-photo results?
+   - REJECT vague descriptions like "a nice product photo" — require specific environment, lighting, and composition details
+4. QUALITY MARKERS: Does the prompt include sufficient detail for high-quality output?
+5. SAFETY: No inappropriate, offensive, or misleading content?
+6. COMPOSITION: Is the described layout/composition practical and visually appealing?
+7. STYLE CONSISTENCY: Does it align with the brand's visual identity and past successful images?
 
 If the prompt is good, approve it. If it needs refinement, provide a refined version.
 ALWAYS return the refined prompt — even if approved (just return the same prompt if no changes needed).
