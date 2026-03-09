@@ -382,3 +382,186 @@ function SLARow({ priority, responseTime, resolutionTime, escalationTime, onSave
     </div>
   );
 }
+
+// BMS Integration Card
+function BmsIntegrationCard({ companyId }: { companyId: string }) {
+  const queryClient = useQueryClient();
+  const [bmsType, setBmsType] = useState<'single_tenant' | 'multi_tenant'>('multi_tenant');
+  const [bridgeUrl, setBridgeUrl] = useState('');
+  const [apiSecret, setApiSecret] = useState('');
+  const [tenantId, setTenantId] = useState('');
+  const [isActive, setIsActive] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+
+  const { data: bmsConnection, isLoading } = useQuery({
+    queryKey: ['bms-connection', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bms_connections')
+        .select('*')
+        .eq('company_id', companyId)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!companyId,
+  });
+
+  useEffect(() => {
+    if (bmsConnection) {
+      setBmsType(bmsConnection.bms_type as 'single_tenant' | 'multi_tenant');
+      setBridgeUrl(bmsConnection.bridge_url);
+      setApiSecret(bmsConnection.api_secret);
+      setTenantId(bmsConnection.tenant_id || '');
+      setIsActive(bmsConnection.is_active);
+    }
+  }, [bmsConnection]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!bridgeUrl || !apiSecret) throw new Error('Bridge URL and API Secret are required');
+      if (bmsType === 'multi_tenant' && !tenantId) throw new Error('Tenant ID is required for multi-tenant');
+
+      const payload = {
+        company_id: companyId,
+        bms_type: bmsType,
+        bridge_url: bridgeUrl,
+        api_secret: apiSecret,
+        tenant_id: bmsType === 'multi_tenant' ? tenantId : null,
+        is_active: isActive,
+      };
+
+      if (bmsConnection) {
+        const { error } = await supabase
+          .from('bms_connections')
+          .update(payload)
+          .eq('id', bmsConnection.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('bms_connections')
+          .insert(payload);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bms-connection', companyId] });
+      toast.success('BMS connection saved');
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('bms-agent', {
+        body: { action: 'list_products', params: { company_id: companyId, limit: 1 } },
+      });
+      if (error) throw error;
+      setTestResult(data?.success ? 'success' : 'error');
+    } catch {
+      setTestResult('error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  if (isLoading) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Database className="h-4 w-4 text-primary" />
+          BMS Integration
+          {bmsConnection && (
+            <Badge variant={isActive ? 'default' : 'secondary'} className="text-[10px]">
+              {isActive ? 'Active' : 'Inactive'}
+            </Badge>
+          )}
+        </CardTitle>
+        <CardDescription>
+          Connect to a Business Management System for stock, orders & sales
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label className="text-xs">BMS Type</Label>
+          <Select value={bmsType} onValueChange={(v) => setBmsType(v as any)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="multi_tenant">Multi-Tenant BMS</SelectItem>
+              <SelectItem value="single_tenant">Single-Tenant (Finch Only)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs">Bridge URL</Label>
+          <Input
+            value={bridgeUrl}
+            onChange={(e) => setBridgeUrl(e.target.value)}
+            placeholder="https://your-bms.example.com/api"
+            className="h-8 text-xs"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs">API Secret</Label>
+          <Input
+            type="password"
+            value={apiSecret}
+            onChange={(e) => setApiSecret(e.target.value)}
+            placeholder="••••••••"
+            className="h-8 text-xs"
+          />
+        </div>
+
+        {bmsType === 'multi_tenant' && (
+          <div className="space-y-2">
+            <Label className="text-xs">Tenant ID</Label>
+            <Input
+              value={tenantId}
+              onChange={(e) => setTenantId(e.target.value)}
+              placeholder="company-tenant-id"
+              className="h-8 text-xs"
+            />
+          </div>
+        )}
+
+        <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+          <div>
+            <p className="font-medium text-sm">Active</p>
+            <p className="text-xs text-muted-foreground">Enable or disable this BMS connection</p>
+          </div>
+          <Switch checked={isActive} onCheckedChange={setIsActive} />
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="flex-1"
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? 'Saving...' : bmsConnection ? 'Update Connection' : 'Save Connection'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleTest}
+            disabled={testing || !bmsConnection}
+            className="gap-1"
+          >
+            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : testResult === 'success' ? <CheckCircle className="h-3 w-3 text-green-500" /> : testResult === 'error' ? <XCircle className="h-3 w-3 text-destructive" /> : null}
+            Test
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
