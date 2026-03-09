@@ -1,87 +1,83 @@
+# Phase 1: BMS Deep Integration — COMPLETED ✅
 
+## What Was Built
 
-# Multi-Tenant BMS Integration Plan
+### bms-agent/index.ts — 9 new actions added
+- `get_product_variants` — colors/sizes for products
+- `create_order` — customer order placement
+- `get_order_status` — order tracking
+- `update_order_status` — boss updates order status
+- `cancel_order` — cancel orders
+- `get_customer_history` — purchase history lookup
+- `get_company_statistics` — impact stats
+- `create_quotation` — formal price quotes
+- `create_invoice` — invoice generation
+- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
 
-## Current State
+### whatsapp-messages/index.ts — Customer-facing tools
+- 9 new tool definitions for customer AI
+- Complexity classifier updated with order/variant/quote/invoice triggers
+- Mandatory checkout tools expanded
+- Tool handlers for all new BMS actions
 
-- **`bms-agent`** uses a single hardcoded Finch BMS bridge URL and global `BMS_API_SECRET`
-- **`bms-callback`** authenticates all incoming webhooks against one global `BMS_API_SECRET`
-- **`whatsapp-messages`** and **`boss-chat`** call `bms-agent` passing `company_id` in params
-- `bms-agent` does NOT use `company_id` to resolve credentials — it just forwards it to the bridge
+### boss-chat/index.ts — Boss-facing tools
+- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
+- Tool handlers with formatted emoji responses
 
-## Design
+### bms-callback/index.ts — NEW webhook endpoint
+- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
+- Authenticated via BMS_API_SECRET
+- Sends WhatsApp notifications to boss and/or customer via Twilio
 
-Two BMS types coexist:
-- **Finch Investments** → single-tenant BMS (hardcoded bridge URL + global secret) — only Finch's company connects here
-- **All other companies** → multi-tenant BMS (different bridge URL, each company has a `tenant_id`)
+# Phase 2: Operations, Finance & HR — COMPLETED ✅
 
-## Implementation
+## What Was Built
 
-### 1. Database: `bms_connections` table
+### bms-agent/index.ts — 10 new actions added
+- `get_low_stock_items` — products below reorder level
+- `record_expense` — log business expenses
+- `get_expenses` — expense history with filters
+- `get_outstanding_receivables` — unpaid invoices
+- `get_outstanding_payables` — pending vendor bills
+- `profit_loss_report` — P&L with date range
+- `clock_in` — employee attendance start
+- `clock_out` — employee attendance end
+- `create_contact` — website contact form submissions
+- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
+- Added `tracking_number` to `update_order_status`
 
-```sql
-CREATE TABLE public.bms_connections (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id uuid NOT NULL UNIQUE REFERENCES public.companies(id) ON DELETE CASCADE,
-  bms_type text NOT NULL DEFAULT 'multi_tenant',  -- 'single_tenant' or 'multi_tenant'
-  bridge_url text NOT NULL,
-  api_secret text NOT NULL,
-  tenant_id text,  -- required for multi_tenant type
-  is_active boolean NOT NULL DEFAULT true,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-```
+### boss-chat/index.ts — 9 new tool definitions + handlers
+- `get_low_stock_items` — inventory warnings
+- `record_expense` — expense tracking
+- `get_expenses` — expense reporting
+- `get_outstanding_receivables` — accounts receivable
+- `get_outstanding_payables` — accounts payable
+- `profit_loss_report` — financial performance
+- `clock_in` / `clock_out` — HR attendance
+- Updated `sales_report` tool to use `start_date`/`end_date`
+- Updated system prompt with Finance & HR capabilities
 
-RLS: company members can SELECT, managers can INSERT/UPDATE, owners can DELETE, platform admins full access.
+### whatsapp-messages/index.ts — Customer-facing
+- Added `create_contact` tool definition + handler
+- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
 
-### 2. Shared helper: `_shared/bms-connection.ts`
+### bms-callback/index.ts — New event
+- Added `new_contact` event handler (notifies boss of website inquiries)
 
-Exports `loadBmsConnection(supabase, companyId)`:
-- Queries `bms_connections` for the company
-- If no record found, falls back to global env vars (Finch backward compat)
-- Returns `{ bridge_url, api_secret, bms_type, tenant_id }`
+## Phase 2.5: PDF Document Generation — COMPLETED ✅
 
-### 3. Update `bms-agent/index.ts`
+### generate-document/index.ts — NEW edge function
+- Generates professionally branded A4 PDFs using pdf-lib
+- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
+- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
+- Auto-uploads to company-documents storage with 7-day signed URLs
+- Auto-sends PDFs to boss via WhatsApp (Twilio)
+- Invoices include payment info (MTN/Airtel mobile money numbers)
 
-- Accept `company_id` from `params` (already passed by callers)
-- Call `loadBmsConnection()` to get the right bridge URL and secret
-- For `multi_tenant` type: include `tenant_id` in every request payload to the bridge
-- For `single_tenant` (Finch): works exactly as today
+### boss-chat/index.ts — generate_document tool added
+- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
+- AI fetches data first (via BMS tools), then calls generate_document with the results
+- System prompt updated with document generation instructions
 
-### 4. Update `bms-callback/index.ts`
-
-- Extract `tenant_id` from the incoming payload
-- Look up the company via `bms_connections` WHERE `tenant_id` matches
-- Validate the `Authorization` header against that connection's `api_secret`
-- Fall back to global `BMS_API_SECRET` if no `tenant_id` (Finch backward compat)
-- Use resolved `company_id` for boss notifications
-
-### 5. Admin UI: BMS settings in `CompanySettingsPanel.tsx`
-
-Add a "BMS Integration" card:
-- Dropdown: BMS type (single-tenant / multi-tenant) — single-tenant locked to Finch only
-- Input: Bridge URL
-- Input: API Secret (masked)
-- Input: Tenant ID (shown for multi-tenant)
-- Toggle: Active/Inactive
-- "Test Connection" button (calls `bms-agent` with `list_products`)
-
-### 6. No new secrets needed
-
-Per-company secrets are stored in `bms_connections` table, not as global env secrets. The existing global `BMS_API_SECRET` remains for Finch backward compatibility.
-
-### Changes Summary
-
-| Component | Change |
-|-----------|--------|
-| Database | New `bms_connections` table with RLS |
-| `_shared/bms-connection.ts` | New shared credential loader |
-| `bms-agent` | Load per-company BMS config, route to correct bridge |
-| `bms-callback` | Resolve company by `tenant_id`, per-connection auth |
-| `CompanySettingsPanel.tsx` | BMS settings card |
-
-### Backward Compatibility
-
-Finch continues working without any `bms_connections` record — the global env vars serve as fallback. New companies must have a `bms_connections` record pointing to the multi-tenant BMS.
-
+## Next Phases (Pending)
+- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)

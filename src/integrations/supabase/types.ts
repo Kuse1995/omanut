@@ -418,6 +418,50 @@ export type Database = {
           },
         ]
       }
+      bms_connections: {
+        Row: {
+          api_secret: string
+          bms_type: string
+          bridge_url: string
+          company_id: string
+          created_at: string
+          id: string
+          is_active: boolean
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          api_secret: string
+          bms_type?: string
+          bridge_url: string
+          company_id: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          api_secret?: string
+          bms_type?: string
+          bridge_url?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bms_connections_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       boss_conversations: {
         Row: {
           company_id: string
