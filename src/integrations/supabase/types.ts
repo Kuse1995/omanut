@@ -2272,7 +2272,7 @@ export type Database = {
           company_id: string
           content: string
           created_at?: string
-          created_by: string
+          created_by?: string
           error_message?: string | null
           id?: string
           image_url?: string | null
