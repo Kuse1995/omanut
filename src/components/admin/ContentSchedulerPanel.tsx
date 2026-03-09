@@ -33,11 +33,12 @@ export const ContentSchedulerPanel = () => {
   const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both'>('facebook');
   const [publishMode, setPublishMode] = useState<'schedule' | 'now'>('schedule');
 
-  // Approval queue editing state
+  // Editing state (shared for approval queue and all posts)
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editCaption, setEditCaption] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
+  const [editPopoverOpen, setEditPopoverOpen] = useState(false);
 
   // Fetch meta credentials
   const { data: pages } = useQuery({
@@ -212,6 +213,25 @@ export const ContentSchedulerPanel = () => {
     onSuccess: () => {
       toast.success('Post approved! It will be published at the scheduled time.');
       setEditingPostId(null);
+      queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  // Save edits mutation (for All Posts tab)
+  const saveEditMutation = useMutation({
+    mutationFn: async (postId: string) => {
+      const updates: any = { content: editCaption, updated_at: new Date().toISOString() };
+      if (editDate && editTime) {
+        updates.scheduled_time = new Date(`${editDate}T${editTime}`).toISOString();
+      }
+      const { error } = await supabase.from('scheduled_posts').update(updates).eq('id', postId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Post updated');
+      setEditingPostId(null);
+      setEditPopoverOpen(false);
       queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
     },
     onError: (error: Error) => toast.error(error.message),
@@ -546,28 +566,106 @@ export const ContentSchedulerPanel = () => {
                 <p className="text-center text-muted-foreground py-8">No posts yet.</p>
               ) : (
                 <div className="space-y-3">
-                  {allPosts.map((post: any) => (
-                    <div key={post.id} className="flex items-start justify-between gap-4 p-4 rounded-lg border border-border bg-muted/30">
-                      {post.image_url && <img src={post.image_url} alt="" className="w-14 h-14 rounded-md object-cover flex-shrink-0 border border-border" />}
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <p className="text-sm line-clamp-2">{post.content}</p>
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                          <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{format(new Date(post.scheduled_time), 'MMM d, yyyy')}</span>
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{format(new Date(post.scheduled_time), 'HH:mm')}</span>
-                          {platformBadge(post.target_platform || 'facebook')}
+                  {allPosts.map((post: any) => {
+                    const isEditable = ['draft', 'approved', 'scheduled'].includes(post.status);
+                    const isEditingThis = editingPostId === post.id && editPopoverOpen;
+                    
+                    return (
+                      <div key={post.id} className="relative flex items-start justify-between gap-4 p-4 rounded-lg border border-border bg-muted/30 group">
+                        {post.image_url && <img src={post.image_url} alt="" className="w-14 h-14 rounded-md object-cover flex-shrink-0 border border-border" />}
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <p className="text-sm line-clamp-2">{post.content}</p>
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{format(new Date(post.scheduled_time), 'MMM d, yyyy')}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{format(new Date(post.scheduled_time), 'HH:mm')}</span>
+                            {platformBadge(post.target_platform || 'facebook')}
+                          </div>
+                          {post.error_message && <p className="text-xs text-destructive">{post.error_message}</p>}
                         </div>
-                        {post.error_message && <p className="text-xs text-destructive">{post.error_message}</p>}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {statusBadge(post.status)}
+                          {isEditable && (
+                            <Popover open={isEditingThis} onOpenChange={(open) => {
+                              if (open) {
+                                startEditing(post);
+                                setEditPopoverOpen(true);
+                              } else {
+                                setEditingPostId(null);
+                                setEditPopoverOpen(false);
+                              }
+                            }}>
+                              <PopoverTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80 p-0" align="end" side="left">
+                                <div className="p-3 border-b border-border bg-muted/50">
+                                  <p className="text-sm font-medium">Edit Post</p>
+                                </div>
+                                <div className="p-3 space-y-3">
+                                  <Textarea 
+                                    value={editCaption} 
+                                    onChange={(e) => setEditCaption(e.target.value)} 
+                                    rows={4} 
+                                    className="resize-none text-sm"
+                                    placeholder="Post content..."
+                                  />
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">Date</Label>
+                                      <Input 
+                                        type="date" 
+                                        value={editDate} 
+                                        onChange={(e) => setEditDate(e.target.value)} 
+                                        className="h-8 text-xs" 
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-xs">Time</Label>
+                                      <Input 
+                                        type="time" 
+                                        value={editTime} 
+                                        onChange={(e) => setEditTime(e.target.value)} 
+                                        className="h-8 text-xs" 
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-end gap-2 pt-2">
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      onClick={() => { setEditingPostId(null); setEditPopoverOpen(false); }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => saveEditMutation.mutate(post.id)} 
+                                      disabled={saveEditMutation.isPending}
+                                      className="gap-1"
+                                    >
+                                      {saveEditMutation.isPending ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <Check className="w-3 h-3" />
+                                      )}
+                                      Save
+                                    </Button>
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                          {(post.status === 'draft' || post.status === 'failed') && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive/70 hover:text-destructive" onClick={() => deleteMutation.mutate(post.id)}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {statusBadge(post.status)}
-                        {(post.status === 'draft' || post.status === 'failed') && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive/70 hover:text-destructive" onClick={() => deleteMutation.mutate(post.id)}>
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
