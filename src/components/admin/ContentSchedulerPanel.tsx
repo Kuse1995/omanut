@@ -218,6 +218,25 @@ export const ContentSchedulerPanel = () => {
     onError: (error: Error) => toast.error(error.message),
   });
 
+  // Save edits mutation (for All Posts tab)
+  const saveEditMutation = useMutation({
+    mutationFn: async (postId: string) => {
+      const updates: any = { content: editCaption, updated_at: new Date().toISOString() };
+      if (editDate && editTime) {
+        updates.scheduled_time = new Date(`${editDate}T${editTime}`).toISOString();
+      }
+      const { error } = await supabase.from('scheduled_posts').update(updates).eq('id', postId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Post updated');
+      setEditingPostId(null);
+      setEditPopoverOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
   // Reject post
   const rejectMutation = useMutation({
     mutationFn: async (postId: string) => {
