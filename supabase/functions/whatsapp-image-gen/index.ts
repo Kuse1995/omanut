@@ -345,7 +345,8 @@ Respond ONLY with valid JSON:
 
 // ============================================================
 // AGENT 5: QUALITY ASSESSMENT AGENT (Post-Generation)
-// Evaluates generated image quality before delivery
+// Strict rating system — images must score 8+ to pass
+// Hard-fail on product/brand accuracy below 8
 // ============================================================
 async function qualityAssessmentAgent(
   imageUrl: string,
@@ -354,37 +355,63 @@ async function qualityAssessmentAgent(
   companyName: string,
   productMatch: ProductImage | null
 ): Promise<{ score: number; pass: boolean; issues: string[]; retryPrompt: string | null }> {
-  console.log('[QUALITY-ASSESS] Evaluating generated image...');
+  console.log('[QUALITY-ASSESS] Evaluating generated image (STRICT MODE)...');
 
-  const systemPrompt = `You are an image quality assessor for AI-generated marketing images.
-Score the image on these criteria (each 0-10):
+  const systemPrompt = `You are a STRICT image quality assessor for AI-generated marketing images.
+You must evaluate the image against each criterion below. Be brutally honest — brand and product accuracy are NON-NEGOTIABLE.
 
-1. PROMPT ADHERENCE: Does the image match what was requested?
-2. BRAND ACCURACY: Are product labels, logos, and branding correct?
-3. COMPOSITION: Is the layout balanced and visually appealing?
-4. QUALITY: Resolution, sharpness, no artifacts or distortions?
-5. MARKETING VALUE: Would this work well on social media for ${companyName}?
+SCORING CRITERIA (each 0-10):
 
-${productMatch ? `EXPECTED PRODUCT: ${productMatch.description || productMatch.file_name}. Check that this specific product is clearly visible and its branding is intact.` : ''}
+| # | Criterion               | Weight | Hard-Fail Rule                          |
+|---|-------------------------|--------|-----------------------------------------|
+| 1 | Product Accuracy        | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 2 | Brand/Logo Accuracy     | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 3 | Prompt Adherence        | 2x     | Below 6 = AUTOMATIC FAIL               |
+| 4 | Composition             | 1x     | No hard-fail                            |
+| 5 | Quality (resolution)    | 1x     | Below 5 = AUTOMATIC FAIL               |
+| 6 | Marketing Value         | 1x     | No hard-fail                            |
+
+SCORING GUIDE:
+- 10: Perfect, indistinguishable from professional studio work
+- 8-9: Excellent, minor imperfections only
+- 6-7: Acceptable but noticeable issues
+- 4-5: Below standard, clear problems
+- 1-3: Unacceptable, major failures
+- 0: Completely wrong / missing
+
+PRODUCT ACCURACY means: The product shown MUST match the real product exactly — correct label text, correct colors, correct shape, correct proportions. Even small deviations (wrong font on label, slightly different color) should drop this below 8.
+
+BRAND/LOGO ACCURACY means: Any logo or brand mark must be pixel-accurate to the real brand. Misspelled names, wrong logo shapes, or invented brand elements = score 3 or below.
+
+${productMatch ? `EXPECTED PRODUCT: ${productMatch.description || productMatch.file_name}. This specific product must be clearly visible with its branding intact and accurate.` : 'No specific product referenced — score Product Accuracy based on whether any depicted products look realistic and coherent.'}
+
+You MUST provide detailed reasoning for each score, especially for any score below 8.
 
 Respond ONLY with valid JSON:
 {
   "scores": {
+    "productAccuracy": 0-10,
+    "brandLogoAccuracy": 0-10,
     "promptAdherence": 0-10,
-    "brandAccuracy": 0-10,
     "composition": 0-10,
     "quality": 0-10,
     "marketingValue": 0-10
   },
-  "overallScore": 0-10 (weighted average, brand accuracy weighs double),
-  "pass": true if overallScore >= 7,
+  "reasoning": {
+    "productAccuracy": "explain what's right or wrong about the product depiction",
+    "brandLogoAccuracy": "explain brand/logo accuracy issues",
+    "promptAdherence": "how well does it match the request",
+    "composition": "layout assessment",
+    "quality": "resolution/artifacts assessment",
+    "marketingValue": "social media suitability"
+  },
   "issues": ["list of specific problems found"],
   "improvementSuggestion": "what to change in the prompt to fix issues (null if pass)"
 }`;
 
   try {
     const contentParts: any[] = [
-      { type: 'text', text: `Assess this generated image.\n\nORIGINAL REQUEST: "${originalPrompt}"\nGENERATION PROMPT: "${refinedPrompt}"` },
+      { type: 'text', text: `Assess this generated image using STRICT criteria.\n\nORIGINAL REQUEST: "${originalPrompt}"\nGENERATION PROMPT: "${refinedPrompt}"` },
       { type: 'image_url', image_url: { url: imageUrl } }
     ];
 
@@ -395,7 +422,7 @@ Respond ONLY with valid JSON:
         { role: 'user', content: contentParts }
       ],
       temperature: 0.1,
-      max_tokens: 1000,
+      max_tokens: 1500,
     });
 
     if (response.ok) {
@@ -403,24 +430,56 @@ Respond ONLY with valid JSON:
       const content = data.choices?.[0]?.message?.content || '';
       const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
       const assessment = JSON.parse(cleaned);
-      
-      console.log(`[QUALITY-ASSESS] Score: ${assessment.overallScore}/10, Pass: ${assessment.pass}`);
-      if (assessment.issues?.length > 0) {
-        console.log(`[QUALITY-ASSESS] Issues: ${assessment.issues.join(', ')}`);
+      const scores = assessment.scores || {};
+
+      // Calculate weighted average: Product(3x) + Brand(3x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
+      const productAcc = scores.productAccuracy ?? 5;
+      const brandAcc = scores.brandLogoAccuracy ?? 5;
+      const promptAdh = scores.promptAdherence ?? 5;
+      const composition = scores.composition ?? 5;
+      const quality = scores.quality ?? 5;
+      const marketing = scores.marketingValue ?? 5;
+
+      const weightedScore = (
+        (productAcc * 3) + (brandAcc * 3) + (promptAdh * 2) + composition + quality + marketing
+      ) / 11;
+
+      const roundedScore = Math.round(weightedScore * 10) / 10;
+
+      // Hard-fail rules
+      const hardFails: string[] = [];
+      if (productAcc < 8) hardFails.push(`Product Accuracy too low (${productAcc}/10)`);
+      if (brandAcc < 8) hardFails.push(`Brand/Logo Accuracy too low (${brandAcc}/10)`);
+      if (promptAdh < 6) hardFails.push(`Prompt Adherence too low (${promptAdh}/10)`);
+      if (quality < 5) hardFails.push(`Quality too low (${quality}/10)`);
+      // Any single criterion below 4 = automatic fail
+      const allScores = [productAcc, brandAcc, promptAdh, composition, quality, marketing];
+      const belowFour = allScores.filter(s => s < 4);
+      if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
+
+      const pass = hardFails.length === 0 && roundedScore >= 8.0;
+
+      const allIssues = [...(assessment.issues || []), ...hardFails];
+
+      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass}`);
+      console.log(`[QUALITY-ASSESS] Breakdown — Product:${productAcc} Brand:${brandAcc} Prompt:${promptAdh} Comp:${composition} Qual:${quality} Mktg:${marketing}`);
+      if (hardFails.length > 0) {
+        console.log(`[QUALITY-ASSESS] HARD FAILS: ${hardFails.join('; ')}`);
       }
 
       return {
-        score: assessment.overallScore || 5,
-        pass: assessment.pass !== false && (assessment.overallScore || 5) >= 7,
-        issues: assessment.issues || [],
-        retryPrompt: assessment.pass ? null : assessment.improvementSuggestion || null
+        score: roundedScore,
+        pass,
+        issues: allIssues,
+        retryPrompt: pass ? null : assessment.improvementSuggestion || null
       };
     }
   } catch (e) {
-    console.error('[QUALITY-ASSESS] Assessment failed, passing by default:', e);
+    console.error('[QUALITY-ASSESS] Assessment failed, FAILING by default (strict mode):', e);
   }
 
-  return { score: 7, pass: true, issues: [], retryPrompt: null };
+  // Fallback: FAIL by default in strict mode (force retry)
+  return { score: 5, pass: false, issues: ['Quality assessment failed — defaulting to retry'], retryPrompt: 'Ensure product and brand accuracy. Add more specific details about the product label, colors, and logo placement.' };
 }
 
 // ============================================================
