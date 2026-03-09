@@ -1259,9 +1259,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-              // If needs image generation, do that first
+              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
               let postImageUrl = args.image_url || null;
-              if (args.needs_image_generation && args.image_prompt) {
+              if (!postImageUrl && toolImageUrl) {
+                // Reuse image from a prior generate_image call in this conversation
+                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post:', toolImageUrl);
+                postImageUrl = toolImageUrl;
+              }
+              if (!postImageUrl && args.needs_image_generation && args.image_prompt) {
                 try {
                   const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                     method: 'POST',
