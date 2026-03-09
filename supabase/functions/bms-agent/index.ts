@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadBmsConnection, type BmsConnection } from "../_shared/bms-connection.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,26 +7,29 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const BMS_BRIDGE_URL = "https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge";
-
-async function callBMS(action: string, params: Record<string, any>): Promise<{ success: boolean; data?: any; error?: string }> {
-  const BMS_API_SECRET = Deno.env.get("BMS_API_SECRET");
-  if (!BMS_API_SECRET) {
-    return { success: false, error: "BMS_API_SECRET not configured" };
-  }
-
+async function callBMS(
+  connection: BmsConnection,
+  action: string,
+  params: Record<string, any>
+): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    const res = await fetch(BMS_BRIDGE_URL, {
+    // For multi-tenant, inject tenant_id into payload
+    const payload: Record<string, any> = { action, ...params };
+    if (connection.bms_type === "multi_tenant" && connection.tenant_id) {
+      payload.tenant_id = connection.tenant_id;
+    }
+
+    const res = await fetch(connection.bridge_url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${BMS_API_SECRET}`,
+        "Authorization": `Bearer ${connection.api_secret}`,
       },
-      body: JSON.stringify({ action, ...params }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
-    
+
     if (!res.ok || !data.success) {
       return { success: false, error: data.error || data.message || `BMS returned status ${res.status}` };
     }
@@ -45,32 +49,13 @@ function respond(data: unknown, status = 200) {
 }
 
 const AVAILABLE_ACTIONS = [
-  "check_stock",
-  "record_sale",
-  "generate_payment_link",
-  "list_products",
-  "get_product_details",
-  "get_product_variants",
-  "update_stock",
-  "sales_report",
-  "create_order",
-  "get_order_status",
-  "update_order_status",
-  "cancel_order",
-  "get_customer_history",
-  "get_company_statistics",
-  "create_quotation",
-  "create_invoice",
-  "list_quotations",
-  "list_invoices",
-  "get_low_stock_items",
-  "record_expense",
-  "get_expenses",
-  "get_outstanding_receivables",
-  "get_outstanding_payables",
-  "profit_loss_report",
-  "clock_in",
-  "clock_out",
+  "check_stock", "record_sale", "generate_payment_link", "list_products",
+  "get_product_details", "get_product_variants", "update_stock", "sales_report",
+  "create_order", "get_order_status", "update_order_status", "cancel_order",
+  "get_customer_history", "get_company_statistics", "create_quotation",
+  "create_invoice", "list_quotations", "list_invoices", "get_low_stock_items",
+  "record_expense", "get_expenses", "get_outstanding_receivables",
+  "get_outstanding_payables", "profit_loss_report", "clock_in", "clock_out",
   "create_contact",
 ];
 
@@ -86,362 +71,46 @@ Deno.serve(async (req) => {
       return respond({ success: false, error: "Missing 'action' field" }, 400);
     }
 
-    console.log(`[BMS-AGENT] Action: ${action}, Params:`, JSON.stringify(params));
+    // Resolve BMS connection for this company
+    const companyId = params.company_id;
+    let connection: BmsConnection | null = null;
 
-    let result: { success: boolean; data?: any; error?: string };
-
-    switch (action) {
-      case "check_stock": {
-        if (!params.product_name) {
-          return respond({ success: false, error: "product_name is required" }, 400);
-        }
-        result = await callBMS("check_stock", {
-          product_name: params.product_name,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "record_sale": {
-        if (!params.product_name || !params.quantity) {
-          return respond({ success: false, error: "product_name and quantity are required" }, 400);
-        }
-        result = await callBMS("record_sale", {
-          product_name: params.product_name,
-          quantity: params.quantity,
-          payment_method: params.payment_method || null,
-          customer_name: params.customer_name || null,
-          customer_phone: params.customer_phone || null,
-          customer_email: params.customer_email || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "generate_payment_link": {
-        if (!params.amount || !params.customer_name) {
-          return respond({ success: false, error: "amount and customer_name are required" }, 400);
-        }
-        result = await callBMS("generate_payment_link", {
-          amount: params.amount,
-          customer_name: params.customer_name,
-          customer_phone: params.customer_phone || null,
-          reference: params.reference || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "list_products": {
-        result = await callBMS("list_products", {
-          category: params.category || null,
-          status: params.status || null,
-          limit: params.limit || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_product_details": {
-        if (!params.product_name) {
-          return respond({ success: false, error: "product_name is required" }, 400);
-        }
-        result = await callBMS("get_product_details", {
-          product_name: params.product_name,
-          company_id: params.company_id,
-        });
-
-        if (!result.success && result.error?.includes("Unknown action")) {
-          console.log("[BMS-AGENT] get_product_details not supported, falling back to check_stock");
-          result = await callBMS("check_stock", {
-            product_name: params.product_name,
-            company_id: params.company_id,
-          });
-        }
-        break;
-      }
-
-      case "update_stock": {
-        if (!params.product_name || params.quantity === undefined) {
-          return respond({ success: false, error: "product_name and quantity are required" }, 400);
-        }
-        result = await callBMS("update_stock", {
-          product_name: params.product_name,
-          quantity: params.quantity,
-          adjustment_type: params.adjustment_type || "set",
-          reason: params.reason || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "sales_report": {
-        result = await callBMS("sales_report", {
-          start_date: params.start_date || params.date_from || null,
-          end_date: params.end_date || params.date_to || null,
-          limit: params.limit || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_product_variants": {
-        if (!params.product_id && !params.product_name) {
-          return respond({ success: false, error: "product_id or product_name is required" }, 400);
-        }
-        result = await callBMS("get_product_variants", {
-          product_id: params.product_id || null,
-          product_name: params.product_name || null,
-          variant_type: params.variant_type || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "create_order": {
-        if (!params.customer_name || !params.customer_phone || !params.items) {
-          return respond({ success: false, error: "customer_name, customer_phone, and items are required" }, 400);
-        }
-        result = await callBMS("create_order", {
-          customer_name: params.customer_name,
-          customer_phone: params.customer_phone,
-          customer_email: params.customer_email || null,
-          items: params.items,
-          payment_method: params.payment_method || null,
-          delivery_address: params.delivery_address || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_order_status": {
-        if (!params.order_number && !params.order_id) {
-          return respond({ success: false, error: "order_number or order_id is required" }, 400);
-        }
-        result = await callBMS("get_order_status", {
-          order_number: params.order_number || null,
-          order_id: params.order_id || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "update_order_status": {
-        if (!params.order_id || !params.status) {
-          return respond({ success: false, error: "order_id and status are required" }, 400);
-        }
-        result = await callBMS("update_order_status", {
-          order_id: params.order_id,
-          order_number: params.order_number || null,
-          status: params.status,
-          tracking_number: params.tracking_number || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "cancel_order": {
-        if (!params.order_id && !params.order_number) {
-          return respond({ success: false, error: "order_id or order_number is required" }, 400);
-        }
-        result = await callBMS("cancel_order", {
-          order_id: params.order_id || null,
-          order_number: params.order_number || null,
-          reason: params.reason || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_customer_history": {
-        if (!params.customer_name && !params.customer_phone) {
-          return respond({ success: false, error: "customer_name or customer_phone is required" }, 400);
-        }
-        result = await callBMS("get_customer_history", {
-          customer_name: params.customer_name || null,
-          customer_phone: params.customer_phone || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_company_statistics": {
-        result = await callBMS("get_company_statistics", {
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "create_quotation": {
-        if (!params.client_name || !params.items) {
-          return respond({ success: false, error: "client_name and items are required" }, 400);
-        }
-        result = await callBMS("create_quotation", {
-          client_name: params.client_name,
-          items: params.items,
-          client_email: params.client_email || null,
-          client_phone: params.client_phone || null,
-          notes: params.notes || null,
-          tax_rate: params.tax_rate || null,
-          valid_until: params.valid_until || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "create_invoice": {
-        if (!params.client_name || !params.items) {
-          return respond({ success: false, error: "client_name and items are required" }, 400);
-        }
-        result = await callBMS("create_invoice", {
-          client_name: params.client_name,
-          items: params.items,
-          client_email: params.client_email || null,
-          client_phone: params.client_phone || null,
-          due_date: params.due_date || null,
-          tax_rate: params.tax_rate || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "list_quotations": {
-        result = await callBMS("list_quotations", {
-          client_name: params.client_name || null,
-          status: params.status || null,
-          start_date: params.start_date || null,
-          end_date: params.end_date || null,
-          limit: params.limit || 10,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "list_invoices": {
-        result = await callBMS("list_invoices", {
-          client_name: params.client_name || null,
-          status: params.status || null,
-          start_date: params.start_date || null,
-          end_date: params.end_date || null,
-          limit: params.limit || 10,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      // ========== PHASE 2: NEW ACTIONS ==========
-
-      case "get_low_stock_items": {
-        result = await callBMS("get_low_stock_items", {
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "record_expense": {
-        if (!params.category || !params.vendor_name || !params.amount_zmw) {
-          return respond({ success: false, error: "category, vendor_name, and amount_zmw are required" }, 400);
-        }
-        result = await callBMS("record_expense", {
-          category: params.category,
-          vendor_name: params.vendor_name,
-          amount_zmw: params.amount_zmw,
-          date_incurred: params.date_incurred || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_expenses": {
-        result = await callBMS("get_expenses", {
-          start_date: params.start_date || null,
-          end_date: params.end_date || null,
-          category: params.category || null,
-          limit: params.limit || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_outstanding_receivables": {
-        result = await callBMS("get_outstanding_receivables", {
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "get_outstanding_payables": {
-        result = await callBMS("get_outstanding_payables", {
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "profit_loss_report": {
-        if (!params.start_date || !params.end_date) {
-          return respond({ success: false, error: "start_date and end_date are required" }, 400);
-        }
-        result = await callBMS("profit_loss_report", {
-          start_date: params.start_date,
-          end_date: params.end_date,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "clock_in": {
-        if (!params.employee_name && !params.employee_id) {
-          return respond({ success: false, error: "employee_name or employee_id is required" }, 400);
-        }
-        result = await callBMS("clock_in", {
-          employee_name: params.employee_name || null,
-          employee_id: params.employee_id || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "clock_out": {
-        if (!params.employee_name && !params.employee_id) {
-          return respond({ success: false, error: "employee_name or employee_id is required" }, 400);
-        }
-        result = await callBMS("clock_out", {
-          employee_name: params.employee_name || null,
-          employee_id: params.employee_id || null,
-          notes: params.notes || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      case "create_contact": {
-        if (!params.sender_name || !params.sender_email || !params.message) {
-          return respond({ success: false, error: "sender_name, sender_email, and message are required" }, 400);
-        }
-        result = await callBMS("create_contact", {
-          sender_name: params.sender_name,
-          sender_email: params.sender_email,
-          message: params.message,
-          sender_phone: params.sender_phone || null,
-          source_page: params.source_page || null,
-          company_id: params.company_id,
-        });
-        break;
-      }
-
-      default:
-        return respond({
-          success: false,
-          error: `Unknown action: ${action}`,
-          available_actions: AVAILABLE_ACTIONS,
-        }, 400);
+    if (companyId) {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+      connection = await loadBmsConnection(supabase, companyId);
     }
+
+    if (!connection) {
+      // Last resort: try global env fallback without DB
+      const globalSecret = Deno.env.get("BMS_API_SECRET");
+      if (globalSecret) {
+        connection = {
+          bridge_url: "https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge",
+          api_secret: globalSecret,
+          bms_type: "single_tenant",
+          tenant_id: null,
+          is_active: true,
+        };
+      } else {
+        return respond({ success: false, error: "No BMS connection configured for this company" }, 400);
+      }
+    }
+
+    console.log(`[BMS-AGENT] Action: ${action}, Company: ${companyId}, BMS: ${connection.bms_type}, Bridge: ${connection.bridge_url}`);
+
+    if (!AVAILABLE_ACTIONS.includes(action)) {
+      return respond({
+        success: false,
+        error: `Unknown action: ${action}`,
+        available_actions: AVAILABLE_ACTIONS,
+      }, 400);
+    }
+
+    // Forward to BMS with all params
+    const result = await callBMS(connection, action, params);
 
     console.log(`[BMS-AGENT] ${action} result:`, JSON.stringify(result).slice(0, 500));
     return respond(result, result.success ? 200 : 502);
