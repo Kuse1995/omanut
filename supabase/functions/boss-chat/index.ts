@@ -1419,14 +1419,19 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
                 const post = allPending?.find((p: any) => p.id === postId);
                 if (post) {
-                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-facebook-post`, {
+                  // Set status to 'approved' first so publish-meta-post accepts it
+                  await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', postId);
+                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                    body: JSON.stringify({ companyId: company.id, content: post.content, imageUrl: post.image_url }),
+                    body: JSON.stringify({ post_id: postId }),
                   });
                   const pubResult = await publishResponse.json();
-                  await supabase.from('scheduled_posts').update({ status: 'published' }).eq('id', postId);
-                  result = { success: true, message: '✅ Post published immediately!' };
+                  if (pubResult.success) {
+                    result = { success: true, message: '✅ Post published immediately!' };
+                  } else {
+                    result = { success: false, message: `❌ Publish failed: ${pubResult.error || 'Unknown error'}` };
+                  }
                 } else {
                   result = { success: false, message: '❌ Post not found for publishing' };
                 }
