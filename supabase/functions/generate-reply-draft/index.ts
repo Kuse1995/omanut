@@ -3,7 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { assertTenantContext, loadTenantFromRecord } from "../_shared/tenant-context.ts";
 import { logTenantViolation, logSecurityEvent } from "../_shared/security-logging.ts";
 import { geminiChat } from "../_shared/gemini-client.ts";
-import { logTenantViolation, logSecurityEvent } from "../_shared/security-logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
