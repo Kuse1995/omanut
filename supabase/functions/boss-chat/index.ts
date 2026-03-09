@@ -463,7 +463,7 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    - Use it when the boss asks "show me my product photos" or "what product images do I have"
    - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
    
-   For scheduling posts with images, you can generate the image first with generate_image, then pass the returned imageUrl to schedule_social_post.
+    IMAGE REUSE RULE (CRITICAL): If you already called generate_image in this conversation and got an imageUrl back, you MUST pass that URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true when an image was already generated and approved. The system will automatically reuse the last generated image, but explicitly passing image_url is preferred.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
    - Use get_pending_posts to check what AI-generated content is waiting for approval
@@ -1259,9 +1259,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-              // If needs image generation, do that first
+              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
               let postImageUrl = args.image_url || null;
-              if (args.needs_image_generation && args.image_prompt) {
+              if (!postImageUrl && toolImageUrl) {
+                // Reuse image from a prior generate_image call in this conversation
+                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post:', toolImageUrl);
+                postImageUrl = toolImageUrl;
+              }
+              if (!postImageUrl && args.needs_image_generation && args.image_prompt) {
                 try {
                   const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                     method: 'POST',
@@ -1414,14 +1419,19 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
                 const post = allPending?.find((p: any) => p.id === postId);
                 if (post) {
-                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-facebook-post`, {
+                  // Set status to 'approved' first so publish-meta-post accepts it
+                  await supabase.from('scheduled_posts').update({ status: 'approved' }).eq('id', postId);
+                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                    body: JSON.stringify({ companyId: company.id, content: post.content, imageUrl: post.image_url }),
+                    body: JSON.stringify({ post_id: postId }),
                   });
                   const pubResult = await publishResponse.json();
-                  await supabase.from('scheduled_posts').update({ status: 'published' }).eq('id', postId);
-                  result = { success: true, message: '✅ Post published immediately!' };
+                  if (pubResult.success) {
+                    result = { success: true, message: '✅ Post published immediately!' };
+                  } else {
+                    result = { success: false, message: `❌ Publish failed: ${pubResult.error || 'Unknown error'}` };
+                  }
                 } else {
                   result = { success: false, message: '❌ Post not found for publishing' };
                 }
