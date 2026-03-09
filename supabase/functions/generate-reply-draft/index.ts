@@ -163,6 +163,40 @@ serve(async (req) => {
       .eq("company_id", verifiedCompanyId)
       .single();
 
+    // Pre-fetch BMS live data for accurate product/pricing info
+    let bmsContext = '';
+    try {
+      const bmsResponse = await fetch(`${supabaseUrl}/functions/v1/bms-agent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          action: 'list_products',
+          params: { company_id: verifiedCompanyId }
+        }),
+      });
+
+      if (bmsResponse.ok) {
+        const bmsData = await bmsResponse.json();
+        if (bmsData.success && bmsData.data) {
+          const products = Array.isArray(bmsData.data) ? bmsData.data : bmsData.data.products || [];
+          if (products.length > 0) {
+            bmsContext = '\n\nLIVE PRODUCT DATA (from BMS - use these prices/stock levels as primary source):\n' +
+              products.slice(0, 30).map((p: any) => {
+                const parts = [`${p.name || p.product_name}`];
+                if (p.price != null) parts.push(`Price: ${p.currency || ''}${p.price}`);
+                if (p.stock != null || p.quantity != null) parts.push(`Stock: ${p.stock ?? p.quantity}`);
+                return `- ${parts.join(' | ')}`;
+              }).join('\n');
+          }
+        }
+      }
+    } catch (bmsErr) {
+      console.error('[generate-reply-draft] BMS fetch failed (non-blocking):', bmsErr);
+    }
+
     // Build prompt with brand context
     const brandContext = `
 Company: ${company?.name || "Unknown"}
@@ -170,7 +204,7 @@ Business Type: ${company?.business_type || "general"}
 Voice Style: ${company?.voice_style || "professional and friendly"}
 Brand Tone: ${imageSettings?.brand_tone || "professional"}
 Business Context: ${imageSettings?.business_context || ""}
-Custom Instructions: ${aiOverrides?.system_instructions || ""}
+Custom Instructions: ${aiOverrides?.system_instructions || ""}${bmsContext}
     `.trim();
 
     const systemPrompt = `You are a social media community manager for ${company?.name || "a business"}.
