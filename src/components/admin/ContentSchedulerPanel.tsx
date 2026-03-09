@@ -33,11 +33,12 @@ export const ContentSchedulerPanel = () => {
   const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both'>('facebook');
   const [publishMode, setPublishMode] = useState<'schedule' | 'now'>('schedule');
 
-  // Approval queue editing state
+  // Editing state (shared for approval queue and all posts)
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [editCaption, setEditCaption] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
+  const [editPopoverOpen, setEditPopoverOpen] = useState(false);
 
   // Fetch meta credentials
   const { data: pages } = useQuery({
