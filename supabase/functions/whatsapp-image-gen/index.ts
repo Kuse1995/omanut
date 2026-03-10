@@ -604,7 +604,13 @@ async function runImagePipeline(
     let genPrompt = currentPrompt;
     const hasProductAnchor = bmsImageUrls.length > 0 || productMatch;
     if (hasProductAnchor) {
-      genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep this product UNCHANGED — same label, logo, colors, shape, proportions. ONLY change the environment/background/lighting.\n\n${currentPrompt}`;
+      genPrompt = `HARD GEOMETRY LOCK — The first reference image is the EXACT product (ground truth). MANDATORY CONSTRAINTS:\n` +
+        `• Preserve the label layout PIXEL-FOR-PIXEL — same text positions, same font sizes, same section arrangement\n` +
+        `• Maintain EXACT color hex codes from the product — no tinting, no color shifting, no reinterpretation\n` +
+        `• Logo must be reproduced with ZERO distortion — no warping, no stretching, no invented elements\n` +
+        `• Packaging form factor is IMMUTABLE — same bottle/box/container shape, same proportions, same dimensions\n` +
+        `• You may ONLY change: environment, background, lighting, camera angle, and surrounding context\n` +
+        `• ANY deviation from the product reference = FAILURE\n\n${currentPrompt}`;
     }
 
     const { imageBase64, text: imageText } = await geminiImageGenerate({
