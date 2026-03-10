@@ -1275,7 +1275,8 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData, editData } = await req.json() as ImageGenRequest;
+    const body = await req.json();
+    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData, editData } = body as ImageGenRequest;
 
     console.log(`[IMAGE-GEN] Request: type=${messageType}, company=${companyId}, prompt="${prompt?.substring(0, 50)}..."`);
 
