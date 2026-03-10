@@ -3390,44 +3390,22 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           const args = JSON.parse(toolCall.function.arguments);
           console.log(`[TOOL-LOOP] Round ${currentRound} executing: ${fnName}`);
           
-          if (fnName === 'check_stock') {
+          if (['check_stock', 'record_sale', 'generate_payment_link'].includes(fnName)) {
             try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
-                body: JSON.stringify({ action: 'check_stock', product_name: args.product_name }),
-              });
-              const bmsResult = await bmsResponse.json();
+              const bmsResult = await bmsCallWithAck(
+                () => fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
+                  body: JSON.stringify({ action: fnName, product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null, amount: args.amount, reference: args.reference }),
+                }),
+                fnName,
+                customerPhone,
+                company.whatsapp_number || ''
+              );
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
-              toolExecutionContext.push(`[R${currentRound}] checked stock: ${args.product_name}`);
+              toolExecutionContext.push(`[R${currentRound}] ${fnName} completed`);
             } catch (e) {
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
-            }
-          } else if (fnName === 'record_sale') {
-            try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
-                body: JSON.stringify({ action: 'record_sale', product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }),
-              });
-              const bmsResult = await bmsResponse.json();
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
-              toolExecutionContext.push(`[R${currentRound}] recorded sale: ${args.quantity}x ${args.product_name}`);
-            } catch (e) {
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
-            }
-          } else if (fnName === 'generate_payment_link') {
-            try {
-              const bmsResponse = await fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
-                body: JSON.stringify({ action: 'generate_payment_link', amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }),
-              });
-              const bmsResult = await bmsResponse.json();
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
-              toolExecutionContext.push(`[R${currentRound}] payment link generated`);
-            } catch (e) {
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'Payment link generation failed' }) });
             }
           } else {
             // For other tools in subsequent rounds, provide a generic acknowledgment
