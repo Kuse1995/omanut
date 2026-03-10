@@ -43,6 +43,22 @@ serve(async (req) => {
     const results: { id: string; success: boolean; error?: string }[] = [];
 
     for (const post of duePosts) {
+      // ── ATOMIC CLAIM: Prevent duplicate publishing across cron ticks ──
+      // Transition from 'approved' → 'publishing' atomically.
+      // If another cron tick or process already claimed it, this returns null.
+      const { data: claimedPost } = await supabase
+        .from('scheduled_posts')
+        .update({ status: 'publishing', updated_at: new Date().toISOString() })
+        .eq('id', post.id)
+        .eq('status', 'approved')
+        .select('id')
+        .maybeSingle();
+
+      if (!claimedPost) {
+        console.log(`[CRON-PUBLISHER] Post ${post.id} already claimed by another process, skipping.`);
+        continue;
+      }
+
       try {
         const res = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
           method: 'POST',

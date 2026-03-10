@@ -43,30 +43,42 @@ serve(async (req) => {
       });
     }
 
-    // Load post
-    const { data: post, error: postError } = await supabaseService
+    // Quick check: reject if post is pending_image (before attempting claim)
+    const { data: preCheck } = await supabaseService
       .from('scheduled_posts')
-      .select('*')
+      .select('status')
       .eq('id', post_id)
-      .single();
+      .maybeSingle();
 
-    if (postError || !post) {
-      return new Response(JSON.stringify({ error: 'Post not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    if (post.status === 'pending_image') {
+    if (preCheck?.status === 'pending_image') {
       return new Response(JSON.stringify({ error: 'Post is waiting for image generation. It will auto-publish when the image is ready.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    if (post.status !== 'draft' && post.status !== 'scheduled' && post.status !== 'approved') {
-      return new Response(JSON.stringify({ error: `Post is already ${post.status}` }), {
-        status: 400,
+    // ── ATOMIC CLAIM: Prevent duplicate publishing ──
+    // A single UPDATE...WHERE atomically transitions the post to 'publishing'.
+    // If another process already claimed it, this returns null → we bail out.
+    const { data: post, error: claimError } = await supabaseService
+      .from('scheduled_posts')
+      .update({ status: 'publishing', updated_at: new Date().toISOString() })
+      .eq('id', post_id)
+      .in('status', ['draft', 'scheduled', 'approved', 'publishing'])
+      .select('*')
+      .maybeSingle();
+
+    if (claimError) {
+      console.error('Claim error:', claimError);
+      return new Response(JSON.stringify({ error: claimError.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!post) {
+      return new Response(JSON.stringify({ error: 'Post not found, already published, or claimed by another process' }), {
+        status: 409,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

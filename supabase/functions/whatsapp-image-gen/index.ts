@@ -1433,10 +1433,11 @@ serve(async (req) => {
     if (scheduledPostId && imageUrl) {
       try {
         console.log(`[IMAGE-GEN] Auto-publish callback for post ${scheduledPostId}`);
-        // Update the post with the generated image and mark as approved
+        // Update the post with the generated image and set to 'publishing' (not 'approved')
+        // This prevents cron-publisher from also picking it up — atomic claim pattern.
         await supabase.from('scheduled_posts').update({
           image_url: imageUrl,
-          status: 'approved',
+          status: 'publishing',
           updated_at: new Date().toISOString(),
         }).eq('id', scheduledPostId).eq('status', 'pending_image');
 
