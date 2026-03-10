@@ -302,6 +302,111 @@ async function sendFallbackMessage(
   }
 }
 
+// ============= STREAMING ACKNOWLEDGEMENT FOR SLOW BMS CALLS =============
+const BMS_ACK_TIMEOUT_MS = 8000;
+
+const BMS_ACK_MESSAGES: Record<string, string> = {
+  check_stock: "Checking our inventory now, one moment... 🔍",
+  get_product_variants: "Checking available options, one moment... 🔍",
+  list_products: "Looking up our catalog, one moment... 🔍",
+  get_product_details: "Fetching product details, one moment... 🔍",
+  sales_report: "Pulling up your reports, one moment... 📊",
+  get_company_statistics: "Pulling up the stats, one moment... 📊",
+  profit_loss_report: "Generating your financial report, one moment... 📊",
+  get_expenses: "Looking up expenses, one moment... 📊",
+  get_outstanding_receivables: "Checking receivables, one moment... 📊",
+  get_outstanding_payables: "Checking payables, one moment... 📊",
+  create_order: "Processing your order, please hold... 🛒",
+  record_sale: "Recording your sale, please hold... 🛒",
+  create_quotation: "Generating your quotation, just a moment... 📄",
+  create_invoice: "Generating your invoice, just a moment... 📄",
+  generate_payment_link: "Creating your payment link, one moment... 💳",
+  get_order_status: "Checking your order status, one moment... 📦",
+  cancel_order: "Processing cancellation, one moment... ❌",
+  get_customer_history: "Looking up your history, one moment... 📋",
+  get_low_stock_items: "Checking low stock items, one moment... ⚠️",
+  create_contact: "Submitting your inquiry, one moment... 📝",
+  clock_in: "Clocking you in, one moment... ⏰",
+  clock_out: "Clocking you out, one moment... ⏰",
+  record_expense: "Recording expense, one moment... 💰",
+  update_stock: "Updating stock levels, one moment... 📦",
+};
+
+/**
+ * Send a streaming acknowledgement message via Twilio.
+ * Used when a BMS tool call exceeds the timeout threshold.
+ */
+async function sendStreamingAck(
+  toPhone: string,
+  fromWhatsappNumber: string,
+  ackMessage: string
+) {
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !fromWhatsappNumber) return;
+
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+  const fromNumber = fromWhatsappNumber.startsWith('whatsapp:')
+    ? fromWhatsappNumber
+    : `whatsapp:${fromWhatsappNumber}`;
+  const toNumber = toPhone.startsWith('whatsapp:') ? toPhone : `whatsapp:${toPhone}`;
+
+  const formData = new URLSearchParams();
+  formData.append('From', fromNumber);
+  formData.append('To', toNumber);
+  formData.append('Body', ackMessage);
+
+  try {
+    await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+    console.log(`[STREAMING-ACK] Sent: "${ackMessage}"`);
+  } catch (e) {
+    console.error('[STREAMING-ACK] Failed to send:', e);
+  }
+}
+
+/**
+ * Race-based BMS call wrapper. If the BMS fetch takes longer than BMS_ACK_TIMEOUT_MS,
+ * sends an acknowledgement message to the user while continuing to wait for the result.
+ */
+async function bmsCallWithAck(
+  fetchFn: () => Promise<Response>,
+  toolName: string,
+  toPhone: string,
+  fromWhatsappNumber: string
+): Promise<any> {
+  let ackSent = false;
+  const ackMessage = BMS_ACK_MESSAGES[toolName] || "Working on that for you, one moment... ⏳";
+
+  const resultPromise = fetchFn().then(res => res.json());
+  const ackPromise = new Promise<'timeout'>((resolve) =>
+    setTimeout(() => resolve('timeout'), BMS_ACK_TIMEOUT_MS)
+  );
+
+  const race = await Promise.race([
+    resultPromise.then(data => ({ type: 'data' as const, data })),
+    ackPromise.then(() => ({ type: 'timeout' as const }))
+  ]);
+
+  if (race.type === 'timeout') {
+    ackSent = true;
+    // Fire-and-forget the ack — don't await to avoid delaying the main flow
+    sendStreamingAck(toPhone, fromWhatsappNumber, ackMessage);
+    // Now wait for the actual result
+    const data = await resultPromise;
+    console.log(`[BMS-ACK] ${toolName} completed after ack was sent`);
+    return data;
+  }
+
+  return race.data;
+}
+
 // Generate 3-bullet conversation summary using AI
 async function generateConversationSummary(
   conversationId: string,
