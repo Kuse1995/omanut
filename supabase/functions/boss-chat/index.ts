@@ -1268,7 +1268,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               }
               if (!postImageUrl && args.needs_image_generation && args.image_prompt) {
                 try {
-                  const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                  const IMG_TIMEOUT = 45000;
+                  const imgGenPromise = fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
                     body: JSON.stringify({
@@ -1279,12 +1280,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                       messageType: 'generate',
                     }),
                   });
+                  const timeoutPromise = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Image generation timed out')), IMG_TIMEOUT)
+                  );
+                  const imgGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
                   if (imgGenResponse.ok) {
                     const imgResult = await imgGenResponse.json();
                     if (imgResult.imageUrl) postImageUrl = imgResult.imageUrl;
                   }
-                } catch (e) {
-                  console.error('Image gen for post failed:', e);
+                } catch (e: any) {
+                  console.error('Image gen for post failed:', e.message);
+                  // Continue without image rather than failing the whole post
                 }
               }
 
