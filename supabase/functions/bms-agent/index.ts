@@ -50,7 +50,7 @@ function respond(data: unknown, status = 200) {
 
 const AVAILABLE_ACTIONS = [
   "check_stock", "record_sale", "generate_payment_link", "list_products",
-  "get_product_details", "get_product_variants", "update_stock", "sales_report",
+  "get_product_variants", "update_stock", "sales_report",
   "create_order", "get_order_status", "update_order_status", "cancel_order",
   "get_customer_history", "get_company_statistics", "create_quotation",
   "create_invoice", "list_quotations", "list_invoices", "get_low_stock_items",

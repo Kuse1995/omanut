@@ -418,7 +418,7 @@ const BMS_ACK_MESSAGES: Record<string, string> = {
   check_stock: "Checking our inventory now, one moment... 🔍",
   get_product_variants: "Checking available options, one moment... 🔍",
   list_products: "Looking up our catalog, one moment... 🔍",
-  get_product_details: "Fetching product details, one moment... 🔍",
+  
   sales_report: "Pulling up your reports, one moment... 📊",
   get_company_statistics: "Pulling up the stats, one moment... 📊",
   profit_loss_report: "Generating your financial report, one moment... 📊",
