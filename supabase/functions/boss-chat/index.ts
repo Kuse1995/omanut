@@ -1322,6 +1322,27 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
               const targetPlatform = args.target_platform || 'facebook';
 
+              // Deduplication: check for identical post in last 2 minutes
+              const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+              const { data: existingPost } = await supabase
+                .from('scheduled_posts')
+                .select('id, status, image_url')
+                .eq('company_id', company.id)
+                .eq('content', args.content)
+                .eq('target_platform', targetPlatform)
+                .gte('created_at', twoMinAgo)
+                .limit(1)
+                .maybeSingle();
+
+              if (existingPost) {
+                result = {
+                  success: true,
+                  message: `✅ This post was already created moments ago. No duplicate needed.`,
+                  imageUrl: existingPost.image_url || undefined,
+                };
+                break;
+              }
+
               if (args.publish_now) {
                 if (imageGenFailed) {
                   // Image gen failed — insert as pending_image and trigger async generation
