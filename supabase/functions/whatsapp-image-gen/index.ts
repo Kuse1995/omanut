@@ -565,7 +565,7 @@ async function runImagePipeline(
   companyName: string,
   businessType: string,
   productMatch: ProductImage | null,
-  maxRetries: number = 3,
+  maxRetries?: number,
   bmsImageUrls: string[] = []
 ): Promise<{ imageUrl: string; enhancedPrompt: string; pipelineData: any }> {
   console.log('[PIPELINE] === Starting 6-Agent Image Generation Pipeline ===');
