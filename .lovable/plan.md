@@ -99,5 +99,24 @@ Race-based timeout: `Promise.race([bmsFetch, 8s_timer])`. If timer wins, fire-an
 - Sends ack to boss WhatsApp number when BMS calls exceed 8s
 - Same context-aware messages
 
+## Phase 2.7: Hard Geometry Product Fidelity — COMPLETED ✅
+
+### Problem Solved
+AI-generated product images sometimes exhibited "Brand Hallucination" (warped logos, invented elements) and "Product Mutation" (wrong packaging shape, altered labels). No formal enforcement existed.
+
+### Architecture
+"Hard Geometry" constraint system: BMS product references are treated as immutable ground truth, not creative suggestions.
+
+### whatsapp-image-gen/index.ts — 4 agents updated
+- **Agent 2 (Reference Curator)**: Tags product matches with `[HARD GEOMETRY]` — locks label layout, color hex codes, logo placement, packaging form factor
+- **Agent 3 (Prompt Optimizer)**: New `HARD GEOMETRY CONSTRAINT` rule block — explicit anchor language for pixel-perfect label preservation
+- **Agent 4 (Supervisor Review)**: Added Brand Hallucination Check and Product Mutation Check as explicit rejection criteria
+- **Agent 5 (Quality Assessment)**: 
+  - Renamed dimensions: Product Fidelity (3x), Brand Hallucination Check (3x), Product Mutation Check (2x)
+  - Raised pass threshold from 8.0 → 8.5
+  - Auto-fail for warped logos, invented brand elements, wrong packaging type, altered label layout
+  - Weighted score now /13 (was /11)
+- **Generation prompt prefix**: "HARD GEOMETRY LOCK" with 6 mandatory constraints
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
