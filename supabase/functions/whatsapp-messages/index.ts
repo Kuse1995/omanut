@@ -418,7 +418,7 @@ const BMS_ACK_MESSAGES: Record<string, string> = {
   check_stock: "Checking our inventory now, one moment... 🔍",
   get_product_variants: "Checking available options, one moment... 🔍",
   list_products: "Looking up our catalog, one moment... 🔍",
-  get_product_details: "Fetching product details, one moment... 🔍",
+  
   sales_report: "Pulling up your reports, one moment... 📊",
   get_company_statistics: "Pulling up the stats, one moment... 📊",
   profit_loss_report: "Generating your financial report, one moment... 📊",
@@ -1975,11 +1975,25 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
           }
         }
       },
+      list_products: {
+        type: "function",
+        function: {
+          name: "list_products",
+          description: "Lists all available products/items in the business catalog from the BMS. Use when a customer asks 'what do you sell?', 'show me your products', 'what's available?', or wants to browse the full catalog. Returns product names, prices (unit_price field), and stock levels (current_stock field).",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Optional category filter to narrow results" }
+            },
+            required: []
+          }
+        }
+      },
       check_stock: {
         type: "function",
         function: {
           name: "check_stock",
-          description: "Checks real-time inventory levels and pricing for a specific product in the BMS.",
+          description: "Checks real-time inventory levels and pricing for a specific product in the BMS. Returns current_stock (quantity available) and unit_price (price per unit).",
           parameters: {
             type: "object",
             properties: {
@@ -2174,7 +2188,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     
     // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
     if (!isSchool && !company.payments_disabled) {
-      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice'];
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice'];
       for (const tool of mandatoryCheckoutTools) {
         if (!enabledToolNames.includes(tool)) {
           enabledToolNames.push(tool);
@@ -3346,7 +3360,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               console.error('[LOOKUP-PRODUCT] Exception:', error);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
             }
-          } else if (['check_stock','record_sale','get_product_variants','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'].includes(toolCall.function.name)) {
+          } else if (['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'].includes(toolCall.function.name)) {
             const bmsToolName = toolCall.function.name;
             const args = JSON.parse(toolCall.function.arguments);
             console.log(`[BMS] ${bmsToolName} called:`, JSON.stringify(args).slice(0, 200));
@@ -3362,11 +3376,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               case 'cancel_order': bmsParams = { order_number: args.order_number, order_id: args.order_id, reason: args.reason }; break;
               case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
               case 'get_company_statistics': bmsParams = {}; break;
+              case 'list_products': bmsParams = { category: args.category || null }; break;
               case 'create_quotation': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes }; break;
               case 'create_invoice': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
               case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
               case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
             }
+
+            // Inject company_id for multi-tenant BMS routing
+            bmsParams.company_id = company.id;
 
             try {
               const bmsResult = await bmsCallWithAck(
