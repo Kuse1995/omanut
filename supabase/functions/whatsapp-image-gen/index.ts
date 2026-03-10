@@ -1275,7 +1275,8 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData, editData } = await req.json() as ImageGenRequest;
+    const body = await req.json();
+    const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData, editData } = body as ImageGenRequest;
 
     console.log(`[IMAGE-GEN] Request: type=${messageType}, company=${companyId}, prompt="${prompt?.substring(0, 50)}..."`);
 
@@ -1430,6 +1431,93 @@ serve(async (req) => {
         content: responseMessage,
         message_metadata: imageUrl ? { generated_image_url: imageUrl } : {}
       });
+    }
+
+    // ── AUTO-PUBLISH CALLBACK ──
+    // If this generation was triggered for a pending_image scheduled post,
+    // attach the image and auto-publish it, then notify the boss.
+    const scheduledPostId = body.scheduledPostId;
+    const bossPhone = body.bossPhone;
+    if (scheduledPostId && imageUrl) {
+      try {
+        console.log(`[IMAGE-GEN] Auto-publish callback for post ${scheduledPostId}`);
+        // Update the post with the generated image and mark as approved
+        await supabase.from('scheduled_posts').update({
+          image_url: imageUrl,
+          status: 'approved',
+          updated_at: new Date().toISOString(),
+        }).eq('id', scheduledPostId).eq('status', 'pending_image');
+
+        // Trigger publish-meta-post
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const srkKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const publishRes = await fetch(`${supabaseUrl}/functions/v1/publish-meta-post`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${srkKey}` },
+          body: JSON.stringify({ post_id: scheduledPostId }),
+        });
+        const publishResult = await publishRes.json();
+
+        if (publishResult.success) {
+          console.log(`[IMAGE-GEN] Auto-published post ${scheduledPostId} successfully`);
+          // Notify boss via WhatsApp with the image preview
+          if (bossPhone) {
+            const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+            const { data: postCompany } = await supabase.from('companies').select('twilio_number').eq('id', companyId).single();
+            if (twilioSid && twilioAuth && postCompany?.twilio_number) {
+              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+              const confirmMsg = `✅ Your post has been published with the brand image!\n\n🖼️ Image attached below.`;
+              const formData = new URLSearchParams();
+              formData.append('To', `whatsapp:${bossPhone}`);
+              formData.append('From', `whatsapp:${postCompany.twilio_number}`);
+              formData.append('Body', confirmMsg);
+              formData.append('MediaUrl', imageUrl);
+              await fetch(twilioUrl, {
+                method: 'POST',
+                headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData.toString(),
+              });
+            }
+          }
+        } else {
+          console.error(`[IMAGE-GEN] Auto-publish failed for post ${scheduledPostId}:`, publishResult.error);
+        }
+      } catch (autoPublishErr: any) {
+        console.error(`[IMAGE-GEN] Auto-publish callback error:`, autoPublishErr.message);
+      }
+    } else if (scheduledPostId && !imageUrl) {
+      // Image gen failed — mark post as failed so it doesn't sit in limbo
+      console.error(`[IMAGE-GEN] Image gen failed for scheduled post ${scheduledPostId}, marking as failed`);
+      await supabase.from('scheduled_posts').update({
+        status: 'failed',
+        error_message: 'Image generation failed. You can retry by asking to post again.',
+        updated_at: new Date().toISOString(),
+      }).eq('id', scheduledPostId).eq('status', 'pending_image');
+
+      // Notify boss of failure
+      if (bossPhone) {
+        try {
+          const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+          const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+          const { data: postCompany } = await supabase.from('companies').select('twilio_number').eq('id', companyId).single();
+          if (twilioSid && twilioAuth && postCompany?.twilio_number) {
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+            const failMsg = `⚠️ Image generation failed for your post. The post was NOT published.\n\nJust ask me to post again and I'll retry!`;
+            const formData = new URLSearchParams();
+            formData.append('To', `whatsapp:${bossPhone}`);
+            formData.append('From', `whatsapp:${postCompany.twilio_number}`);
+            formData.append('Body', failMsg);
+            await fetch(twilioUrl, {
+              method: 'POST',
+              headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: formData.toString(),
+            });
+          }
+        } catch (notifyErr: any) {
+          console.error('[IMAGE-GEN] Failed to notify boss of image gen failure:', notifyErr.message);
+        }
+      }
     }
 
     return new Response(

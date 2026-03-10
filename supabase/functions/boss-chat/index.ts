@@ -1262,13 +1262,19 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
               let postImageUrl = args.image_url || null;
               if (!postImageUrl && toolImageUrl) {
-                // Reuse image from a prior generate_image call in this conversation
                 console.log('[BOSS-CHAT] Reusing toolImageUrl for social post:', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
-              if (!postImageUrl && args.needs_image_generation && args.image_prompt) {
+
+              // ── IMAGE-FIRST PIPELINE ──
+              // When needs_image_generation is true, generate the image BEFORE publishing.
+              // Never silently degrade to text-only.
+              const needsImageGen = !postImageUrl && args.needs_image_generation && args.image_prompt;
+              let imageGenFailed = false;
+
+              if (needsImageGen) {
                 try {
-                  const IMG_TIMEOUT = 45000;
+                  const IMG_TIMEOUT = 90000; // 90s — generous for quality generation
                   const imgGenPromise = fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
@@ -1286,79 +1292,164 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   const imgGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
                   if (imgGenResponse.ok) {
                     const imgResult = await imgGenResponse.json();
-                    if (imgResult.imageUrl) postImageUrl = imgResult.imageUrl;
+                    if (imgResult.imageUrl) {
+                      postImageUrl = imgResult.imageUrl;
+                      toolImageUrl = imgResult.imageUrl; // Store for reuse in conversation
+                    } else {
+                      imageGenFailed = true;
+                    }
+                  } else {
+                    imageGenFailed = true;
                   }
                 } catch (e: any) {
-                  console.error('Image gen for post failed:', e.message);
-                  // Continue without image rather than failing the whole post
+                  console.error('[BOSS-CHAT] Image gen for post failed/timed out:', e.message);
+                  imageGenFailed = true;
                 }
               }
 
+              // Get meta credentials (needed for both publish_now and schedule)
+              const { data: metaCred } = await supabase
+                .from('meta_credentials')
+                .select('page_id')
+                .eq('company_id', company.id)
+                .limit(1)
+                .maybeSingle();
+
+              if (!metaCred?.page_id) {
+                result = { success: false, message: '❌ No Meta page connected. Please connect your Facebook/Instagram page first.' };
+                break;
+              }
+
+              const targetPlatform = args.target_platform || 'facebook';
+
               if (args.publish_now) {
-                // Publish immediately: insert to scheduled_posts then publish via publish-meta-post
-                const targetPlatform = args.target_platform || 'facebook';
-                
-                // Step 1: Get page_id from meta_credentials
-                const { data: metaCred } = await supabase
-                  .from('meta_credentials')
-                  .select('page_id')
-                  .eq('company_id', company.id)
-                  .limit(1)
-                  .maybeSingle();
-                
-                if (!metaCred?.page_id) {
-                  result = { success: false, message: '❌ No Meta page connected. Please connect your Facebook/Instagram page first.' };
-                  break;
+                if (imageGenFailed) {
+                  // Image gen failed — insert as pending_image and trigger async generation
+                  const { data: pendingPost, error: pendingErr } = await supabase
+                    .from('scheduled_posts')
+                    .insert({
+                      company_id: company.id,
+                      page_id: metaCred.page_id,
+                      content: args.content,
+                      image_url: null,
+                      target_platform: targetPlatform,
+                      status: 'pending_image',
+                      scheduled_time: new Date().toISOString(),
+                    })
+                    .select('id')
+                    .single();
+
+                  if (pendingErr || !pendingPost) {
+                    result = { success: false, message: `❌ Failed to create post: ${pendingErr?.message || 'Unknown error'}` };
+                    break;
+                  }
+
+                  // Fire-and-forget async image generation with scheduledPostId callback
+                  fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({
+                      companyId: company.id,
+                      customerPhone: '',
+                      conversationId: null,
+                      prompt: args.image_prompt,
+                      messageType: 'generate',
+                      scheduledPostId: pendingPost.id,
+                      bossPhone: company.boss_phone,
+                    }),
+                  }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
+
+                  result = {
+                    success: true,
+                    message: `⏳ Image is still generating. I'll publish your post automatically once the image is ready and send you a preview. No action needed from you!`,
+                  };
+                } else {
+                  // Image ready (or no image needed) — publish immediately
+                  const { data: insertedPost, error: insertErr } = await supabase
+                    .from('scheduled_posts')
+                    .insert({
+                      company_id: company.id,
+                      page_id: metaCred.page_id,
+                      content: args.content,
+                      image_url: postImageUrl,
+                      target_platform: targetPlatform,
+                      status: 'approved',
+                      scheduled_time: new Date().toISOString(),
+                    })
+                    .select('id')
+                    .single();
+
+                  if (insertErr || !insertedPost) {
+                    result = { success: false, message: `❌ Failed to create post: ${insertErr?.message || 'Unknown error'}` };
+                    break;
+                  }
+
+                  const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({ post_id: insertedPost.id }),
+                  });
+                  const publishResult = await publishResponse.json();
+                  result = publishResult.success !== false
+                    ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
+                    : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
                 }
-                
-                // Step 2: Insert scheduled_posts row with status='approved'
-                const { data: insertedPost, error: insertErr } = await supabase
-                  .from('scheduled_posts')
-                  .insert({
-                    company_id: company.id,
-                    page_id: metaCred.page_id,
-                    content: args.content,
-                    image_url: postImageUrl,
-                    target_platform: targetPlatform,
-                    status: 'approved',
-                    scheduled_time: new Date().toISOString(),
-                  })
-                  .select('id')
-                  .single();
-                
-                if (insertErr || !insertedPost) {
-                  result = { success: false, message: `❌ Failed to create post: ${insertErr?.message || 'Unknown error'}` };
-                  break;
-                }
-                
-                // Step 3: Call publish-meta-post with the post_id
-                const publishResponse = await fetch(`${SUPABASE_URL}/functions/v1/publish-meta-post`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                  body: JSON.stringify({ post_id: insertedPost.id }),
-                });
-                const publishResult = await publishResponse.json();
-                result = publishResult.success !== false
-                  ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` }
-                  : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
               } else {
                 // Schedule for later
-                const scheduleResponse = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                  body: JSON.stringify({
-                    companyId: company.id,
-                    content: args.content,
-                    scheduledTime: args.scheduled_time,
-                    imageUrl: postImageUrl,
-                    targetPlatform: args.target_platform || 'facebook',
-                    status: 'approved',
-                  }),
-                });
-                const schedResult = await scheduleResponse.json();
-                result = schedResult.error
-                  ? { success: false, message: `❌ Scheduling failed: ${schedResult.error}` }
-                  : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With image' : '📝 Text only'}` };
+                if (imageGenFailed) {
+                  // Insert as pending_image — async gen will update before scheduled time
+                  const { data: pendingPost, error: pendingErr } = await supabase
+                    .from('scheduled_posts')
+                    .insert({
+                      company_id: company.id,
+                      page_id: metaCred.page_id,
+                      content: args.content,
+                      image_url: null,
+                      target_platform: targetPlatform,
+                      status: 'pending_image',
+                      scheduled_time: args.scheduled_time,
+                    })
+                    .select('id')
+                    .single();
+
+                  if (!pendingErr && pendingPost) {
+                    fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                      body: JSON.stringify({
+                        companyId: company.id,
+                        customerPhone: '',
+                        conversationId: null,
+                        prompt: args.image_prompt,
+                        messageType: 'generate',
+                        scheduledPostId: pendingPost.id,
+                        bossPhone: company.boss_phone,
+                      }),
+                    }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
+                  }
+
+                  result = {
+                    success: true,
+                    message: `✅ Post scheduled for ${args.scheduled_time}\n⏳ Image is generating — it'll be attached automatically before publishing.`,
+                  };
+                } else {
+                  const scheduleResponse = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                    body: JSON.stringify({
+                      companyId: company.id,
+                      content: args.content,
+                      scheduledTime: args.scheduled_time,
+                      imageUrl: postImageUrl,
+                      targetPlatform: targetPlatform,
+                      status: 'approved',
+                    }),
+                  });
+                  const schedResult = await scheduleResponse.json();
+                  result = schedResult.error
+                    ? { success: false, message: `❌ Scheduling failed: ${schedResult.error}` }
+                    : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined };
+                }
               }
               break;
             }
