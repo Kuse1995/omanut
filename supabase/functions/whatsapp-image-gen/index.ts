@@ -458,32 +458,34 @@ Respond ONLY with valid JSON:
       const assessment = JSON.parse(cleaned);
       const scores = assessment.scores || {};
 
-      // Calculate weighted average: Product(3x) + Brand(3x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
-      const productAcc = scores.productAccuracy ?? 5;
-      const brandAcc = scores.brandLogoAccuracy ?? 5;
+      // Calculate weighted average: ProductFidelity(3x) + BrandHallucination(3x) + ProductMutation(2x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
+      const productFid = scores.productFidelity ?? scores.productAccuracy ?? 5;
+      const brandHalluc = scores.brandHallucinationCheck ?? scores.brandLogoAccuracy ?? 5;
+      const productMut = scores.productMutationCheck ?? 5;
       const promptAdh = scores.promptAdherence ?? 5;
       const composition = scores.composition ?? 5;
       const quality = scores.quality ?? 5;
       const marketing = scores.marketingValue ?? 5;
 
       const weightedScore = (
-        (productAcc * 3) + (brandAcc * 3) + (promptAdh * 2) + composition + quality + marketing
-      ) / 11;
+        (productFid * 3) + (brandHalluc * 3) + (productMut * 2) + (promptAdh * 2) + composition + quality + marketing
+      ) / 13;
 
       const roundedScore = Math.round(weightedScore * 10) / 10;
 
       // Hard-fail rules
       const hardFails: string[] = [];
-      if (productAcc < 8) hardFails.push(`Product Accuracy too low (${productAcc}/10)`);
-      if (brandAcc < 8) hardFails.push(`Brand/Logo Accuracy too low (${brandAcc}/10)`);
+      if (productFid < 8) hardFails.push(`Product Fidelity too low (${productFid}/10) — Hard Geometry violation`);
+      if (brandHalluc < 8) hardFails.push(`Brand Hallucination detected (${brandHalluc}/10) — warped logos or invented elements`);
+      if (productMut < 8) hardFails.push(`Product Mutation detected (${productMut}/10) — packaging or label altered`);
       if (promptAdh < 6) hardFails.push(`Prompt Adherence too low (${promptAdh}/10)`);
       if (quality < 5) hardFails.push(`Quality too low (${quality}/10)`);
       // Any single criterion below 4 = automatic fail
-      const allScores = [productAcc, brandAcc, promptAdh, composition, quality, marketing];
+      const allScores = [productFid, brandHalluc, productMut, promptAdh, composition, quality, marketing];
       const belowFour = allScores.filter(s => s < 4);
       if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
 
-      const pass = hardFails.length === 0 && roundedScore >= 8.0;
+      const pass = hardFails.length === 0 && roundedScore >= 8.5;
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
 
