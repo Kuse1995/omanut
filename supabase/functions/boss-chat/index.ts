@@ -888,6 +888,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: []
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_business_summary",
+          description: "Fetch detailed operational data on demand. Use when the boss asks about business performance, recent conversations, reservations, payments, customer segments, or wants a briefing. Do NOT call for simple commands like image generation, stock checks, or scheduling.",
+          parameters: {
+            type: "object",
+            properties: {
+              focus: {
+                type: "string",
+                enum: ["conversations", "reservations", "payments", "segments", "action_items", "all"],
+                description: "Which data area to focus on. Use 'all' for a full briefing."
+              }
+            },
+            required: ["focus"]
+          }
+        }
       }
     ];
 
