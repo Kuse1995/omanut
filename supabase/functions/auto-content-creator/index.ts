@@ -145,9 +145,9 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const { imageBase64, text: imageText } = await geminiImageGenerate({
-      model: 'gemini-3-pro-image-preview',
+    const { imageBase64, text: imageText } = await openaiImageGenerate({
       prompt: imagePrompt,
+      quality: 'high',
     });
 
     console.log('Image generation result:', imageBase64 ? 'got image' : 'no image', imageText?.substring(0, 50));

@@ -149,6 +149,117 @@ export async function geminiImageGenerate(options: {
 }
 
 /**
+ * Generate images using OpenAI's native Images API (gpt-image-1.5).
+ * Drop-in replacement for geminiImageGenerate — same return signature.
+ */
+export async function openaiImageGenerate(options: {
+  prompt: string;
+  size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+}): Promise<{ imageBase64: string | null; text: string | null }> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
+
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1',
+      prompt: options.prompt,
+      n: 1,
+      size: options.size || '1024x1024',
+      quality: options.quality || 'high',
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`OpenAI image gen error (${response.status}):`, errText);
+    throw Object.assign(new Error(`Image generation failed: ${response.status}`), { status: response.status });
+  }
+
+  const data = await response.json();
+  const b64 = data.data?.[0]?.b64_json;
+
+  if (!b64) {
+    return { imageBase64: null, text: null };
+  }
+
+  return { imageBase64: `data:image/png;base64,${b64}`, text: null };
+}
+
+/**
+ * Edit/transform images using OpenAI's Images Edit API (gpt-image-1.5).
+ * Supports input images for product-anchored generation and edit flows.
+ */
+export async function openaiImageEdit(options: {
+  prompt: string;
+  inputImageUrls: string[];
+  size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+}): Promise<{ imageBase64: string | null; text: string | null }> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
+
+  // Build multipart form data
+  const formData = new FormData();
+  formData.append('model', 'gpt-image-1');
+  formData.append('prompt', options.prompt);
+  formData.append('n', '1');
+  formData.append('size', options.size || '1024x1024');
+  formData.append('quality', options.quality || 'high');
+
+  // Fetch and attach input images
+  for (let i = 0; i < options.inputImageUrls.length; i++) {
+    const imageUrl = options.inputImageUrls[i];
+    try {
+      let imageBlob: Blob;
+      if (imageUrl.startsWith('data:')) {
+        const match = imageUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (match) {
+          const bytes = Uint8Array.from(atob(match[2]), c => c.charCodeAt(0));
+          imageBlob = new Blob([bytes], { type: match[1] });
+        } else continue;
+      } else {
+        const imgResponse = await fetch(imageUrl);
+        if (!imgResponse.ok) continue;
+        imageBlob = await imgResponse.blob();
+      }
+      // Convert to PNG blob for OpenAI compatibility
+      formData.append('image[]', imageBlob, `input_${i}.png`);
+    } catch (e) {
+      console.error(`Failed to fetch input image ${i}:`, e);
+    }
+  }
+
+  const response = await fetch('https://api.openai.com/v1/images/edits', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`OpenAI image edit error (${response.status}):`, errText);
+    throw Object.assign(new Error(`Image edit failed: ${response.status}`), { status: response.status });
+  }
+
+  const data = await response.json();
+  const b64 = data.data?.[0]?.b64_json;
+
+  if (!b64) {
+    return { imageBase64: null, text: null };
+  }
+
+  return { imageBase64: `data:image/png;base64,${b64}`, text: null };
+}
+
+/**
  * Convenience wrapper that returns parsed JSON response (non-streaming).
  */
 export async function geminiChatJSON(options: GeminiChatOptions): Promise<any> {
