@@ -1476,7 +1476,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
-            // ========== BMS TOOLS ==========
+            // ========== BMS TOOLS (with streaming ack for slow calls) ==========
             case 'check_stock':
             case 'record_sale':
             case 'update_stock':
@@ -1502,8 +1502,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 result = { success: false, message: '❌ BMS integration not configured.' };
                 break;
               }
+
+              // Streaming ack config
+              const BMS_ACK_TIMEOUT = 8000;
+              const bmsAckMessages: Record<string, string> = {
+                check_stock: "Checking inventory... 🔍", get_product_variants: "Checking options... 🔍",
+                sales_report: "Pulling up reports... 📊", get_company_statistics: "Pulling up stats... 📊",
+                profit_loss_report: "Generating P&L... 📊", get_expenses: "Looking up expenses... 📊",
+                get_outstanding_receivables: "Checking receivables... 📊", get_outstanding_payables: "Checking payables... 📊",
+                create_order: "Processing order... 🛒", record_sale: "Recording sale... 🛒",
+                create_quotation: "Generating quotation... 📄", create_invoice: "Generating invoice... 📄",
+                get_order_status: "Checking order status... 📦", cancel_order: "Processing cancellation... ❌",
+                get_customer_history: "Looking up history... 📋", get_low_stock_items: "Checking low stock... ⚠️",
+                clock_in: "Clocking in... ⏰", clock_out: "Clocking out... ⏰",
+                record_expense: "Recording expense... 💰", update_stock: "Updating stock... 📦",
+              };
+
               try {
-                const bmsResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                const bmsFetchFn = () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
@@ -1515,7 +1531,40 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     companyId: company.id,
                   }),
                 });
-                const bmsResult = await bmsResponse.json();
+
+                // Race: BMS fetch vs ack timeout
+                const resultPromise = bmsFetchFn().then(r => r.json());
+                const ackPromise = new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), BMS_ACK_TIMEOUT));
+                const race = await Promise.race([
+                  resultPromise.then(data => ({ type: 'data' as const, data })),
+                  ackPromise.then(() => ({ type: 'timeout' as const }))
+                ]);
+
+                let bmsResult: any;
+                if (race.type === 'timeout') {
+                  // Send ack to boss via Twilio
+                  const ackMsg = bmsAckMessages[functionName] || "Working on that... ⏳";
+                  const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+                  const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+                  if (TWILIO_SID && TWILIO_TOKEN && company.boss_phone && company.whatsapp_number) {
+                    const fromNum = company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+                    const toNum = company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`;
+                    const fd = new URLSearchParams();
+                    fd.append('From', fromNum);
+                    fd.append('To', toNum);
+                    fd.append('Body', ackMsg);
+                    fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+                      method: 'POST',
+                      headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+                      body: fd.toString(),
+                    }).catch(e => console.error('[BOSS-ACK] Failed:', e));
+                    console.log(`[BOSS-ACK] Sent: "${ackMsg}" for ${functionName}`);
+                  }
+                  bmsResult = await resultPromise;
+                } else {
+                  bmsResult = race.data;
+                }
+
                 if (bmsResult.success) {
                   // Format BMS results with emoji indicators for boss
                   let formatted = '';
