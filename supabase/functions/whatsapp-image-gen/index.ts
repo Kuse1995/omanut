@@ -298,8 +298,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     if (response.ok) {
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
-      const brief = JSON.parse(cleaned);
+      const brief = safeParseJSON(content);
       console.log(`[PROMPT-OPTIMIZER] Intent: ${brief.intent}, Photography: ${brief.photographyStyle}`);
       console.log(`[PROMPT-OPTIMIZER] Final prompt: ${brief.finalPrompt?.substring(0, 200)}`);
       return { finalPrompt: brief.finalPrompt || userPrompt, intent: brief.intent || 'general', brief };
