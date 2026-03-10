@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat, geminiImageGenerate } from "../_shared/gemini-client.ts";
+import { geminiChat, openaiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -145,9 +145,9 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const { imageBase64, text: imageText } = await geminiImageGenerate({
-      model: 'gemini-3-pro-image-preview',
+    const { imageBase64, text: imageText } = await openaiImageGenerate({
       prompt: imagePrompt,
+      quality: 'high',
     });
 
     console.log('Image generation result:', imageBase64 ? 'got image' : 'no image', imageText?.substring(0, 50));

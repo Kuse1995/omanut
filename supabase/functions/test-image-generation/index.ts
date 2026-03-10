@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { geminiChat, geminiImageGenerate } from "../_shared/gemini-client.ts";
+import { geminiChat, openaiImageGenerate, openaiImageEdit } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -280,8 +280,8 @@ async function runImagePipeline(
     supervisor_warnings: warnings,
     final_prompt: refinedPrompt,
     reference_count: referenceUrls.length,
-    model: 'gemini-3-pro-image-preview',
-    pipeline_version: '6-agent-v1',
+    model: 'openai/gpt-image-1',
+    pipeline_version: '6-agent-v2-openai',
   };
 
   // Stage 5-6: Generate + Quality loop
@@ -303,11 +303,17 @@ async function runImagePipeline(
       genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep it UNCHANGED. ONLY change environment/background/lighting.\n\n${currentPrompt}`;
     }
 
-    const { imageBase64 } = await geminiImageGenerate({
-      model: 'gemini-3-pro-image-preview',
-      prompt: genPrompt,
-      inputImageUrls: inputImages.length > 0 ? inputImages.slice(0, 4) : undefined,
-    });
+    const hasInputImages = inputImages.length > 0;
+    const { imageBase64 } = hasInputImages
+      ? await openaiImageEdit({
+          prompt: genPrompt,
+          inputImageUrls: inputImages.slice(0, 4),
+          quality: 'high',
+        })
+      : await openaiImageGenerate({
+          prompt: genPrompt,
+          quality: 'high',
+        });
 
     if (!imageBase64) throw new Error('No image generated');
 
