@@ -1686,12 +1686,16 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     case 'check_stock': {
                       if (Array.isArray(d)) {
                         formatted = d.map((p: any) => {
-                          const status = p.quantity <= 0 ? '🔴' : p.quantity <= (p.reorder_level || 5) ? '🟡' : '🟢';
-                          return `${status} ${p.name}: ${p.quantity} in stock @ ${company.currency_prefix}${p.selling_price}`;
+                          const qty = p.current_stock ?? p.quantity ?? 0;
+                          const price = p.unit_price ?? p.selling_price ?? 0;
+                          const status = qty <= 0 ? '🔴' : qty <= (p.reorder_level || 5) ? '🟡' : '🟢';
+                          return `${status} ${p.name}: ${qty} in stock @ ${company.currency_prefix}${price}`;
                         }).join('\n');
                       } else if (d?.name) {
-                        const status = d.quantity <= 0 ? '🔴' : d.quantity <= (d.reorder_level || 5) ? '🟡' : '🟢';
-                        formatted = `${status} ${d.name}: ${d.quantity} in stock @ ${company.currency_prefix}${d.selling_price}`;
+                        const qty = d.current_stock ?? d.quantity ?? 0;
+                        const price = d.unit_price ?? d.selling_price ?? 0;
+                        const status = qty <= 0 ? '🔴' : qty <= (d.reorder_level || 5) ? '🟡' : '🟢';
+                        formatted = `${status} ${d.name}: ${qty} in stock @ ${company.currency_prefix}${price}`;
                       } else {
                         formatted = JSON.stringify(d);
                       }
