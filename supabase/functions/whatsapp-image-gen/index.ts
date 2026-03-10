@@ -689,7 +689,7 @@ async function runImagePipeline(
       break;
     }
 
-    if (attempt <= maxRetries && qualityResult.retryPrompt) {
+    if (attempt <= effectiveMaxRetries && qualityResult.retryPrompt) {
       console.log(`[PIPELINE] Quality check FAILED (score: ${qualityResult.score}/10), retrying with improvements...`);
       currentPrompt = `${currentPrompt}\n\nIMPROVEMENTS NEEDED: ${qualityResult.retryPrompt}\nISSUES TO FIX: ${qualityResult.issues.join('; ')}`;
     } else {
