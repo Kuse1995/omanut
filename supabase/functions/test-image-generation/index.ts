@@ -303,11 +303,17 @@ async function runImagePipeline(
       genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep it UNCHANGED. ONLY change environment/background/lighting.\n\n${currentPrompt}`;
     }
 
-    const { imageBase64 } = await geminiImageGenerate({
-      model: 'gemini-3-pro-image-preview',
-      prompt: genPrompt,
-      inputImageUrls: inputImages.length > 0 ? inputImages.slice(0, 4) : undefined,
-    });
+    const hasInputImages = inputImages.length > 0;
+    const { imageBase64 } = hasInputImages
+      ? await openaiImageEdit({
+          prompt: genPrompt,
+          inputImageUrls: inputImages.slice(0, 4),
+          quality: 'high',
+        })
+      : await openaiImageGenerate({
+          prompt: genPrompt,
+          quality: 'high',
+        });
 
     if (!imageBase64) throw new Error('No image generated');
 
