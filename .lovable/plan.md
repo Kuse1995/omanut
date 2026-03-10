@@ -1,122 +1,78 @@
-# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## What Was Built
 
-### bms-agent/index.ts — 9 new actions added
-- `get_product_variants` — colors/sizes for products
-- `create_order` — customer order placement
-- `get_order_status` — order tracking
-- `update_order_status` — boss updates order status
-- `cancel_order` — cancel orders
-- `get_customer_history` — purchase history lookup
-- `get_company_statistics` — impact stats
-- `create_quotation` — formal price quotes
-- `create_invoice` — invoice generation
-- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
+# Frustration Signal Detection & Auto-Escalation
 
-### whatsapp-messages/index.ts — Customer-facing tools
-- 9 new tool definitions for customer AI
-- Complexity classifier updated with order/variant/quote/invoice triggers
-- Mandatory checkout tools expanded
-- Tool handlers for all new BMS actions
+## Overview
 
-### boss-chat/index.ts — Boss-facing tools
-- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
-- Tool handlers with formatted emoji responses
+Add a "Frustration Signal Detector" that tracks consecutive AI errors per conversation. When 2+ consecutive errors are detected (wrong image, wrong stock data, BMS failures, behavior drift), silently flag `#SYSTEM_RECALIBRATION_REQUIRED` to the Boss Agent and suggest human takeover.
 
-### bms-callback/index.ts — NEW webhook endpoint
-- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
-- Authenticated via BMS_API_SECRET
-- Sends WhatsApp notifications to boss and/or customer via Twilio
+## Architecture
 
-# Phase 2: Operations, Finance & HR — COMPLETED ✅
+```text
+Customer msg → AI responds → Post-Response Frustration Check
+                                    │
+                    ┌────────────────┴────────────────┐
+                    │  Count recent errors for this   │
+                    │  conversation from ai_error_logs │
+                    └────────────────┬────────────────┘
+                                    │
+                    ┌───── < 2 consecutive ──── OK, continue
+                    │
+              ≥ 2 consecutive errors
+                    │
+                    ▼
+        ┌───────────────────────────┐
+        │  1. Log #SYSTEM_RECAL...  │
+        │  2. Silent boss notify    │
+        │  3. Suggest takeover      │
+        │  4. Mark conversation     │
+        └───────────────────────────┘
+```
 
-## What Was Built
+## Implementation
 
-### bms-agent/index.ts — 10 new actions added
-- `get_low_stock_items` — products below reorder level
-- `record_expense` — log business expenses
-- `get_expenses` — expense history with filters
-- `get_outstanding_receivables` — unpaid invoices
-- `get_outstanding_payables` — pending vendor bills
-- `profit_loss_report` — P&L with date range
-- `clock_in` — employee attendance start
-- `clock_out` — employee attendance end
-- `create_contact` — website contact form submissions
-- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
-- Added `tracking_number` to `update_order_status`
+### 1. `whatsapp-messages/index.ts` — Add frustration detection after response validation (~line 3560)
 
-### boss-chat/index.ts — 9 new tool definitions + handlers
-- `get_low_stock_items` — inventory warnings
-- `record_expense` — expense tracking
-- `get_expenses` — expense reporting
-- `get_outstanding_receivables` — accounts receivable
-- `get_outstanding_payables` — accounts payable
-- `profit_loss_report` — financial performance
-- `clock_in` / `clock_out` — HR attendance
-- Updated `sales_report` tool to use `start_date`/`end_date`
-- Updated system prompt with Finance & HR capabilities
+**New function: `detectFrustrationSignals`**
+- Query `ai_error_logs` for the current `conversation_id`, ordered by `created_at DESC`, limit 5
+- Check if the 2 most recent entries are consecutive (no successful interactions between them)
+- Also detect inline frustration signals from the customer's message: repeated complaints, "you already told me wrong", "that's not what I asked", explicit frustration keywords
+- Error types that count: `behavior_drift`, `wrong_stock_data`, `bms_error`, `wrong_image`, `tool_failure`, `hallucination`
 
-### whatsapp-messages/index.ts — Customer-facing
-- Added `create_contact` tool definition + handler
-- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+**New function: `sendRecalibrationAlert`**
+- Calls `send-boss-notification` with a new `system_recalibration` notification type
+- Message format: `🚨 #SYSTEM_RECALIBRATION_REQUIRED\n\nConversation: [customer_name]\nPhone: [phone]\nConsecutive Errors: [count]\nError Types: [list]\n\nRecommendation: Manual human takeover advised.\n\nReply TAKEOVER [phone] to assume control.`
+- Logs to `ai_error_logs` with `error_type: 'frustration_escalation'`
 
-### bms-callback/index.ts — New event
-- Added `new_contact` event handler (notifies boss of website inquiries)
+**Integration point** — after the response validation layer (line ~3560) and before inserting the assistant message:
+- Call `detectFrustrationSignals(conversationId, company, supabase)`
+- Also log errors to `ai_error_logs` when BMS tool calls fail (currently only behavior_drift is logged)
 
-## Phase 2.5: PDF Document Generation — COMPLETED ✅
+### 2. `whatsapp-messages/index.ts` — Track tool errors in existing tool execution blocks
 
-### generate-document/index.ts — NEW edge function
-- Generates professionally branded A4 PDFs using pdf-lib
-- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
-- Auto-uploads to company-documents storage with 7-day signed URLs
-- Auto-sends PDFs to boss via WhatsApp (Twilio)
-- Invoices include payment info (MTN/Airtel mobile money numbers)
+In the BMS tool execution catch blocks (~line 3407 and similar), insert `ai_error_logs` entries with `error_type: 'tool_failure'` so the frustration detector has data to work with. Currently only `behavior_drift` is logged.
 
-### boss-chat/index.ts — generate_document tool added
-- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
-- AI fetches data first (via BMS tools), then calls generate_document with the results
-- System prompt updated with document generation instructions
+### 3. `send-boss-notification/index.ts` — Add `system_recalibration` notification type
 
-## Phase 2.6: Streaming Acknowledgements — COMPLETED ✅
+New case in the switch statement:
+```
+case 'system_recalibration':
+  message = `🚨 #SYSTEM_RECALIBRATION_REQUIRED\n\n...`
+```
 
-### Problem Solved
-BMS tool calls taking >8s left users staring at silence. Now sends an immediate "working on it..." message via Twilio while continuing to wait for the BMS result.
+### 4. Customer frustration keyword detection
 
-### Architecture
-Race-based timeout: `Promise.race([bmsFetch, 8s_timer])`. If timer wins, fire-and-forget a Twilio ack, then await the real result.
+Before the AI call, scan the incoming message for frustration signals:
+- "wrong", "not what I asked", "already told you", "incorrect", "you keep", "again?!", "frustrated", "useless"
+- If detected AND there's at least 1 recent error in `ai_error_logs`, treat it as the 2nd consecutive error and trigger escalation immediately
 
-### whatsapp-messages/index.ts
-- Added `sendStreamingAck()` helper — sends ack via Twilio
-- Added `bmsCallWithAck()` wrapper — race-based timeout around any BMS fetch
-- Consolidated 13 individual BMS tool handlers into a single unified handler with param mapping
-- Applied to multi-round tool loop (rounds 2-5) as well
-- Context-aware ack messages per tool type (🔍 inventory, 📊 reports, 🛒 orders, 📄 documents)
+## Files Changed
 
-### boss-chat/index.ts
-- Inline race-based timeout added to the consolidated BMS switch-case
-- Sends ack to boss WhatsApp number when BMS calls exceed 8s
-- Same context-aware messages
+| File | Change |
+|------|--------|
+| `supabase/functions/whatsapp-messages/index.ts` | Add `detectFrustrationSignals` + `sendRecalibrationAlert` functions, log tool failures to `ai_error_logs`, integrate after response validation |
+| `supabase/functions/send-boss-notification/index.ts` | Add `system_recalibration` notification type |
 
-## Phase 2.7: Hard Geometry Product Fidelity — COMPLETED ✅
+## No database changes needed
+The existing `ai_error_logs` table has all required columns (`error_type`, `conversation_id`, `company_id`, `severity`, `analysis_details`).
 
-### Problem Solved
-AI-generated product images sometimes exhibited "Brand Hallucination" (warped logos, invented elements) and "Product Mutation" (wrong packaging shape, altered labels). No formal enforcement existed.
-
-### Architecture
-"Hard Geometry" constraint system: BMS product references are treated as immutable ground truth, not creative suggestions.
-
-### whatsapp-image-gen/index.ts — 4 agents updated
-- **Agent 2 (Reference Curator)**: Tags product matches with `[HARD GEOMETRY]` — locks label layout, color hex codes, logo placement, packaging form factor
-- **Agent 3 (Prompt Optimizer)**: New `HARD GEOMETRY CONSTRAINT` rule block — explicit anchor language for pixel-perfect label preservation
-- **Agent 4 (Supervisor Review)**: Added Brand Hallucination Check and Product Mutation Check as explicit rejection criteria
-- **Agent 5 (Quality Assessment)**: 
-  - Renamed dimensions: Product Fidelity (3x), Brand Hallucination Check (3x), Product Mutation Check (2x)
-  - Raised pass threshold from 8.0 → 8.5
-  - Auto-fail for warped logos, invented brand elements, wrong packaging type, altered label layout
-  - Weighted score now /13 (was /11)
-- **Generation prompt prefix**: "HARD GEOMETRY LOCK" with 6 mandatory constraints
-
-## Next Phases (Pending)
-- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
