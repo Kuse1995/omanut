@@ -618,9 +618,9 @@ async function runImagePipeline(
   let attempt = 0;
   let qualityResult: any = null;
 
-  while (attempt <= maxRetries) {
+  while (attempt <= effectiveMaxRetries) {
     attempt++;
-    console.log(`[PIPELINE] Generation attempt ${attempt}/${maxRetries + 1}`);
+    console.log(`[PIPELINE] Generation attempt ${attempt}/${effectiveMaxRetries + 1}`);
 
     // Determine input images: BMS product images (highest priority) → product reference → curated references
     const inputImages: string[] = [];
