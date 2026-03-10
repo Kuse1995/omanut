@@ -547,11 +547,11 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
       };
     }
   } catch (e) {
-    console.error('[QUALITY-ASSESS] Assessment failed, FAILING by default (strict mode):', e);
+    console.error('[QUALITY-ASSESS] Assessment failed:', e);
   }
 
-  // Fallback: FAIL by default in strict mode (force retry)
-  return { score: 5, pass: false, issues: ['Quality assessment failed — defaulting to retry'], retryPrompt: 'Ensure product and brand accuracy. Add more specific details about the product label, colors, and logo placement.' };
+  // Fallback: PASS with moderate score when assessment parsing fails (prevents infinite retry loops)
+  return { score: 7, pass: true, issues: ['Quality assessment parsing failed — auto-passing to avoid timeout'], retryPrompt: null };
 }
 
 // ============================================================
