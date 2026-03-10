@@ -550,8 +550,8 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     console.error('[QUALITY-ASSESS] Assessment failed:', e);
   }
 
-  // Fallback: PASS with moderate score when assessment parsing fails (prevents infinite retry loops)
-  return { score: 7, pass: true, issues: ['Quality assessment parsing failed — auto-passing to avoid timeout'], retryPrompt: null };
+  // Fallback: FAIL so bad images get retried instead of silently passing
+  return { score: 5, pass: false, issues: ['Quality assessment parsing failed — requiring retry'], retryPrompt: 'Regenerate with clearer product focus and simpler composition' };
 }
 
 // ============================================================
@@ -896,7 +896,7 @@ async function selectProductImageForPrompt(
       const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+        body: JSON.stringify({ action: 'list_products', params: { company_id: companyId, search: prompt } }),
       });
       if (bmsRes.ok) {
         const bmsData = await bmsRes.json();
@@ -926,7 +926,7 @@ async function selectProductImageForPrompt(
     const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+      body: JSON.stringify({ action: 'list_products', params: { company_id: companyId, search: prompt } }),
     });
     if (bmsRes.ok) {
       const bmsData = await bmsRes.json();
@@ -1510,6 +1510,55 @@ serve(async (req) => {
         } catch (notifyErr: any) {
           console.error('[IMAGE-GEN] Failed to notify boss of image gen failure:', notifyErr.message);
         }
+      }
+    } else if (!scheduledPostId && bossPhone && imageUrl) {
+      // ── STANDALONE BOSS IMAGE DELIVERY ──
+      // Image was generated async for the boss (not for a post) — deliver it directly via WhatsApp
+      console.log(`[IMAGE-GEN] Standalone boss delivery to ${bossPhone}`);
+      try {
+        const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const { data: postCompany } = await supabase.from('companies').select('twilio_number').eq('id', companyId).single();
+        if (twilioSid && twilioAuth && postCompany?.twilio_number) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+          const deliverMsg = `🎨 Your image is ready!`;
+          const formData = new URLSearchParams();
+          formData.append('To', `whatsapp:${bossPhone}`);
+          formData.append('From', `whatsapp:${postCompany.twilio_number}`);
+          formData.append('Body', deliverMsg);
+          formData.append('MediaUrl', imageUrl);
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString(),
+          });
+          console.log(`[IMAGE-GEN] Standalone image delivered to boss ${bossPhone}`);
+        }
+      } catch (deliverErr: any) {
+        console.error('[IMAGE-GEN] Failed to deliver standalone image to boss:', deliverErr.message);
+      }
+    } else if (!scheduledPostId && bossPhone && !imageUrl) {
+      // Standalone boss image gen failed — notify
+      console.error(`[IMAGE-GEN] Standalone boss image gen failed, notifying ${bossPhone}`);
+      try {
+        const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const { data: postCompany } = await supabase.from('companies').select('twilio_number').eq('id', companyId).single();
+        if (twilioSid && twilioAuth && postCompany?.twilio_number) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+          const failMsg = `⚠️ Sorry, I couldn't generate that image. Please try again with a different description.`;
+          const formData = new URLSearchParams();
+          formData.append('To', `whatsapp:${bossPhone}`);
+          formData.append('From', `whatsapp:${postCompany.twilio_number}`);
+          formData.append('Body', failMsg);
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString(),
+          });
+        }
+      } catch (notifyErr: any) {
+        console.error('[IMAGE-GEN] Failed to notify boss of standalone failure:', notifyErr.message);
       }
     }
 

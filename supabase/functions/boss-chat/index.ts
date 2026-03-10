@@ -1800,18 +1800,28 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
               const imgPrompt = functionName === 'generate_image' ? args.prompt : args.instructions;
 
-              const IMG_GEN_TIMEOUT = 45000;
+              // Check if a previous round already fired async image gen — don't stack them
+              if ((globalThis as any).__imageGenInProgress) {
+                console.log(`[BOSS-TOOL-${functionName}] Skipping — async image gen already in progress from previous round`);
+                result = { success: true, message: '🎨 Image is already generating in the background. It will be sent to you via WhatsApp when ready. Do NOT request another image.' };
+                break;
+              }
+
+              const IMG_GEN_TIMEOUT = 30000;
+              const imgGenBody = {
+                companyId: company.id,
+                customerPhone: '',
+                conversationId: null,
+                prompt: imgPrompt,
+                messageType,
+                bossPhone: company.boss_phone || '',
+              };
+
               try {
                 const imgGenPromise = fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
-                  body: JSON.stringify({
-                    companyId: company.id,
-                    customerPhone: '',
-                    conversationId: null,
-                    prompt: imgPrompt,
-                    messageType,
-                  }),
+                  body: JSON.stringify(imgGenBody),
                 });
                 const timeoutPromise = new Promise<never>((_, reject) =>
                   setTimeout(() => reject(new Error('Image generation timed out')), IMG_GEN_TIMEOUT)
@@ -1834,8 +1844,15 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
               } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout or error:`, timeoutErr.message);
-                result = { success: true, message: '🎨 Image is being generated in the background. I\'ll send it when ready!' };
+                console.error(`[BOSS-TOOL-${functionName}] Timeout — firing async with bossPhone delivery`);
+                // Fire-and-forget: the image-gen function will deliver via WhatsApp when done
+                fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
+                  body: JSON.stringify(imgGenBody),
+                }).catch(e => console.error('[BOSS-TOOL] Async image gen fire failed:', e));
+                (globalThis as any).__imageGenInProgress = true;
+                result = { success: true, message: '🎨 Image is generating asynchronously. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
               }
               break;
             }
