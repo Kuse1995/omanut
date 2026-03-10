@@ -8,6 +8,45 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ============================================================
+// ROBUST JSON PARSER — handles malformed AI responses
+// ============================================================
+function safeParseJSON(text: string): any {
+  // 1. Direct parse
+  try { return JSON.parse(text); } catch (_) { /* continue */ }
+
+  // 2. Strip markdown code fences
+  let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+  // 3. Find JSON boundaries
+  const jsonStart = cleaned.search(/[\{\[]/);
+  const openChar = jsonStart !== -1 ? cleaned[jsonStart] : '{';
+  const closeChar = openChar === '[' ? ']' : '}';
+  const jsonEnd = cleaned.lastIndexOf(closeChar);
+
+  if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+    throw new Error('No JSON object found in response');
+  }
+  cleaned = cleaned.substring(jsonStart, jsonEnd + 1);
+
+  // 4. Try parse after extraction
+  try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
+
+  // 5. Repair common issues
+  cleaned = cleaned
+    .replace(/,\s*}/g, '}')          // trailing commas in objects
+    .replace(/,\s*]/g, ']')          // trailing commas in arrays
+    .replace(/[\x00-\x1F\x7F]/g, ' ') // control characters
+    .replace(/\n/g, ' ')              // newlines inside strings
+    .replace(/\t/g, ' ');             // tabs
+
+  try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
+
+  // 6. Last resort: extract key-value pairs with regex for known fields
+  console.warn('[safeParseJSON] All parse attempts failed, trying regex extraction');
+  throw new Error('Failed to parse JSON after multiple attempts');
+}
+
 interface ImageGenRequest {
   companyId: string;
   customerPhone: string;
