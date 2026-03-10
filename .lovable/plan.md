@@ -1,83 +1,67 @@
-# Phase 1: BMS Deep Integration — COMPLETED ✅
 
-## What Was Built
 
-### bms-agent/index.ts — 9 new actions added
-- `get_product_variants` — colors/sizes for products
-- `create_order` — customer order placement
-- `get_order_status` — order tracking
-- `update_order_status` — boss updates order status
-- `cancel_order` — cancel orders
-- `get_customer_history` — purchase history lookup
-- `get_company_statistics` — impact stats
-- `create_quotation` — formal price quotes
-- `create_invoice` — invoice generation
-- Enhanced `sales_report` with `date_from`, `date_to`, `group_by`
+# Streaming Acknowledgement for Slow BMS Tool Calls
 
-### whatsapp-messages/index.ts — Customer-facing tools
-- 9 new tool definitions for customer AI
-- Complexity classifier updated with order/variant/quote/invoice triggers
-- Mandatory checkout tools expanded
-- Tool handlers for all new BMS actions
+## Problem
 
-### boss-chat/index.ts — Boss-facing tools
-- 8 new tool definitions (order mgmt, customer history, stats, quotes, invoices)
-- Tool handlers with formatted emoji responses
+When BMS tool calls (check_stock, sales_report, etc.) take longer than ~8 seconds, the customer sees nothing — no typing indicator, no acknowledgement. This creates a poor experience where it looks like the bot is unresponsive.
 
-### bms-callback/index.ts — NEW webhook endpoint
-- Receives proactive BMS events (low_stock, new_order, payment_confirmed, order_shipped, daily_summary, etc.)
-- Authenticated via BMS_API_SECRET
-- Sends WhatsApp notifications to boss and/or customer via Twilio
+## Solution
 
-# Phase 2: Operations, Finance & HR — COMPLETED ✅
+Add a **race-based timeout wrapper** around every BMS tool call. If the BMS doesn't respond within 8 seconds, immediately send a "streaming acknowledgement" message to the customer via Twilio (e.g., "Let me check that for you, one moment..."), then continue waiting for the actual BMS result.
 
-## What Was Built
+### Architecture
 
-### bms-agent/index.ts — 10 new actions added
-- `get_low_stock_items` — products below reorder level
-- `record_expense` — log business expenses
-- `get_expenses` — expense history with filters
-- `get_outstanding_receivables` — unpaid invoices
-- `get_outstanding_payables` — pending vendor bills
-- `profit_loss_report` — P&L with date range
-- `clock_in` — employee attendance start
-- `clock_out` — employee attendance end
-- `create_contact` — website contact form submissions
-- Fixed `sales_report` params: `start_date`/`end_date` (was `date_from`/`date_to`)
-- Added `tracking_number` to `update_order_status`
+```text
+Customer asks "Do you have X in stock?"
+       │
+       ▼
+AI calls check_stock tool
+       │
+       ├── BMS responds < 8s → normal flow (no ack)
+       │
+       └── BMS takes > 8s →
+              ├── Send ack via Twilio: "Checking our warehouse now, one moment… 🔍"
+              └── Continue waiting for BMS result → send final answer
+```
 
-### boss-chat/index.ts — 9 new tool definitions + handlers
-- `get_low_stock_items` — inventory warnings
-- `record_expense` — expense tracking
-- `get_expenses` — expense reporting
-- `get_outstanding_receivables` — accounts receivable
-- `get_outstanding_payables` — accounts payable
-- `profit_loss_report` — financial performance
-- `clock_in` / `clock_out` — HR attendance
-- Updated `sales_report` tool to use `start_date`/`end_date`
-- Updated system prompt with Finance & HR capabilities
+### Implementation
 
-### whatsapp-messages/index.ts — Customer-facing
-- Added `create_contact` tool definition + handler
-- Updated complexity classifier with `expense|payable|receivable|contact|inquiry`
+**1. Create `bmsCallWithAck` helper function** (in `whatsapp-messages/index.ts`)
 
-### bms-callback/index.ts — New event
-- Added `new_contact` event handler (notifies boss of website inquiries)
+A wrapper that:
+- Starts the BMS fetch
+- Starts an 8-second timer
+- If timer fires first: sends a Twilio acknowledgement message to the customer, sets a flag so the final response knows an ack was already sent
+- Returns the BMS result regardless
 
-## Phase 2.5: PDF Document Generation — COMPLETED ✅
+**2. Replace all direct BMS `fetch()` calls** in the first-round tool execution block
 
-### generate-document/index.ts — NEW edge function
-- Generates professionally branded A4 PDFs using pdf-lib
-- Supports 8 document types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
-- Fully branded templates: company header bar, footer with contact info, "Powered by Omanut AI" watermark
-- Auto-uploads to company-documents storage with 7-day signed URLs
-- Auto-sends PDFs to boss via WhatsApp (Twilio)
-- Invoices include payment info (MTN/Airtel mobile money numbers)
+Currently there are ~10+ BMS tool handlers (`check_stock`, `record_sale`, `get_product_variants`, `create_order`, `get_order_status`, `cancel_order`, `get_customer_history`, `get_company_statistics`, `create_quotation`, `create_invoice`, `get_low_stock_items`, etc.) that each call `fetch(bms-agent)` directly. Wrap each in `bmsCallWithAck`.
 
-### boss-chat/index.ts — generate_document tool added
-- Boss can say "send me the sales report as PDF" or "I need an invoice PDF"
-- AI fetches data first (via BMS tools), then calls generate_document with the results
-- System prompt updated with document generation instructions
+**3. Same pattern for multi-round tool loop** (rounds 2-5)
 
-## Next Phases (Pending)
-- Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
+The multi-round loop at line ~3396 also has BMS tool handlers. Apply the same wrapper there.
+
+**4. Apply to `boss-chat/index.ts`**
+
+The boss-chat function has its own BMS tool handlers. Apply the same streaming ack pattern there, sending the ack to the boss's WhatsApp number instead.
+
+**5. Context-aware ack messages**
+
+Different tools get different acknowledgement messages:
+- `check_stock` / `get_product_variants` → "Checking our inventory now, one moment... 🔍"
+- `sales_report` / `get_company_statistics` → "Pulling up your reports, one moment... 📊"
+- `create_order` / `record_sale` → "Processing your order, please hold... 🛒"
+- `create_quotation` / `create_invoice` → "Generating your document, just a moment... 📄"
+- Default → "Working on that for you, one moment... ⏳"
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `supabase/functions/whatsapp-messages/index.ts` | Add `bmsCallWithAck` helper, wrap all BMS fetch calls in both first-round and multi-round tool handlers |
+| `supabase/functions/boss-chat/index.ts` | Add same `bmsCallWithAck` helper, wrap all BMS tool handlers in the tool execution loop |
+
+## No database changes needed
+
