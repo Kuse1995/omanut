@@ -125,10 +125,11 @@ async function referenceCuratorAgent(
   const referenceUrls: string[] = [];
   let referenceContext = '';
 
-  // 1. If we have a product match, it's the primary reference
+  // 1. If we have a product match, it's the primary reference — tagged as HARD GEOMETRY
   if (productMatch) {
     referenceUrls.push(getMediaPublicUrl(supabaseUrl, productMatch.file_path));
-    referenceContext += `PRIMARY PRODUCT REFERENCE: ${productMatch.description || productMatch.file_name}\n`;
+    referenceContext += `PRIMARY PRODUCT REFERENCE [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}\n`;
+    referenceContext += `⚠️ HARD GEOMETRY LOCK: This product's label layout, color hex codes, logo placement, and packaging form factor are IMMUTABLE. Treat this reference as pixel-accurate ground truth — not a creative suggestion.\n`;
   }
 
   // 2. Fetch logo assets
