@@ -550,8 +550,8 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     console.error('[QUALITY-ASSESS] Assessment failed:', e);
   }
 
-  // Fallback: PASS with moderate score when assessment parsing fails (prevents infinite retry loops)
-  return { score: 7, pass: true, issues: ['Quality assessment parsing failed — auto-passing to avoid timeout'], retryPrompt: null };
+  // Fallback: FAIL so bad images get retried instead of silently passing
+  return { score: 5, pass: false, issues: ['Quality assessment parsing failed — requiring retry'], retryPrompt: 'Regenerate with clearer product focus and simpler composition' };
 }
 
 // ============================================================
