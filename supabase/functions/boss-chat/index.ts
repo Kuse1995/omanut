@@ -955,7 +955,32 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     let toolImageUrl: string | null = null;
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
 
+    const toolLoopStartTime = Date.now();
+    let thinkingAckSent = false;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // Send "still working" ack if round 2+ and >12s elapsed
+      if (round >= 1 && !thinkingAckSent && (Date.now() - toolLoopStartTime) > 12000) {
+        thinkingAckSent = true;
+        const TWILIO_SID_THINK = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_TOKEN_THINK = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const bossPhone = From;
+        const companyWhatsApp = company.whatsapp_number?.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+        if (TWILIO_SID_THINK && TWILIO_TOKEN_THINK && bossPhone) {
+          const thinkForm = new URLSearchParams();
+          thinkForm.append('From', companyWhatsApp);
+          thinkForm.append('To', bossPhone);
+          thinkForm.append('Body', '🔄 Still working on that...');
+          fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_THINK}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_SID_THINK}:${TWILIO_TOKEN_THINK}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: thinkForm.toString(),
+          }).catch(e => console.error('[BOSS-CHAT] Thinking ack error:', e));
+        }
+      }
       console.log(`[BOSS-CHAT] Tool round ${round + 1}/${MAX_TOOL_ROUNDS}`);
 
       const response = await geminiChat({
