@@ -57,6 +57,13 @@ serve(async (req) => {
       });
     }
 
+    if (post.status === 'pending_image') {
+      return new Response(JSON.stringify({ error: 'Post is waiting for image generation. It will auto-publish when the image is ready.' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (post.status !== 'draft' && post.status !== 'scheduled' && post.status !== 'approved') {
       return new Response(JSON.stringify({ error: `Post is already ${post.status}` }), {
         status: 400,
