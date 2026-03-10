@@ -79,5 +79,25 @@
 - AI fetches data first (via BMS tools), then calls generate_document with the results
 - System prompt updated with document generation instructions
 
+## Phase 2.6: Streaming Acknowledgements — COMPLETED ✅
+
+### Problem Solved
+BMS tool calls taking >8s left users staring at silence. Now sends an immediate "working on it..." message via Twilio while continuing to wait for the BMS result.
+
+### Architecture
+Race-based timeout: `Promise.race([bmsFetch, 8s_timer])`. If timer wins, fire-and-forget a Twilio ack, then await the real result.
+
+### whatsapp-messages/index.ts
+- Added `sendStreamingAck()` helper — sends ack via Twilio
+- Added `bmsCallWithAck()` wrapper — race-based timeout around any BMS fetch
+- Consolidated 13 individual BMS tool handlers into a single unified handler with param mapping
+- Applied to multi-round tool loop (rounds 2-5) as well
+- Context-aware ack messages per tool type (🔍 inventory, 📊 reports, 🛒 orders, 📄 documents)
+
+### boss-chat/index.ts
+- Inline race-based timeout added to the consolidated BMS switch-case
+- Sends ack to boss WhatsApp number when BMS calls exceed 8s
+- Same context-aware messages
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
