@@ -157,5 +157,24 @@ Migrated image generation from Gemini `gemini-3-pro-image-preview` to OpenAI `gp
 - `test-image-generation/index.ts` — pipeline generation call site
 - Pipeline version bumped to `6-agent-v2-openai`
 
+## Phase 2.10: Image-First Publishing Pipeline — COMPLETED ✅
+
+### Problem Solved
+When the boss asked to publish a post with an image "right now," the system raced image generation against a 45s timeout. If generation was slow, it silently published text-only and the image was never delivered.
+
+### Architecture
+"Generate First, Publish Second" — synchronous 90s image generation attempt. If that fails, post enters `pending_image` state and async generation auto-publishes + notifies boss when ready.
+
+### Files Updated
+- `boss-chat/index.ts` — Removed 45s race pattern. Sync 90s gen → publish with image. Fallback: `pending_image` status + async fire-and-forget with `scheduledPostId` callback
+- `publish-meta-post/index.ts` — Added guard: refuses to publish `pending_image` posts (handled by callback)
+- `whatsapp-image-gen/index.ts` — Added auto-publish callback: when `scheduledPostId` is provided, updates post `image_url`, changes status to `approved`, calls `publish-meta-post`, sends WhatsApp confirmation with image preview to boss. On failure, marks post as `failed` and notifies boss.
+
+### Key Behaviors
+- **Happy path**: Image generates within 90s → published with image immediately
+- **Slow gen**: Post saved as `pending_image` → async gen completes → auto-publishes → boss gets WhatsApp confirmation with image
+- **Failed gen**: Post marked `failed` → boss notified → can retry by asking again
+- **No silent degradation**: A post with a requested image NEVER goes out as text-only without explicit boss consent
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
