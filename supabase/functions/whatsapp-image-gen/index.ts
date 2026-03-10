@@ -125,10 +125,11 @@ async function referenceCuratorAgent(
   const referenceUrls: string[] = [];
   let referenceContext = '';
 
-  // 1. If we have a product match, it's the primary reference
+  // 1. If we have a product match, it's the primary reference — tagged as HARD GEOMETRY
   if (productMatch) {
     referenceUrls.push(getMediaPublicUrl(supabaseUrl, productMatch.file_path));
-    referenceContext += `PRIMARY PRODUCT REFERENCE: ${productMatch.description || productMatch.file_name}\n`;
+    referenceContext += `PRIMARY PRODUCT REFERENCE [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}\n`;
+    referenceContext += `⚠️ HARD GEOMETRY LOCK: This product's label layout, color hex codes, logo placement, and packaging form factor are IMMUTABLE. Treat this reference as pixel-accurate ground truth — not a creative suggestion.\n`;
   }
 
   // 2. Fetch logo assets
@@ -222,6 +223,14 @@ RULES:
 7. NEVER include text/watermarks in the prompt unless specifically requested
 8. Consider the business type and what would work for their social media
 
+HARD GEOMETRY CONSTRAINT (when product reference is present):
+- The product label layout must be preserved EXACTLY — same text placement, same proportions, same font sizing
+- Color hex codes from the product reference are LOCKED — do not shift, tint, or reinterpret them
+- Logo placement and orientation must remain pixel-accurate to the reference
+- Packaging form factor (bottle shape, box dimensions, container type) is IMMUTABLE — no mutations allowed
+- You may ONLY change the environment, background, lighting, and context around the product
+- Include explicit anchor language in the finalPrompt: "preserve exact label layout", "maintain original color hex codes", "no logo distortion"
+
 Respond ONLY with valid JSON:
 {
   "intent": "product_showcase|lifestyle|promotional|announcement|behind_scenes|seasonal",
@@ -282,22 +291,29 @@ async function supervisorReviewAgent(
   const systemPrompt = `You are a brand guardian AI supervisor. Your job is to review an image generation prompt before it is sent to the AI image generator.
 
 COMPANY: ${companyName} (${businessType})
-${productMatch ? `PRODUCT: ${productMatch.description || productMatch.file_name}` : 'No specific product'}
+${productMatch ? `PRODUCT [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}` : 'No specific product'}
 ${styleDNA ? `BRAND GUIDELINES:\n${styleDNA}` : ''}
 
 REVIEW CHECKLIST — STRICT:
 1. BRAND ACCURACY: Does the prompt correctly reference the company and product? No competitor names or wrong branding?
    - REJECT if any competitor brand name appears in the prompt
    - REJECT if the company name is misspelled or wrong
-2. PRODUCT FIDELITY: If a product is involved, does the prompt ensure the product stays unchanged?
+2. PRODUCT FIDELITY (HARD GEOMETRY): If a product is involved, does the prompt ensure the product stays unchanged?
    - CHECK that label text, packaging colors, bottle/container shape, and logo placement are explicitly described
    - If product-specific details are missing (e.g., just "a bottle" instead of "a green bottle with the XYZ label"), ADD them
-3. ANTI-GENERIC CHECK: Is the prompt specific enough to avoid generic stock-photo results?
+   - VERIFY the prompt includes explicit "Hard Geometry" anchor language (preserve label layout, maintain color hex codes, no logo distortion)
+3. BRAND HALLUCINATION CHECK: Does the prompt risk generating warped logos, invented brand elements, misspelled brand text, or fabricated visual marks?
+   - REJECT if the prompt lacks explicit instructions to preserve logo fidelity
+   - ADD explicit anti-hallucination language if missing: "reproduce logo exactly as in reference — no warping, no invention, no misspelling"
+4. PRODUCT MUTATION CHECK: Does the prompt risk altering the packaging type, container shape, label layout, or product proportions?
+   - REJECT if the prompt allows creative reinterpretation of the product form factor
+   - ENSURE the prompt locks packaging geometry: "maintain exact packaging shape, label dimensions, and proportional relationships"
+5. ANTI-GENERIC CHECK: Is the prompt specific enough to avoid generic stock-photo results?
    - REJECT vague descriptions like "a nice product photo" — require specific environment, lighting, and composition details
-4. QUALITY MARKERS: Does the prompt include sufficient detail for high-quality output?
-5. SAFETY: No inappropriate, offensive, or misleading content?
-6. COMPOSITION: Is the described layout/composition practical and visually appealing?
-7. STYLE CONSISTENCY: Does it align with the brand's visual identity and past successful images?
+6. QUALITY MARKERS: Does the prompt include sufficient detail for high-quality output?
+7. SAFETY: No inappropriate, offensive, or misleading content?
+8. COMPOSITION: Is the described layout/composition practical and visually appealing?
+9. STYLE CONSISTENCY: Does it align with the brand's visual identity and past successful images?
 
 If the prompt is good, approve it. If it needs refinement, provide a refined version.
 ALWAYS return the refined prompt — even if approved (just return the same prompt if no changes needed).
@@ -362,14 +378,15 @@ You must evaluate the image against each criterion below. Be brutally honest —
 
 SCORING CRITERIA (each 0-10):
 
-| # | Criterion               | Weight | Hard-Fail Rule                          |
-|---|-------------------------|--------|-----------------------------------------|
-| 1 | Product Accuracy        | 3x     | Below 8 = AUTOMATIC FAIL               |
-| 2 | Brand/Logo Accuracy     | 3x     | Below 8 = AUTOMATIC FAIL               |
-| 3 | Prompt Adherence        | 2x     | Below 6 = AUTOMATIC FAIL               |
-| 4 | Composition             | 1x     | No hard-fail                            |
-| 5 | Quality (resolution)    | 1x     | Below 5 = AUTOMATIC FAIL               |
-| 6 | Marketing Value         | 1x     | No hard-fail                            |
+| # | Criterion                    | Weight | Hard-Fail Rule                          |
+|---|------------------------------|--------|-----------------------------------------|
+| 1 | Product Fidelity             | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 2 | Brand Hallucination Check    | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 3 | Product Mutation Check       | 2x     | Below 8 = AUTOMATIC FAIL               |
+| 4 | Prompt Adherence             | 2x     | Below 6 = AUTOMATIC FAIL               |
+| 5 | Composition                  | 1x     | No hard-fail                            |
+| 6 | Quality (resolution)         | 1x     | Below 5 = AUTOMATIC FAIL               |
+| 7 | Marketing Value              | 1x     | No hard-fail                            |
 
 SCORING GUIDE:
 - 10: Perfect, indistinguishable from professional studio work
@@ -379,27 +396,44 @@ SCORING GUIDE:
 - 1-3: Unacceptable, major failures
 - 0: Completely wrong / missing
 
-PRODUCT ACCURACY means: The product shown MUST match the real product exactly — correct label text, correct colors, correct shape, correct proportions. Even small deviations (wrong font on label, slightly different color) should drop this below 8.
+PRODUCT FIDELITY (replaces "Product Accuracy") — HARD GEOMETRY EVALUATION:
+The product shown MUST match the real product exactly — correct label text, correct colors (exact hex codes), correct shape, correct proportions. Even small deviations (wrong font on label, slightly different color shade, label text shifted) should drop this below 8. This is a "Hard Geometry" check — the product reference is ground truth.
 
-BRAND/LOGO ACCURACY means: Any logo or brand mark must be pixel-accurate to the real brand. Misspelled names, wrong logo shapes, or invented brand elements = score 3 or below.
+BRAND HALLUCINATION CHECK — AUTO-FAIL CATEGORY:
+Any of the following = score 3 or below (auto-fail):
+- Warped, distorted, or stretched logos
+- Invented brand elements that don't exist in the reference
+- Misspelled brand names or product names
+- Fabricated visual marks, taglines, or icons not in the original
+- Any logo that looks "approximately right" but has wrong geometry = FAIL
 
-${productMatch ? `EXPECTED PRODUCT: ${productMatch.description || productMatch.file_name}. This specific product must be clearly visible with its branding intact and accurate.` : 'No specific product referenced — score Product Accuracy based on whether any depicted products look realistic and coherent.'}
+PRODUCT MUTATION CHECK — AUTO-FAIL CATEGORY:
+Any of the following = score 3 or below (auto-fail):
+- Wrong packaging type (e.g., bottle shown as can, box shown as pouch)
+- Altered label layout (text repositioned, sections rearranged)
+- Incorrect proportions (product stretched, squished, or resized incorrectly)
+- Wrong container shape (round shown as square, tall shown as short)
+- Added or removed label elements not in the original
+
+${productMatch ? `EXPECTED PRODUCT [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}. This specific product must be clearly visible with its branding intact, label layout identical to reference, and no mutations to packaging or form factor.` : 'No specific product referenced — score Product Fidelity based on whether any depicted products look realistic and coherent. Brand Hallucination and Product Mutation checks score 10 if no product reference exists.'}
 
 You MUST provide detailed reasoning for each score, especially for any score below 8.
 
 Respond ONLY with valid JSON:
 {
   "scores": {
-    "productAccuracy": 0-10,
-    "brandLogoAccuracy": 0-10,
+    "productFidelity": 0-10,
+    "brandHallucinationCheck": 0-10,
+    "productMutationCheck": 0-10,
     "promptAdherence": 0-10,
     "composition": 0-10,
     "quality": 0-10,
     "marketingValue": 0-10
   },
   "reasoning": {
-    "productAccuracy": "explain what's right or wrong about the product depiction",
-    "brandLogoAccuracy": "explain brand/logo accuracy issues",
+    "productFidelity": "Hard Geometry evaluation — does the product match the reference exactly?",
+    "brandHallucinationCheck": "are there any warped logos, invented brand elements, or misspelled text?",
+    "productMutationCheck": "is the packaging type, label layout, and form factor identical to the reference?",
     "promptAdherence": "how well does it match the request",
     "composition": "layout assessment",
     "quality": "resolution/artifacts assessment",
@@ -432,37 +466,39 @@ Respond ONLY with valid JSON:
       const assessment = JSON.parse(cleaned);
       const scores = assessment.scores || {};
 
-      // Calculate weighted average: Product(3x) + Brand(3x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
-      const productAcc = scores.productAccuracy ?? 5;
-      const brandAcc = scores.brandLogoAccuracy ?? 5;
+      // Calculate weighted average: ProductFidelity(3x) + BrandHallucination(3x) + ProductMutation(2x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
+      const productFid = scores.productFidelity ?? scores.productAccuracy ?? 5;
+      const brandHalluc = scores.brandHallucinationCheck ?? scores.brandLogoAccuracy ?? 5;
+      const productMut = scores.productMutationCheck ?? 5;
       const promptAdh = scores.promptAdherence ?? 5;
       const composition = scores.composition ?? 5;
       const quality = scores.quality ?? 5;
       const marketing = scores.marketingValue ?? 5;
 
       const weightedScore = (
-        (productAcc * 3) + (brandAcc * 3) + (promptAdh * 2) + composition + quality + marketing
-      ) / 11;
+        (productFid * 3) + (brandHalluc * 3) + (productMut * 2) + (promptAdh * 2) + composition + quality + marketing
+      ) / 13;
 
       const roundedScore = Math.round(weightedScore * 10) / 10;
 
       // Hard-fail rules
       const hardFails: string[] = [];
-      if (productAcc < 8) hardFails.push(`Product Accuracy too low (${productAcc}/10)`);
-      if (brandAcc < 8) hardFails.push(`Brand/Logo Accuracy too low (${brandAcc}/10)`);
+      if (productFid < 8) hardFails.push(`Product Fidelity too low (${productFid}/10) — Hard Geometry violation`);
+      if (brandHalluc < 8) hardFails.push(`Brand Hallucination detected (${brandHalluc}/10) — warped logos or invented elements`);
+      if (productMut < 8) hardFails.push(`Product Mutation detected (${productMut}/10) — packaging or label altered`);
       if (promptAdh < 6) hardFails.push(`Prompt Adherence too low (${promptAdh}/10)`);
       if (quality < 5) hardFails.push(`Quality too low (${quality}/10)`);
       // Any single criterion below 4 = automatic fail
-      const allScores = [productAcc, brandAcc, promptAdh, composition, quality, marketing];
+      const allScores = [productFid, brandHalluc, productMut, promptAdh, composition, quality, marketing];
       const belowFour = allScores.filter(s => s < 4);
       if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
 
-      const pass = hardFails.length === 0 && roundedScore >= 8.0;
+      const pass = hardFails.length === 0 && roundedScore >= 8.5;
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
 
-      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass}`);
-      console.log(`[QUALITY-ASSESS] Breakdown — Product:${productAcc} Brand:${brandAcc} Prompt:${promptAdh} Comp:${composition} Qual:${quality} Mktg:${marketing}`);
+      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass} (threshold: 8.5)`);
+      console.log(`[QUALITY-ASSESS] Breakdown — Fidelity:${productFid} Halluc:${brandHalluc} Mutation:${productMut} Prompt:${promptAdh} Comp:${composition} Qual:${quality} Mktg:${marketing}`);
       if (hardFails.length > 0) {
         console.log(`[QUALITY-ASSESS] HARD FAILS: ${hardFails.join('; ')}`);
       }
@@ -576,7 +612,13 @@ async function runImagePipeline(
     let genPrompt = currentPrompt;
     const hasProductAnchor = bmsImageUrls.length > 0 || productMatch;
     if (hasProductAnchor) {
-      genPrompt = `CRITICAL: The first reference image is the EXACT product. Keep this product UNCHANGED — same label, logo, colors, shape, proportions. ONLY change the environment/background/lighting.\n\n${currentPrompt}`;
+      genPrompt = `HARD GEOMETRY LOCK — The first reference image is the EXACT product (ground truth). MANDATORY CONSTRAINTS:\n` +
+        `• Preserve the label layout PIXEL-FOR-PIXEL — same text positions, same font sizes, same section arrangement\n` +
+        `• Maintain EXACT color hex codes from the product — no tinting, no color shifting, no reinterpretation\n` +
+        `• Logo must be reproduced with ZERO distortion — no warping, no stretching, no invented elements\n` +
+        `• Packaging form factor is IMMUTABLE — same bottle/box/container shape, same proportions, same dimensions\n` +
+        `• You may ONLY change: environment, background, lighting, camera angle, and surrounding context\n` +
+        `• ANY deviation from the product reference = FAILURE\n\n${currentPrompt}`;
     }
 
     const { imageBase64, text: imageText } = await geminiImageGenerate({
