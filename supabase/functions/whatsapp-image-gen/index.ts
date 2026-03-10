@@ -370,14 +370,15 @@ You must evaluate the image against each criterion below. Be brutally honest —
 
 SCORING CRITERIA (each 0-10):
 
-| # | Criterion               | Weight | Hard-Fail Rule                          |
-|---|-------------------------|--------|-----------------------------------------|
-| 1 | Product Accuracy        | 3x     | Below 8 = AUTOMATIC FAIL               |
-| 2 | Brand/Logo Accuracy     | 3x     | Below 8 = AUTOMATIC FAIL               |
-| 3 | Prompt Adherence        | 2x     | Below 6 = AUTOMATIC FAIL               |
-| 4 | Composition             | 1x     | No hard-fail                            |
-| 5 | Quality (resolution)    | 1x     | Below 5 = AUTOMATIC FAIL               |
-| 6 | Marketing Value         | 1x     | No hard-fail                            |
+| # | Criterion                    | Weight | Hard-Fail Rule                          |
+|---|------------------------------|--------|-----------------------------------------|
+| 1 | Product Fidelity             | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 2 | Brand Hallucination Check    | 3x     | Below 8 = AUTOMATIC FAIL               |
+| 3 | Product Mutation Check       | 2x     | Below 8 = AUTOMATIC FAIL               |
+| 4 | Prompt Adherence             | 2x     | Below 6 = AUTOMATIC FAIL               |
+| 5 | Composition                  | 1x     | No hard-fail                            |
+| 6 | Quality (resolution)         | 1x     | Below 5 = AUTOMATIC FAIL               |
+| 7 | Marketing Value              | 1x     | No hard-fail                            |
 
 SCORING GUIDE:
 - 10: Perfect, indistinguishable from professional studio work
@@ -387,27 +388,44 @@ SCORING GUIDE:
 - 1-3: Unacceptable, major failures
 - 0: Completely wrong / missing
 
-PRODUCT ACCURACY means: The product shown MUST match the real product exactly — correct label text, correct colors, correct shape, correct proportions. Even small deviations (wrong font on label, slightly different color) should drop this below 8.
+PRODUCT FIDELITY (replaces "Product Accuracy") — HARD GEOMETRY EVALUATION:
+The product shown MUST match the real product exactly — correct label text, correct colors (exact hex codes), correct shape, correct proportions. Even small deviations (wrong font on label, slightly different color shade, label text shifted) should drop this below 8. This is a "Hard Geometry" check — the product reference is ground truth.
 
-BRAND/LOGO ACCURACY means: Any logo or brand mark must be pixel-accurate to the real brand. Misspelled names, wrong logo shapes, or invented brand elements = score 3 or below.
+BRAND HALLUCINATION CHECK — AUTO-FAIL CATEGORY:
+Any of the following = score 3 or below (auto-fail):
+- Warped, distorted, or stretched logos
+- Invented brand elements that don't exist in the reference
+- Misspelled brand names or product names
+- Fabricated visual marks, taglines, or icons not in the original
+- Any logo that looks "approximately right" but has wrong geometry = FAIL
 
-${productMatch ? `EXPECTED PRODUCT: ${productMatch.description || productMatch.file_name}. This specific product must be clearly visible with its branding intact and accurate.` : 'No specific product referenced — score Product Accuracy based on whether any depicted products look realistic and coherent.'}
+PRODUCT MUTATION CHECK — AUTO-FAIL CATEGORY:
+Any of the following = score 3 or below (auto-fail):
+- Wrong packaging type (e.g., bottle shown as can, box shown as pouch)
+- Altered label layout (text repositioned, sections rearranged)
+- Incorrect proportions (product stretched, squished, or resized incorrectly)
+- Wrong container shape (round shown as square, tall shown as short)
+- Added or removed label elements not in the original
+
+${productMatch ? `EXPECTED PRODUCT [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}. This specific product must be clearly visible with its branding intact, label layout identical to reference, and no mutations to packaging or form factor.` : 'No specific product referenced — score Product Fidelity based on whether any depicted products look realistic and coherent. Brand Hallucination and Product Mutation checks score 10 if no product reference exists.'}
 
 You MUST provide detailed reasoning for each score, especially for any score below 8.
 
 Respond ONLY with valid JSON:
 {
   "scores": {
-    "productAccuracy": 0-10,
-    "brandLogoAccuracy": 0-10,
+    "productFidelity": 0-10,
+    "brandHallucinationCheck": 0-10,
+    "productMutationCheck": 0-10,
     "promptAdherence": 0-10,
     "composition": 0-10,
     "quality": 0-10,
     "marketingValue": 0-10
   },
   "reasoning": {
-    "productAccuracy": "explain what's right or wrong about the product depiction",
-    "brandLogoAccuracy": "explain brand/logo accuracy issues",
+    "productFidelity": "Hard Geometry evaluation — does the product match the reference exactly?",
+    "brandHallucinationCheck": "are there any warped logos, invented brand elements, or misspelled text?",
+    "productMutationCheck": "is the packaging type, label layout, and form factor identical to the reference?",
     "promptAdherence": "how well does it match the request",
     "composition": "layout assessment",
     "quality": "resolution/artifacts assessment",
