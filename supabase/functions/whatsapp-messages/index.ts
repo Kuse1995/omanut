@@ -3406,6 +3406,19 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolExecutionContext.push(`[R${currentRound}] ${fnName} completed`);
             } catch (e) {
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+              // Log tool failure for frustration detection
+              try {
+                await supabase.from('ai_error_logs').insert({
+                  company_id: company.id,
+                  conversation_id: conversationId,
+                  error_type: 'tool_failure',
+                  severity: 'warning',
+                  original_message: userMessage,
+                  ai_response: `Tool ${fnName} failed in round ${currentRound}`,
+                  analysis_details: { tool_name: fnName, round: currentRound, error: String(e) },
+                  auto_flagged: true
+                });
+              } catch (_logErr) { /* silent */ }
             }
           } else {
             // For other tools in subsequent rounds, provide a generic acknowledgment
