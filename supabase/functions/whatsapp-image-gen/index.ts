@@ -456,7 +456,7 @@ ${productMatch ? `EXPECTED PRODUCT [HARD GEOMETRY]: ${productMatch.description |
 
 You MUST provide detailed reasoning for each score, especially for any score below 8.
 
-Respond ONLY with valid JSON:
+Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 {
   "scores": {
     "productFidelity": 0-10,
