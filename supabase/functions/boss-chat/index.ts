@@ -86,108 +86,22 @@ The AI handles everything - generation, editing, posting. Just ask!`;
       });
     }
 
-    // Get recent conversation stats with messages
-    const { data: recentConvs } = await supabase
-      .from('conversations')
-      .select('id, customer_name, phone, started_at, ended_at, status, quality_flag, transcript')
-      .eq('company_id', company.id)
-      .order('started_at', { ascending: false })
-      .limit(10);
-
-    // Get messages for each conversation to build detailed summaries
-    const conversationsWithMessages = await Promise.all(
-      (recentConvs || []).map(async (conv) => {
-        const { data: messages } = await supabase
-          .from('messages')
-          .select('role, content, created_at')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: true })
-          .limit(20);
-        
-        return {
-          ...conv,
-          messages: messages || []
-        };
-      })
-    );
-
-    // Get recent reservations
-    const { data: recentReservations } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    // Specifically get demo bookings
-    const { data: demoBookings } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('company_id', company.id)
-      .ilike('occasion', '%demo%')
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    console.log('Demo bookings found:', demoBookings?.length || 0, demoBookings);
-
-    // Get action items
-    const { data: actionItems } = await supabase
-      .from('action_items')
-      .select('*')
-      .eq('company_id', company.id)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    // Get client insights
-    const { data: clientInfo } = await supabase
-      .from('client_information')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    // Get total statistics for comprehensive sales data
-    const { count: totalConversations } = await supabase
-      .from('conversations')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', company.id);
-
-    const { count: totalReservations } = await supabase
-      .from('reservations')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', company.id);
-
-    // Get unique customer count
-    const { data: uniqueCustomers } = await supabase
-      .from('conversations')
-      .select('phone')
-      .eq('company_id', company.id)
-      .not('phone', 'is', null);
+    // ========== LIGHTWEIGHT COUNTS ONLY (heavy data moved to get_business_summary tool) ==========
+    const [
+      { count: totalConversations },
+      { count: totalReservations },
+      { data: uniqueCustomers },
+      { data: paymentData }
+    ] = await Promise.all([
+      supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('company_id', company.id),
+      supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('company_id', company.id),
+      supabase.from('conversations').select('phone').eq('company_id', company.id).not('phone', 'is', null),
+      supabase.from('payment_transactions').select('amount, payment_status').eq('company_id', company.id)
+    ]);
 
     const uniquePhones = new Set(uniqueCustomers?.map(c => c.phone) || []);
-
-    // Get payment transactions for revenue data
-    const { data: paymentData } = await supabase
-      .from('payment_transactions')
-      .select('amount, payment_status, customer_phone, customer_name, created_at')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
-    const totalRevenue = paymentData?.reduce((sum, p) => 
-      p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
-
-    const pendingRevenue = paymentData?.reduce((sum, p) => 
-      p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
-
-    // Get customer segments
-    const { data: segments } = await supabase
-      .from('customer_segments')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('conversion_score', { ascending: false })
-      .limit(20);
+    const totalRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
+    const pendingRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
 
     // Build context for AI
     const knowledgeBase = company.company_documents
@@ -249,65 +163,6 @@ Always compare actual performance against these goals when providing updates.`;
       ? `\n\nDAILY BRIEFING FORMAT:\n${bossDailyBriefingTemplate}` 
       : '';
 
-    // Format data concisely for AI with actual conversation content
-    const conversationsSummary = conversationsWithMessages?.length 
-      ? `RECENT CONVERSATIONS (showing ${conversationsWithMessages.length} of ${totalConversations || 0} total):\n\n${conversationsWithMessages.map((c: any) => {
-          const messagePreview = c.messages.length > 0 
-            ? c.messages.slice(0, 10).map((m: any) => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content.substring(0, 200)}`).join('\n    ')
-            : 'No messages';
-          
-          const transcript = c.transcript || 'No transcript available';
-          
-          return `\n📞 ${c.customer_name || 'Unknown'} (${c.phone || 'N/A'})
-  Status: ${c.status}${c.quality_flag ? ` | Quality: ${c.quality_flag}` : ''}
-  Started: ${new Date(c.started_at).toLocaleString()}
-  
-  Conversation Preview:
-    ${messagePreview}
-  
-  ${c.transcript ? `Full Transcript Summary:\n    ${transcript.substring(0, 500)}${transcript.length > 500 ? '...' : ''}` : ''}`;
-        }).join('\n\n---\n')}`
-      : 'No recent conversations';
-
-    const demoBookingsSummary = demoBookings?.length
-      ? `${demoBookings.length} demo bookings:\n${demoBookings.map((r: any) =>
-          `• ${r.name} - ${r.date} at ${r.time} (${r.status})`
-        ).join('\n')}`
-      : 'No demo bookings';
-
-    const reservationsSummary = recentReservations?.length
-      ? `${recentReservations.length} recent reservations:\n${recentReservations.map((r: any) =>
-          `• ${r.name} - ${r.guests} guests on ${r.date} at ${r.time} (${r.status})`
-        ).join('\n')}`
-      : 'No recent reservations';
-
-    const actionItemsSummary = actionItems?.length
-      ? `${actionItems.length} pending actions:\n${actionItems.map((a: any) =>
-          `• [${a.priority}] ${a.action_type}: ${a.description}`
-        ).join('\n')}`
-      : 'No pending actions';
-
-    const clientInsightsSummary = clientInfo?.length
-      ? `${clientInfo.length} client insights:\n${clientInfo.map((i: any) =>
-          `• ${i.customer_name || 'Unknown'}: ${i.information}`
-        ).join('\n')}`
-      : 'No client insights';
-
-    const paymentSummary = paymentData?.length
-      ? `RECENT PAYMENTS (last ${Math.min(paymentData.length, 10)}):\n${paymentData.slice(0, 10).map((p: any) =>
-          `• ${p.customer_name || 'Unknown'} (${p.customer_phone || 'N/A'}): ${company.currency_prefix}${Number(p.amount).toFixed(2)} - ${p.payment_status}`
-        ).join('\n')}`
-      : 'No payment transactions';
-
-    const segmentsSummary = segments?.length
-      ? `CUSTOMER SEGMENTS (top 20 by conversion score):\n${segments.map((s: any) => {
-          const badges = [];
-          if (s.has_payment) badges.push(`${company.currency_prefix}${s.total_spend}`);
-          if (s.has_reservation) badges.push('Reserved');
-          return `• ${s.customer_name || 'Unknown'} (${s.customer_phone}): ${s.segment_type.replace(/_/g, ' ').toUpperCase()} | Engagement: ${s.engagement_level} (${s.engagement_score}%) | Intent: ${s.intent_category} (${s.intent_score}%) | Conversion: ${s.conversion_potential} (${s.conversion_score}%)${badges.length ? ` [${badges.join(', ')}]` : ''}`;
-        }).join('\n')}`
-      : 'No customer segments analyzed yet';
-
     const systemPrompt = `You are the trusted right-hand business partner for ${company.name}, a ${company.business_type}.
 
 You're both a strategic advisor and a great conversationalist. The boss can bounce ideas off you, brainstorm strategy, vent about a tough day, or ask you to execute tasks — and you know when to do which. Think of yourself as a smart business partner they're texting on WhatsApp, not a system they're issuing commands to.
@@ -326,7 +181,7 @@ Hours: ${company.hours}
 Services/Menu: ${company.services}
 ${aiOverrides?.system_instructions ? `\nSpecial Context: ${aiOverrides.system_instructions}` : ''}
 
-BUSINESS STATISTICS:
+BUSINESS STATISTICS (lightweight — use get_business_summary tool for detailed data):
 📊 Total Conversations: ${totalConversations || 0}
 👥 Unique Customers: ${uniquePhones.size}
 💰 Total Revenue: ${company.currency_prefix}${totalRevenue.toFixed(2)}
@@ -334,33 +189,20 @@ BUSINESS STATISTICS:
 📅 Total Reservations: ${totalReservations || 0}
 🔄 Conversion Rate: ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%
 
-CURRENT OPERATIONAL DATA:
-${bossDataFocus.includes('conversations') ? conversationsSummary : '(Conversations data not prioritized)'}
-
-${demoBookingsSummary}
-
-${bossDataFocus.includes('reservations') ? reservationsSummary : '(Reservations data not prioritized)'}
-
-${bossDataFocus.includes('action_items') ? actionItemsSummary : '(Action items data not prioritized)'}
-
-${bossDataFocus.includes('customer_insights') ? clientInsightsSummary : '(Client insights data not prioritized)'}
-
-${bossDataFocus.includes('revenue') ? paymentSummary : '(Payment data not prioritized)'}
-
-${segmentsSummary}
-
 ${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
 
 YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
-**DATA ACCESS**: You have FULL access to:
-- All ${totalConversations || 0} conversations with customer names and phone numbers
-- Complete payment history (${company.currency_prefix}${totalRevenue.toFixed(2)} total revenue)
-- All ${totalReservations || 0} reservations
-- Customer segmentation data with engagement, intent, and conversion metrics
-- Action items and client insights
-- Business configuration and settings
-- REAL-TIME inventory and sales data via the Business Management System (BMS)
+**DATA ACCESS**: You have FULL access via the get_business_summary tool:
+- Use get_business_summary(focus: "conversations") for detailed conversation transcripts
+- Use get_business_summary(focus: "reservations") for booking details
+- Use get_business_summary(focus: "payments") for transaction history
+- Use get_business_summary(focus: "segments") for customer segmentation
+- Use get_business_summary(focus: "action_items") for pending tasks and client insights
+- Use get_business_summary(focus: "all") for a full operational briefing
+- You also have REAL-TIME inventory and sales data via the Business Management System (BMS)
+
+IMPORTANT: Only call get_business_summary when the boss asks about business performance, wants a briefing, or needs operational data. Do NOT call it for simple commands like image generation, stock checks, or scheduling.
 
 10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
    - Use check_stock to look up current stock levels and pricing for any product
@@ -1074,6 +916,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: []
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_business_summary",
+          description: "Fetch detailed operational data on demand. Use when the boss asks about business performance, recent conversations, reservations, payments, customer segments, or wants a briefing. Do NOT call for simple commands like image generation, stock checks, or scheduling.",
+          parameters: {
+            type: "object",
+            properties: {
+              focus: {
+                type: "string",
+                enum: ["conversations", "reservations", "payments", "segments", "action_items", "all"],
+                description: "Which data area to focus on. Use 'all' for a full briefing."
+              }
+            },
+            required: ["focus"]
+          }
+        }
       }
     ];
 
@@ -1103,7 +963,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       .select('message_content, response, created_at')
       .eq('company_id', company.id)
       .order('created_at', { ascending: false })
-      .limit(6);
+      .limit(12);
 
     // Build conversation messages with history (oldest first)
     const historyMessages = (recentHistory || []).reverse().flatMap((h: any) => [
@@ -1123,7 +983,32 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     let toolImageUrl: string | null = null;
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
 
+    const toolLoopStartTime = Date.now();
+    let thinkingAckSent = false;
+
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      // Send "still working" ack if round 2+ and >12s elapsed
+      if (round >= 1 && !thinkingAckSent && (Date.now() - toolLoopStartTime) > 12000) {
+        thinkingAckSent = true;
+        const TWILIO_SID_THINK = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_TOKEN_THINK = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const bossPhone = From;
+        const companyWhatsApp = company.whatsapp_number?.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+        if (TWILIO_SID_THINK && TWILIO_TOKEN_THINK && bossPhone) {
+          const thinkForm = new URLSearchParams();
+          thinkForm.append('From', companyWhatsApp);
+          thinkForm.append('To', bossPhone);
+          thinkForm.append('Body', '🔄 Still working on that...');
+          fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_THINK}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_SID_THINK}:${TWILIO_TOKEN_THINK}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: thinkForm.toString(),
+          }).catch(e => console.error('[BOSS-CHAT] Thinking ack error:', e));
+        }
+      }
       console.log(`[BOSS-CHAT] Tool round ${round + 1}/${MAX_TOOL_ROUNDS}`);
 
       const response = await geminiChat({
@@ -1237,7 +1122,87 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               result = { success: true, message: '✅ Quick reference info updated' };
               break;
 
-            case 'get_all_customers': {
+            case 'get_business_summary': {
+              const focus = args.focus || 'all';
+              const summaryParts: string[] = [];
+
+              if (focus === 'conversations' || focus === 'all') {
+                const { data: recentConvs } = await supabase
+                  .from('conversations')
+                  .select('id, customer_name, phone, started_at, status, quality_flag')
+                  .eq('company_id', company.id)
+                  .order('started_at', { ascending: false })
+                  .limit(10);
+                const convsWithMsgs = await Promise.all(
+                  (recentConvs || []).map(async (conv) => {
+                    const { data: msgs } = await supabase
+                      .from('messages')
+                      .select('role, content, created_at')
+                      .eq('conversation_id', conv.id)
+                      .order('created_at', { ascending: true })
+                      .limit(10);
+                    return { ...conv, messages: msgs || [] };
+                  })
+                );
+                summaryParts.push(`RECENT CONVERSATIONS (${convsWithMsgs.length}):\n${convsWithMsgs.map((c: any) => {
+                  const preview = c.messages.slice(0, 5).map((m: any) => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content.substring(0, 150)}`).join('\n  ');
+                  return `📞 ${c.customer_name || 'Unknown'} (${c.phone || 'N/A'}) - ${c.status}\n  ${preview}`;
+                }).join('\n\n')}`);
+              }
+
+              if (focus === 'reservations' || focus === 'all') {
+                const { data: res } = await supabase
+                  .from('reservations')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .order('created_at', { ascending: false })
+                  .limit(10);
+                summaryParts.push(`RECENT RESERVATIONS (${res?.length || 0}):\n${(res || []).map((r: any) =>
+                  `• ${r.name} - ${r.guests} guests on ${r.date} at ${r.time} (${r.status})`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'payments' || focus === 'all') {
+                const { data: payments } = await supabase
+                  .from('payment_transactions')
+                  .select('amount, payment_status, customer_phone, customer_name, created_at')
+                  .eq('company_id', company.id)
+                  .order('created_at', { ascending: false })
+                  .limit(15);
+                summaryParts.push(`RECENT PAYMENTS (${payments?.length || 0}):\n${(payments || []).map((p: any) =>
+                  `• ${p.customer_name || 'Unknown'} (${p.customer_phone || 'N/A'}): ${company.currency_prefix}${Number(p.amount).toFixed(2)} - ${p.payment_status}`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'segments' || focus === 'all') {
+                const { data: segs } = await supabase
+                  .from('customer_segments')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .order('conversion_score', { ascending: false })
+                  .limit(15);
+                summaryParts.push(`CUSTOMER SEGMENTS (${segs?.length || 0}):\n${(segs || []).map((s: any) =>
+                  `• ${s.customer_name || 'Unknown'} (${s.customer_phone}): ${s.segment_type?.replace(/_/g, ' ')} | Engagement: ${s.engagement_level} | Intent: ${s.intent_category}`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'action_items' || focus === 'all') {
+                const [{ data: actions }, { data: clientInsights }] = await Promise.all([
+                  supabase.from('action_items').select('*').eq('company_id', company.id).eq('status', 'pending').order('created_at', { ascending: false }).limit(5),
+                  supabase.from('client_information').select('*').eq('company_id', company.id).order('created_at', { ascending: false }).limit(10)
+                ]);
+                summaryParts.push(`PENDING ACTIONS (${actions?.length || 0}):\n${(actions || []).map((a: any) =>
+                  `• [${a.priority}] ${a.action_type}: ${a.description}`
+                ).join('\n')}`);
+                summaryParts.push(`CLIENT INSIGHTS (${clientInsights?.length || 0}):\n${(clientInsights || []).map((i: any) =>
+                  `• ${i.customer_name || 'Unknown'}: ${i.information}`
+                ).join('\n')}`);
+              }
+
+              result = { success: true, message: summaryParts.join('\n\n') || 'No data found for the requested focus area.' };
+              break;
+            }
+
               const { data: allConvs } = await supabase
                 .from('conversations')
                 .select('customer_name, phone, started_at, status')
