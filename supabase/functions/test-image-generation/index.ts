@@ -280,8 +280,8 @@ async function runImagePipeline(
     supervisor_warnings: warnings,
     final_prompt: refinedPrompt,
     reference_count: referenceUrls.length,
-    model: 'openai/gpt-image-1',
-    pipeline_version: '6-agent-v2-openai',
+    model: 'gemini-3-pro-image-preview',
+    pipeline_version: '6-agent-v2-gemini',
   };
 
   // Stage 5-6: Generate + Quality loop
