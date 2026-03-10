@@ -223,6 +223,14 @@ RULES:
 7. NEVER include text/watermarks in the prompt unless specifically requested
 8. Consider the business type and what would work for their social media
 
+HARD GEOMETRY CONSTRAINT (when product reference is present):
+- The product label layout must be preserved EXACTLY — same text placement, same proportions, same font sizing
+- Color hex codes from the product reference are LOCKED — do not shift, tint, or reinterpret them
+- Logo placement and orientation must remain pixel-accurate to the reference
+- Packaging form factor (bottle shape, box dimensions, container type) is IMMUTABLE — no mutations allowed
+- You may ONLY change the environment, background, lighting, and context around the product
+- Include explicit anchor language in the finalPrompt: "preserve exact label layout", "maintain original color hex codes", "no logo distortion"
+
 Respond ONLY with valid JSON:
 {
   "intent": "product_showcase|lifestyle|promotional|announcement|behind_scenes|seasonal",
