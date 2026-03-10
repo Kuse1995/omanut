@@ -1094,7 +1094,87 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               result = { success: true, message: '✅ Quick reference info updated' };
               break;
 
-            case 'get_all_customers': {
+            case 'get_business_summary': {
+              const focus = args.focus || 'all';
+              const summaryParts: string[] = [];
+
+              if (focus === 'conversations' || focus === 'all') {
+                const { data: recentConvs } = await supabase
+                  .from('conversations')
+                  .select('id, customer_name, phone, started_at, status, quality_flag')
+                  .eq('company_id', company.id)
+                  .order('started_at', { ascending: false })
+                  .limit(10);
+                const convsWithMsgs = await Promise.all(
+                  (recentConvs || []).map(async (conv) => {
+                    const { data: msgs } = await supabase
+                      .from('messages')
+                      .select('role, content, created_at')
+                      .eq('conversation_id', conv.id)
+                      .order('created_at', { ascending: true })
+                      .limit(10);
+                    return { ...conv, messages: msgs || [] };
+                  })
+                );
+                summaryParts.push(`RECENT CONVERSATIONS (${convsWithMsgs.length}):\n${convsWithMsgs.map((c: any) => {
+                  const preview = c.messages.slice(0, 5).map((m: any) => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content.substring(0, 150)}`).join('\n  ');
+                  return `📞 ${c.customer_name || 'Unknown'} (${c.phone || 'N/A'}) - ${c.status}\n  ${preview}`;
+                }).join('\n\n')}`);
+              }
+
+              if (focus === 'reservations' || focus === 'all') {
+                const { data: res } = await supabase
+                  .from('reservations')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .order('created_at', { ascending: false })
+                  .limit(10);
+                summaryParts.push(`RECENT RESERVATIONS (${res?.length || 0}):\n${(res || []).map((r: any) =>
+                  `• ${r.name} - ${r.guests} guests on ${r.date} at ${r.time} (${r.status})`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'payments' || focus === 'all') {
+                const { data: payments } = await supabase
+                  .from('payment_transactions')
+                  .select('amount, payment_status, customer_phone, customer_name, created_at')
+                  .eq('company_id', company.id)
+                  .order('created_at', { ascending: false })
+                  .limit(15);
+                summaryParts.push(`RECENT PAYMENTS (${payments?.length || 0}):\n${(payments || []).map((p: any) =>
+                  `• ${p.customer_name || 'Unknown'} (${p.customer_phone || 'N/A'}): ${company.currency_prefix}${Number(p.amount).toFixed(2)} - ${p.payment_status}`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'segments' || focus === 'all') {
+                const { data: segs } = await supabase
+                  .from('customer_segments')
+                  .select('*')
+                  .eq('company_id', company.id)
+                  .order('conversion_score', { ascending: false })
+                  .limit(15);
+                summaryParts.push(`CUSTOMER SEGMENTS (${segs?.length || 0}):\n${(segs || []).map((s: any) =>
+                  `• ${s.customer_name || 'Unknown'} (${s.customer_phone}): ${s.segment_type?.replace(/_/g, ' ')} | Engagement: ${s.engagement_level} | Intent: ${s.intent_category}`
+                ).join('\n')}`);
+              }
+
+              if (focus === 'action_items' || focus === 'all') {
+                const [{ data: actions }, { data: clientInsights }] = await Promise.all([
+                  supabase.from('action_items').select('*').eq('company_id', company.id).eq('status', 'pending').order('created_at', { ascending: false }).limit(5),
+                  supabase.from('client_information').select('*').eq('company_id', company.id).order('created_at', { ascending: false }).limit(10)
+                ]);
+                summaryParts.push(`PENDING ACTIONS (${actions?.length || 0}):\n${(actions || []).map((a: any) =>
+                  `• [${a.priority}] ${a.action_type}: ${a.description}`
+                ).join('\n')}`);
+                summaryParts.push(`CLIENT INSIGHTS (${clientInsights?.length || 0}):\n${(clientInsights || []).map((i: any) =>
+                  `• ${i.customer_name || 'Unknown'}: ${i.information}`
+                ).join('\n')}`);
+              }
+
+              result = { success: true, message: summaryParts.join('\n\n') || 'No data found for the requested focus area.' };
+              break;
+            }
+
               const { data: allConvs } = await supabase
                 .from('conversations')
                 .select('customer_name, phone, started_at, status')
