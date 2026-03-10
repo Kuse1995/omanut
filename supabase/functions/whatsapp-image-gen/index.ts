@@ -1058,10 +1058,9 @@ async function editImage(
 ): Promise<{ imageUrl: string; editDescription: string }> {
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
-  const { imageBase64, text: textResponse } = await openaiImageEdit({
+  const { imageBase64, text: textResponse } = await geminiImageGenerate({
     prompt: editInstruction,
     inputImageUrls: [sourceImageUrl],
-    quality: 'high',
   });
   
   if (!imageBase64) {

@@ -81,10 +81,9 @@ serve(async (req) => {
 
     console.log('Generating image with prompt:', enhancedPrompt);
 
-    // Call OpenAI gpt-image-1 for image generation
-    const { imageBase64, text: imageText } = await openaiImageGenerate({
+    // Call Gemini for image generation
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
       prompt: enhancedPrompt,
-      quality: 'high',
     });
 
     if (!imageBase64) {
