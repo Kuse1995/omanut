@@ -86,108 +86,22 @@ The AI handles everything - generation, editing, posting. Just ask!`;
       });
     }
 
-    // Get recent conversation stats with messages
-    const { data: recentConvs } = await supabase
-      .from('conversations')
-      .select('id, customer_name, phone, started_at, ended_at, status, quality_flag, transcript')
-      .eq('company_id', company.id)
-      .order('started_at', { ascending: false })
-      .limit(10);
-
-    // Get messages for each conversation to build detailed summaries
-    const conversationsWithMessages = await Promise.all(
-      (recentConvs || []).map(async (conv) => {
-        const { data: messages } = await supabase
-          .from('messages')
-          .select('role, content, created_at')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: true })
-          .limit(20);
-        
-        return {
-          ...conv,
-          messages: messages || []
-        };
-      })
-    );
-
-    // Get recent reservations
-    const { data: recentReservations } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    // Specifically get demo bookings
-    const { data: demoBookings } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('company_id', company.id)
-      .ilike('occasion', '%demo%')
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    console.log('Demo bookings found:', demoBookings?.length || 0, demoBookings);
-
-    // Get action items
-    const { data: actionItems } = await supabase
-      .from('action_items')
-      .select('*')
-      .eq('company_id', company.id)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    // Get client insights
-    const { data: clientInfo } = await supabase
-      .from('client_information')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    // Get total statistics for comprehensive sales data
-    const { count: totalConversations } = await supabase
-      .from('conversations')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', company.id);
-
-    const { count: totalReservations } = await supabase
-      .from('reservations')
-      .select('*', { count: 'exact', head: true })
-      .eq('company_id', company.id);
-
-    // Get unique customer count
-    const { data: uniqueCustomers } = await supabase
-      .from('conversations')
-      .select('phone')
-      .eq('company_id', company.id)
-      .not('phone', 'is', null);
+    // ========== LIGHTWEIGHT COUNTS ONLY (heavy data moved to get_business_summary tool) ==========
+    const [
+      { count: totalConversations },
+      { count: totalReservations },
+      { data: uniqueCustomers },
+      { data: paymentData }
+    ] = await Promise.all([
+      supabase.from('conversations').select('*', { count: 'exact', head: true }).eq('company_id', company.id),
+      supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('company_id', company.id),
+      supabase.from('conversations').select('phone').eq('company_id', company.id).not('phone', 'is', null),
+      supabase.from('payment_transactions').select('amount, payment_status').eq('company_id', company.id)
+    ]);
 
     const uniquePhones = new Set(uniqueCustomers?.map(c => c.phone) || []);
-
-    // Get payment transactions for revenue data
-    const { data: paymentData } = await supabase
-      .from('payment_transactions')
-      .select('amount, payment_status, customer_phone, customer_name, created_at')
-      .eq('company_id', company.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
-    const totalRevenue = paymentData?.reduce((sum, p) => 
-      p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
-
-    const pendingRevenue = paymentData?.reduce((sum, p) => 
-      p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
-
-    // Get customer segments
-    const { data: segments } = await supabase
-      .from('customer_segments')
-      .select('*')
-      .eq('company_id', company.id)
-      .order('conversion_score', { ascending: false })
-      .limit(20);
+    const totalRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
+    const pendingRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
 
     // Build context for AI
     const knowledgeBase = company.company_documents
