@@ -356,7 +356,7 @@ REVIEW CHECKLIST — STRICT:
 If the prompt is good, approve it. If it needs refinement, provide a refined version.
 ALWAYS return the refined prompt — even if approved (just return the same prompt if no changes needed).
 
-Respond ONLY with valid JSON:
+Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 {
   "approved": true/false,
   "refinedPrompt": "the final prompt to use (refined if needed, or same as input if approved)",
