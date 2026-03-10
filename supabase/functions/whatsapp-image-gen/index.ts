@@ -378,8 +378,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     if (response.ok) {
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
-      const review = JSON.parse(cleaned);
+      const review = safeParseJSON(content);
       console.log(`[SUPERVISOR-REVIEW] Approved: ${review.approved}, Warnings: ${review.warnings?.length || 0}`);
       if (review.refinements && review.refinements !== 'none') {
         console.log(`[SUPERVISOR-REVIEW] Refinements: ${review.refinements}`);
