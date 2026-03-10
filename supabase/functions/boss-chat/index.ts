@@ -1614,12 +1614,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'profit_loss_report':
             case 'clock_in':
             case 'clock_out': {
-              const BMS_API_URL = Deno.env.get('BMS_API_URL');
-              const BMS_API_SECRET = Deno.env.get('BMS_API_SECRET');
-              if (!BMS_API_URL || !BMS_API_SECRET) {
-                result = { success: false, message: '❌ BMS integration not configured.' };
-                break;
-              }
+              // bms-agent handles connection resolution internally via bms-connection.ts
 
               // Streaming ack config
               const BMS_ACK_TIMEOUT = 8000;
