@@ -328,6 +328,10 @@ Create a warm, personalized follow-up message (max 150 words) that:
 4. Includes a clear call-to-action
 
 Return ONLY the message text, no prefix or explanation.`
+            },
+            {
+              role: 'user',
+              content: `Here is the conversation to analyze:\n\n${conversationHistory.map((m: any) => `[${m.role}]: ${m.content}`).join('\n')}`
             }
           ],
           temperature: 1.0,
