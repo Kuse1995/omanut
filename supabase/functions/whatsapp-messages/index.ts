@@ -3383,6 +3383,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
             }
 
+            // Inject company_id for multi-tenant BMS routing
+            bmsParams.company_id = company.id;
+
             try {
               const bmsResult = await bmsCallWithAck(
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
