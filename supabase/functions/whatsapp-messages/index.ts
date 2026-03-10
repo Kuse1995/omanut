@@ -1975,11 +1975,25 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
           }
         }
       },
+      list_products: {
+        type: "function",
+        function: {
+          name: "list_products",
+          description: "Lists all available products/items in the business catalog from the BMS. Use when a customer asks 'what do you sell?', 'show me your products', 'what's available?', or wants to browse the full catalog. Returns product names, prices (unit_price field), and stock levels (current_stock field).",
+          parameters: {
+            type: "object",
+            properties: {
+              category: { type: "string", description: "Optional category filter to narrow results" }
+            },
+            required: []
+          }
+        }
+      },
       check_stock: {
         type: "function",
         function: {
           name: "check_stock",
-          description: "Checks real-time inventory levels and pricing for a specific product in the BMS.",
+          description: "Checks real-time inventory levels and pricing for a specific product in the BMS. Returns current_stock (quantity available) and unit_price (price per unit).",
           parameters: {
             type: "object",
             properties: {
