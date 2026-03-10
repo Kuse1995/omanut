@@ -118,5 +118,25 @@ AI-generated product images sometimes exhibited "Brand Hallucination" (warped lo
   - Weighted score now /13 (was /11)
 - **Generation prompt prefix**: "HARD GEOMETRY LOCK" with 6 mandatory constraints
 
+## Phase 2.8: Frustration Signal Detection & Auto-Escalation — COMPLETED ✅
+
+### Problem Solved
+When the AI Agent makes 2+ consecutive errors (wrong image, wrong stock data, tool failures, behavior drift), users get frustrated but the system had no detection or escalation mechanism.
+
+### Architecture
+Post-response frustration check runs after every AI reply. Queries `ai_error_logs` for consecutive errors. Also scans incoming messages for frustration keywords. Triggers silent boss notification with `#SYSTEM_RECALIBRATION_REQUIRED`.
+
+### whatsapp-messages/index.ts
+- **`detectFrustrationSignals()`** — queries recent errors from `ai_error_logs`, checks for 2+ consecutive errors or frustration keyword + 1 error
+- **Frustration keywords**: "wrong", "not what I asked", "already told you", "incorrect", "you keep", "frustrated", "useless", etc.
+- **Error types tracked**: `behavior_drift`, `wrong_stock_data`, `bms_error`, `wrong_image`, `tool_failure`, `hallucination`
+- **De-duplication**: Won't re-escalate within 30 minutes of a previous escalation
+- **Tool failure logging**: BMS tool catch blocks now insert `ai_error_logs` entries with `error_type: 'tool_failure'`
+- **Integration point**: Runs after response validation, before inserting assistant message
+
+### send-boss-notification/index.ts
+- New `system_recalibration` notification type
+- Message format: `🚨 #SYSTEM_RECALIBRATION_REQUIRED` with error count, types, and `TAKEOVER [phone]` command
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
