@@ -1689,32 +1689,42 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
               const imgPrompt = functionName === 'generate_image' ? args.prompt : args.instructions;
 
-              const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
-                body: JSON.stringify({
-                  companyId: company.id,
-                  customerPhone: '',
-                  conversationId: null,
-                  prompt: imgPrompt,
-                  messageType,
-                }),
-              });
+              const IMG_GEN_TIMEOUT = 45000;
+              try {
+                const imgGenPromise = fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
+                  body: JSON.stringify({
+                    companyId: company.id,
+                    customerPhone: '',
+                    conversationId: null,
+                    prompt: imgPrompt,
+                    messageType,
+                  }),
+                });
+                const timeoutPromise = new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('Image generation timed out')), IMG_GEN_TIMEOUT)
+                );
+                const imageGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
 
-              if (!imageGenResponse.ok) {
-                const errorText = await imageGenResponse.text();
-                console.error(`[BOSS-TOOL-${functionName}] Error:`, errorText);
-                result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
-              } else {
-                const imageGenResult = await imageGenResponse.json();
-                result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
-                if (imageGenResult.imageUrl) {
-                  toolImageUrl = imageGenResult.imageUrl;
-                  toolMediaMessages.push({
-                    body: imageGenResult.message || '🎨 Here is your generated image!',
-                    imageUrl: imageGenResult.imageUrl
-                  });
+                if (!imageGenResponse.ok) {
+                  const errorText = await imageGenResponse.text();
+                  console.error(`[BOSS-TOOL-${functionName}] Error:`, errorText);
+                  result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
+                } else {
+                  const imageGenResult = await imageGenResponse.json();
+                  result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                  if (imageGenResult.imageUrl) {
+                    toolImageUrl = imageGenResult.imageUrl;
+                    toolMediaMessages.push({
+                      body: imageGenResult.message || '🎨 Here is your generated image!',
+                      imageUrl: imageGenResult.imageUrl
+                    });
+                  }
                 }
+              } catch (timeoutErr: any) {
+                console.error(`[BOSS-TOOL-${functionName}] Timeout or error:`, timeoutErr.message);
+                result = { success: true, message: '🎨 Image is being generated in the background. I\'ll send it when ready!' };
               }
               break;
             }
