@@ -608,8 +608,8 @@ async function runImagePipeline(
     reference_count: referenceUrls.length,
     bms_image_count: bmsImageUrls.length,
     style_dna_available: styleDNA.length > 0,
-    model: 'gemini-3-pro-image-preview',
-    pipeline_version: '6-agent-v1',
+      model: 'openai/gpt-image-1',
+      pipeline_version: '6-agent-v2-openai',
   };
 
   // STAGE 5: Generate image (with Quality Assessment retry loop)
