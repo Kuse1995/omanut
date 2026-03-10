@@ -4574,6 +4574,25 @@ serve(async (req) => {
       EdgeRuntime.waitUntil(
         (async () => {
           try {
+            // Send instant ⏳ ack so boss knows message was received
+            const TWILIO_SID_ACK = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_TOKEN_ACK = Deno.env.get('TWILIO_AUTH_TOKEN');
+            if (TWILIO_SID_ACK && TWILIO_TOKEN_ACK) {
+              const ackForm = new URLSearchParams();
+              ackForm.append('From', To);
+              ackForm.append('To', From);
+              ackForm.append('Body', '⏳');
+              // Fire-and-forget — don't await
+              fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_ACK}/Messages.json`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Basic ' + btoa(`${TWILIO_SID_ACK}:${TWILIO_TOKEN_ACK}`),
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: ackForm.toString(),
+              }).catch(e => console.error('[BOSS] Ack send error:', e));
+            }
+
             console.log('[BOSS] Calling boss-chat function');
             
             // Call boss-chat function
