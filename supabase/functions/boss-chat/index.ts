@@ -1103,7 +1103,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       .select('message_content, response, created_at')
       .eq('company_id', company.id)
       .order('created_at', { ascending: false })
-      .limit(6);
+      .limit(12);
 
     // Build conversation messages with history (oldest first)
     const historyMessages = (recentHistory || []).reverse().flatMap((h: any) => [

@@ -4737,6 +4737,27 @@ serve(async (req) => {
             }
           } catch (error) {
             console.error('[BOSS] Error in background processing:', error);
+            // Send error recovery message instead of silence
+            try {
+              const TWILIO_SID_ERR = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const TWILIO_TOKEN_ERR = Deno.env.get('TWILIO_AUTH_TOKEN');
+              if (TWILIO_SID_ERR && TWILIO_TOKEN_ERR) {
+                const errForm = new URLSearchParams();
+                errForm.append('From', To);
+                errForm.append('To', From);
+                errForm.append('Body', '⚠️ Sorry, I hit a snag processing that. Could you try again?');
+                await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_ERR}/Messages.json`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': 'Basic ' + btoa(`${TWILIO_SID_ERR}:${TWILIO_TOKEN_ERR}`),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: errForm.toString(),
+                });
+              }
+            } catch (errSend) {
+              console.error('[BOSS] Failed to send error recovery message:', errSend);
+            }
           }
         })()
       );
