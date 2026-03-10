@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { openaiImageGenerate } from "../_shared/gemini-client.ts";
+import { geminiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,10 +81,9 @@ serve(async (req) => {
 
     console.log('Generating image with prompt:', enhancedPrompt);
 
-    // Call OpenAI gpt-image-1 for image generation
-    const { imageBase64, text: imageText } = await openaiImageGenerate({
+    // Call Gemini for image generation
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
       prompt: enhancedPrompt,
-      quality: 'high',
     });
 
     if (!imageBase64) {

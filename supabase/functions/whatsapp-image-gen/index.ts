@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { geminiChat, geminiChatJSON, openaiImageGenerate, openaiImageEdit } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiChatJSON, geminiImageGenerate } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -659,18 +659,11 @@ async function runImagePipeline(
         `• ANY deviation from the product reference = FAILURE\n\n${currentPrompt}`;
     }
 
-    // Use OpenAI gpt-image-1 — edit endpoint when input images exist, generation otherwise
-    const hasInputImages = inputImages.length > 0;
-    const { imageBase64, text: imageText } = hasInputImages
-      ? await openaiImageEdit({
-          prompt: genPrompt,
-          inputImageUrls: inputImages.slice(0, 4),
-          quality: 'high',
-        })
-      : await openaiImageGenerate({
-          prompt: genPrompt,
-          quality: 'high',
-        });
+    // Use Gemini gemini-3-pro-image-preview for generation (natively supports input images)
+    const { imageBase64, text: imageText } = await geminiImageGenerate({
+      prompt: genPrompt,
+      inputImageUrls: inputImages.length > 0 ? inputImages.slice(0, 4) : undefined,
+    });
 
     if (!imageBase64) {
       throw new Error('No image generated');
@@ -1065,10 +1058,9 @@ async function editImage(
 ): Promise<{ imageUrl: string; editDescription: string }> {
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
-  const { imageBase64, text: textResponse } = await openaiImageEdit({
+  const { imageBase64, text: textResponse } = await geminiImageGenerate({
     prompt: editInstruction,
     inputImageUrls: [sourceImageUrl],
-    quality: 'high',
   });
   
   if (!imageBase64) {
