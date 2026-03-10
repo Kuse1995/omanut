@@ -896,7 +896,7 @@ async function selectProductImageForPrompt(
       const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_product_details', params: { product_name: prompt } }),
+        body: JSON.stringify({ action: 'list_products', params: { company_id: companyId, search: prompt } }),
       });
       if (bmsRes.ok) {
         const bmsData = await bmsRes.json();
