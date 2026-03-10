@@ -270,7 +270,7 @@ HARD GEOMETRY CONSTRAINT (when product reference is present):
 - You may ONLY change the environment, background, lighting, and context around the product
 - Include explicit anchor language in the finalPrompt: "preserve exact label layout", "maintain original color hex codes", "no logo distortion"
 
-Respond ONLY with valid JSON:
+Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 {
   "intent": "product_showcase|lifestyle|promotional|announcement|behind_scenes|seasonal",
   "subject": "what the image should show",
