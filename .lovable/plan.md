@@ -176,5 +176,19 @@ When the boss asked to publish a post with an image "right now," the system race
 - **Failed gen**: Post marked `failed` → boss notified → can retry by asking again
 - **No silent degradation**: A post with a requested image NEVER goes out as text-only without explicit boss consent
 
+## Phase 2.11: BMS Effectiveness Fixes — COMPLETED ✅
+
+### Problem Solved
+Customer-facing BMS calls were missing `company_id` (breaking multi-tenant), `get_product_details` caused 100% failures (unsupported by bridge), customers couldn't browse the catalog (`list_products` missing from routing), and tool descriptions lacked field name hints.
+
+### Files Updated
+- `bms-agent/index.ts` — Removed `get_product_details` from `AVAILABLE_ACTIONS`
+- `whatsapp-messages/index.ts`:
+  - Injected `company_id: company.id` into all BMS params (multi-tenant fix)
+  - Added `list_products` tool definition with `current_stock`/`unit_price` field hints
+  - Added `list_products` to mandatory checkout tools and BMS routing
+  - Updated `check_stock` description with field name hints
+  - Removed `get_product_details` ack message
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
