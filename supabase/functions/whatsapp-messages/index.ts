@@ -140,7 +140,116 @@ function detectImageGenCommand(message: string): {
   return { isImageCommand: false, type: null, prompt: '' };
 }
 
-// Agent routing function with configurable model from database
+// ========== FRUSTRATION SIGNAL DETECTION ==========
+const FRUSTRATION_KEYWORDS = [
+  'wrong', 'not what i asked', 'already told you', 'incorrect', 'you keep',
+  'again?!', 'frustrated', 'useless', 'not helpful', 'terrible', 'awful',
+  'this is wrong', 'that is wrong', 'same mistake', 'stop giving me',
+  'are you even listening', 'not working', 'broken', 'fix this'
+];
+
+const ESCALATION_ERROR_TYPES = [
+  'behavior_drift', 'wrong_stock_data', 'bms_error', 'wrong_image',
+  'tool_failure', 'hallucination'
+];
+
+async function detectFrustrationSignals(
+  conversationId: string,
+  company: any,
+  customerPhone: string,
+  userMessage: string,
+  supabase: any
+) {
+  // 1. Check for frustration keywords in current message
+  const lowerMsg = userMessage.toLowerCase();
+  const hasFrustrationKeyword = FRUSTRATION_KEYWORDS.some(kw => lowerMsg.includes(kw));
+
+  // 2. Query recent errors for this conversation
+  const { data: recentErrors } = await supabase
+    .from('ai_error_logs')
+    .select('error_type, created_at, severity')
+    .eq('conversation_id', conversationId)
+    .eq('company_id', company.id)
+    .in('error_type', ESCALATION_ERROR_TYPES)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (!recentErrors || recentErrors.length === 0) {
+    if (hasFrustrationKeyword) {
+      console.log('[FRUSTRATION] Keyword detected but no error history — monitoring only');
+    }
+    return;
+  }
+
+  const consecutiveErrorCount = recentErrors.length;
+  const errorTypes = [...new Set(recentErrors.map((e: any) => e.error_type))];
+
+  // Threshold: 2+ consecutive errors OR frustration keyword + 1 error
+  const shouldEscalate = consecutiveErrorCount >= 2 || (hasFrustrationKeyword && consecutiveErrorCount >= 1);
+
+  if (!shouldEscalate) return;
+
+  // Check if we already escalated recently (within 30 min) to avoid spam
+  const { data: existingEscalation } = await supabase
+    .from('ai_error_logs')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('error_type', 'frustration_escalation')
+    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+    .limit(1);
+
+  if (existingEscalation && existingEscalation.length > 0) {
+    console.log('[FRUSTRATION] Already escalated recently — skipping');
+    return;
+  }
+
+  console.log(`[FRUSTRATION] 🚨 Escalating: ${consecutiveErrorCount} errors, keyword=${hasFrustrationKeyword}`);
+
+  // Log the escalation
+  await supabase.from('ai_error_logs').insert({
+    company_id: company.id,
+    conversation_id: conversationId,
+    error_type: 'frustration_escalation',
+    severity: 'critical',
+    original_message: userMessage,
+    ai_response: '#SYSTEM_RECALIBRATION_REQUIRED',
+    analysis_details: {
+      consecutive_errors: consecutiveErrorCount,
+      error_types: errorTypes,
+      frustration_keyword_detected: hasFrustrationKeyword,
+      trigger_reason: hasFrustrationKeyword
+        ? `Customer frustration keyword detected with ${consecutiveErrorCount} recent error(s)`
+        : `${consecutiveErrorCount} consecutive AI errors detected`
+    },
+    auto_flagged: true
+  });
+
+  // Silent boss notification
+  try {
+    const triggerReason = hasFrustrationKeyword
+      ? `Customer expressed frustration ("${FRUSTRATION_KEYWORDS.find(kw => lowerMsg.includes(kw))}") with ${consecutiveErrorCount} recent error(s).`
+      : `${consecutiveErrorCount} consecutive AI errors detected in conversation.`;
+
+    await supabase.functions.invoke('send-boss-notification', {
+      body: {
+        companyId: company.id,
+        notificationType: 'system_recalibration',
+        data: {
+          customer_name: null, // Will be filled by conversation context
+          customer_phone: customerPhone,
+          error_count: consecutiveErrorCount,
+          error_types: errorTypes,
+          trigger_reason: triggerReason
+        }
+      }
+    });
+    console.log('[FRUSTRATION] Boss notified with #SYSTEM_RECALIBRATION_REQUIRED');
+  } catch (notifyErr) {
+    console.error('[FRUSTRATION] Failed to notify boss:', notifyErr);
+  }
+}
+
+
 async function routeToAgent(
   userMessage: string,
   conversationHistory: any[],
@@ -3406,6 +3515,19 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolExecutionContext.push(`[R${currentRound}] ${fnName} completed`);
             } catch (e) {
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
+              // Log tool failure for frustration detection
+              try {
+                await supabase.from('ai_error_logs').insert({
+                  company_id: company.id,
+                  conversation_id: conversationId,
+                  error_type: 'tool_failure',
+                  severity: 'warning',
+                  original_message: userMessage,
+                  ai_response: `Tool ${fnName} failed in round ${currentRound}`,
+                  analysis_details: { tool_name: fnName, round: currentRound, error: String(e) },
+                  auto_flagged: true
+                });
+              } catch (_logErr) { /* silent */ }
             }
           } else {
             // For other tools in subsequent rounds, provide a generic acknowledgment
@@ -3560,6 +3682,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     }
 
     console.log('[BACKGROUND] Final reply:', assistantReply);
+
+    // ========== FRUSTRATION SIGNAL DETECTION ==========
+    try {
+      await detectFrustrationSignals(conversationId, company, customerPhone, userMessage, supabase);
+    } catch (frustErr) {
+      console.error('[FRUSTRATION-DETECT] Error:', frustErr);
+    }
 
     // Insert assistant message
     await supabase

@@ -83,6 +83,10 @@ serve(async (req) => {
         message = `🔋 Low Credit Balance Alert\n\nCurrent Balance: ${data.credit_balance} credits\nUsage Rate: ${data.usage_rate} credits/day\n\nEstimated days remaining: ${data.days_remaining}\n\nPlease top up to avoid service interruption.`;
         break;
       
+      case 'system_recalibration':
+        message = `🚨 #SYSTEM_RECALIBRATION_REQUIRED\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nConsecutive Errors: ${data.error_count || 2}\nError Types: ${(data.error_types || []).join(', ')}\n\n${data.trigger_reason || 'Multiple consecutive AI errors detected.'}\n\nRecommendation: Manual human takeover advised.\n\nReply: TAKEOVER ${data.customer_phone}`;
+        break;
+      
       default:
         message = data.message || 'Notification from AI assistant';
     }
