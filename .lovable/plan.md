@@ -138,5 +138,24 @@ Post-response frustration check runs after every AI reply. Queries `ai_error_log
 - New `system_recalibration` notification type
 - Message format: `🚨 #SYSTEM_RECALIBRATION_REQUIRED` with error count, types, and `TAKEOVER [phone]` command
 
+## Phase 2.9: OpenAI gpt-image-1 Migration — COMPLETED ✅
+
+### Problem Solved
+Migrated image generation from Gemini `gemini-3-pro-image-preview` to OpenAI `gpt-image-1` for higher quality output.
+
+### Architecture
+- New `openaiImageGenerate()` — calls `/v1/images/generations` with `b64_json` output
+- New `openaiImageEdit()` — calls `/v1/images/edits` with multipart form data for product-anchored/edit flows
+- Both return `{ imageBase64, text }` for drop-in compatibility
+- Text-based agents (Prompt Optimizer, Supervisor, Quality Assessment) remain on `geminiChat`
+
+### Files Updated
+- `_shared/gemini-client.ts` — added `openaiImageGenerate` + `openaiImageEdit`
+- `whatsapp-image-gen/index.ts` — main generation + editImage function
+- `generate-business-image/index.ts` — single call site
+- `auto-content-creator/index.ts` — single call site
+- `test-image-generation/index.ts` — pipeline generation call site
+- Pipeline version bumped to `6-agent-v2-openai`
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
