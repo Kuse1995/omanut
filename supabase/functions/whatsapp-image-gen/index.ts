@@ -499,8 +499,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     if (response.ok) {
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
-      const cleaned = content.replace(/```json\n?|\n?```/g, '').trim();
-      const assessment = JSON.parse(cleaned);
+      const assessment = safeParseJSON(content);
       const scores = assessment.scores || {};
 
       // Calculate weighted average: ProductFidelity(3x) + BrandHallucination(3x) + ProductMutation(2x) + Prompt(2x) + Composition(1x) + Quality(1x) + Marketing(1x)
