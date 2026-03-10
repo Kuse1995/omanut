@@ -659,11 +659,18 @@ async function runImagePipeline(
         `• ANY deviation from the product reference = FAILURE\n\n${currentPrompt}`;
     }
 
-    const { imageBase64, text: imageText } = await geminiImageGenerate({
-      model: 'gemini-3-pro-image-preview',
-      prompt: genPrompt,
-      inputImageUrls: inputImages.length > 0 ? inputImages.slice(0, 4) : undefined,
-    });
+    // Use OpenAI gpt-image-1 — edit endpoint when input images exist, generation otherwise
+    const hasInputImages = inputImages.length > 0;
+    const { imageBase64, text: imageText } = hasInputImages
+      ? await openaiImageEdit({
+          prompt: genPrompt,
+          inputImageUrls: inputImages.slice(0, 4),
+          quality: 'high',
+        })
+      : await openaiImageGenerate({
+          prompt: genPrompt,
+          quality: 'high',
+        });
 
     if (!imageBase64) {
       throw new Error('No image generated');
