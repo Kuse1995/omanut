@@ -190,5 +190,24 @@ Customer-facing BMS calls were missing `company_id` (breaking multi-tenant), `ge
   - Updated `check_stock` description with field name hints
   - Removed `get_product_details` ack message
 
+## Phase 2.12: Image Generation Reliability Fixes — COMPLETED ✅
+
+### Problems Solved
+1. Wrong products generated despite reference images (BMS product anchoring broken)
+2. AI going quiet when image gen times out (cascade timeout → 520 → empty TwiML)
+3. "You'll receive an image" but it never arrives (no delivery mechanism for standalone async images)
+
+### Files Updated
+- `whatsapp-image-gen/index.ts`:
+  - Replaced `get_product_details` (unsupported) with `list_products` in product selection (2 call sites)
+  - Quality assessment fallback changed from auto-pass (score 7) to auto-fail (score 5) — forces retry instead of silently passing bad images
+  - Added standalone boss image delivery: when `bossPhone` is set and no `scheduledPostId`, sends completed image directly via Twilio WhatsApp
+  - Added failure notification for standalone boss image gen failures
+- `boss-chat/index.ts`:
+  - Reduced image gen timeout from 45s → 30s
+  - On timeout: fires async `whatsapp-image-gen` with `bossPhone` for delivery callback
+  - Added `__imageGenInProgress` flag — prevents AI from stacking multiple image gen calls across rounds
+  - Tool result on timeout explicitly tells AI "Do NOT request another image"
+
 ## Next Phases (Pending)
 - Phase 3: Full Coverage (HR extensions, agents/distributors, assets, website/content)
