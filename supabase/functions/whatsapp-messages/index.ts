@@ -3574,6 +3574,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
+    // ========== FRUSTRATION SIGNAL DETECTION ==========
+    try {
+      await detectFrustrationSignals(conversationId, company, customerPhone, userMessage, supabase);
+    } catch (frustErr) {
+      console.error('[FRUSTRATION-DETECT] Error:', frustErr);
+    }
+
     // Insert assistant message
     await supabase
       .from('messages')
