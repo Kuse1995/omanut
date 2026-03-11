@@ -3335,35 +3335,73 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log('[LOOKUP-PRODUCT] Searching for:', args.query);
             
             try {
-              // Search products by name/description using ilike
-              const searchTerm = `%${args.query}%`;
-              let productQuery = supabase
-                .from('payment_products')
-                .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
-                .eq('company_id', company.id)
-                .eq('is_active', true);
-              
-              if (args.category) {
-                productQuery = productQuery.eq('category', args.category);
-              }
-              
-              const { data: products, error: prodError } = await productQuery.limit(20);
-              
-              if (prodError) {
-                console.error('[LOOKUP-PRODUCT] DB error:', prodError);
-                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
+              let productList: any[] = [];
+
+              // === EXTERNAL CATALOG MODE ===
+              if (company.external_catalog_url && company.external_catalog_key) {
+                console.log('[LOOKUP-PRODUCT] Using external catalog');
+                const extClient = createClient(company.external_catalog_url, company.external_catalog_key);
+                const tableName = company.external_catalog_table || 'ebooks';
+                const { data: extProducts, error: extErr } = await extClient
+                  .from(tableName)
+                  .select('*')
+                  .limit(50);
+
+                if (extErr) {
+                  console.error('[LOOKUP-PRODUCT] External DB error:', extErr);
+                  toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products from catalog' }) });
+                  continue;
+                }
+
+                const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                const allProducts = extProducts || [];
+                const matchedProducts = allProducts.filter((p: any) => {
+                  const text = `${p.title || p.name || ''} ${p.description || ''} ${p.category || ''} ${p.author || ''}`.toLowerCase();
+                  return queryWords.some((word: string) => text.includes(word));
+                });
+                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : allProducts;
+                
+                productList = resultsToReturn.slice(0, 10).map((p: any) => ({
+                  id: p.id,
+                  name: p.title || p.name,
+                  description: p.description,
+                  price: p.price,
+                  currency: p.currency || 'K',
+                  category: p.category,
+                  product_type: 'digital',
+                  delivery_type: 'digital',
+                  selar_link: p.selar_link || p.checkout_url || null,
+                  author: p.author || null,
+                  cover_url: p.cover_url || p.image_url || null,
+                }));
               } else {
-                // Filter by relevance - match against query keywords
+                // === LOCAL CATALOG MODE ===
+                let productQuery = supabase
+                  .from('payment_products')
+                  .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
+                  .eq('company_id', company.id)
+                  .eq('is_active', true);
+                
+                if (args.category) {
+                  productQuery = productQuery.eq('category', args.category);
+                }
+                
+                const { data: products, error: prodError } = await productQuery.limit(20);
+                
+                if (prodError) {
+                  console.error('[LOOKUP-PRODUCT] DB error:', prodError);
+                  toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
+                  continue;
+                }
+
                 const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
                 const matchedProducts = (products || []).filter((p: any) => {
                   const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
                   return queryWords.some((word: string) => text.includes(word));
                 });
-                
-                // If no keyword match, return all products
                 const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : (products || []);
                 
-                const productList = resultsToReturn.slice(0, 10).map((p: any) => ({
+                productList = resultsToReturn.slice(0, 10).map((p: any) => ({
                   id: p.id,
                   name: p.name,
                   description: p.description,
@@ -3374,30 +3412,87 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   delivery_type: p.delivery_type,
                   selar_link: p.selar_link
                 }));
-                
-                anyToolExecuted = true;
-                toolExecutionContext.push(`found ${productList.length} products matching "${args.query}"`);
-                toolResults.push({
-                  tool_call_id: toolCall.id,
-                  role: "tool",
-                  content: JSON.stringify({
-                    success: true,
-                    products: productList,
-                    total_found: productList.length,
-                    query: args.query,
-                    message: productList.length > 0 
-                      ? `Found ${productList.length} product(s) matching your search`
-                      : 'No products found matching that query. Try a different search term.'
-                  })
-                });
-                
-                console.log('[LOOKUP-PRODUCT] Found', productList.length, 'products');
               }
+
+              anyToolExecuted = true;
+              toolExecutionContext.push(`found ${productList.length} products matching "${args.query}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({
+                  success: true,
+                  products: productList,
+                  total_found: productList.length,
+                  query: args.query,
+                  message: productList.length > 0 
+                    ? `Found ${productList.length} product(s) matching your search`
+                    : 'No products found matching that query. Try a different search term.'
+                })
+              });
+              console.log('[LOOKUP-PRODUCT] Found', productList.length, 'products');
             } catch (error) {
               console.error('[LOOKUP-PRODUCT] Exception:', error);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
             }
           } else if (['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'].includes(toolCall.function.name)) {
+            // === EXTERNAL CATALOG: Intercept list_products and check_stock ===
+            if (company.external_catalog_url && company.external_catalog_key && ['list_products', 'check_stock'].includes(toolCall.function.name)) {
+              const args = JSON.parse(toolCall.function.arguments);
+              console.log(`[EXT-CATALOG] Intercepting ${toolCall.function.name}:`, JSON.stringify(args).slice(0, 200));
+              
+              try {
+                const extClient = createClient(company.external_catalog_url, company.external_catalog_key);
+                const tableName = company.external_catalog_table || 'ebooks';
+                
+                if (toolCall.function.name === 'list_products') {
+                  let extQuery = extClient.from(tableName).select('*');
+                  if (args.category) {
+                    extQuery = extQuery.eq('category', args.category);
+                  }
+                  const { data: extProducts, error: extErr } = await extQuery.limit(50);
+                  
+                  if (extErr) throw new Error(extErr.message);
+                  
+                  const productList = (extProducts || []).map((p: any) => ({
+                    name: p.title || p.name,
+                    description: p.description,
+                    unit_price: p.price,
+                    currency: p.currency || 'K',
+                    category: p.category,
+                    current_stock: 'Digital - Always Available',
+                    author: p.author || null,
+                    selar_link: p.selar_link || p.checkout_url || null,
+                  }));
+                  
+                  anyToolExecuted = true;
+                  toolExecutionContext.push(`listed ${productList.length} external catalog products`);
+                  toolResults.push({
+                    tool_call_id: toolCall.id,
+                    role: "tool",
+                    content: JSON.stringify({ success: true, products: productList, total: productList.length })
+                  });
+                } else {
+                  // check_stock — digital products are always in stock
+                  anyToolExecuted = true;
+                  toolExecutionContext.push(`checked stock for "${args.product_name}" (digital, always available)`);
+                  toolResults.push({
+                    tool_call_id: toolCall.id,
+                    role: "tool",
+                    content: JSON.stringify({
+                      success: true,
+                      product_name: args.product_name,
+                      current_stock: 'Unlimited',
+                      status: 'in_stock',
+                      message: 'Digital product — always available for immediate delivery'
+                    })
+                  });
+                }
+                continue;
+              } catch (extErr) {
+                console.error(`[EXT-CATALOG] ${toolCall.function.name} failed:`, extErr);
+                // Fall through to normal BMS handling
+              }
+            }
             const bmsToolName = toolCall.function.name;
             const args = JSON.parse(toolCall.function.arguments);
             console.log(`[BMS] ${bmsToolName} called:`, JSON.stringify(args).slice(0, 200));
