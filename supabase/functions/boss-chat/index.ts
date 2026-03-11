@@ -1205,6 +1205,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'list_customers': {
               const { data: allConvs } = await supabase
                 .from('conversations')
                 .select('customer_name, phone, started_at, status')
