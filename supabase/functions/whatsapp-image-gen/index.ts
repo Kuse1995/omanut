@@ -658,7 +658,29 @@ async function runImagePipeline(
     supabase, companyId, productMatchName
   );
   const identityLock = matchedProfile ? buildIdentityLockPrompt(matchedProfile) : '';
-  const exclusionPrompt = buildExclusionPrompt(exclusionList);
+
+  // AUTO-EXCLUSION FALLBACK: If no product identity profiles exist, inject business_type as negative anchor
+  // This prevents cross-category contamination (e.g. water filters appearing for a bookstore)
+  let effectiveExclusionList = [...exclusionList];
+  if (allProfiles.length === 0 && businessType) {
+    const businessTypeExclusions: Record<string, string[]> = {
+      'bookstore': ['water filter', 'water purifier', 'LifeStraw', 'Finch', 'beverage', 'food product', 'consumer electronics'],
+      'digital bookstore': ['water filter', 'water purifier', 'LifeStraw', 'Finch', 'beverage', 'food product', 'consumer electronics'],
+      'christian digital bookstore': ['water filter', 'water purifier', 'LifeStraw', 'Finch', 'beverage', 'food product', 'consumer electronics'],
+      'restaurant': ['electronics', 'software', 'books', 'water purifier', 'LifeStraw'],
+      'salon': ['food', 'electronics', 'software', 'books', 'water purifier', 'LifeStraw'],
+      'water purification': ['books', 'food', 'salon', 'restaurant'],
+    };
+    const btLower = businessType.toLowerCase();
+    // Find matching exclusions or generate generic ones
+    const matchedExclusions = Object.entries(businessTypeExclusions).find(([key]) => btLower.includes(key));
+    if (matchedExclusions) {
+      effectiveExclusionList.push(...matchedExclusions[1]);
+    }
+    // Always add a generic negative anchor based on business type
+    console.log(`[PIPELINE] Auto-exclusion fallback active for "${businessType}" — added ${effectiveExclusionList.length} exclusion keywords`);
+  }
+  const exclusionPrompt = buildExclusionPrompt(effectiveExclusionList);
 
   // STAGE 1: Style Memory Agent — learn from past feedback
   const styleDNA = await styleMemoryAgent(supabase, companyId);
