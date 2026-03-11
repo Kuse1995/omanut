@@ -644,6 +644,10 @@ export const ImageGenerationPanel = () => {
             <Image className="h-4 w-4" />
             Gallery
           </TabsTrigger>
+          <TabsTrigger value="products" className="gap-2">
+            <Palette className="h-4 w-4" />
+            Products
+          </TabsTrigger>
           <TabsTrigger value="feedback" className="gap-2">
             <BarChart3 className="h-4 w-4" />
             Feedback
@@ -653,6 +657,15 @@ export const ImageGenerationPanel = () => {
             Settings
           </TabsTrigger>
         </TabsList>
+
+        {/* Products Tab */}
+        <TabsContent value="products">
+          <Card>
+            <CardContent className="p-6">
+              <ProductIdentityManager />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Gallery Tab */}
         <TabsContent value="gallery">
