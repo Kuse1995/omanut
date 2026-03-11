@@ -1242,7 +1242,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
               if (needsImageGen) {
                 try {
-                  const IMG_TIMEOUT = 90000; // 90s — generous for quality generation
+                  const IMG_TIMEOUT = 50000; // 50s — fits within function timeout with room for response
                   const imgGenPromise = fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },

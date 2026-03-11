@@ -23,7 +23,7 @@ project_id = "dzheddvoiauevcayifev"
   [functions.auth-email-hook]
     verify_jwt = false
   [functions.boss-chat]
-    timeout = 60
+    timeout = 120
     verify_jwt = false
   [functions.create-company]
     verify_jwt = true
