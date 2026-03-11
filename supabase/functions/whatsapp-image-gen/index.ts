@@ -315,7 +315,9 @@ async function promptOptimizerAgent(
   productMatch: ProductImage | null,
   styleDNA: string,
   referenceContext: string,
-  mediaContext: string
+  mediaContext: string,
+  identityLock: string = '',
+  exclusionPrompt: string = ''
 ): Promise<{ finalPrompt: string; intent: string; brief: any }> {
   console.log('[PROMPT-OPTIMIZER] Optimizing prompt:', userPrompt.substring(0, 80));
 
