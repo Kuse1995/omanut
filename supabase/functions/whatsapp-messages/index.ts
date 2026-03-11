@@ -1429,7 +1429,44 @@ ${company.services ? `- Services: ${company.services}` : ''}
 ${company.currency_prefix ? `- Currency: ${company.currency_prefix}` : ''}
 ${company.email ? `- Email: ${company.email}` : ''}`;
     // Add quick reference knowledge base
-    if (company.quick_reference_info && company.quick_reference_info.trim()) {
+    // If external catalog is configured, fetch live catalog and inject it
+    if (company.external_catalog_url && company.external_catalog_key) {
+      try {
+        const extClient = createClient(company.external_catalog_url, company.external_catalog_key);
+        const tableName = company.external_catalog_table || 'ebooks';
+        const { data: extProducts, error: extErr } = await extClient
+          .from(tableName)
+          .select('*')
+          .limit(200);
+        
+        if (!extErr && extProducts && extProducts.length > 0) {
+          instructions += `\n\n=== LIVE PRODUCT CATALOG (from website) ===\n`;
+          instructions += `You have ${extProducts.length} products available. Here is the full catalog:\n\n`;
+          for (const ep of extProducts) {
+            const name = ep.title || ep.name || 'Unnamed';
+            const price = ep.price != null ? ep.price : 'N/A';
+            const currency = ep.currency || 'K';
+            const author = ep.author ? ` by ${ep.author}` : '';
+            const category = ep.category ? ` [${ep.category}]` : '';
+            const desc = ep.description ? ` — ${ep.description.substring(0, 150)}` : '';
+            const selarLink = ep.selar_link || ep.checkout_url || '';
+            instructions += `• ${name}${author}${category}: ${currency}${price}${desc}${selarLink ? ` | Buy: ${selarLink}` : ''}\n`;
+          }
+          instructions += `\n⚠️ IMPORTANT: This is your ONLY source of product information. Use ONLY these products and prices. Do NOT make up products or prices.\n`;
+        } else {
+          console.warn('[EXTERNAL-CATALOG] Failed to load or empty:', extErr?.message);
+          // Fallback to local quick_reference_info
+          if (company.quick_reference_info && company.quick_reference_info.trim()) {
+            instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
+          }
+        }
+      } catch (extCatErr) {
+        console.error('[EXTERNAL-CATALOG] Exception:', extCatErr);
+        if (company.quick_reference_info && company.quick_reference_info.trim()) {
+          instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
+        }
+      }
+    } else if (company.quick_reference_info && company.quick_reference_info.trim()) {
       instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
     }
 
