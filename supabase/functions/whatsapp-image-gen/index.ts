@@ -564,7 +564,7 @@ async function runImagePipeline(
   bmsImageUrls: string[] = []
 ): Promise<{ imageUrl: string; enhancedPrompt: string; pipelineData: any }> {
   // Reduce retries for non-product images to avoid timeouts
-  const effectiveMaxRetries = maxRetries ?? (productMatch ? 2 : 0);
+  const effectiveMaxRetries = 0; // TEMPORARY: bypass quality assessment
   console.log(`[PIPELINE] === Starting 6-Agent Image Generation Pipeline (maxRetries=${effectiveMaxRetries}) ===`);
 
   // STAGE 1: Style Memory Agent — learn from past feedback
