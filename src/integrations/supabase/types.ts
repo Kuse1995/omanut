@@ -663,6 +663,9 @@ export type Database = {
           created_at: string | null
           credit_balance: number | null
           currency_prefix: string | null
+          external_catalog_key: string | null
+          external_catalog_table: string | null
+          external_catalog_url: string | null
           google_calendar_id: string | null
           hours: string | null
           id: string
@@ -699,6 +702,9 @@ export type Database = {
           created_at?: string | null
           credit_balance?: number | null
           currency_prefix?: string | null
+          external_catalog_key?: string | null
+          external_catalog_table?: string | null
+          external_catalog_url?: string | null
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
@@ -735,6 +741,9 @@ export type Database = {
           created_at?: string | null
           credit_balance?: number | null
           currency_prefix?: string | null
+          external_catalog_key?: string | null
+          external_catalog_table?: string | null
+          external_catalog_url?: string | null
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
