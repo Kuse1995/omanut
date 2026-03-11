@@ -1438,13 +1438,14 @@ serve(async (req) => {
           if (bossPhone) {
             const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
             const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
-            const { data: postCompany } = await supabase.from('companies').select('twilio_number').eq('id', companyId).single();
-            if (twilioSid && twilioAuth && postCompany?.twilio_number) {
+            const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
+            if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
               const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
               const confirmMsg = `✅ Your post has been published with the brand image!\n\n🖼️ Image attached below.`;
               const formData = new URLSearchParams();
               formData.append('To', `whatsapp:${bossPhone}`);
-              formData.append('From', `whatsapp:${postCompany.twilio_number}`);
+              const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
+              formData.append('From', fromNum);
               formData.append('Body', confirmMsg);
               formData.append('MediaUrl', imageUrl);
               await fetch(twilioUrl, {
