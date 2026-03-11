@@ -4651,6 +4651,37 @@ serve(async (req) => {
               return chunks;
             };
             
+            // Helper: track boss media delivery
+            const trackBossMedia = async (imageUrl: string, context: string) => {
+              try {
+                const { data: trackRow } = await supabase.from('boss_media_deliveries').insert({
+                  company_id: company.id,
+                  boss_phone: From,
+                  image_url: imageUrl,
+                  context,
+                  status: 'pending',
+                }).select('id').single();
+                return trackRow?.id || null;
+              } catch (e) {
+                console.error('[BOSS] Failed to track media delivery:', e);
+                return null;
+              }
+            };
+
+            const updateTrack = async (trackId: string | null, status: string, twilioSid?: string, errorMsg?: string) => {
+              if (!trackId) return;
+              try {
+                await supabase.from('boss_media_deliveries').update({
+                  status,
+                  ...(twilioSid ? { twilio_sid: twilioSid } : {}),
+                  ...(errorMsg ? { error_message: errorMsg } : {}),
+                  updated_at: new Date().toISOString(),
+                }).eq('id', trackId);
+              } catch (e) {
+                console.error('[BOSS] Failed to update media track:', e);
+              }
+            };
+
             // Check if boss-chat returned a mediaMessages array (multi-image posts)
             if (bossData.mediaMessages && Array.isArray(bossData.mediaMessages) && bossData.mediaMessages.length > 0) {
               console.log(`[BOSS] Sending ${bossData.mediaMessages.length} individual media message(s)`);
@@ -4659,6 +4690,12 @@ serve(async (req) => {
                 const item = bossData.mediaMessages[i];
                 const cleanedBody = cleanFormatting(item.body);
                 const bodyChunks = splitMessage(cleanedBody);
+                
+                // Track media delivery if this item has an image
+                let trackId: string | null = null;
+                if (item.imageUrl) {
+                  trackId = await trackBossMedia(item.imageUrl, 'media_message');
+                }
                 
                 for (let c = 0; c < bodyChunks.length; c++) {
                   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -4684,9 +4721,17 @@ serve(async (req) => {
                   
                   if (twilioResponse.ok) {
                     console.log(`[BOSS] Media msg ${i+1} chunk ${c+1}/${bodyChunks.length} sent`);
+                    // Update tracking on the first chunk (where image is attached)
+                    if (c === 0 && trackId) {
+                      const twilioData = await twilioResponse.clone().json().catch(() => null);
+                      await updateTrack(trackId, 'sent', twilioData?.sid);
+                    }
                   } else {
                     const errorText = await twilioResponse.text();
                     console.error(`[BOSS] Failed media msg ${i+1} chunk ${c+1}:`, twilioResponse.status, errorText);
+                    if (c === 0 && trackId) {
+                      await updateTrack(trackId, 'failed', undefined, `Twilio ${twilioResponse.status}: ${errorText.substring(0, 200)}`);
+                    }
                   }
                   
                   // Delay between chunks/messages
@@ -4701,6 +4746,12 @@ serve(async (req) => {
               const responseChunks = splitMessage(cleanedResponse);
               console.log(`[BOSS] Sending ${responseChunks.length} message chunk(s)`);
               console.log(`[BOSS] Has imageUrl: ${!!bossData.imageUrl}`);
+
+              // Track single image delivery
+              let trackId: string | null = null;
+              if (bossData.imageUrl) {
+                trackId = await trackBossMedia(bossData.imageUrl, 'single_image');
+              }
               
               for (let i = 0; i < responseChunks.length; i++) {
                 const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -4725,9 +4776,16 @@ serve(async (req) => {
                 
                 if (twilioResponse.ok) {
                   console.log(`[BOSS] Chunk ${i+1}/${responseChunks.length} sent successfully`);
+                  if (i === 0 && trackId) {
+                    const twilioData = await twilioResponse.clone().json().catch(() => null);
+                    await updateTrack(trackId, 'sent', twilioData?.sid);
+                  }
                 } else {
                   const errorText = await twilioResponse.text();
                   console.error(`[BOSS] Failed to send chunk ${i+1}:`, twilioResponse.status, errorText);
+                  if (i === 0 && trackId) {
+                    await updateTrack(trackId, 'failed', undefined, `Twilio ${twilioResponse.status}: ${errorText.substring(0, 200)}`);
+                  }
                 }
                 
                 if (i < responseChunks.length - 1) {
