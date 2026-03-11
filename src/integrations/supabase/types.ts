@@ -2237,6 +2237,60 @@ export type Database = {
           },
         ]
       }
+      product_identity_profiles: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string | null
+          exclusion_keywords: string[] | null
+          id: string
+          is_active: boolean
+          media_id: string | null
+          product_name: string
+          updated_at: string
+          visual_fingerprint: Json | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description?: string | null
+          exclusion_keywords?: string[] | null
+          id?: string
+          is_active?: boolean
+          media_id?: string | null
+          product_name: string
+          updated_at?: string
+          visual_fingerprint?: Json | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          exclusion_keywords?: string[] | null
+          id?: string
+          is_active?: boolean
+          media_id?: string | null
+          product_name?: string
+          updated_at?: string
+          visual_fingerprint?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_identity_profiles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_identity_profiles_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "company_media"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quick_reply_templates: {
         Row: {
           category: string | null
