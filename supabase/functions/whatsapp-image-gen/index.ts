@@ -538,8 +538,8 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
         if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
       }
 
-      // Product images: threshold 8.5, non-product: threshold 7.5
-      const passThreshold = isProductImage ? 8.5 : 7.5;
+      // Unified quality threshold
+      const passThreshold = 7.0;
       const pass = hardFails.length === 0 && roundedScore >= passThreshold;
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
