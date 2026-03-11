@@ -530,16 +530,16 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
       
       if (isProductImage) {
         // STRICT: Product images — any single criterion below 7 = hard fail
-        const belowSeven = allScores.filter(s => s < 7);
-        if (belowSeven.length > 0) hardFails.push(`Product image: criterion scored below 7`);
+        const belowFive = allScores.filter(s => s < 5);
+        if (belowFive.length > 0) hardFails.push(`Product image: criterion scored below 5`);
       } else {
         // Non-product: any single criterion below 4 = automatic fail
         const belowFour = allScores.filter(s => s < 4);
         if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
       }
 
-      // Product images: threshold 8.5, non-product: threshold 7.5
-      const passThreshold = isProductImage ? 8.5 : 7.5;
+      // Unified quality threshold
+      const passThreshold = 7.0;
       const pass = hardFails.length === 0 && roundedScore >= passThreshold;
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
