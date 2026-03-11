@@ -544,7 +544,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
 
-      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass} (threshold: 8.5)`);
+      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass} (threshold: ${passThreshold}, product: ${isProductImage})`);
       console.log(`[QUALITY-ASSESS] Breakdown — Fidelity:${productFid} Halluc:${brandHalluc} Mutation:${productMut} Prompt:${promptAdh} Comp:${composition} Qual:${quality} Mktg:${marketing}`);
       if (hardFails.length > 0) {
         console.log(`[QUALITY-ASSESS] HARD FAILS: ${hardFails.join('; ')}`);
