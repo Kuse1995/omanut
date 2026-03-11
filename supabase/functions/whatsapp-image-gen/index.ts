@@ -704,8 +704,13 @@ async function runImagePipeline(
       console.log(`[PIPELINE] Quality check FAILED (score: ${qualityResult.score}/10), retrying with improvements...`);
       currentPrompt = `${currentPrompt}\n\nIMPROVEMENTS NEEDED: ${qualityResult.retryPrompt}\nISSUES TO FIX: ${qualityResult.issues.join('; ')}`;
     } else {
-      console.log(`[PIPELINE] Quality check marginal (score: ${qualityResult.score}/10), using best result`);
-      break;
+      // STRICT GATE: Do NOT fall through with a bad image
+      console.log(`[PIPELINE] Quality check FAILED after all retries (score: ${qualityResult.score}/10). Rejecting image.`);
+      pipelineData.final_score = qualityResult?.score || 0;
+      pipelineData.total_attempts = attempt;
+      pipelineData.rejected = true;
+      console.log('[PIPELINE] === Pipeline Complete (REJECTED) ===');
+      return { imageUrl: null, enhancedPrompt: currentPrompt, pipelineData };
     }
   }
 
