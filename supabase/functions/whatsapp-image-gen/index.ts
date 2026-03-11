@@ -72,6 +72,83 @@ interface ProductImage {
 }
 
 // ============================================================
+// PRODUCT IDENTITY PROFILES — Per-company visual fingerprints
+// ============================================================
+interface ProductIdentityProfile {
+  id: string;
+  product_name: string;
+  visual_fingerprint: {
+    colors?: { hex: string; name: string; location: string }[];
+    labels?: string[];
+    shape?: string;
+    distinguishing_features?: string[];
+    logo_description?: string;
+    packaging_type?: string;
+  };
+  exclusion_keywords: string[];
+  is_active: boolean;
+}
+
+async function loadProductIdentityProfiles(
+  supabase: any,
+  companyId: string,
+  productName?: string
+): Promise<{ matchedProfile: ProductIdentityProfile | null; allProfiles: ProductIdentityProfile[]; exclusionList: string[] }> {
+  const { data: profiles } = await supabase
+    .from('product_identity_profiles')
+    .select('id, product_name, visual_fingerprint, exclusion_keywords, is_active')
+    .eq('company_id', companyId)
+    .eq('is_active', true);
+
+  const allProfiles = (profiles || []) as ProductIdentityProfile[];
+
+  // Build global exclusion list from all company profiles
+  const exclusionList = [...new Set(allProfiles.flatMap(p => p.exclusion_keywords || []))];
+
+  // Try to match a specific profile by product name
+  let matchedProfile: ProductIdentityProfile | null = null;
+  if (productName) {
+    const nameLower = productName.toLowerCase();
+    matchedProfile = allProfiles.find(p =>
+      p.product_name.toLowerCase().includes(nameLower) ||
+      nameLower.includes(p.product_name.toLowerCase())
+    ) || null;
+  }
+
+  console.log(`[IDENTITY-PROFILES] Loaded ${allProfiles.length} profiles, ${exclusionList.length} exclusion keywords, matched: ${matchedProfile?.product_name || 'none'}`);
+  return { matchedProfile, allProfiles, exclusionList };
+}
+
+function buildIdentityLockPrompt(profile: ProductIdentityProfile): string {
+  const fp = profile.visual_fingerprint;
+  let lock = `\nPRODUCT IDENTITY LOCK — "${profile.product_name}":\n`;
+  if (fp.colors && fp.colors.length > 0) {
+    lock += `- EXACT COLORS: ${fp.colors.map(c => `${c.hex} (${c.name} — ${c.location})`).join(', ')}\n`;
+  }
+  if (fp.labels && fp.labels.length > 0) {
+    lock += `- LABEL TEXT (verbatim): ${fp.labels.map(l => `"${l}"`).join(', ')}\n`;
+  }
+  if (fp.shape) {
+    lock += `- SHAPE: ${fp.shape}\n`;
+  }
+  if (fp.packaging_type) {
+    lock += `- PACKAGING TYPE: ${fp.packaging_type}\n`;
+  }
+  if (fp.logo_description) {
+    lock += `- LOGO: ${fp.logo_description}\n`;
+  }
+  if (fp.distinguishing_features && fp.distinguishing_features.length > 0) {
+    lock += `- DISTINGUISHING FEATURES: ${fp.distinguishing_features.join('; ')}\n`;
+  }
+  return lock;
+}
+
+function buildExclusionPrompt(exclusionList: string[]): string {
+  if (exclusionList.length === 0) return '';
+  return `\n⛔ EXCLUSION LIST — NEVER generate images containing ANY of these: ${exclusionList.map(k => `"${k}"`).join(', ')}. These are competitor/wrong products.\n`;
+}
+
+// ============================================================
 // AGENT 1: STYLE MEMORY AGENT (Learning Loop)
 // Analyzes past feedback to build a "style DNA" for the company
 // ============================================================
