@@ -701,7 +701,32 @@ async function processAIResponse(
   );
 
   // ========== IMAGE GENERATION COMMAND DETECTION ==========
-  const imageGenCommand = detectImageGenCommand(userMessage);
+  // GATE 1: Check if company has image generation enabled before running detection
+  const { data: imageGenSettings } = await supabase
+    .from('image_generation_settings')
+    .select('enabled')
+    .eq('company_id', companyId)
+    .single();
+  
+  const imageGenEnabled = imageGenSettings?.enabled === true;
+  const imageGenCommand = imageGenEnabled ? detectImageGenCommand(userMessage) : { isImageCommand: false, type: null, prompt: '' };
+  
+  // GATE 2: For feedback type, verify a recent image was generated (within 5 min)
+  if (imageGenCommand.isImageCommand && imageGenCommand.type === 'feedback') {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentImage } = await supabase
+      .from('generated_images')
+      .select('id')
+      .eq('company_id', companyId)
+      .gte('created_at', fiveMinAgo)
+      .limit(1);
+    
+    if (!recentImage || recentImage.length === 0) {
+      console.log('[IMAGE-GEN] Feedback detected but no recent image generation — skipping');
+      imageGenCommand.isImageCommand = false;
+      imageGenCommand.type = null;
+    }
+  }
   
   if (imageGenCommand.isImageCommand) {
     console.log(`[IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
