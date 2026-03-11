@@ -330,6 +330,8 @@ ${styleDNA ? `STYLE DNA (learned from past successes):\n${styleDNA}\n` : ''}
 ${referenceContext ? `REFERENCE CONTEXT:\n${referenceContext}\n` : ''}
 ${mediaContext ? `MEDIA LIBRARY CONTEXT:\n${mediaContext}\n` : ''}
 ${productMatch ? `MATCHED PRODUCT: ${productMatch.description || productMatch.file_name} (Tags: ${productMatch.tags?.join(', ') || 'none'})` : ''}
+${identityLock ? `\n${identityLock}` : ''}
+${exclusionPrompt ? `\n${exclusionPrompt}` : ''}
 
 RULES:
 1. Transform vague requests into specific, vivid visual descriptions
