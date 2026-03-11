@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { ProductIdentityManager } from './ProductIdentityManager';
 import { useCompany } from '@/context/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
