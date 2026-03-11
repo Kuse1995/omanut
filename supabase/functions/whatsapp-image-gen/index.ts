@@ -652,6 +652,14 @@ async function runImagePipeline(
   const effectiveMaxRetries = 0; // TEMPORARY: bypass quality assessment
   console.log(`[PIPELINE] === Starting 6-Agent Image Generation Pipeline (maxRetries=${effectiveMaxRetries}) ===`);
 
+  // STAGE 0: Load Product Identity Profiles — per-company visual fingerprints
+  const productMatchName = productMatch?.description || productMatch?.file_name || '';
+  const { matchedProfile, allProfiles, exclusionList } = await loadProductIdentityProfiles(
+    supabase, companyId, productMatchName
+  );
+  const identityLock = matchedProfile ? buildIdentityLockPrompt(matchedProfile) : '';
+  const exclusionPrompt = buildExclusionPrompt(exclusionList);
+
   // STAGE 1: Style Memory Agent — learn from past feedback
   const styleDNA = await styleMemoryAgent(supabase, companyId);
 
@@ -663,15 +671,17 @@ async function runImagePipeline(
   // Build basic media context
   const mediaContext = await buildMediaContext(supabase, companyId);
 
-  // STAGE 3: Prompt Optimizer Agent — craft the optimal prompt
+  // STAGE 3: Prompt Optimizer Agent — craft the optimal prompt (with identity lock + exclusions)
   const { finalPrompt, intent, brief } = await promptOptimizerAgent(
     userPrompt, companyName, businessType,
-    productMatch, styleDNA, referenceContext, mediaContext
+    productMatch, styleDNA, referenceContext, mediaContext,
+    identityLock, exclusionPrompt
   );
 
-  // STAGE 4: Supervisor Review Agent — validate and refine
+  // STAGE 4: Supervisor Review Agent — validate and refine (with identity lock + exclusions)
   const { approved, refinedPrompt, warnings } = await supervisorReviewAgent(
-    finalPrompt, brief, companyName, businessType, productMatch, styleDNA
+    finalPrompt, brief, companyName, businessType, productMatch, styleDNA,
+    identityLock, exclusionPrompt
   );
 
   if (!approved) {
