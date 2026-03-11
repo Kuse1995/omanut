@@ -519,21 +519,32 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 
       // Hard-fail rules
       const hardFails: string[] = [];
+      const isProductImage = !!(productMatch);
       if (productFid < 8) hardFails.push(`Product Fidelity too low (${productFid}/10) — Hard Geometry violation`);
       if (brandHalluc < 8) hardFails.push(`Brand Hallucination detected (${brandHalluc}/10) — warped logos or invented elements`);
       if (productMut < 8) hardFails.push(`Product Mutation detected (${productMut}/10) — packaging or label altered`);
       if (promptAdh < 6) hardFails.push(`Prompt Adherence too low (${promptAdh}/10)`);
       if (quality < 5) hardFails.push(`Quality too low (${quality}/10)`);
-      // Any single criterion below 4 = automatic fail
+      
       const allScores = [productFid, brandHalluc, productMut, promptAdh, composition, quality, marketing];
-      const belowFour = allScores.filter(s => s < 4);
-      if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
+      
+      if (isProductImage) {
+        // STRICT: Product images — any single criterion below 7 = hard fail
+        const belowSeven = allScores.filter(s => s < 7);
+        if (belowSeven.length > 0) hardFails.push(`Product image: criterion scored below 7`);
+      } else {
+        // Non-product: any single criterion below 4 = automatic fail
+        const belowFour = allScores.filter(s => s < 4);
+        if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
+      }
 
-      const pass = hardFails.length === 0 && roundedScore >= 8.5;
+      // Product images: threshold 8.5, non-product: threshold 7.5
+      const passThreshold = isProductImage ? 8.5 : 7.5;
+      const pass = hardFails.length === 0 && roundedScore >= passThreshold;
 
       const allIssues = [...(assessment.issues || []), ...hardFails];
 
-      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass} (threshold: 8.5)`);
+      console.log(`[QUALITY-ASSESS] Weighted Score: ${roundedScore}/10, Pass: ${pass} (threshold: ${passThreshold}, product: ${isProductImage})`);
       console.log(`[QUALITY-ASSESS] Breakdown — Fidelity:${productFid} Halluc:${brandHalluc} Mutation:${productMut} Prompt:${promptAdh} Comp:${composition} Qual:${quality} Mktg:${marketing}`);
       if (hardFails.length > 0) {
         console.log(`[QUALITY-ASSESS] HARD FAILS: ${hardFails.join('; ')}`);
@@ -693,8 +704,13 @@ async function runImagePipeline(
       console.log(`[PIPELINE] Quality check FAILED (score: ${qualityResult.score}/10), retrying with improvements...`);
       currentPrompt = `${currentPrompt}\n\nIMPROVEMENTS NEEDED: ${qualityResult.retryPrompt}\nISSUES TO FIX: ${qualityResult.issues.join('; ')}`;
     } else {
-      console.log(`[PIPELINE] Quality check marginal (score: ${qualityResult.score}/10), using best result`);
-      break;
+      // STRICT GATE: Do NOT fall through with a bad image
+      console.log(`[PIPELINE] Quality check FAILED after all retries (score: ${qualityResult.score}/10). Rejecting image.`);
+      pipelineData.final_score = qualityResult?.score || 0;
+      pipelineData.total_attempts = attempt;
+      pipelineData.rejected = true;
+      console.log('[PIPELINE] === Pipeline Complete (REJECTED) ===');
+      return { imageUrl: null, enhancedPrompt: currentPrompt, pipelineData };
     }
   }
 

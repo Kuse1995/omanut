@@ -287,6 +287,8 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    Boss: "Post it tomorrow at 10am"
    You: [calls schedule_facebook_post with content, time, and needs_image_generation=true]
    
+   ⚠️ APPROVAL-FIRST RULE (CRITICAL): When you generate a NEW image for a post, you MUST show it to the boss and ask for approval BEFORE finalizing. The system will save it as 'pending_approval' and send the image preview. Your response should ask: "Here's the draft — should I go ahead and schedule/publish it, or would you like changes?" NEVER auto-approve a post with a freshly generated image. If the boss already approved the image in a prior message (e.g. "looks great, schedule it"), then use review_pending_post to approve.
+   
    DO NOT ask multiple questions. Draft the caption immediately and only ask for the time.
    Parse dates from natural language. Scheduled time must be 10+ min from now, within 75 days.
     Current UTC time: ${new Date().toISOString()}
@@ -1308,7 +1310,41 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              if (args.publish_now) {
+              // ── APPROVAL-FIRST: If a NEW image was just generated, always save as pending_approval ──
+              const freshImageGenerated = needsImageGen && !imageGenFailed && postImageUrl;
+
+              if (freshImageGenerated) {
+                // Image was just generated — save as pending_approval and show preview to boss
+                const scheduledTime = args.publish_now ? new Date().toISOString() : args.scheduled_time;
+                const { data: draftPost, error: draftErr } = await supabase
+                  .from('scheduled_posts')
+                  .insert({
+                    company_id: company.id,
+                    page_id: metaCred.page_id,
+                    content: args.content,
+                    image_url: postImageUrl,
+                    target_platform: targetPlatform,
+                    status: 'pending_approval',
+                    scheduled_time: scheduledTime,
+                  })
+                  .select('id')
+                  .single();
+
+                if (draftErr || !draftPost) {
+                  result = { success: false, message: `❌ Failed to create draft: ${draftErr?.message || 'Unknown error'}` };
+                  break;
+                }
+
+                // Add image to toolMediaMessages so boss sees it inline on WhatsApp
+                toolMediaMessages.push(postImageUrl);
+
+                result = {
+                  success: true,
+                  message: `📋 Draft created (Post #${draftPost.id.slice(0, 8)}).\n🖼️ Here's the image I generated — take a look!\n${args.publish_now ? '⏸️ Ready to publish immediately' : `⏰ Scheduled for ${args.scheduled_time}`} once you approve.\n\nReply "approve" to go ahead, or tell me what to change.`,
+                  imageUrl: postImageUrl,
+                  pendingPostId: draftPost.id,
+                };
+              } else if (args.publish_now) {
                 if (imageGenFailed) {
                   // Image gen failed — insert as pending_image and trigger async generation
                   const { data: pendingPost, error: pendingErr } = await supabase
@@ -1347,10 +1383,10 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
                   result = {
                     success: true,
-                    message: `⏳ Image is still generating. I'll publish your post automatically once the image is ready and send you a preview. No action needed from you!`,
+                    message: `⏳ Image is still generating. I'll send you a preview once ready for your approval before publishing.`,
                   };
                 } else {
-                  // Image ready (or no image needed) — publish immediately
+                  // No image needed or image was pre-existing (not freshly generated) — publish immediately
                   const { data: insertedPost, error: insertErr } = await supabase
                     .from('scheduled_posts')
                     .insert({
@@ -1381,7 +1417,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
                 }
               } else {
-                // Schedule for later
+                // Schedule for later — no fresh image
                 if (imageGenFailed) {
                   // Insert as pending_image — async gen will update before scheduled time
                   const { data: pendingPost, error: pendingErr } = await supabase
@@ -1416,7 +1452,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
                   result = {
                     success: true,
-                    message: `✅ Post scheduled for ${args.scheduled_time}\n⏳ Image is generating — it'll be attached automatically before publishing.`,
+                    message: `✅ Post scheduled for ${args.scheduled_time}\n⏳ Image is generating — I'll send a preview for your approval once ready.`,
                   };
                 } else {
                   const scheduleResponse = await fetch(`${SUPABASE_URL}/functions/v1/schedule-meta-post`, {
