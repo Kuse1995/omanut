@@ -403,7 +403,9 @@ async function supervisorReviewAgent(
   companyName: string,
   businessType: string,
   productMatch: ProductImage | null,
-  styleDNA: string
+  styleDNA: string,
+  identityLock: string = '',
+  exclusionPrompt: string = ''
 ): Promise<{ approved: boolean; refinedPrompt: string; warnings: string[] }> {
   console.log('[SUPERVISOR-REVIEW] Reviewing optimized prompt...');
 
@@ -412,6 +414,8 @@ async function supervisorReviewAgent(
 COMPANY: ${companyName} (${businessType})
 ${productMatch ? `PRODUCT [HARD GEOMETRY]: ${productMatch.description || productMatch.file_name}` : 'No specific product'}
 ${styleDNA ? `BRAND GUIDELINES:\n${styleDNA}` : ''}
+${identityLock ? `\n${identityLock}` : ''}
+${exclusionPrompt ? `\n${exclusionPrompt}\nCRITICAL: If the optimized prompt references ANY excluded brand/product, you MUST remove it and REJECT.` : ''}
 
 REVIEW CHECKLIST — STRICT:
 1. BRAND ACCURACY: Does the prompt correctly reference the company and product? No competitor names or wrong branding?
