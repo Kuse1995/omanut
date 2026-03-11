@@ -115,3 +115,6 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.bms-callback]
     verify_jwt = false
+  [functions.extract-product-identity]
+    timeout = 60
+    verify_jwt = false
