@@ -1337,7 +1337,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 }
 
                 // Add image to toolMediaMessages so boss sees it inline on WhatsApp
-                toolMediaMessages.push(postImageUrl);
+                toolMediaMessages.push({ body: `📋 Draft post preview (${targetPlatform})`, imageUrl: postImageUrl });
 
                 result = {
                   success: true,

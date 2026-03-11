@@ -500,6 +500,62 @@ export type Database = {
           },
         ]
       }
+      boss_media_deliveries: {
+        Row: {
+          boss_phone: string
+          company_id: string
+          context: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          image_url: string
+          max_retries: number
+          related_id: string | null
+          retry_count: number
+          status: string
+          twilio_sid: string | null
+          updated_at: string
+        }
+        Insert: {
+          boss_phone: string
+          company_id: string
+          context?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          image_url: string
+          max_retries?: number
+          related_id?: string | null
+          retry_count?: number
+          status?: string
+          twilio_sid?: string | null
+          updated_at?: string
+        }
+        Update: {
+          boss_phone?: string
+          company_id?: string
+          context?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          image_url?: string
+          max_retries?: number
+          related_id?: string | null
+          retry_count?: number
+          status?: string
+          twilio_sid?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "boss_media_deliveries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calendar_conflicts: {
         Row: {
           company_id: string | null
