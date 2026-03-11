@@ -287,6 +287,8 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    Boss: "Post it tomorrow at 10am"
    You: [calls schedule_facebook_post with content, time, and needs_image_generation=true]
    
+   ⚠️ APPROVAL-FIRST RULE (CRITICAL): When you generate a NEW image for a post, you MUST show it to the boss and ask for approval BEFORE finalizing. The system will save it as 'pending_approval' and send the image preview. Your response should ask: "Here's the draft — should I go ahead and schedule/publish it, or would you like changes?" NEVER auto-approve a post with a freshly generated image. If the boss already approved the image in a prior message (e.g. "looks great, schedule it"), then use review_pending_post to approve.
+   
    DO NOT ask multiple questions. Draft the caption immediately and only ask for the time.
    Parse dates from natural language. Scheduled time must be 10+ min from now, within 75 days.
     Current UTC time: ${new Date().toISOString()}
