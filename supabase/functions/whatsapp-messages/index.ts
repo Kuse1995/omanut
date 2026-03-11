@@ -47,6 +47,7 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
 }
 
 // Detect image generation commands from WhatsApp messages
+// TIGHTENED: Requires explicit image keywords, no more false positives from common words
 function detectImageGenCommand(message: string): { 
   isImageCommand: boolean; 
   type: 'generate' | 'feedback' | 'caption' | 'suggest' | 'edit' | 'history' | null;
@@ -65,7 +66,6 @@ function detectImageGenCommand(message: string): {
     /^list\s+(my\s+)?images?$/i,
     /^gallery$/i,
     /^📸$/,
-    /^history$/i,
   ];
   
   for (const pattern of historyPatterns) {
@@ -74,15 +74,13 @@ function detectImageGenCommand(message: string): {
     }
   }
   
-  // Edit image commands
+  // Edit image commands — TIGHTENED: require explicit prefixes only
+  // Removed: standalone "add/remove/change/crop/resize" which match normal conversation
   const editPatterns = [
     /^edit:\s*(.+)/i,
     /^✏️\s*(.+)/i,
-    /^(make it|make the image|make this)\s+(.+)/i,
-    /^(add|remove|change|adjust|increase|decrease|brighten|darken)\s+(.+)/i,
-    /^(more|less)\s+(bright|dark|contrast|saturation|vibrant|colorful)(.*)$/i,
-    /^add\s+(text|overlay|watermark|logo|border|frame)\s*(.*)$/i,
-    /^(crop|resize|rotate|flip|mirror)\s*(.*)$/i,
+    /^(make the image|make this image)\s+(.+)/i,
+    /^(add|remove|change)\s+(to the image|on the image|from the image|in the image)\s*(.*)$/i,
   ];
   
   for (const pattern of editPatterns) {
@@ -100,9 +98,10 @@ function detectImageGenCommand(message: string): {
     }
   }
   
-  // Generate image commands
+  // Generate image commands — TIGHTENED: must include "image/picture/photo/graphic" keyword
   const generatePatterns = [
-    /^(generate|create|make|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
+    /^(generate|create|design|draw)\s*(an?\s+)?(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
+    /^make\s*(an?\s+)(image|picture|photo|graphic|visual)\s*(of|for|with|showing)?\s*(.+)/i,
     /^image:\s*(.+)/i,
     /^img:\s*(.+)/i,
     /^🎨\s*(.+)/i,
@@ -118,17 +117,18 @@ function detectImageGenCommand(message: string): {
     }
   }
   
-  // Caption request
-  if (lowerMsg.includes('caption for') || lowerMsg.includes('what to post') || lowerMsg.includes('suggest text for')) {
+  // Caption request — TIGHTENED: require "image" context
+  if (lowerMsg.includes('caption for this image') || lowerMsg.includes('caption for the image') || lowerMsg.includes('suggest text for this image')) {
     return { isImageCommand: true, type: 'caption', prompt: message };
   }
   
-  // Suggestion request
-  if (lowerMsg.includes('what should i post') || lowerMsg.includes('post idea') || lowerMsg.includes('content idea') || lowerMsg.includes('suggest a post')) {
+  // Suggestion request — REMOVED "post idea" and "suggest a post" (too broad, let regular AI handle)
+  // Only keep explicit image-related suggestions
+  if (lowerMsg === 'suggest an image' || lowerMsg.includes('content image idea')) {
     return { isImageCommand: true, type: 'suggest', prompt: message };
   }
   
-  // Feedback patterns - only after recent image generation
+  // Feedback patterns — these will be gated by recency check at call site
   if (lowerMsg.includes('👍') || lowerMsg === 'love it' || lowerMsg === 'perfect' || lowerMsg === 'great image') {
     return { isImageCommand: true, type: 'feedback', prompt: message, feedbackData: { feedbackType: 'thumbs_up' } };
   }
@@ -701,7 +701,32 @@ async function processAIResponse(
   );
 
   // ========== IMAGE GENERATION COMMAND DETECTION ==========
-  const imageGenCommand = detectImageGenCommand(userMessage);
+  // GATE 1: Check if company has image generation enabled before running detection
+  const { data: imageGenSettings } = await supabase
+    .from('image_generation_settings')
+    .select('enabled')
+    .eq('company_id', companyId)
+    .single();
+  
+  const imageGenEnabled = imageGenSettings?.enabled === true;
+  const imageGenCommand = imageGenEnabled ? detectImageGenCommand(userMessage) : { isImageCommand: false, type: null, prompt: '' };
+  
+  // GATE 2: For feedback type, verify a recent image was generated (within 5 min)
+  if (imageGenCommand.isImageCommand && imageGenCommand.type === 'feedback') {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: recentImage } = await supabase
+      .from('generated_images')
+      .select('id')
+      .eq('company_id', companyId)
+      .gte('created_at', fiveMinAgo)
+      .limit(1);
+    
+    if (!recentImage || recentImage.length === 0) {
+      console.log('[IMAGE-GEN] Feedback detected but no recent image generation — skipping');
+      imageGenCommand.isImageCommand = false;
+      imageGenCommand.type = null;
+    }
+  }
   
   if (imageGenCommand.isImageCommand) {
     console.log(`[IMAGE-GEN] Detected image command: type=${imageGenCommand.type}, prompt="${imageGenCommand.prompt?.substring(0, 50)}..."`);
