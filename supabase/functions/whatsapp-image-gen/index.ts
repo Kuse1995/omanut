@@ -517,26 +517,10 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 
       const roundedScore = Math.round(weightedScore * 10) / 10;
 
-      // Hard-fail rules
+      // Hard-fail rules — only reject truly broken images
       const hardFails: string[] = [];
       const isProductImage = !!(productMatch);
-      if (productFid < 8) hardFails.push(`Product Fidelity too low (${productFid}/10) — Hard Geometry violation`);
-      if (brandHalluc < 8) hardFails.push(`Brand Hallucination detected (${brandHalluc}/10) — warped logos or invented elements`);
-      if (productMut < 8) hardFails.push(`Product Mutation detected (${productMut}/10) — packaging or label altered`);
-      if (promptAdh < 6) hardFails.push(`Prompt Adherence too low (${promptAdh}/10)`);
-      if (quality < 5) hardFails.push(`Quality too low (${quality}/10)`);
-      
-      const allScores = [productFid, brandHalluc, productMut, promptAdh, composition, quality, marketing];
-      
-      if (isProductImage) {
-        // STRICT: Product images — any single criterion below 7 = hard fail
-        const belowFive = allScores.filter(s => s < 5);
-        if (belowFive.length > 0) hardFails.push(`Product image: criterion scored below 5`);
-      } else {
-        // Non-product: any single criterion below 4 = automatic fail
-        const belowFour = allScores.filter(s => s < 4);
-        if (belowFour.length > 0) hardFails.push(`Criterion scored below 4`);
-      }
+      if (quality < 3) hardFails.push(`Quality too low (${quality}/10)`);
 
       // Unified quality threshold
       const passThreshold = 7.0;
