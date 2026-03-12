@@ -1779,8 +1779,9 @@ CRITICAL HANDOFF PROTOCOL:
       }
     }
 
-    // Take last 20 messages for context
-    const recentMessages = parsedMessages.slice(-20);
+    // Take last N messages based on complexity: 8 for simple, 12 for complex
+    const historyWindow = messageComplexity === 'simple' ? -8 : -12;
+    const recentMessages = parsedMessages.slice(historyWindow);
 
     const messages = [
       { role: 'system', content: instructions },
