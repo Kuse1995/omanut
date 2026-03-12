@@ -47,12 +47,14 @@ serve(async (req) => {
 
     for (const product of products) {
       try {
-        // Combine name + description + category for rich embedding
+        // Combine name + description + category + tags for rich embedding
+        // Repeat name for stronger semantic weight on product identity
         const textToEmbed = [
           product.name,
+          product.name, // duplicate for emphasis
           product.description || '',
-          product.category || '',
-          product.price ? `${product.currency || 'K'}${product.price}` : '',
+          product.category ? `category: ${product.category}` : '',
+          product.price ? `price ${product.currency || 'K'}${product.price}` : '',
         ].filter(Boolean).join(' — ');
 
         const embedding = await embedText({
