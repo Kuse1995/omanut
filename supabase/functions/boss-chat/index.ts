@@ -1913,6 +1913,27 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'get_recent_images': {
+              const minutesBack = args.minutes_back || 30;
+              const cutoffTime = new Date(Date.now() - minutesBack * 60 * 1000).toISOString();
+              const { data: recentImgs } = await supabase
+                .from('generated_images')
+                .select('id, prompt, image_url, created_at, status')
+                .eq('company_id', company.id)
+                .gte('created_at', cutoffTime)
+                .order('created_at', { ascending: false })
+                .limit(10);
+              if (!recentImgs?.length) {
+                result = { success: true, message: `No images generated in the last ${minutesBack} minutes.` };
+              } else {
+                const imgList = recentImgs.map((img: any, i: number) =>
+                  `${i + 1}. "${img.prompt.substring(0, 80)}"\n   URL: ${img.image_url}\n   Status: ${img.status}`
+                ).join('\n\n');
+                result = { success: true, message: `🖼️ ${recentImgs.length} recent images (last ${minutesBack} min):\n\n${imgList}\n\nUse these URLs as image_url when scheduling posts. Do NOT regenerate.` };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
