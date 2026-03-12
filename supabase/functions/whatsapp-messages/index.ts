@@ -1875,13 +1875,13 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-3-pro-preview';
-    const fallbackModel = 'google/gemini-3-flash-preview';
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    const fallbackModel = 'google/gemini-2.5-flash-lite';
     
-    // Select model based on complexity - use configured primary for complex, fallback for simple
+    // Select model based on complexity - flash for complex (tool-calling), flash-lite for simple
     const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;
-    const configuredMaxTokens = aiOverrides?.max_tokens || 8192;
-    const maxTokens = messageComplexity === 'simple' ? Math.min(2048, configuredMaxTokens) : configuredMaxTokens;
+    const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
+    const maxTokens = messageComplexity === 'simple' ? Math.min(350, configuredMaxTokens) : Math.min(1024, configuredMaxTokens);
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
     const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
