@@ -3412,7 +3412,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   const text = `${p.title || p.name || ''} ${p.description || ''} ${p.category || ''} ${p.author || ''}`.toLowerCase();
                   return queryWords.some((word: string) => text.includes(word));
                 });
-                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : allProducts;
+                // NO fallback to all products — only return actual matches
+                const resultsToReturn = matchedProducts;
                 
                 productList = resultsToReturn.slice(0, 10).map((p: any) => ({
                   id: p.id,
