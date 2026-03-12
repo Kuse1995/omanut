@@ -10,6 +10,46 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ── Lightweight Query Expansion for Semantic Search ──
+const SLANG_MAP: Record<string, string> = {
+  'u': 'you', 'ur': 'your', 'r': 'are', 'thx': 'thanks', 'thnx': 'thanks',
+  'pls': 'please', 'plz': 'please', 'msg': 'message', 'pics': 'pictures',
+  'pic': 'picture', 'info': 'information', 'abt': 'about', 'govt': 'government',
+  'qty': 'quantity', 'amt': 'amount', 'diff': 'different', 'sm': 'small',
+  'lg': 'large', 'lrg': 'large', 'med': 'medium', 'yr': 'year',
+  'tmrw': 'tomorrow', 'yday': 'yesterday', 'asap': 'as soon as possible',
+  'idk': 'I do not know', 'btw': 'by the way', 'nvm': 'never mind',
+};
+
+function normalizeSearchQuery(query: string, company: any): string {
+  // 1. Strip emojis
+  let cleaned = query.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}]/gu, '').trim();
+
+  // 2. Expand slang (word-boundary safe)
+  cleaned = cleaned.split(/\s+/).map(w => {
+    const lower = w.toLowerCase().replace(/[?.!,]+$/, '');
+    const suffix = w.slice(lower.length);
+    return (SLANG_MAP[lower] || w) + suffix;
+  }).join(' ');
+
+  // 3. Normalize common shopping phrases
+  cleaned = cleaned.replace(/how much/gi, 'price cost');
+  cleaned = cleaned.replace(/got any/gi, 'available products');
+  cleaned = cleaned.replace(/what do you (have|sell|offer)/gi, 'available products catalog');
+
+  // 4. Context enrichment for short queries (< 4 words)
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length < 4) {
+    const context = company?.services || company?.business_type || '';
+    if (context) {
+      cleaned = `${context} ${cleaned}`;
+    }
+  }
+
+  console.log(`[QUERY-EXPAND] "${query}" → "${cleaned}"`);
+  return cleaned;
+}
+
 // Message complexity classifier
 function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   const simpleTriggers = [
