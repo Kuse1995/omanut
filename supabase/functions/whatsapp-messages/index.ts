@@ -5,6 +5,11 @@ import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
+/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors */
+function sanitizeMessages(msgs: Array<{ role: string; content: any }>): Array<{ role: string; content: any }> {
+  return msgs.filter(m => m.content != null && m.content !== '' && String(m.content) !== 'undefined');
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
