@@ -939,6 +939,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["focus"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_recent_images",
+          description: "Fetch recently generated images for this company (last 30 minutes). Use BEFORE scheduling posts when the boss references images that were already created ('post the images we made', 'use the images we created', 'post them all'). Returns image URLs and prompts so you can pass them as image_url to schedule_social_post instead of regenerating.",
+          parameters: {
+            type: "object",
+            properties: {
+              minutes_back: { type: "integer", description: "How many minutes back to look (default 30)" }
+            },
+            required: []
+          }
+        }
       }
     ];
 
