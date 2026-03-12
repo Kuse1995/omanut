@@ -1867,6 +1867,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
                   if (imageGenResult.imageUrl) {
                     toolImageUrl = imageGenResult.imageUrl;
+                    imageGenCount++;
                     toolMediaMessages.push({
                       body: imageGenResult.message || '🎨 Here is your generated image!',
                       imageUrl: imageGenResult.imageUrl
