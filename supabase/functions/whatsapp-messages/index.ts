@@ -969,7 +969,10 @@ async function processAIResponse(
       .from('messages')
       .select('role, content, created_at')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(12);
+    // Re-sort ascending after limiting (we fetched newest 12, now chronological order)
+    if (messageHistory) messageHistory.reverse();
 
     // ========== CSAT RESPONSE DETECTION ==========
     // Check if customer is replying to a satisfaction survey (message is just a number 1-5)
