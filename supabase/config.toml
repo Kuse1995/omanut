@@ -118,3 +118,6 @@ project_id = "dzheddvoiauevcayifev"
   [functions.extract-product-identity]
     timeout = 60
     verify_jwt = false
+  [functions.embed-catalog]
+    timeout = 120
+    verify_jwt = false
