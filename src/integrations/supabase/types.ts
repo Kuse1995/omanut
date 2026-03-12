@@ -2085,6 +2085,7 @@ export type Database = {
           download_limit: number | null
           download_url: string | null
           duration_minutes: number | null
+          embedding: string | null
           id: string
           is_active: boolean | null
           name: string
@@ -2105,6 +2106,7 @@ export type Database = {
           download_limit?: number | null
           download_url?: string | null
           duration_minutes?: number | null
+          embedding?: string | null
           id?: string
           is_active?: boolean | null
           name: string
@@ -2125,6 +2127,7 @@ export type Database = {
           download_limit?: number | null
           download_url?: string | null
           duration_minutes?: number | null
+          embedding?: string | null
           id?: string
           is_active?: boolean | null
           name?: string
@@ -2872,6 +2875,26 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_products: {
+        Args: {
+          match_company_id: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          category: string
+          currency: string
+          delivery_type: string
+          description: string
+          id: string
+          name: string
+          price: number
+          product_type: string
+          selar_link: string
+          similarity: number
+        }[]
       }
       ticket_company_id: { Args: { p_ticket_id: string }; Returns: string }
       user_has_company_access: {

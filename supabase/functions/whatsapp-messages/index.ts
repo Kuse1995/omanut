@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat } from "../_shared/gemini-client.ts";
+import { embedQuery } from "../_shared/embedding-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -3301,14 +3302,55 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log('[RECOMMEND] Searching services for:', args.issue_description);
             
             try {
-              // Search products
-              let productQuery = supabase
-                .from('payment_products')
-                .select('name, description, price, currency, category')
-                .eq('company_id', company.id)
-                .eq('is_active', true);
-              if (args.category) productQuery = productQuery.eq('category', args.category);
-              const { data: products } = await productQuery.limit(10);
+              const recommendations: any[] = [];
+
+              // Try semantic search first
+              let usedSemantic = false;
+              try {
+                const queryVec = await embedQuery(args.issue_description);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: semanticResults } = await supabase.rpc('match_products', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.3,
+                  match_count: 5,
+                });
+                if (semanticResults && semanticResults.length > 0) {
+                  usedSemantic = true;
+                  for (const p of semanticResults) {
+                    recommendations.push({
+                      type: 'product',
+                      name: p.name,
+                      description: p.description,
+                      price: `${p.currency || 'K'}${p.price}`,
+                      similarity: p.similarity,
+                    });
+                  }
+                }
+              } catch (embErr) {
+                console.warn('[RECOMMEND] Semantic search failed, falling back to keyword:', embErr);
+              }
+
+              // Fallback to keyword matching if semantic search didn't work
+              if (!usedSemantic) {
+                let productQuery = supabase
+                  .from('payment_products')
+                  .select('name, description, price, currency, category')
+                  .eq('company_id', company.id)
+                  .eq('is_active', true);
+                if (args.category) productQuery = productQuery.eq('category', args.category);
+                const { data: products } = await productQuery.limit(10);
+
+                const keywords = args.issue_description.toLowerCase().split(/\s+/);
+                if (products) {
+                  for (const p of products) {
+                    const pText = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                    if (keywords.some((k: string) => k.length > 3 && pText.includes(k))) {
+                      recommendations.push({ type: 'product', name: p.name, description: p.description, price: `${p.currency || 'K'}${p.price}` });
+                    }
+                  }
+                }
+              }
               
               // Get quick reference info
               const { data: companyData } = await supabase
@@ -3316,23 +3358,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 .select('quick_reference_info, services')
                 .eq('id', company.id)
                 .single();
-              
-              const recommendations: any[] = [];
-              
-              // Match products by keyword
-              const keywords = args.issue_description.toLowerCase().split(/\s+/);
-              if (products) {
-                for (const p of products) {
-                  const pText = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
-                  if (keywords.some((k: string) => k.length > 3 && pText.includes(k))) {
-                    recommendations.push({ type: 'product', name: p.name, description: p.description, price: `${p.currency || 'K'}${p.price}` });
-                  }
-                }
-              }
-              
-              // Include quick reference snippets
+
               if (companyData?.quick_reference_info) {
                 const refInfo = companyData.quick_reference_info;
+                const keywords = args.issue_description.toLowerCase().split(/\s+/);
                 if (keywords.some((k: string) => k.length > 3 && refInfo.toLowerCase().includes(k))) {
                   recommendations.push({ type: 'info', content: refInfo.substring(0, 300) });
                 }
@@ -3346,8 +3375,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 content: JSON.stringify({
                   success: true,
                   recommendations,
-                  total_products: products?.length || 0,
-                  message: recommendations.length > 0 ? 'Found relevant services' : 'No exact matches, but here are available services'
+                  message: recommendations.length > 0 ? 'Found relevant services' : 'No matching services found for this query'
                 })
               });
               
@@ -3384,7 +3412,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   const text = `${p.title || p.name || ''} ${p.description || ''} ${p.category || ''} ${p.author || ''}`.toLowerCase();
                   return queryWords.some((word: string) => text.includes(word));
                 });
-                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : allProducts;
+                // NO fallback to all products — only return actual matches
+                const resultsToReturn = matchedProducts;
                 
                 productList = resultsToReturn.slice(0, 10).map((p: any) => ({
                   id: p.id,
@@ -3400,43 +3429,80 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   cover_url: p.cover_url || p.image_url || null,
                 }));
               } else {
-                // === LOCAL CATALOG MODE ===
-                let productQuery = supabase
-                  .from('payment_products')
-                  .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
-                  .eq('company_id', company.id)
-                  .eq('is_active', true);
-                
-                if (args.category) {
-                  productQuery = productQuery.eq('category', args.category);
-                }
-                
-                const { data: products, error: prodError } = await productQuery.limit(20);
-                
-                if (prodError) {
-                  console.error('[LOOKUP-PRODUCT] DB error:', prodError);
-                  toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
-                  continue;
+                // === LOCAL CATALOG MODE — Semantic Search with fallback ===
+                let usedSemantic = false;
+
+                try {
+                  const queryVec = await embedQuery(args.query);
+                  const vectorStr = `[${queryVec.join(',')}]`;
+                  const { data: semanticResults, error: rpcErr } = await supabase.rpc('match_products', {
+                    query_embedding: vectorStr,
+                    match_company_id: company.id,
+                    match_threshold: 0.3,
+                    match_count: 10,
+                  });
+
+                  if (!rpcErr && semanticResults && semanticResults.length > 0) {
+                    usedSemantic = true;
+                    console.log(`[LOOKUP-PRODUCT] Semantic search found ${semanticResults.length} results`);
+                    productList = semanticResults.map((p: any) => ({
+                      id: p.id,
+                      name: p.name,
+                      description: p.description,
+                      price: p.price,
+                      currency: p.currency || 'K',
+                      category: p.category,
+                      product_type: p.product_type,
+                      delivery_type: p.delivery_type,
+                      selar_link: p.selar_link,
+                      similarity: p.similarity,
+                    }));
+                  } else if (rpcErr) {
+                    console.warn('[LOOKUP-PRODUCT] Semantic RPC error:', rpcErr.message);
+                  }
+                } catch (embErr) {
+                  console.warn('[LOOKUP-PRODUCT] Embedding failed, falling back to keyword:', embErr);
                 }
 
-                const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-                const matchedProducts = (products || []).filter((p: any) => {
-                  const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
-                  return queryWords.some((word: string) => text.includes(word));
-                });
-                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : (products || []);
-                
-                productList = resultsToReturn.slice(0, 10).map((p: any) => ({
-                  id: p.id,
-                  name: p.name,
-                  description: p.description,
-                  price: p.price,
-                  currency: p.currency || 'K',
-                  category: p.category,
-                  product_type: p.product_type,
-                  delivery_type: p.delivery_type,
-                  selar_link: p.selar_link
-                }));
+                // Fallback to keyword matching (but NO "return all" fallback)
+                if (!usedSemantic) {
+                  let productQuery = supabase
+                    .from('payment_products')
+                    .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
+                    .eq('company_id', company.id)
+                    .eq('is_active', true);
+                  
+                  if (args.category) {
+                    productQuery = productQuery.eq('category', args.category);
+                  }
+                  
+                  const { data: products, error: prodError } = await productQuery.limit(20);
+                  
+                  if (prodError) {
+                    console.error('[LOOKUP-PRODUCT] DB error:', prodError);
+                    toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
+                    continue;
+                  }
+
+                  const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                  const matchedProducts = (products || []).filter((p: any) => {
+                    const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                    return queryWords.some((word: string) => text.includes(word));
+                  });
+                  
+                  // NO fallback to all products — only return actual matches
+                  productList = matchedProducts.slice(0, 10).map((p: any) => ({
+                    id: p.id,
+                    name: p.name,
+                    description: p.description,
+                    price: p.price,
+                    currency: p.currency || 'K',
+                    category: p.category,
+                    product_type: p.product_type,
+                    delivery_type: p.delivery_type,
+                    selar_link: p.selar_link
+                  }));
+                }
               }
 
               anyToolExecuted = true;
