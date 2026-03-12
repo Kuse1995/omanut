@@ -2404,7 +2404,7 @@ Trust ONLY the information provided in this system prompt.
     try {
       const response = await geminiChat({
         model: selectedModel,
-        messages,
+        messages: sanitizeMessages(messages),
         temperature,
         max_tokens: maxTokens,
         tools: filteredTools,
