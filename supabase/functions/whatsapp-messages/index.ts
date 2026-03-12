@@ -3347,7 +3347,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               // Try semantic search first
               let usedSemantic = false;
               try {
-                const queryVec = await embedQuery(args.issue_description);
+                const expandedQuery = normalizeSearchQuery(args.issue_description, company);
+                const queryVec = await embedQuery(expandedQuery);
                 const vectorStr = `[${queryVec.join(',')}]`;
                 const { data: semanticResults } = await supabase.rpc('match_products', {
                   query_embedding: vectorStr,
