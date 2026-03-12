@@ -3428,43 +3428,80 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   cover_url: p.cover_url || p.image_url || null,
                 }));
               } else {
-                // === LOCAL CATALOG MODE ===
-                let productQuery = supabase
-                  .from('payment_products')
-                  .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
-                  .eq('company_id', company.id)
-                  .eq('is_active', true);
-                
-                if (args.category) {
-                  productQuery = productQuery.eq('category', args.category);
-                }
-                
-                const { data: products, error: prodError } = await productQuery.limit(20);
-                
-                if (prodError) {
-                  console.error('[LOOKUP-PRODUCT] DB error:', prodError);
-                  toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
-                  continue;
+                // === LOCAL CATALOG MODE — Semantic Search with fallback ===
+                let usedSemantic = false;
+
+                try {
+                  const queryVec = await embedQuery(args.query);
+                  const vectorStr = `[${queryVec.join(',')}]`;
+                  const { data: semanticResults, error: rpcErr } = await supabase.rpc('match_products', {
+                    query_embedding: vectorStr,
+                    match_company_id: company.id,
+                    match_threshold: 0.3,
+                    match_count: 10,
+                  });
+
+                  if (!rpcErr && semanticResults && semanticResults.length > 0) {
+                    usedSemantic = true;
+                    console.log(`[LOOKUP-PRODUCT] Semantic search found ${semanticResults.length} results`);
+                    productList = semanticResults.map((p: any) => ({
+                      id: p.id,
+                      name: p.name,
+                      description: p.description,
+                      price: p.price,
+                      currency: p.currency || 'K',
+                      category: p.category,
+                      product_type: p.product_type,
+                      delivery_type: p.delivery_type,
+                      selar_link: p.selar_link,
+                      similarity: p.similarity,
+                    }));
+                  } else if (rpcErr) {
+                    console.warn('[LOOKUP-PRODUCT] Semantic RPC error:', rpcErr.message);
+                  }
+                } catch (embErr) {
+                  console.warn('[LOOKUP-PRODUCT] Embedding failed, falling back to keyword:', embErr);
                 }
 
-                const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-                const matchedProducts = (products || []).filter((p: any) => {
-                  const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
-                  return queryWords.some((word: string) => text.includes(word));
-                });
-                const resultsToReturn = matchedProducts.length > 0 ? matchedProducts : (products || []);
-                
-                productList = resultsToReturn.slice(0, 10).map((p: any) => ({
-                  id: p.id,
-                  name: p.name,
-                  description: p.description,
-                  price: p.price,
-                  currency: p.currency || 'K',
-                  category: p.category,
-                  product_type: p.product_type,
-                  delivery_type: p.delivery_type,
-                  selar_link: p.selar_link
-                }));
+                // Fallback to keyword matching (but NO "return all" fallback)
+                if (!usedSemantic) {
+                  let productQuery = supabase
+                    .from('payment_products')
+                    .select('id, name, description, price, currency, category, product_type, delivery_type, selar_link')
+                    .eq('company_id', company.id)
+                    .eq('is_active', true);
+                  
+                  if (args.category) {
+                    productQuery = productQuery.eq('category', args.category);
+                  }
+                  
+                  const { data: products, error: prodError } = await productQuery.limit(20);
+                  
+                  if (prodError) {
+                    console.error('[LOOKUP-PRODUCT] DB error:', prodError);
+                    toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Failed to search products' }) });
+                    continue;
+                  }
+
+                  const queryWords = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                  const matchedProducts = (products || []).filter((p: any) => {
+                    const text = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                    return queryWords.some((word: string) => text.includes(word));
+                  });
+                  
+                  // NO fallback to all products — only return actual matches
+                  productList = matchedProducts.slice(0, 10).map((p: any) => ({
+                    id: p.id,
+                    name: p.name,
+                    description: p.description,
+                    price: p.price,
+                    currency: p.currency || 'K',
+                    category: p.category,
+                    product_type: p.product_type,
+                    delivery_type: p.delivery_type,
+                    selar_link: p.selar_link
+                  }));
+                }
               }
 
               anyToolExecuted = true;
