@@ -298,6 +298,7 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    - Use the generate_image tool when the boss asks for any image creation. Extract a detailed visual prompt from their message.
    - Use the edit_image tool when they want to modify the last generated image.
    - Use the show_image_gallery tool when they want to see recent creations.
+   - Use the get_recent_images tool to look up images that were already generated recently.
    - You can CHAIN tools: generate an image, then schedule it as a social post in the SAME turn!
    - NEVER say you cannot generate images. Use the generate_image tool directly.
    
@@ -307,7 +308,9 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    - Use it when the boss asks "show me my product photos" or "what product images do I have"
    - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
    
-    IMAGE REUSE RULE (CRITICAL): If you already called generate_image in this conversation and got an imageUrl back, you MUST pass that URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true when an image was already generated and approved. The system will automatically reuse the last generated image, but explicitly passing image_url is preferred.
+   IMAGE REUSE RULE (CRITICAL): If you already called generate_image in this conversation and got an imageUrl back, you MUST pass that URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true when an image was already generated and approved. The system will automatically reuse the last generated image, but explicitly passing image_url is preferred.
+   
+   EXISTING IMAGE LOOKUP (CRITICAL): When the boss references images that were already generated ("post the images we created", "use the images we made", "post them all"), you MUST call get_recent_images FIRST to find existing image URLs. Then pass each URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true for already-generated images. NEVER regenerate images that already exist.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
    - Use get_pending_posts to check what AI-generated content is waiting for approval
@@ -936,6 +939,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["focus"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_recent_images",
+          description: "Fetch recently generated images for this company (last 30 minutes). Use BEFORE scheduling posts when the boss references images that were already created ('post the images we made', 'use the images we created', 'post them all'). Returns image URLs and prompts so you can pass them as image_url to schedule_social_post instead of regenerating.",
+          parameters: {
+            type: "object",
+            properties: {
+              minutes_back: { type: "integer", description: "How many minutes back to look (default 30)" }
+            },
+            required: []
+          }
+        }
       }
     ];
 
@@ -984,6 +1001,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     let aiResponse = '';
     let toolImageUrl: string | null = null;
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
+    let imageGenCount = 0; // Per-session image generation cap
+    const MAX_IMAGE_GENS_PER_SESSION = 2;
 
     const toolLoopStartTime = Date.now();
     let thinkingAckSent = false;
@@ -1241,37 +1260,46 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               let imageGenFailed = false;
 
               if (needsImageGen) {
-                try {
-                  const IMG_TIMEOUT = 50000; // 50s — fits within function timeout with room for response
-                  const imgGenPromise = fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                    body: JSON.stringify({
-                      companyId: company.id,
-                      customerPhone: '',
-                      conversationId: null,
-                      prompt: args.image_prompt,
-                      messageType: 'generate',
-                    }),
-                  });
-                  const timeoutPromise = new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error('Image generation timed out')), IMG_TIMEOUT)
-                  );
-                  const imgGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
-                  if (imgGenResponse.ok) {
-                    const imgResult = await imgGenResponse.json();
-                    if (imgResult.imageUrl) {
-                      postImageUrl = imgResult.imageUrl;
-                      toolImageUrl = imgResult.imageUrl; // Store for reuse in conversation
+                // Per-session cap: prevent runaway image generations
+                if (imageGenCount >= MAX_IMAGE_GENS_PER_SESSION) {
+                  console.log(`[BOSS-CHAT] Image gen cap reached (${imageGenCount}/${MAX_IMAGE_GENS_PER_SESSION})`);
+                  imageGenFailed = true;
+                } else {
+                  try {
+                    const IMG_TIMEOUT = 50000; // 50s — fits within function timeout with room for response
+                    const imgAbortController = new AbortController();
+                    const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_TIMEOUT);
+                    
+                    const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                      body: JSON.stringify({
+                        companyId: company.id,
+                        customerPhone: '',
+                        conversationId: null,
+                        prompt: args.image_prompt,
+                        messageType: 'generate',
+                      }),
+                      signal: imgAbortController.signal,
+                    });
+                    clearTimeout(imgTimeoutId);
+                    
+                    if (imgGenResponse.ok) {
+                      const imgResult = await imgGenResponse.json();
+                      if (imgResult.imageUrl) {
+                        postImageUrl = imgResult.imageUrl;
+                        toolImageUrl = imgResult.imageUrl; // Store for reuse in conversation
+                        imageGenCount++;
+                      } else {
+                        imageGenFailed = true;
+                      }
                     } else {
                       imageGenFailed = true;
                     }
-                  } else {
+                  } catch (e: any) {
+                    console.error('[BOSS-CHAT] Image gen for post failed/timed out:', e.message);
                     imageGenFailed = true;
                   }
-                } catch (e: any) {
-                  console.error('[BOSS-CHAT] Image gen for post failed/timed out:', e.message);
-                  imageGenFailed = true;
                 }
               }
 
@@ -1839,6 +1867,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
                   if (imageGenResult.imageUrl) {
                     toolImageUrl = imageGenResult.imageUrl;
+                    imageGenCount++;
                     toolMediaMessages.push({
                       body: imageGenResult.message || '🎨 Here is your generated image!',
                       imageUrl: imageGenResult.imageUrl
@@ -1881,6 +1910,27 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     imageUrl: recentImages[0].image_url
                   });
                 }
+              }
+              break;
+            }
+
+            case 'get_recent_images': {
+              const minutesBack = args.minutes_back || 30;
+              const cutoffTime = new Date(Date.now() - minutesBack * 60 * 1000).toISOString();
+              const { data: recentImgs } = await supabase
+                .from('generated_images')
+                .select('id, prompt, image_url, created_at, status')
+                .eq('company_id', company.id)
+                .gte('created_at', cutoffTime)
+                .order('created_at', { ascending: false })
+                .limit(10);
+              if (!recentImgs?.length) {
+                result = { success: true, message: `No images generated in the last ${minutesBack} minutes.` };
+              } else {
+                const imgList = recentImgs.map((img: any, i: number) =>
+                  `${i + 1}. "${img.prompt.substring(0, 80)}"\n   URL: ${img.image_url}\n   Status: ${img.status}`
+                ).join('\n\n');
+                result = { success: true, message: `🖼️ ${recentImgs.length} recent images (last ${minutesBack} min):\n\n${imgList}\n\nUse these URLs as image_url when scheduling posts. Do NOT regenerate.` };
               }
               break;
             }
