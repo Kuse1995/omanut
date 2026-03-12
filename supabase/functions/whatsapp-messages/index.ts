@@ -5,6 +5,11 @@ import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
+/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors */
+function sanitizeMessages(msgs: Array<{ role: string; content: any }>): Array<{ role: string; content: any }> {
+  return msgs.filter(m => m.content != null && m.content !== '' && String(m.content) !== 'undefined');
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -964,7 +969,10 @@ async function processAIResponse(
       .from('messages')
       .select('role, content, created_at')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(12);
+    // Re-sort ascending after limiting (we fetched newest 12, now chronological order)
+    if (messageHistory) messageHistory.reverse();
 
     // ========== CSAT RESPONSE DETECTION ==========
     // Check if customer is replying to a satisfaction survey (message is just a number 1-5)
@@ -1771,8 +1779,9 @@ CRITICAL HANDOFF PROTOCOL:
       }
     }
 
-    // Take last 20 messages for context
-    const recentMessages = parsedMessages.slice(-20);
+    // Take last N messages based on complexity: 8 for simple, 12 for complex
+    const historyWindow = messageComplexity === 'simple' ? -8 : -12;
+    const recentMessages = parsedMessages.slice(historyWindow);
 
     const messages = [
       { role: 'system', content: instructions },
@@ -1866,13 +1875,13 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-3-pro-preview';
-    const fallbackModel = 'google/gemini-3-flash-preview';
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    const fallbackModel = 'google/gemini-2.5-flash-lite';
     
-    // Select model based on complexity - use configured primary for complex, fallback for simple
+    // Select model based on complexity - flash for complex (tool-calling), flash-lite for simple
     const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;
-    const configuredMaxTokens = aiOverrides?.max_tokens || 8192;
-    const maxTokens = messageComplexity === 'simple' ? Math.min(2048, configuredMaxTokens) : configuredMaxTokens;
+    const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
+    const maxTokens = messageComplexity === 'simple' ? Math.min(350, configuredMaxTokens) : Math.min(1024, configuredMaxTokens);
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
     const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
@@ -2395,7 +2404,7 @@ Trust ONLY the information provided in this system prompt.
     try {
       const response = await geminiChat({
         model: selectedModel,
-        messages,
+        messages: sanitizeMessages(messages),
         temperature,
         max_tokens: maxTokens,
         tools: filteredTools,
@@ -3740,9 +3749,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         // Call AI WITH tools still available for multi-step chains
         const roundResponse = await geminiChat({
           model: selectedModel,
-          messages: currentMessages,
+          messages: sanitizeMessages(currentMessages),
           temperature: 1.0,
-          max_tokens: maxTokens,
+          max_tokens: Math.min(1024, maxTokens),
           tools: filteredTools,
           tool_choice: "auto",
           signal: roundController.signal,
