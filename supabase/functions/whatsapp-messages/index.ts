@@ -3749,9 +3749,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         // Call AI WITH tools still available for multi-step chains
         const roundResponse = await geminiChat({
           model: selectedModel,
-          messages: currentMessages,
+          messages: sanitizeMessages(currentMessages),
           temperature: 1.0,
-          max_tokens: maxTokens,
+          max_tokens: Math.min(1024, maxTokens),
           tools: filteredTools,
           tool_choice: "auto",
           signal: roundController.signal,
