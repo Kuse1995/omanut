@@ -3302,14 +3302,55 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log('[RECOMMEND] Searching services for:', args.issue_description);
             
             try {
-              // Search products
-              let productQuery = supabase
-                .from('payment_products')
-                .select('name, description, price, currency, category')
-                .eq('company_id', company.id)
-                .eq('is_active', true);
-              if (args.category) productQuery = productQuery.eq('category', args.category);
-              const { data: products } = await productQuery.limit(10);
+              const recommendations: any[] = [];
+
+              // Try semantic search first
+              let usedSemantic = false;
+              try {
+                const queryVec = await embedQuery(args.issue_description);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: semanticResults } = await supabase.rpc('match_products', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.3,
+                  match_count: 5,
+                });
+                if (semanticResults && semanticResults.length > 0) {
+                  usedSemantic = true;
+                  for (const p of semanticResults) {
+                    recommendations.push({
+                      type: 'product',
+                      name: p.name,
+                      description: p.description,
+                      price: `${p.currency || 'K'}${p.price}`,
+                      similarity: p.similarity,
+                    });
+                  }
+                }
+              } catch (embErr) {
+                console.warn('[RECOMMEND] Semantic search failed, falling back to keyword:', embErr);
+              }
+
+              // Fallback to keyword matching if semantic search didn't work
+              if (!usedSemantic) {
+                let productQuery = supabase
+                  .from('payment_products')
+                  .select('name, description, price, currency, category')
+                  .eq('company_id', company.id)
+                  .eq('is_active', true);
+                if (args.category) productQuery = productQuery.eq('category', args.category);
+                const { data: products } = await productQuery.limit(10);
+
+                const keywords = args.issue_description.toLowerCase().split(/\s+/);
+                if (products) {
+                  for (const p of products) {
+                    const pText = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+                    if (keywords.some((k: string) => k.length > 3 && pText.includes(k))) {
+                      recommendations.push({ type: 'product', name: p.name, description: p.description, price: `${p.currency || 'K'}${p.price}` });
+                    }
+                  }
+                }
+              }
               
               // Get quick reference info
               const { data: companyData } = await supabase
@@ -3317,23 +3358,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 .select('quick_reference_info, services')
                 .eq('id', company.id)
                 .single();
-              
-              const recommendations: any[] = [];
-              
-              // Match products by keyword
-              const keywords = args.issue_description.toLowerCase().split(/\s+/);
-              if (products) {
-                for (const p of products) {
-                  const pText = `${p.name} ${p.description || ''} ${p.category || ''}`.toLowerCase();
-                  if (keywords.some((k: string) => k.length > 3 && pText.includes(k))) {
-                    recommendations.push({ type: 'product', name: p.name, description: p.description, price: `${p.currency || 'K'}${p.price}` });
-                  }
-                }
-              }
-              
-              // Include quick reference snippets
+
               if (companyData?.quick_reference_info) {
                 const refInfo = companyData.quick_reference_info;
+                const keywords = args.issue_description.toLowerCase().split(/\s+/);
                 if (keywords.some((k: string) => k.length > 3 && refInfo.toLowerCase().includes(k))) {
                   recommendations.push({ type: 'info', content: refInfo.substring(0, 300) });
                 }
@@ -3347,8 +3375,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 content: JSON.stringify({
                   success: true,
                   recommendations,
-                  total_products: products?.length || 0,
-                  message: recommendations.length > 0 ? 'Found relevant services' : 'No exact matches, but here are available services'
+                  message: recommendations.length > 0 ? 'Found relevant services' : 'No matching services found for this query'
                 })
               });
               
