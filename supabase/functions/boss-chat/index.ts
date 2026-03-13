@@ -1249,19 +1249,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
 
             case 'schedule_social_post': {
+              // ── SESSION CAP: max 1 post per message ──
+              if (socialPostCount >= MAX_SOCIAL_POSTS_PER_SESSION) {
+                console.log(`[BOSS-CHAT] Social post cap reached (${socialPostCount}/${MAX_SOCIAL_POSTS_PER_SESSION})`);
+                result = { success: false, message: '⚠️ Only 1 post per message. Send another message for additional posts.' };
+                break;
+              }
+
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
               // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
+              // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
               let postImageUrl = args.image_url || null;
               if (!postImageUrl && toolImageUrl) {
-                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post:', toolImageUrl);
+                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
 
               // ── IMAGE-FIRST PIPELINE ──
-              // When needs_image_generation is true, generate the image BEFORE publishing.
-              // Never silently degrade to text-only.
+              // Only generate if NO image exists from any source
               const needsImageGen = !postImageUrl && args.needs_image_generation && args.image_prompt;
               let imageGenFailed = false;
 
