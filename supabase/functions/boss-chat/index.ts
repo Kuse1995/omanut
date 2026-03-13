@@ -1515,6 +1515,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined };
                 }
               }
+              socialPostCount++;
               break;
             }
 
