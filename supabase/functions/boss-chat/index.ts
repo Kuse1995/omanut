@@ -1007,6 +1007,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
     let imageGenCount = 0; // Per-session image generation cap
     const MAX_IMAGE_GENS_PER_SESSION = 2;
+    let socialPostCount = 0; // Per-session social post cap
+    const MAX_SOCIAL_POSTS_PER_SESSION = 1;
 
     const toolLoopStartTime = Date.now();
     let thinkingAckSent = false;
