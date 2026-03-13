@@ -1861,15 +1861,18 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
 
               try {
-                const imgGenPromise = fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                // AbortController pattern: cancels the sync request on timeout
+                // so it doesn't ghost-complete alongside the async retry
+                const imgAbortController = new AbortController();
+                const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_GEN_TIMEOUT);
+
+                const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
                   body: JSON.stringify(imgGenBody),
+                  signal: imgAbortController.signal,
                 });
-                const timeoutPromise = new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error('Image generation timed out')), IMG_GEN_TIMEOUT)
-                );
-                const imageGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
+                clearTimeout(imgTimeoutId);
 
                 if (!imageGenResponse.ok) {
                   const errorText = await imageGenResponse.text();
@@ -1888,8 +1891,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
               } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout — firing async with bossPhone delivery`);
-                // Fire-and-forget: the image-gen function will deliver via WhatsApp when done
+                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — firing async with bossPhone delivery`);
+                // Original request is now cancelled (aborted). Fire a fresh async request for delivery.
                 fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
