@@ -308,9 +308,13 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    - Use it when the boss asks "show me my product photos" or "what product images do I have"
    - PROACTIVELY suggest using it if the boss reports inaccurate image generation results
    
-   IMAGE REUSE RULE (CRITICAL): If you already called generate_image in this conversation and got an imageUrl back, you MUST pass that URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true when an image was already generated and approved. The system will automatically reuse the last generated image, but explicitly passing image_url is preferred.
-   
-   EXISTING IMAGE LOOKUP (CRITICAL): When the boss references images that were already generated ("post the images we created", "use the images we made", "post them all"), you MUST call get_recent_images FIRST to find existing image URLs. Then pass each URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true for already-generated images. NEVER regenerate images that already exist.
+    IMAGE REUSE RULE (CRITICAL): If you already called generate_image in this conversation and got an imageUrl back, you MUST pass that URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true when an image was already generated and approved. The system will automatically reuse the last generated image, but explicitly passing image_url is preferred.
+    
+    EXISTING IMAGE LOOKUP (CRITICAL): When the boss references images that were already generated ("post the images we created", "use the images we made", "post them all"), you MUST call get_recent_images FIRST to find existing image URLs. Then pass each URL as image_url to schedule_social_post. Do NOT set needs_image_generation=true for already-generated images. NEVER regenerate images that already exist.
+
+    STRICT IMAGE REUSE (MANDATORY): When the boss says "post it", "post this", "publish it", "schedule it", or any variation of posting an existing image, you MUST use the image_url from the previous generate_image result. Set needs_image_generation=false. NEVER regenerate. If no image exists in context, call get_recent_images first. If still nothing, ask the boss which image to use.
+
+    ONE POST PER MESSAGE: You may only call schedule_social_post ONCE per boss message. If the boss wants multiple posts, tell them to send separate messages.
 
 9. **Social Media Strategy Management**: You manage the full content approval queue via WhatsApp.
    - Use get_pending_posts to check what AI-generated content is waiting for approval
@@ -1003,6 +1007,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
     let imageGenCount = 0; // Per-session image generation cap
     const MAX_IMAGE_GENS_PER_SESSION = 2;
+    let socialPostCount = 0; // Per-session social post cap
+    const MAX_SOCIAL_POSTS_PER_SESSION = 1;
 
     const toolLoopStartTime = Date.now();
     let thinkingAckSent = false;
@@ -1243,19 +1249,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             }
 
             case 'schedule_social_post': {
+              // ── SESSION CAP: max 1 post per message ──
+              if (socialPostCount >= MAX_SOCIAL_POSTS_PER_SESSION) {
+                console.log(`[BOSS-CHAT] Social post cap reached (${socialPostCount}/${MAX_SOCIAL_POSTS_PER_SESSION})`);
+                result = { success: false, message: '⚠️ Only 1 post per message. Send another message for additional posts.' };
+                break;
+              }
+
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
               // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
+              // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
               let postImageUrl = args.image_url || null;
               if (!postImageUrl && toolImageUrl) {
-                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post:', toolImageUrl);
+                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
 
               // ── IMAGE-FIRST PIPELINE ──
-              // When needs_image_generation is true, generate the image BEFORE publishing.
-              // Never silently degrade to text-only.
+              // Only generate if NO image exists from any source
               const needsImageGen = !postImageUrl && args.needs_image_generation && args.image_prompt;
               let imageGenFailed = false;
 
@@ -1502,6 +1515,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     : { success: true, message: `✅ Post scheduled for ${args.scheduled_time}\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined };
                 }
               }
+              socialPostCount++;
               break;
             }
 
@@ -1848,15 +1862,18 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
 
               try {
-                const imgGenPromise = fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
+                // AbortController pattern: cancels the sync request on timeout
+                // so it doesn't ghost-complete alongside the async retry
+                const imgAbortController = new AbortController();
+                const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_GEN_TIMEOUT);
+
+                const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
                   body: JSON.stringify(imgGenBody),
+                  signal: imgAbortController.signal,
                 });
-                const timeoutPromise = new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error('Image generation timed out')), IMG_GEN_TIMEOUT)
-                );
-                const imageGenResponse = await Promise.race([imgGenPromise, timeoutPromise]) as Response;
+                clearTimeout(imgTimeoutId);
 
                 if (!imageGenResponse.ok) {
                   const errorText = await imageGenResponse.text();
@@ -1875,8 +1892,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
               } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout — firing async with bossPhone delivery`);
-                // Fire-and-forget: the image-gen function will deliver via WhatsApp when done
+                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — firing async with bossPhone delivery`);
+                // Original request is now cancelled (aborted). Fire a fresh async request for delivery.
                 fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
