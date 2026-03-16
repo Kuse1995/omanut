@@ -3921,8 +3921,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                                 'Content-Type': 'application/x-www-form-urlencoded',
                               },
                               body: new URLSearchParams({
-                                To: `whatsapp:${bossPhone}`,
-                                From: `whatsapp:${senderNumber}`,
+                                To: bossPhone.startsWith('whatsapp:') ? bossPhone : `whatsapp:${bossPhone}`,
+                                From: senderNumber.startsWith('whatsapp:') ? senderNumber : `whatsapp:${senderNumber}`,
                                 MediaUrl: pdfUrl,
                                 Body: bossMsg,
                               }),
