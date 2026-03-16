@@ -1505,19 +1505,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     .single();
 
                   if (!pendingErr && pendingPost) {
-                    fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                      body: JSON.stringify({
-                        companyId: company.id,
-                        customerPhone: '',
-                        conversationId: null,
-                        prompt: args.image_prompt,
-                        messageType: 'generate',
-                        scheduledPostId: pendingPost.id,
-                        bossPhone: company.boss_phone,
-                      }),
-                    }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
+                    if (!(globalThis as any).__imageGenInProgress) {
+                      (globalThis as any).__imageGenInProgress = true;
+                      fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                        body: JSON.stringify({
+                          companyId: company.id,
+                          customerPhone: '',
+                          conversationId: null,
+                          prompt: args.image_prompt,
+                          messageType: 'generate',
+                          scheduledPostId: pendingPost.id,
+                          bossPhone: company.boss_phone,
+                        }),
+                      }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
+                    } else {
+                      console.log('[BOSS-CHAT] Skipping scheduled async gen — already in progress');
+                    }
                   }
 
                   result = {

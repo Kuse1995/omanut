@@ -738,9 +738,11 @@ async function runImagePipeline(
     const inputImages: string[] = [];
     
     // Priority 1: BMS canonical product images
-    if (bmsImageUrls.length > 0) {
+    if (bmsImageUrls.length > 0 && productMatch) {
       inputImages.push(...bmsImageUrls);
       console.log(`[PIPELINE] Added ${bmsImageUrls.length} BMS product images as priority anchors`);
+    } else if (bmsImageUrls.length > 0 && !productMatch) {
+      console.log(`[PIPELINE] Skipping ${bmsImageUrls.length} BMS images — no product match, avoiding random product injection`);
     }
     
     // Priority 2: company_media product match
