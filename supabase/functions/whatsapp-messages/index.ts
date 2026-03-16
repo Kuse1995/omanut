@@ -5,9 +5,16 @@ import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
-/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors */
-function sanitizeMessages(msgs: Array<{ role: string; content: any }>): Array<{ role: string; content: any }> {
-  return msgs.filter(m => m.content != null && m.content !== '' && String(m.content) !== 'undefined');
+/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
+ *  Preserves assistant messages with tool_calls even if content is null (required by API). */
+function sanitizeMessages(msgs: Array<{ role: string; content: any; tool_calls?: any[] }>): Array<{ role: string; content: any; tool_calls?: any[] }> {
+  return msgs.filter(m => {
+    // Keep assistant messages that have tool_calls even if content is empty
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) return true;
+    // Keep tool role messages (responses to tool calls)
+    if (m.role === 'tool') return true;
+    return m.content != null && m.content !== '' && String(m.content) !== 'undefined';
+  });
 }
 
 const corsHeaders = {
