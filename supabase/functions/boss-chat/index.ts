@@ -2011,6 +2011,58 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'search_knowledge': {
+              try {
+                const queryVec = await embedQuery(args.query);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: docResults } = await supabase.rpc('match_documents', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: 3,
+                });
+                if (docResults && docResults.length > 0) {
+                  const docs = docResults.map((d: any, i: number) =>
+                    `${i + 1}. **${d.filename}** (relevance: ${(d.similarity * 100).toFixed(0)}%)\n${d.parsed_content?.substring(0, 600) || 'No content'}`
+                  ).join('\n\n');
+                  result = { success: true, message: `📚 Found ${docResults.length} relevant documents:\n\n${docs}` };
+                } else {
+                  // Fallback to quick_reference_info
+                  const { data: compData } = await supabase.from('companies').select('quick_reference_info').eq('id', company.id).single();
+                  result = { success: true, message: compData?.quick_reference_info ? `No document matches, but here's the quick reference:\n${compData.quick_reference_info.substring(0, 800)}` : 'No matching knowledge base content found.' };
+                }
+              } catch (searchErr) {
+                console.error('[BOSS-SEARCH-KNOWLEDGE] Error:', searchErr);
+                result = { success: false, message: 'Knowledge search failed.' };
+              }
+              break;
+            }
+
+            case 'search_media': {
+              try {
+                const queryVec = await embedQuery(args.query);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: mediaResults } = await supabase.rpc('match_media', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: args.count || 5,
+                });
+                if (mediaResults && mediaResults.length > 0) {
+                  const mediaList = mediaResults.map((m: any, i: number) =>
+                    `${i + 1}. ${m.description || m.category} (${m.media_type})\n   URL: https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}\n   Relevance: ${(m.similarity * 100).toFixed(0)}%`
+                  ).join('\n\n');
+                  result = { success: true, message: `📁 Found ${mediaResults.length} matching media:\n\n${mediaList}` };
+                } else {
+                  result = { success: true, message: 'No matching media found in the library.' };
+                }
+              } catch (searchErr) {
+                console.error('[BOSS-SEARCH-MEDIA] Error:', searchErr);
+                result = { success: false, message: 'Media search failed.' };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
