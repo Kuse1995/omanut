@@ -1138,7 +1138,8 @@ INSTRUCTIONS:
     for (const word of promptWords) { if (searchText.includes(word)) score += 1; }
     if (score > bestScore) { bestScore = score; bestMatch = img; }
   }
-  return { product: bestMatch, bmsImageUrls };
+  // Only return bmsImageUrls if we have a confident match
+  return { product: bestMatch, bmsImageUrls: bestMatch ? bmsImageUrls : [] };
 }
 
 // Get public URL for a storage file
