@@ -190,7 +190,7 @@ BUSINESS STATISTICS (lightweight — use get_business_summary tool for detailed 
 📅 Total Reservations: ${totalReservations || 0}
 🔄 Conversion Rate: ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%
 
-${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
+${knowledgeBaseHint ? `\n${knowledgeBaseHint}` : ''}
 
 YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
