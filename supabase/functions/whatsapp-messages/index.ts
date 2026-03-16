@@ -4062,38 +4062,98 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           const args = JSON.parse(toolCall.function.arguments);
           console.log(`[TOOL-LOOP] Round ${currentRound} executing: ${fnName}`);
           
-          if (['check_stock', 'record_sale', 'generate_payment_link'].includes(fnName)) {
+          const BMS_TOOLS = ['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'];
+          
+          if (BMS_TOOLS.includes(fnName)) {
+            // Build params using same mapping as first-round handler
+            let bmsParams: Record<string, any> = {};
+            switch (fnName) {
+              case 'check_stock': bmsParams = { product_name: args.product_name }; break;
+              case 'record_sale': bmsParams = { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }; break;
+              case 'get_product_variants': bmsParams = { product_name: args.product_name }; break;
+              case 'create_order': bmsParams = { customer_name: args.customer_name, customer_phone: args.customer_phone || customerPhone, customer_email: args.customer_email, items: args.items, payment_method: args.payment_method, delivery_address: args.delivery_address, notes: args.notes }; break;
+              case 'get_order_status': bmsParams = { order_number: args.order_number, order_id: args.order_id }; break;
+              case 'cancel_order': bmsParams = { order_number: args.order_number, order_id: args.order_id, reason: args.reason }; break;
+              case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
+              case 'get_company_statistics': bmsParams = {}; break;
+              case 'list_products': bmsParams = { category: args.category || null }; break;
+              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes }; break;
+              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
+              case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
+              case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
+            }
+            bmsParams.company_id = company.id;
+            
             try {
               const bmsResult = await bmsCallWithAck(
-                () => fetch('https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge', {
+                () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('BMS_API_SECRET')}` },
-                  body: JSON.stringify({ action: fnName, product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null, amount: args.amount, reference: args.reference }),
+                  headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: fnName, params: bmsParams }),
                 }),
                 fnName,
                 customerPhone,
                 company.whatsapp_number || ''
               );
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
-              toolExecutionContext.push(`[R${currentRound}] ${fnName} completed`);
+              toolExecutionContext.push(`[R${currentRound}] BMS ${fnName} completed`);
+              
+              // Auto-send PDF for quotations/invoices created in tool loop rounds
+              if ((fnName === 'create_quotation' || fnName === 'create_invoice') && bmsResult && !bmsResult.error) {
+                const docType = fnName === 'create_quotation' ? 'quotation' : 'invoice';
+                console.log(`[AUTO-DOC-R${currentRound}] Generating ${docType} PDF`);
+                try {
+                  const docResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ company_id: company.id, document_type: docType, data: bmsResult, customer_name: args.customer_name || customerName || 'Customer', customer_phone: customerPhone }),
+                  });
+                  if (docResp.ok) {
+                    const docResult = await docResp.json();
+                    const pdfUrl = docResult.pdf_url || docResult.url;
+                    if (pdfUrl) {
+                      const senderNumber = company.whatsapp_number || '';
+                      const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+                      const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+                      if (senderNumber && twilioSid && twilioToken) {
+                        // Send PDF to customer
+                        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+                          method: 'POST',
+                          headers: { 'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+                          body: new URLSearchParams({ To: `whatsapp:${customerPhone}`, From: `whatsapp:${senderNumber}`, MediaUrl: pdfUrl, Body: `📄 Here is your ${docType}. Please review and let us know if you have any questions.` }),
+                        });
+                        // Notify boss
+                        if (company.boss_phone) {
+                          const itemsSummary = (args.items || []).map((it: any) => `${it.name || it.product_name} x${it.quantity || 1}`).join(', ');
+                          const totalAmount = bmsResult.total || bmsResult.grand_total || 'N/A';
+                          const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || customerName || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
+                          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+                            method: 'POST',
+                            headers: { 'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({ To: `whatsapp:${company.boss_phone}`, From: `whatsapp:${senderNumber}`, MediaUrl: pdfUrl, Body: bossMsg }),
+                          });
+                          await supabase.from('boss_conversations').insert({ company_id: company.id, message_from: 'system', message_content: bossMsg, handed_off_by: 'auto-doc-delivery' });
+                        }
+                      }
+                      console.log(`[AUTO-DOC-R${currentRound}] ${docType} PDF sent`);
+                    }
+                  }
+                } catch (docErr) {
+                  console.error(`[AUTO-DOC-R${currentRound}] PDF generation failed:`, docErr);
+                }
+              }
             } catch (e) {
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ error: 'BMS unavailable' }) });
-              // Log tool failure for frustration detection
               try {
                 await supabase.from('ai_error_logs').insert({
-                  company_id: company.id,
-                  conversation_id: conversationId,
-                  error_type: 'tool_failure',
-                  severity: 'warning',
-                  original_message: userMessage,
-                  ai_response: `Tool ${fnName} failed in round ${currentRound}`,
-                  analysis_details: { tool_name: fnName, round: currentRound, error: String(e) },
-                  auto_flagged: true
+                  company_id: company.id, conversation_id: conversationId, error_type: 'tool_failure', severity: 'warning',
+                  original_message: userMessage, ai_response: `Tool ${fnName} failed in round ${currentRound}`,
+                  analysis_details: { tool_name: fnName, round: currentRound, error: String(e) }, auto_flagged: true
                 });
               } catch (_logErr) { /* silent */ }
             }
           } else {
-            // For other tools in subsequent rounds, provide a generic acknowledgment
+            // For non-BMS tools in subsequent rounds (search_media, etc.), provide generic acknowledgment
             toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: `Tool ${fnName} executed in round ${currentRound}` }) });
           }
           anyToolExecuted = true;
