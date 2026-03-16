@@ -961,6 +961,35 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: []
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_knowledge",
+          description: "Semantically search the company's knowledge base documents. Use when the boss asks about policies, product details, procedures, or any information that might be in uploaded documents.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The topic or question to search for" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_media",
+          description: "Semantically search the company's media library to find relevant product photos, promotional images, or other media files.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What to search for — product name, category, or description" },
+              count: { type: "integer", description: "Max results (default 5)" }
+            },
+            required: ["query"]
+          }
+        }
       }
     ];
 
