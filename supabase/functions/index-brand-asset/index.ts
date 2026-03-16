@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import { embedText } from '../_shared/embedding-client.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -79,8 +80,28 @@ serve(async (req) => {
 
     const result = await analyzeImageBase64(base64, mimeType);
 
+    // Generate semantic embedding from description + tags
+    let embeddingVector: string | null = null;
+    try {
+      const textToEmbed = [result.description, ...(result.tags || [])].join(' — ');
+      const embedding = await embedText({
+        text: textToEmbed,
+        dimensions: 768,
+        taskType: 'RETRIEVAL_DOCUMENT',
+      });
+      embeddingVector = `[${embedding.join(',')}]`;
+      console.log(`[INDEX] ✓ Embedding generated (${embedding.length} dims)`);
+    } catch (embErr) {
+      console.error('[INDEX] Embedding failed (non-fatal):', embErr);
+    }
+
+    const updatePayload: any = { description: result.description, tags: result.tags };
+    if (embeddingVector) {
+      updatePayload.embedding = embeddingVector;
+    }
+
     await supabase.from('company_media')
-      .update({ description: result.description, tags: result.tags })
+      .update(updatePayload)
       .eq('id', media_id);
 
     console.log(`[INDEX] ✓ "${result.description}" [${result.tags.length} tags]`);
