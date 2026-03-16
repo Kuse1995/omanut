@@ -3626,6 +3626,119 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               console.error('[LOOKUP-PRODUCT] Exception:', error);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
             }
+          } else if (toolCall.function.name === 'search_media') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-MEDIA] Query:', args.query);
+            try {
+              const expandedQuery = normalizeSearchQuery(args.query, company);
+              const queryVec = await embedQuery(expandedQuery);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.25,
+                match_count: args.count || 5,
+              });
+
+              let results: any[] = [];
+              if (!mediaErr && mediaResults && mediaResults.length > 0) {
+                results = mediaResults.map((m: any) => ({
+                  description: m.description,
+                  category: m.category,
+                  media_type: m.media_type,
+                  tags: m.tags,
+                  url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                  similarity: m.similarity,
+                }));
+              }
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_media found ${results.length} results for "${args.query}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Use send_media with the URLs above.' : 'No matching media found.' })
+              });
+            } catch (error) {
+              console.error('[SEARCH-MEDIA] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Media search failed' }) });
+            }
+          } else if (toolCall.function.name === 'search_knowledge') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-KNOWLEDGE] Query:', args.query);
+            try {
+              const queryVec = await embedQuery(args.query);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: docResults, error: docErr } = await supabase.rpc('match_documents', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.25,
+                match_count: 3,
+              });
+
+              let results: any[] = [];
+              if (!docErr && docResults && docResults.length > 0) {
+                results = docResults.map((d: any) => ({
+                  filename: d.filename,
+                  content: d.parsed_content?.substring(0, 800) || '',
+                  similarity: d.similarity,
+                }));
+              }
+
+              // Also check quick_reference_info as fallback
+              let quickRef = '';
+              if (results.length === 0 && company.quick_reference_info) {
+                quickRef = company.quick_reference_info;
+              }
+
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_knowledge found ${results.length} documents for "${args.query}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, documents: results, quick_reference: quickRef || undefined, message: results.length > 0 ? 'Found relevant knowledge base content.' : (quickRef ? 'No document matches but quick reference info available.' : 'No matching knowledge base content found.') })
+              });
+            } catch (error) {
+              console.error('[SEARCH-KNOWLEDGE] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Knowledge search failed' }) });
+            }
+          } else if (toolCall.function.name === 'search_past_conversations') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-CONVERSATIONS] Query:', args.query);
+            try {
+              const queryVec = await embedQuery(args.query);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: convResults, error: convErr } = await supabase.rpc('match_conversations', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.3,
+                match_count: 5,
+              });
+
+              let results: any[] = [];
+              if (!convErr && convResults && convResults.length > 0) {
+                // Optionally filter by customer phone
+                let filtered = convResults;
+                if (args.customer_phone) {
+                  const normPhone = args.customer_phone.replace(/\D/g, '');
+                  filtered = convResults.filter((c: any) => c.phone && c.phone.includes(normPhone));
+                  if (filtered.length === 0) filtered = convResults; // fallback to all
+                }
+                results = filtered.map((c: any) => ({
+                  customer_name: c.customer_name,
+                  phone: c.phone,
+                  date: c.started_at,
+                  transcript_preview: c.transcript?.substring(0, 400) || 'No transcript available',
+                  similarity: c.similarity,
+                }));
+              }
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_past_conversations found ${results.length} results`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, conversations: results, message: results.length > 0 ? 'Found past conversations.' : 'No matching past conversations found.' })
+              });
+            } catch (error) {
+              console.error('[SEARCH-CONVERSATIONS] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Conversation search failed' }) });
+            }
           } else if (['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'].includes(toolCall.function.name)) {
             // === EXTERNAL CATALOG: Intercept list_products and check_stock ===
             if (company.external_catalog_url && company.external_catalog_key && ['list_products', 'check_stock'].includes(toolCall.function.name)) {
