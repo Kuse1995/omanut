@@ -866,31 +866,48 @@ async function processAIResponse(
       const mediaUrl = storedMediaUrls[i];
       const mediaType = storedMediaTypes[i] || '';
       
-      // Only analyze images
-      if (mediaType.startsWith('image/')) {
+      // Analyze ALL media types (images, audio, PDFs, documents)
+      const isAnalyzable = mediaType.startsWith('image/') || mediaType.startsWith('audio/') || 
+                           mediaType.includes('pdf') || mediaType.startsWith('application/');
+      if (isAnalyzable) {
         try {
           const analysisResponse = await fetch(
             `${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-customer-image`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ imageUrl: mediaUrl })
+              body: JSON.stringify({ imageUrl: mediaUrl, mediaType })
             }
           );
           
           if (analysisResponse.ok) {
             const analysis = await analysisResponse.json();
-            console.log('[IMAGE-ANALYSIS] Result:', analysis);
+            console.log('[MEDIA-ANALYSIS] Result:', analysis);
             
-            if (analysis.isPaymentProof && analysis.confidence > 0.7) {
+            // Audio/voice note — inject transcription as message context
+            if (analysis.transcription) {
+              imageAnalysisContext += `\n🎤 VOICE NOTE TRANSCRIPTION:\n"${analysis.transcription}"\n`;
+              if (analysis.audioSummary) {
+                imageAnalysisContext += `Summary: ${analysis.audioSummary}\n`;
+              }
+              imageAnalysisContext += `⚡ IMPORTANT: Treat this transcription as if the customer typed it. Respond to their request accordingly.\n`;
+            }
+            // PDF/document — inject extracted content
+            else if (analysis.documentContent) {
+              imageAnalysisContext += `\n📄 CUSTOMER DOCUMENT (${analysis.documentType || 'unknown type'}):\n`;
+              imageAnalysisContext += `${analysis.documentContent}\n`;
+              if (analysis.documentType === 'purchase_order') {
+                imageAnalysisContext += `⚡ This looks like a PURCHASE ORDER. Extract the line items and offer to create a quotation using create_quotation tool.\n`;
+              }
+            }
+            // Payment proof (existing logic)
+            else if (analysis.isPaymentProof && analysis.confidence > 0.7) {
               imageAnalysisContext += `\n🔔 PAYMENT PROOF DETECTED (${Math.round(analysis.confidence * 100)}% confidence):\n`;
               if (analysis.extractedData.amount) imageAnalysisContext += `- Amount: ${analysis.extractedData.amount}\n`;
               if (analysis.extractedData.transactionReference) imageAnalysisContext += `- Reference: ${analysis.extractedData.transactionReference}\n`;
               if (analysis.extractedData.senderName) imageAnalysisContext += `- Sender: ${analysis.extractedData.senderName}\n`;
               if (analysis.extractedData.provider) imageAnalysisContext += `- Provider: ${analysis.extractedData.provider}\n`;
               
-              // Fetch pending transactions for this customer to help AI match payment
-              // customerPhone is already available from function parameter
               const { data: pendingTxs } = await supabase
                 .from('payment_transactions')
                 .select('*, payment_products(name, price, currency)')
@@ -907,10 +924,8 @@ async function processAIResponse(
                   const price = tx.payment_products?.price || tx.amount;
                   const currency = tx.payment_products?.currency || tx.currency || 'ZMW';
                   imageAnalysisContext += `${idx + 1}. ${productName} - ${currency} ${price}\n`;
-                  console.log(`[PAYMENT-PROOF] Pending tx ${idx + 1}: ${productName} - ${currency} ${price}`);
                 });
                 
-                // CRITICAL: Strong, explicit instructions for AI to use the tool
                 imageAnalysisContext += `\n🚨🚨🚨 CRITICAL ACTION REQUIRED 🚨🚨🚨\n`;
                 imageAnalysisContext += `The customer just sent PAYMENT PROOF. You MUST take action NOW:\n`;
                 imageAnalysisContext += `1. Compare the detected amount (${analysis.extractedData.amount || 'unknown'}) with pending transactions above\n`;
@@ -925,11 +940,11 @@ async function processAIResponse(
                 imageAnalysisContext += `\n⚡ ACTION: No pending transactions found for this customer. Acknowledge receipt and inform them that our team will verify the payment and get back to them shortly.\n`;
               }
             } else {
-              imageAnalysisContext += `\nCustomer shared an image: ${analysis.description} (Category: ${analysis.category})\n`;
+              imageAnalysisContext += `\nCustomer shared an attachment: ${analysis.description} (Category: ${analysis.category})\n`;
             }
           }
-        } catch (imgError) {
-          console.error('[IMAGE-ANALYSIS] Error:', imgError);
+        } catch (mediaError) {
+          console.error('[MEDIA-ANALYSIS] Error:', mediaError);
         }
       }
     }
