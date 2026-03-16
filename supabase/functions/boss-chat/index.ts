@@ -270,9 +270,12 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
 7. **Content Scheduling (BE PROACTIVE!)**: You are a content marketing expert AND the Social Media Manager. When the boss mentions marketing, promotions, sales, events, new products, or social media AND seems ready to act (not just brainstorming or discussing strategy):
    - PROACTIVELY suggest scheduling a Facebook post about it
    - Draft the caption yourself based on the context - don't ask "what do you want to say?"
-   - ALWAYS offer to generate a brand-aligned image (default to yes)
+   - Check if a recent image already exists (get_recent_images) BEFORE offering to generate a new one
    - Ask only the essentials: "When should I post this?" if they haven't specified a time
-   - Use the schedule_facebook_post tool with needs_image_generation=true by default
+   - Use the schedule_facebook_post tool with needs_image_generation=false by default. Only set needs_image_generation=true if the boss EXPLICITLY asks to "create an image", "generate an image", or "make an image". Saying "create a post" does NOT mean create an image.
+   
+   REUSE-FIRST RULE: Before ANY post scheduling, call get_recent_images to check for existing images from the last 30 minutes. If found, use that image_url. Do NOT generate a new one.
+   ASK-FIRST RULE: If the product/subject for an image is unclear or ambiguous, ASK the boss to specify which product before generating. Never guess.
    
    IDEAL FLOW (2-3 messages max):
    Boss: "We have a weekend special on grilled chicken"
@@ -1267,6 +1270,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 postImageUrl = toolImageUrl;
               }
 
+              // ── AUTO-REUSE: query recent images if nothing in session ──
+              if (!postImageUrl) {
+                try {
+                  const { data: recentImgs } = await supabase
+                    .from('generated_images')
+                    .select('image_url')
+                    .eq('company_id', company.id)
+                    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                  if (recentImgs?.[0]?.image_url) {
+                    console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImgs[0].image_url);
+                    postImageUrl = recentImgs[0].image_url;
+                    toolImageUrl = postImageUrl;
+                  }
+                } catch (e) {
+                  console.error('[BOSS-CHAT] Auto-reuse query failed:', e);
+                }
+              }
+
               // ── IMAGE-FIRST PIPELINE ──
               // Only generate if NO image exists from any source
               const needsImageGen = !postImageUrl && args.needs_image_generation && args.image_prompt;
@@ -1408,20 +1431,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     break;
                   }
 
-                  // Fire-and-forget async image generation with scheduledPostId callback
-                  fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                    body: JSON.stringify({
-                      companyId: company.id,
-                      customerPhone: '',
-                      conversationId: null,
-                      prompt: args.image_prompt,
-                      messageType: 'generate',
-                      scheduledPostId: pendingPost.id,
-                      bossPhone: company.boss_phone,
-                    }),
-                  }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
+                  // Fire-and-forget async image generation — only if no gen already in progress
+                  if (!(globalThis as any).__imageGenInProgress) {
+                    (globalThis as any).__imageGenInProgress = true;
+                    fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                      body: JSON.stringify({
+                        companyId: company.id,
+                        customerPhone: '',
+                        conversationId: null,
+                        prompt: args.image_prompt,
+                        messageType: 'generate',
+                        scheduledPostId: pendingPost.id,
+                        bossPhone: company.boss_phone,
+                      }),
+                    }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
+                  } else {
+                    console.log('[BOSS-CHAT] Skipping async fire-and-forget — image gen already in progress');
+                  }
 
                   result = {
                     success: true,
@@ -1477,19 +1505,24 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     .single();
 
                   if (!pendingErr && pendingPost) {
-                    fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                      body: JSON.stringify({
-                        companyId: company.id,
-                        customerPhone: '',
-                        conversationId: null,
-                        prompt: args.image_prompt,
-                        messageType: 'generate',
-                        scheduledPostId: pendingPost.id,
-                        bossPhone: company.boss_phone,
-                      }),
-                    }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
+                    if (!(globalThis as any).__imageGenInProgress) {
+                      (globalThis as any).__imageGenInProgress = true;
+                      fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                        body: JSON.stringify({
+                          companyId: company.id,
+                          customerPhone: '',
+                          conversationId: null,
+                          prompt: args.image_prompt,
+                          messageType: 'generate',
+                          scheduledPostId: pendingPost.id,
+                          bossPhone: company.boss_phone,
+                        }),
+                      }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
+                    } else {
+                      console.log('[BOSS-CHAT] Skipping scheduled async gen — already in progress');
+                    }
                   }
 
                   result = {
@@ -1892,15 +1925,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
               } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — firing async with bossPhone delivery`);
-                // Original request is now cancelled (aborted). Fire a fresh async request for delivery.
-                fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
-                  body: JSON.stringify(imgGenBody),
-                }).catch(e => console.error('[BOSS-TOOL] Async image gen fire failed:', e));
+                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — server-side request may still be running`);
+                // Do NOT fire a new request — the server-side function continues even after abort.
+                // AbortController only cancels the client read, not the server execution.
                 (globalThis as any).__imageGenInProgress = true;
-                result = { success: true, message: '🎨 Image is generating asynchronously. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
+                result = { success: true, message: '🎨 Image is still generating on the server. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
               }
               break;
             }
