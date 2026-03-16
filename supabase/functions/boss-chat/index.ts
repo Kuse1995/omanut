@@ -104,11 +104,11 @@ The AI handles everything - generation, editing, posting. Just ask!`;
     const totalRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
     const pendingRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
 
-    // Build context for AI
-    const knowledgeBase = company.company_documents
-      ?.map((doc: any) => doc.parsed_content)
-      .filter(Boolean)
-      .join('\n\n') || '';
+    // Knowledge base summary (actual content accessed via search_knowledge tool)
+    const docCount = company.company_documents?.length || 0;
+    const knowledgeBaseHint = docCount > 0
+      ? `You have ${docCount} knowledge base documents. Use the search_knowledge tool to find specific information.`
+      : '';
 
     const aiOverrides = company.company_ai_overrides?.[0];
     
