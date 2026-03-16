@@ -114,7 +114,24 @@ serve(async (req) => {
       try {
         let fbResponse: Response;
 
-        if (post.image_url) {
+        if (post.video_url) {
+          // Video post via resumable upload or direct URL
+          fbResponse = await fetch(
+            `https://graph.facebook.com/v25.0/${post.page_id}/videos`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                file_url: post.video_url,
+                description: post.content,
+                published: true,
+              }),
+            }
+          );
+        } else if (post.image_url) {
           fbResponse = await fetch(
             `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
             {
