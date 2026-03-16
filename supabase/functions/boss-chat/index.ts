@@ -1431,20 +1431,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     break;
                   }
 
-                  // Fire-and-forget async image generation with scheduledPostId callback
-                  fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
-                    body: JSON.stringify({
-                      companyId: company.id,
-                      customerPhone: '',
-                      conversationId: null,
-                      prompt: args.image_prompt,
-                      messageType: 'generate',
-                      scheduledPostId: pendingPost.id,
-                      bossPhone: company.boss_phone,
-                    }),
-                  }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
+                  // Fire-and-forget async image generation — only if no gen already in progress
+                  if (!(globalThis as any).__imageGenInProgress) {
+                    (globalThis as any).__imageGenInProgress = true;
+                    fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
+                      body: JSON.stringify({
+                        companyId: company.id,
+                        customerPhone: '',
+                        conversationId: null,
+                        prompt: args.image_prompt,
+                        messageType: 'generate',
+                        scheduledPostId: pendingPost.id,
+                        bossPhone: company.boss_phone,
+                      }),
+                    }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
+                  } else {
+                    console.log('[BOSS-CHAT] Skipping async fire-and-forget — image gen already in progress');
+                  }
 
                   result = {
                     success: true,
