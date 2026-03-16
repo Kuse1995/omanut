@@ -3999,7 +3999,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           ...currentMessages,
           {
             role: "assistant",
-            content: assistantReply || null,
+            content: assistantReply || "",
             ...(currentToolCalls && currentToolCalls.length > 0 ? { tool_calls: currentToolCalls } : {})
           },
           ...toolResults
