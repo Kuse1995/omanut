@@ -1572,28 +1572,19 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       }
     }
 
-    // Add knowledge base
+    // Knowledge base & media library are now accessed via semantic search tools (search_knowledge, search_media)
+    // Only inject a lightweight hint instead of the full content to save tokens
     if (documents && documents.length > 0) {
-      instructions += '\n\n=== KNOWLEDGE BASE ===\n';
-      for (const doc of documents) {
-        instructions += `\nDocument: ${doc.filename}\n${doc.parsed_content}\n`;
-      }
+      instructions += `\n\n=== KNOWLEDGE BASE (${documents.length} documents available) ===\n`;
+      instructions += `You have ${documents.length} knowledge base documents available. Use the search_knowledge tool to find relevant information when customers ask about policies, procedures, fees, or detailed product info.\n`;
+      instructions += `Documents: ${documents.map((d: any) => d.filename).join(', ')}\n`;
     }
 
-    // Add media library
     if (mediaWithUrls && mediaWithUrls.length > 0) {
-      instructions += '\n\n=== MEDIA LIBRARY ===\n';
-      instructions += 'Available media files:\n';
-      for (const media of mediaWithUrls) {
-        const displayName = media.description || media.category;
-        instructions += `- ${displayName} (${media.category}, ${media.media_type}): ${media.full_url}\n`;
-      }
-      instructions += '\n⚠️ CRITICAL RULES FOR MEDIA:\n';
-      instructions += '1. ONLY use URLs from the list above - NEVER make up or guess URLs\n';
-      instructions += '2. If customer asks for more samples than available, tell them you have ' + mediaWithUrls.length + ' samples and offer to send what you have\n';
-      instructions += '3. When sending media, call send_media with ONLY the exact URLs listed above\n';
-      instructions += '4. DO NOT create fake URLs like "https://omanut.tech/media/..." or "https://example.com/..."\n';
-      instructions += '5. If no relevant media exists, tell the customer and offer alternatives\n';
+      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files available) ===\n`;
+      instructions += `You have ${mediaWithUrls.length} media files available. Use the search_media tool to find relevant photos/videos when customers ask for samples or product images.\n`;
+      instructions += '⚠️ CRITICAL: Always use search_media to find the right files. NEVER make up or guess URLs.\n';
+      instructions += 'After finding media via search_media, use send_media with the returned URLs.\n';
     } else {
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
