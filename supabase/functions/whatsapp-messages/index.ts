@@ -3885,14 +3885,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                                 'Content-Type': 'application/x-www-form-urlencoded',
                               },
                               body: new URLSearchParams({
-                                To: `whatsapp:${customerPhone}`,
-                                From: `whatsapp:${senderNumber}`,
+                                To: customerPhone.startsWith('whatsapp:') ? customerPhone : `whatsapp:${customerPhone}`,
+                                From: senderNumber.startsWith('whatsapp:') ? senderNumber : `whatsapp:${senderNumber}`,
                                 MediaUrl: pdfUrl,
                                 Body: `📄 Here is your ${docType}. Please review and let us know if you have any questions.`,
                               }),
                             });
                             if (!twilioResp.ok) {
-                              console.error(`[AUTO-DOC] Twilio send failed: ${twilioResp.status}`);
+                              const errBody = await twilioResp.text().catch(() => '');
+                              console.error(`[AUTO-DOC] Twilio send failed: ${twilioResp.status}`, errBody);
                             } else {
                               console.log(`[AUTO-DOC] ${docType} PDF sent to customer successfully`);
                             }
