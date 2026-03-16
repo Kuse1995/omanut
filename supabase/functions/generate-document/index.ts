@@ -185,85 +185,216 @@ serve(async (req) => {
     // ===== DOCUMENT TYPE BUILDERS =====
     const dateNow = new Date().toLocaleDateString("en-GB");
 
+    // BMS-style colors for quotation/invoice
+    const TEAL_DARK = rgb(0.05, 0.35, 0.45);
+    const TABLE_HEADER_BG = rgb(0.94, 0.95, 0.96);
+    const BADGE_BG = rgb(0.9, 0.91, 0.93);
+
     switch (document_type) {
       case "invoice":
       case "quotation": {
         const isInvoice = document_type === "invoice";
         const title = isInvoice ? "INVOICE" : "QUOTATION";
         const docNum = data.document_number || data.invoice_number || data.quotation_number || `${isInvoice ? "INV" : "QUO"}-${Date.now().toString(36).toUpperCase()}`;
-        
-        drawHeader(title, `${docNum}`);
-        
-        // Document info block
-        y -= 10;
-        drawLabelValue("Document No.", docNum, margin, y);
-        drawLabelValue("Date", data.date || dateNow, margin + 150, y);
-        drawLabelValue("Valid Until", data.valid_until || "30 days", margin + 300, y);
-        y -= 40;
-        
-        // Client info
-        drawLine(page, margin, y, width - margin, BRAND_LIGHT);
-        y -= 20;
-        page.drawText("BILL TO:", { x: margin, y, size: 9, font: helveticaBold, color: BRAND_BLUE });
-        y -= 15;
-        page.drawText(data.client_name || "Customer", { x: margin, y, size: 11, font: helveticaBold, color: BRAND_DARK });
-        y -= 14;
-        if (data.client_email) {
-          page.drawText(data.client_email, { x: margin, y, size: 9, font: helvetica, color: BRAND_GRAY });
-          y -= 13;
+
+        // === BMS-STYLE HEADER (white background, no blue bar) ===
+        // Try to fetch company logo
+        let logoImage: any = null;
+        try {
+          const { data: logoMedia } = await supabase
+            .from("company_media")
+            .select("file_path, file_type")
+            .eq("company_id", company_id)
+            .eq("category", "logo")
+            .limit(1)
+            .single();
+
+          if (logoMedia?.file_path) {
+            const { data: signedUrl } = await supabase.storage
+              .from("company-media")
+              .createSignedUrl(logoMedia.file_path, 120);
+
+            if (signedUrl?.signedUrl) {
+              const logoResp = await fetch(signedUrl.signedUrl);
+              if (logoResp.ok) {
+                const logoBytes = new Uint8Array(await logoResp.arrayBuffer());
+                const isPng = logoMedia.file_type?.includes("png") || logoMedia.file_path.endsWith(".png");
+                logoImage = isPng
+                  ? await pdfDoc.embedPng(logoBytes)
+                  : await pdfDoc.embedJpg(logoBytes);
+              }
+            }
+          }
+        } catch (e) {
+          console.log("Logo fetch skipped:", e);
         }
+
+        // Left side: logo + company info
+        const logoSize = 50;
+        let headerTextX = margin;
+        if (logoImage) {
+          const logoDims = logoImage.scale(logoSize / Math.max(logoImage.width, logoImage.height));
+          page.drawImage(logoImage, {
+            x: margin,
+            y: height - margin - logoDims.height,
+            width: logoDims.width,
+            height: logoDims.height,
+          });
+          headerTextX = margin + logoDims.width + 12;
+        }
+
+        // Company name (teal/dark)
+        page.drawText(company.name, {
+          x: headerTextX, y: height - margin - 14, size: 16, font: helveticaBold, color: TEAL_DARK,
+        });
+        // Business type subtitle
+        if (company.business_type) {
+          page.drawText(company.business_type, {
+            x: headerTextX, y: height - margin - 28, size: 9, font: helvetica, color: BRAND_GRAY,
+          });
+        }
+        // Contact line
+        const contactParts: string[] = [];
+        if (company.boss_phone) contactParts.push(company.boss_phone);
+        if (company.whatsapp_number && company.whatsapp_number !== company.boss_phone) contactParts.push(company.whatsapp_number);
+        if (contactParts.length > 0) {
+          page.drawText(contactParts.join("  |  "), {
+            x: headerTextX, y: height - margin - 42, size: 8, font: helvetica, color: BRAND_GRAY,
+          });
+        }
+
+        // Right side: document title + number
+        const titleWidth = helveticaBold.widthOfTextAtSize(title, 22);
+        page.drawText(title, {
+          x: width - margin - titleWidth, y: height - margin - 14, size: 22, font: helveticaBold, color: TEAL_DARK,
+        });
+        const numWidth = helvetica.widthOfTextAtSize(docNum, 10);
+        page.drawText(docNum, {
+          x: width - margin - numWidth, y: height - margin - 30, size: 10, font: helvetica, color: BRAND_GRAY,
+        });
+
+        // Separator line
+        y = height - margin - 60;
+        drawLine(page, margin, y, width - margin, rgb(0.8, 0.82, 0.85), 1.5);
+        y -= 25;
+
+        // === QUOTE TO / BILL TO section ===
+        const billLabel = isInvoice ? "Bill To:" : "Quote To:";
+        page.drawText(billLabel, { x: margin, y, size: 9, font: helveticaBold, color: BRAND_GRAY });
+        y -= 15;
+        page.drawText(data.client_name || "Customer", { x: margin, y, size: 12, font: helveticaBold, color: BRAND_DARK });
         if (data.client_phone) {
+          y -= 14;
           page.drawText(data.client_phone, { x: margin, y, size: 9, font: helvetica, color: BRAND_GRAY });
-          y -= 13;
         }
-        y -= 15;
-        
-        // Items table
+        if (data.client_email) {
+          y -= 13;
+          page.drawText(data.client_email, { x: margin, y, size: 9, font: helvetica, color: BRAND_GRAY });
+        }
+
+        // Right side: Date + Status badge
+        const dateLabel = `Date: ${data.date || dateNow}`;
+        const dateLabelW = helvetica.widthOfTextAtSize(dateLabel, 9);
+        page.drawText(dateLabel, {
+          x: width - margin - dateLabelW, y: y + 29, size: 9, font: helvetica, color: BRAND_GRAY,
+        });
+
+        // Status badge (DRAFT)
+        const status = data.status || "DRAFT";
+        const badgeW = helveticaBold.widthOfTextAtSize(status, 8) + 16;
+        const badgeX = width - margin - badgeW;
+        const badgeY = y + 12;
+        page.drawRectangle({ x: badgeX, y: badgeY - 4, width: badgeW, height: 16, color: BADGE_BG });
+        page.drawText(status, {
+          x: badgeX + 8, y: badgeY, size: 8, font: helveticaBold, color: BRAND_DARK,
+        });
+
+        y -= 30;
+
+        // === ITEMS TABLE (BMS style: no # column, light gray header) ===
         const items = Array.isArray(data.items) ? data.items : [];
-        const tableHeaders = ["#", "Description", "Qty", "Unit Price", "Total"];
-        const colW = [30, 230, 50, 80, 80];
-        
-        const tableRows = items.map((item: any, i: number) => {
+        const tableHeaders = ["Description", "Qty", "Unit Price", "Amount"];
+        const colW = [260, 60, 80, 90];
+        const tableX = margin;
+        const rowHeight = 24;
+
+        // Table header row (light gray bg, dark text)
+        page.drawRectangle({
+          x: tableX, y: y - rowHeight, width: width - 2 * margin, height: rowHeight, color: TABLE_HEADER_BG,
+        });
+        let xOff = tableX + 8;
+        tableHeaders.forEach((h, i) => {
+          page.drawText(h, { x: xOff, y: y - 16, size: 9, font: helveticaBold, color: BRAND_DARK });
+          xOff += colW[i];
+        });
+        y -= rowHeight;
+
+        // Data rows
+        items.forEach((item: any, rowIdx: number) => {
+          if (y < 80) {
+            drawFooter();
+            page = pdfDoc.addPage([595, 842]);
+            y = height - margin;
+          }
+
+          if (rowIdx % 2 === 0) {
+            page.drawRectangle({
+              x: tableX, y: y - rowHeight, width: width - 2 * margin, height: rowHeight, color: rgb(0.98, 0.98, 0.99),
+            });
+          }
+
           const qty = item.quantity || 1;
           const price = item.unit_price || item.price || 0;
           const total = qty * price;
-          return [String(i + 1), item.description || item.name || "", String(qty), `${currency}${price.toFixed(2)}`, `${currency}${total.toFixed(2)}`];
+          const rowData = [
+            (item.description || item.name || "").slice(0, 45),
+            String(qty),
+            `${currency}${price.toFixed(2)}`,
+            `${currency}${total.toFixed(2)}`,
+          ];
+
+          xOff = tableX + 8;
+          rowData.forEach((cell, i) => {
+            page.drawText(cell, { x: xOff, y: y - 16, size: 9, font: helvetica, color: BRAND_DARK });
+            xOff += colW[i];
+          });
+          y -= rowHeight;
         });
-        
-        y = drawTable(tableHeaders, tableRows, colW, y);
-        
-        // Totals
-        y -= 10;
+
+        // Bottom table border
+        drawLine(page, tableX, y, width - margin, rgb(0.85, 0.86, 0.88));
+
+        // === TOTALS ===
+        y -= 15;
         const subtotal = items.reduce((s: number, item: any) => s + (item.quantity || 1) * (item.unit_price || item.price || 0), 0);
         const taxRate = data.tax_rate || 0;
         const tax = subtotal * (taxRate / 100);
         const grandTotal = subtotal + tax;
-        
-        const totalsX = width - margin - 180;
-        drawLine(page, totalsX, y, width - margin, BRAND_LIGHT);
-        y -= 18;
-        page.drawText("Subtotal:", { x: totalsX, y, size: 9, font: helvetica, color: BRAND_GRAY });
+
+        const totalsX = width - margin - 200;
+        // Subtotal
+        page.drawText("Subtotal", { x: totalsX, y, size: 9, font: helvetica, color: BRAND_GRAY });
         const subStr = `${currency}${subtotal.toFixed(2)}`;
         page.drawText(subStr, { x: width - margin - helveticaBold.widthOfTextAtSize(subStr, 10), y, size: 10, font: helveticaBold, color: BRAND_DARK });
-        
+
         if (taxRate > 0) {
-          y -= 18;
-          page.drawText(`Tax (${taxRate}%):`, { x: totalsX, y, size: 9, font: helvetica, color: BRAND_GRAY });
+          y -= 20;
+          page.drawText(`Tax (${taxRate}%)`, { x: totalsX, y, size: 9, font: helvetica, color: BRAND_GRAY });
           const taxStr = `${currency}${tax.toFixed(2)}`;
-          page.drawText(taxStr, { x: width - margin - helveticaBold.widthOfTextAtSize(taxStr, 10), y, size: 10, font: helvetica, color: BRAND_DARK });
+          page.drawText(taxStr, { x: width - margin - helvetica.widthOfTextAtSize(taxStr, 10), y, size: 10, font: helvetica, color: BRAND_DARK });
         }
-        
-        y -= 5;
-        drawLine(page, totalsX, y, width - margin, BRAND_BLUE, 2);
+
+        y -= 8;
+        drawLine(page, totalsX, y, width - margin, TEAL_DARK, 1.5);
         y -= 20;
-        page.drawText("TOTAL:", { x: totalsX, y, size: 11, font: helveticaBold, color: BRAND_BLUE });
+        page.drawText("TOTAL", { x: totalsX, y, size: 12, font: helveticaBold, color: TEAL_DARK });
         const totalStr = `${currency}${grandTotal.toFixed(2)}`;
-        page.drawText(totalStr, { x: width - margin - helveticaBold.widthOfTextAtSize(totalStr, 14), y, size: 14, font: helveticaBold, color: BRAND_BLUE });
-        
-        // Payment info
+        page.drawText(totalStr, { x: width - margin - helveticaBold.widthOfTextAtSize(totalStr, 16), y, size: 16, font: helveticaBold, color: TEAL_DARK });
+
+        // Payment info (invoices only)
         if (isInvoice && (company.payment_number_mtn || company.payment_instructions)) {
           y -= 40;
-          page.drawText("PAYMENT INFORMATION", { x: margin, y, size: 9, font: helveticaBold, color: BRAND_BLUE });
+          page.drawText("PAYMENT INFORMATION", { x: margin, y, size: 9, font: helveticaBold, color: TEAL_DARK });
           y -= 15;
           if (company.payment_number_mtn) {
             page.drawText(`MTN Mobile Money: ${company.payment_number_mtn}`, { x: margin, y, size: 9, font: helvetica, color: BRAND_DARK });
@@ -281,11 +412,11 @@ serve(async (req) => {
             });
           }
         }
-        
+
         // Notes
         if (data.notes) {
           y -= 20;
-          page.drawText("NOTES", { x: margin, y, size: 9, font: helveticaBold, color: BRAND_BLUE });
+          page.drawText("NOTES", { x: margin, y, size: 9, font: helveticaBold, color: TEAL_DARK });
           y -= 15;
           const noteLines = wrapText(data.notes, width - 2 * margin, 9, helvetica);
           noteLines.forEach(line => {
@@ -293,7 +424,7 @@ serve(async (req) => {
             y -= 13;
           });
         }
-        
+
         break;
       }
 
