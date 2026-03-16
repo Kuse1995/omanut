@@ -4084,8 +4084,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
               case 'get_company_statistics': bmsParams = {}; break;
               case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
+              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
+              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
               case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
               case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
             }
