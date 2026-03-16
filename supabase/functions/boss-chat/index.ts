@@ -2088,6 +2088,77 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               break;
             }
 
+            case 'generate_video': {
+              console.log('[BOSS-CHAT] generate_video called:', { prompt: args.prompt?.substring(0, 80), hasImage: !!args.input_image_url });
+              
+              try {
+                const videoPrompt = args.prompt;
+                const inputImageUrl = args.input_image_url || toolImageUrl || null;
+                const aspectRatio = args.aspect_ratio || '9:16';
+
+                // Video generation takes a long time — send ack first
+                const TWILIO_SID_VID = Deno.env.get('TWILIO_ACCOUNT_SID');
+                const TWILIO_TOKEN_VID = Deno.env.get('TWILIO_AUTH_TOKEN');
+                const bossPhoneVid = From;
+                const companyWhatsAppVid = company.whatsapp_number?.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+                
+                if (TWILIO_SID_VID && TWILIO_TOKEN_VID && bossPhoneVid) {
+                  const vidAckForm = new URLSearchParams();
+                  vidAckForm.append('From', companyWhatsAppVid);
+                  vidAckForm.append('To', bossPhoneVid);
+                  vidAckForm.append('Body', `🎬 Generating video... This takes 1-4 minutes.${inputImageUrl ? '\n📸 Using your product image as the starting frame!' : ''}`);
+                  fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_VID}/Messages.json`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_SID_VID}:${TWILIO_TOKEN_VID}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: vidAckForm.toString(),
+                  }).catch(e => console.error('[BOSS-VID-ACK] Failed:', e));
+                }
+
+                const veoResult = await veoGenerateVideo({
+                  prompt: videoPrompt,
+                  inputImageUrl: inputImageUrl || undefined,
+                  aspectRatio,
+                });
+
+                if (veoResult.videoBase64) {
+                  // Upload video to storage
+                  const videoBytes = Uint8Array.from(atob(veoResult.videoBase64), c => c.charCodeAt(0));
+                  const videoPath = `videos/${company.id}/${crypto.randomUUID()}.mp4`;
+                  
+                  const { error: uploadErr } = await supabase.storage
+                    .from('company-media')
+                    .upload(videoPath, videoBytes, {
+                      contentType: veoResult.mimeType || 'video/mp4',
+                      upsert: false,
+                    });
+
+                  if (uploadErr) {
+                    console.error('[BOSS-VID] Upload error:', uploadErr);
+                    result = { success: false, message: `❌ Video generated but upload failed: ${uploadErr.message}` };
+                  } else {
+                    const { data: publicData } = supabase.storage
+                      .from('company-media')
+                      .getPublicUrl(videoPath);
+                    const videoUrl = publicData.publicUrl;
+                    toolImageUrl = videoUrl; // Store for reuse in schedule_social_post
+                    
+                    console.log(`[BOSS-VID] Video uploaded: ${videoUrl}`);
+                    result = { 
+                      success: true, 
+                      message: `🎬 Video generated successfully!\n📎 ${videoUrl}\n\nYou can now schedule this as a video post. Just tell me when and where to post it!`,
+                      videoUrl,
+                    };
+                  }
+                } else {
+                  result = { success: false, message: `❌ Video generation failed: ${veoResult.error || 'No video data returned'}` };
+                }
+              } catch (vidErr: any) {
+                console.error('[BOSS-VID] Error:', vidErr);
+                result = { success: false, message: `❌ Video generation error: ${vidErr.message}` };
+              }
+              break;
+            }
+
             default:
               result = { success: false, message: `Unknown tool: ${functionName}` };
           }
