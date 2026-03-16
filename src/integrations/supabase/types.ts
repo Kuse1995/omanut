@@ -2442,6 +2442,7 @@ export type Database = {
           status: string
           target_platform: string
           updated_at: string
+          video_url: string | null
         }
         Insert: {
           company_id: string
@@ -2457,6 +2458,7 @@ export type Database = {
           status?: string
           target_platform?: string
           updated_at?: string
+          video_url?: string | null
         }
         Update: {
           company_id?: string
@@ -2472,6 +2474,7 @@ export type Database = {
           status?: string
           target_platform?: string
           updated_at?: string
+          video_url?: string | null
         }
         Relationships: [
           {

@@ -114,7 +114,24 @@ serve(async (req) => {
       try {
         let fbResponse: Response;
 
-        if (post.image_url) {
+        if (post.video_url) {
+          // Video post via resumable upload or direct URL
+          fbResponse = await fetch(
+            `https://graph.facebook.com/v25.0/${post.page_id}/videos`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${cred.access_token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                file_url: post.video_url,
+                description: post.content,
+                published: true,
+              }),
+            }
+          );
+        } else if (post.image_url) {
           fbResponse = await fetch(
             `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
             {
@@ -164,11 +181,24 @@ serve(async (req) => {
     if (targetPlatform === 'instagram' || targetPlatform === 'both') {
       if (!cred.ig_user_id) {
         errors.push('Instagram: No Instagram Business Account ID configured');
-      } else if (!post.image_url) {
-        errors.push('Instagram: An image is required for Instagram posts');
+      } else if (!post.image_url && !post.video_url) {
+        errors.push('Instagram: An image or video is required for Instagram posts');
       } else {
         try {
-          // Step 1: Create media container
+          // Step 1: Create media container (video or image)
+          const isVideo = !!post.video_url;
+          const containerBody: any = {
+            caption: post.content,
+          };
+
+          if (isVideo) {
+            containerBody.media_type = 'REELS';
+            containerBody.video_url = post.video_url;
+            containerBody.share_to_feed = true;
+          } else {
+            containerBody.image_url = post.image_url;
+          }
+
           const containerRes = await fetch(
             `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media`,
             {
@@ -177,10 +207,7 @@ serve(async (req) => {
                 Authorization: `Bearer ${cred.access_token}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                image_url: post.image_url,
-                caption: post.content,
-              }),
+              body: JSON.stringify(containerBody),
             }
           );
 
@@ -189,12 +216,14 @@ serve(async (req) => {
             errors.push(`Instagram container: ${containerResult.error?.message || 'API error'}`);
           } else {
             const creationId = containerResult.id;
-            console.log(`IG media container created: ${creationId}`);
+            console.log(`IG media container created: ${creationId} (type: ${isVideo ? 'REELS' : 'IMAGE'})`);
 
-            // Poll for container readiness
+            // Poll for container readiness (videos take longer)
+            const maxPolls = isVideo ? 20 : 10;
+            const pollInterval = isVideo ? 5000 : 3000;
             let containerStatus = 'IN_PROGRESS';
-            for (let i = 0; i < 10; i++) {
-              await new Promise(resolve => setTimeout(resolve, 3000));
+            for (let i = 0; i < maxPolls; i++) {
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
               const statusRes = await fetch(
                 `https://graph.facebook.com/v25.0/${creationId}?fields=status_code&access_token=${cred.access_token}`
               );
@@ -227,7 +256,7 @@ serve(async (req) => {
                 errors.push(`Instagram publish: ${publishResult.error?.message || 'API error'}`);
               } else {
                 results.instagram = publishResult;
-                console.log(`Post ${post_id} published on Instagram. ID: ${publishResult.id}`);
+                console.log(`Post ${post_id} published on Instagram as ${isVideo ? 'Reel' : 'image'}. ID: ${publishResult.id}`);
               }
             }
           }

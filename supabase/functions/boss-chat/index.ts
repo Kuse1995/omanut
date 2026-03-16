@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, veoGenerateVideo } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
 const corsHeaders = {
@@ -303,8 +303,16 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
    - Use the edit_image tool when they want to modify the last generated image.
    - Use the show_image_gallery tool when they want to see recent creations.
    - Use the get_recent_images tool to look up images that were already generated recently.
-   - You can CHAIN tools: generate an image, then schedule it as a social post in the SAME turn!
-   - NEVER say you cannot generate images. Use the generate_image tool directly.
+    - You can CHAIN tools: generate an image, then schedule it as a social post in the SAME turn!
+    - NEVER say you cannot generate images. Use the generate_image tool directly.
+
+10. **Video Generation**: You can create short product videos using the generate_video tool!
+    - Use when the boss asks for a video, reel, or animated content for social media.
+    - PRIORITIZE IMAGE-TO-VIDEO: When a product image exists (from generate_image or media library), always pass it as input_image_url to create a video from that image. This produces the best product-focused content.
+    - Videos are 8 seconds long and optimized for social media (9:16 vertical by default for reels, or 16:9 for Facebook).
+    - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
+    - Chain: generate_image → generate_video (with the image) → schedule_social_post (with video_url)
+    - ⚠️ Video generation takes 1-4 minutes. The boss will be notified when it's ready.
    
    ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in uploaded product photos. If no match is found, it will ask to check the product library first.
    
@@ -506,7 +514,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" },
               image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." },
-              target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
+              target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." },
+              video_url: { type: "string", description: "Optional URL of a generated video to attach. When set, the post is published as a video post (Reel on Instagram, video on Facebook). Takes priority over image_url." }
             },
             required: ["content"]
           }
@@ -990,6 +999,22 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["query"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_video",
+          description: "Generate a short product video (8 seconds) using AI. PRIORITIZE image-to-video by passing an existing product image URL as input_image_url — this creates the best product-focused video content. Use for social media reels and video posts.",
+          parameters: {
+            type: "object",
+            properties: {
+              prompt: { type: "string", description: "Detailed description of what the video should show. Include camera movements, actions, and mood." },
+              input_image_url: { type: "string", description: "URL of an existing product/brand image to use as the starting frame. ALWAYS pass this when available for best results." },
+              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Use 9:16 for reels/stories, 16:9 for feed videos, 1:1 for square. Default: 9:16" },
+            },
+            required: ["prompt"]
+          }
+        }
       }
     ];
 
@@ -1292,10 +1317,17 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+              // VIDEO PRIORITY: If video_url is provided or toolImageUrl is a video, use it
+              let postVideoUrl = args.video_url || null;
+              if (!postVideoUrl && toolImageUrl && toolImageUrl.includes('/videos/')) {
+                console.log('[BOSS-CHAT] Reusing toolImageUrl as video_url (auto-detect):', toolImageUrl);
+                postVideoUrl = toolImageUrl;
+              }
+
               // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
               // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
               let postImageUrl = args.image_url || null;
-              if (!postImageUrl && toolImageUrl) {
+              if (!postImageUrl && !postVideoUrl && toolImageUrl) {
                 console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
@@ -1413,11 +1445,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const scheduledTime = args.publish_now ? new Date().toISOString() : args.scheduled_time;
                 const { data: draftPost, error: draftErr } = await supabase
                   .from('scheduled_posts')
-                  .insert({
+                   .insert({
                     company_id: company.id,
                     page_id: metaCred.page_id,
                     content: args.content,
                     image_url: postImageUrl,
+                    video_url: postVideoUrl,
                     target_platform: targetPlatform,
                     status: 'pending_approval',
                     scheduled_time: scheduledTime,
@@ -1489,11 +1522,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   // No image needed or image was pre-existing (not freshly generated) — publish immediately
                   const { data: insertedPost, error: insertErr } = await supabase
                     .from('scheduled_posts')
-                    .insert({
+                   .insert({
                       company_id: company.id,
                       page_id: metaCred.page_id,
                       content: args.content,
                       image_url: postImageUrl,
+                      video_url: postVideoUrl,
                       target_platform: targetPlatform,
                       status: 'approved',
                       scheduled_time: new Date().toISOString(),
@@ -1513,7 +1547,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   });
                   const publishResult = await publishResponse.json();
                   result = publishResult.success !== false
-                    ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
+                    ? { success: true, message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
                     : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
                 }
               } else {
@@ -2059,6 +2093,77 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               } catch (searchErr) {
                 console.error('[BOSS-SEARCH-MEDIA] Error:', searchErr);
                 result = { success: false, message: 'Media search failed.' };
+              }
+              break;
+            }
+
+            case 'generate_video': {
+              console.log('[BOSS-CHAT] generate_video called:', { prompt: args.prompt?.substring(0, 80), hasImage: !!args.input_image_url });
+              
+              try {
+                const videoPrompt = args.prompt;
+                const inputImageUrl = args.input_image_url || toolImageUrl || null;
+                const aspectRatio = args.aspect_ratio || '9:16';
+
+                // Video generation takes a long time — send ack first
+                const TWILIO_SID_VID = Deno.env.get('TWILIO_ACCOUNT_SID');
+                const TWILIO_TOKEN_VID = Deno.env.get('TWILIO_AUTH_TOKEN');
+                const bossPhoneVid = From;
+                const companyWhatsAppVid = company.whatsapp_number?.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+                
+                if (TWILIO_SID_VID && TWILIO_TOKEN_VID && bossPhoneVid) {
+                  const vidAckForm = new URLSearchParams();
+                  vidAckForm.append('From', companyWhatsAppVid);
+                  vidAckForm.append('To', bossPhoneVid);
+                  vidAckForm.append('Body', `🎬 Generating video... This takes 1-4 minutes.${inputImageUrl ? '\n📸 Using your product image as the starting frame!' : ''}`);
+                  fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_VID}/Messages.json`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_SID_VID}:${TWILIO_TOKEN_VID}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: vidAckForm.toString(),
+                  }).catch(e => console.error('[BOSS-VID-ACK] Failed:', e));
+                }
+
+                const veoResult = await veoGenerateVideo({
+                  prompt: videoPrompt,
+                  inputImageUrl: inputImageUrl || undefined,
+                  aspectRatio,
+                });
+
+                if (veoResult.videoBase64) {
+                  // Upload video to storage
+                  const videoBytes = Uint8Array.from(atob(veoResult.videoBase64), c => c.charCodeAt(0));
+                  const videoPath = `videos/${company.id}/${crypto.randomUUID()}.mp4`;
+                  
+                  const { error: uploadErr } = await supabase.storage
+                    .from('company-media')
+                    .upload(videoPath, videoBytes, {
+                      contentType: veoResult.mimeType || 'video/mp4',
+                      upsert: false,
+                    });
+
+                  if (uploadErr) {
+                    console.error('[BOSS-VID] Upload error:', uploadErr);
+                    result = { success: false, message: `❌ Video generated but upload failed: ${uploadErr.message}` };
+                  } else {
+                    const { data: publicData } = supabase.storage
+                      .from('company-media')
+                      .getPublicUrl(videoPath);
+                    const videoUrl = publicData.publicUrl;
+                    toolImageUrl = videoUrl; // Store for reuse in schedule_social_post
+                    
+                    console.log(`[BOSS-VID] Video uploaded: ${videoUrl}`);
+                    result = { 
+                      success: true, 
+                      message: `🎬 Video generated successfully!\n📎 ${videoUrl}\n\nYou can now schedule this as a video post. Just tell me when and where to post it!`,
+                      videoUrl,
+                    };
+                  }
+                } else {
+                  result = { success: false, message: `❌ Video generation failed: ${veoResult.error || 'No video data returned'}` };
+                }
+              } catch (vidErr: any) {
+                console.error('[BOSS-VID] Error:', vidErr);
+                result = { success: false, message: `❌ Video generation error: ${vidErr.message}` };
               }
               break;
             }
