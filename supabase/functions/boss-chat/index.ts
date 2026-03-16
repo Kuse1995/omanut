@@ -1270,6 +1270,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 postImageUrl = toolImageUrl;
               }
 
+              // ── AUTO-REUSE: query recent images if nothing in session ──
+              if (!postImageUrl) {
+                try {
+                  const { data: recentImgs } = await supabase
+                    .from('generated_images')
+                    .select('image_url')
+                    .eq('company_id', company.id)
+                    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+                    .order('created_at', { ascending: false })
+                    .limit(1);
+                  if (recentImgs?.[0]?.image_url) {
+                    console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImgs[0].image_url);
+                    postImageUrl = recentImgs[0].image_url;
+                    toolImageUrl = postImageUrl;
+                  }
+                } catch (e) {
+                  console.error('[BOSS-CHAT] Auto-reuse query failed:', e);
+                }
+              }
+
               // ── IMAGE-FIRST PIPELINE ──
               // Only generate if NO image exists from any source
               const needsImageGen = !postImageUrl && args.needs_image_generation && args.image_prompt;
