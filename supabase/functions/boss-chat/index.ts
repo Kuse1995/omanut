@@ -1522,11 +1522,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   // No image needed or image was pre-existing (not freshly generated) — publish immediately
                   const { data: insertedPost, error: insertErr } = await supabase
                     .from('scheduled_posts')
-                    .insert({
+                   .insert({
                       company_id: company.id,
                       page_id: metaCred.page_id,
                       content: args.content,
                       image_url: postImageUrl,
+                      video_url: postVideoUrl,
                       target_platform: targetPlatform,
                       status: 'approved',
                       scheduled_time: new Date().toISOString(),
