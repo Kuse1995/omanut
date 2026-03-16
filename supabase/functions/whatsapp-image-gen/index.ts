@@ -1119,7 +1119,7 @@ INSTRUCTIONS:
         const matched = candidates.find((img: ProductImage) => aiChoice.includes(img.id));
         if (matched) return { product: matched, bmsImageUrls };
       }
-      return { product: null, bmsImageUrls };
+      return { product: null, bmsImageUrls: [] };
     }
   } catch (e) {
     console.error('[PRODUCT-SELECT] Vision selection failed:', e);
