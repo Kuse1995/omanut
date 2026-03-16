@@ -998,6 +998,22 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             required: ["query"]
           }
         }
+      },
+      {
+        type: "function",
+        function: {
+          name: "generate_video",
+          description: "Generate a short product video (8 seconds) using AI. PRIORITIZE image-to-video by passing an existing product image URL as input_image_url — this creates the best product-focused video content. Use for social media reels and video posts.",
+          parameters: {
+            type: "object",
+            properties: {
+              prompt: { type: "string", description: "Detailed description of what the video should show. Include camera movements, actions, and mood." },
+              input_image_url: { type: "string", description: "URL of an existing product/brand image to use as the starting frame. ALWAYS pass this when available for best results." },
+              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Use 9:16 for reels/stories, 16:9 for feed videos, 1:1 for square. Default: 9:16" },
+            },
+            required: ["prompt"]
+          }
+        }
       }
     ];
 
