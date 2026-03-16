@@ -1547,7 +1547,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   });
                   const publishResult = await publishResponse.json();
                   result = publishResult.success !== false
-                    ? { success: true, message: `✅ Post published now!\n${postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
+                    ? { success: true, message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
                     : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
                 }
               } else {
