@@ -412,6 +412,32 @@ Return ONLY the message text, no prefix or explanation.`
 
         console.log(`[Analyze] Successfully sent follow-up to ${conv.phone}`);
 
+        // Embed conversation summary for semantic search
+        try {
+          const summaryText = [
+            conv.customer_name ? `Customer: ${conv.customer_name}` : '',
+            conv.phone ? `Phone: ${conv.phone}` : '',
+            recommendation?.analysis || '',
+            recommendation?.strategy || '',
+            conv.transcript ? conv.transcript.substring(0, 1500) : conversationHistory.map((m: any) => `${m.role}: ${m.content}`).join('\n').substring(0, 1500),
+          ].filter(Boolean).join(' — ');
+
+          const embedding = await embedText({
+            text: summaryText,
+            dimensions: 768,
+            taskType: 'RETRIEVAL_DOCUMENT',
+          });
+          const vectorStr = `[${embedding.join(',')}]`;
+
+          await supabase.from('conversations')
+            .update({ summary_embedding: vectorStr })
+            .eq('id', conv.id);
+
+          console.log(`[Analyze] ✓ Conversation ${conv.id} embedding stored`);
+        } catch (embErr) {
+          console.error(`[Analyze] Embedding failed for ${conv.id} (non-fatal):`, embErr);
+        }
+
       } catch (error) {
         console.error(`Error processing conversation ${conv.id}:`, error);
         if (sendEvent) {
