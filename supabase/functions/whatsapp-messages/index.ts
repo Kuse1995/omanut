@@ -2306,6 +2306,50 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
             required: ["sender_name", "sender_email", "message"]
           }
         }
+      },
+      search_media: {
+        type: "function",
+        function: {
+          name: "search_media",
+          description: "Semantically search the company's media library (photos, videos, documents) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What the customer is looking for — product name, category, or description" },
+              count: { type: "integer", description: "Max results to return (default 5)" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      search_knowledge: {
+        type: "function",
+        function: {
+          name: "search_knowledge",
+          description: "Search the company's knowledge base documents for relevant information. Use when a customer asks about policies, procedures, detailed product info, or anything that might be in uploaded documents.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The question or topic to search for" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      search_past_conversations: {
+        type: "function",
+        function: {
+          name: "search_past_conversations",
+          description: "Search past conversations with this customer or similar topics. Use when a returning customer references a previous interaction, or when you need context from prior discussions.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What to search for in past conversations" },
+              customer_phone: { type: "string", description: "Optional: filter to a specific customer's conversations" }
+            },
+            required: ["query"]
+          }
+        }
       }
     };
 
