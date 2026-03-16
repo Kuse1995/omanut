@@ -514,7 +514,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               image_url: { type: "string", description: "Optional URL of an existing image to attach" },
               needs_image_generation: { type: "boolean", description: "Set to true if the boss wants AI to generate a brand image for this post" },
               image_prompt: { type: "string", description: "Detailed description of what the generated image should depict, extracted from the boss's message. E.g., 'Zambian preteens reading in a Bible study'. Always extract the boss's specific visual description separately from the post caption." },
-              target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." }
+              target_platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Where to publish: facebook, instagram, or both. Default to 'facebook' if not specified. If boss mentions Instagram or IG, use 'instagram'. If boss says 'all platforms' or 'everywhere', use 'both'." },
+              video_url: { type: "string", description: "Optional URL of a generated video to attach. When set, the post is published as a video post (Reel on Instagram, video on Facebook). Takes priority over image_url." }
             },
             required: ["content"]
           }
