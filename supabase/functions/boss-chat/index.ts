@@ -1445,11 +1445,12 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 const scheduledTime = args.publish_now ? new Date().toISOString() : args.scheduled_time;
                 const { data: draftPost, error: draftErr } = await supabase
                   .from('scheduled_posts')
-                  .insert({
+                   .insert({
                     company_id: company.id,
                     page_id: metaCred.page_id,
                     content: args.content,
                     image_url: postImageUrl,
+                    video_url: postVideoUrl,
                     target_platform: targetPlatform,
                     status: 'pending_approval',
                     scheduled_time: scheduledTime,
