@@ -3978,9 +3978,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       maxToolRounds = 3;
     }
     let currentRound = 0;
-    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls?.map((tc: any) => ({
-      id: tc.id, type: tc.type, function: tc.function,
-    }));
+    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
     
     // Validate tool_calls structure
     if (currentToolCalls && !Array.isArray(currentToolCalls)) {
