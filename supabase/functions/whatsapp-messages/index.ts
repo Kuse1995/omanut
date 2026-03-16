@@ -3689,6 +3689,110 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               anyToolExecuted = true;
               toolExecutionContext.push(`BMS ${bmsToolName} executed`);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
+
+              // ── Auto-send PDF to customer + notify boss for quotations/invoices ──
+              if ((bmsToolName === 'create_quotation' || bmsToolName === 'create_invoice') && bmsResult && !bmsResult.error) {
+                const docType = bmsToolName === 'create_quotation' ? 'quotation' : 'invoice';
+                console.log(`[AUTO-DOC] Generating ${docType} PDF for customer ${customerPhone}`);
+                try {
+                  const docResponse = await fetch(
+                    `${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`,
+                    {
+                      method: 'POST',
+                      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        company_id: company.id,
+                        document_type: docType,
+                        data: bmsResult,
+                        customer_name: args.customer_name || customerName || 'Customer',
+                        customer_phone: customerPhone,
+                      }),
+                    }
+                  );
+
+                  if (docResponse.ok) {
+                    const docResult = await docResponse.json();
+                    const pdfUrl = docResult.pdf_url || docResult.url;
+
+                    if (pdfUrl) {
+                      // Send PDF to customer via Twilio WhatsApp
+                      const senderNumber = company.whatsapp_number || '';
+                      if (senderNumber) {
+                        console.log(`[AUTO-DOC] Sending ${docType} PDF to customer: ${customerPhone}`);
+                        try {
+                          const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+                          const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+                          if (twilioSid && twilioToken) {
+                            const twilioResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                              },
+                              body: new URLSearchParams({
+                                To: `whatsapp:${customerPhone}`,
+                                From: `whatsapp:${senderNumber}`,
+                                MediaUrl: pdfUrl,
+                                Body: `📄 Here is your ${docType}. Please review and let us know if you have any questions.`,
+                              }),
+                            });
+                            if (!twilioResp.ok) {
+                              console.error(`[AUTO-DOC] Twilio send failed: ${twilioResp.status}`);
+                            } else {
+                              console.log(`[AUTO-DOC] ${docType} PDF sent to customer successfully`);
+                            }
+                          }
+                        } catch (sendErr) {
+                          console.error(`[AUTO-DOC] Failed to send PDF to customer:`, sendErr);
+                        }
+                      }
+
+                      // Notify boss via WhatsApp
+                      const bossPhone = company.boss_phone;
+                      if (bossPhone && senderNumber) {
+                        console.log(`[AUTO-DOC] Notifying boss about ${docType}: ${bossPhone}`);
+                        const itemsSummary = (args.items || []).map((it: any) => `${it.name || it.product_name} x${it.quantity || 1}`).join(', ');
+                        const totalAmount = bmsResult.total || bmsResult.grand_total || 'N/A';
+                        const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || customerName || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
+                        try {
+                          const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+                          const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+                          if (twilioSid && twilioToken) {
+                            await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                              },
+                              body: new URLSearchParams({
+                                To: `whatsapp:${bossPhone}`,
+                                From: `whatsapp:${senderNumber}`,
+                                MediaUrl: pdfUrl,
+                                Body: bossMsg,
+                              }),
+                            });
+                            console.log(`[AUTO-DOC] Boss notified about ${docType}`);
+                          }
+                        } catch (bossErr) {
+                          console.error(`[AUTO-DOC] Failed to notify boss:`, bossErr);
+                        }
+
+                        // Log to boss_conversations
+                        await supabase.from('boss_conversations').insert({
+                          company_id: company.id,
+                          message_from: 'system',
+                          message_content: bossMsg,
+                          handed_off_by: 'auto-doc-delivery',
+                        });
+                      }
+                    }
+                  } else {
+                    console.error(`[AUTO-DOC] generate-document failed: ${docResponse.status}`);
+                  }
+                } catch (docErr) {
+                  console.error(`[AUTO-DOC] Document generation error:`, docErr);
+                }
+              }
             } catch (error) {
               console.error(`[BMS] ${bmsToolName} error:`, error);
               anyToolExecuted = true;
