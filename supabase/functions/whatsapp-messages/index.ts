@@ -4050,7 +4050,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         
         // Execute the new tool calls
         toolResults = [];
-        currentToolCalls = newToolCalls;
+        currentToolCalls = newToolCalls?.map((tc: any) => ({
+          id: tc.id, type: tc.type, function: tc.function,
+        }));
         aiData = roundData;
         
         for (const toolCall of newToolCalls) {
