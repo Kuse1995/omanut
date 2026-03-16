@@ -5,9 +5,16 @@ import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
-/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors */
-function sanitizeMessages(msgs: Array<{ role: string; content: any }>): Array<{ role: string; content: any }> {
-  return msgs.filter(m => m.content != null && m.content !== '' && String(m.content) !== 'undefined');
+/** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
+ *  Preserves assistant messages with tool_calls even if content is null (required by API). */
+function sanitizeMessages(msgs: Array<{ role: string; content: any; tool_calls?: any[] }>): Array<{ role: string; content: any; tool_calls?: any[] }> {
+  return msgs.filter(m => {
+    // Keep assistant messages that have tool_calls even if content is empty
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) return true;
+    // Keep tool role messages (responses to tool calls)
+    if (m.role === 'tool') return true;
+    return m.content != null && m.content !== '' && String(m.content) !== 'undefined';
+  });
 }
 
 const corsHeaders = {
@@ -3814,8 +3821,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
               case 'get_company_statistics': bmsParams = {}; break;
               case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
+              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
+              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
               case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
               case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
             }
@@ -3971,9 +3978,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       maxToolRounds = 3;
     }
     let currentRound = 0;
-    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls?.map((tc: any) => ({
-      id: tc.id, type: tc.type, function: tc.function,
-    }));
+    let currentToolCalls = aiData?.choices?.[0]?.message?.tool_calls;
     
     // Validate tool_calls structure
     if (currentToolCalls && !Array.isArray(currentToolCalls)) {
@@ -3992,7 +3997,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           ...currentMessages,
           {
             role: "assistant",
-            content: assistantReply || null,
+            content: assistantReply || "",
             ...(currentToolCalls && currentToolCalls.length > 0 ? { tool_calls: currentToolCalls } : {})
           },
           ...toolResults
@@ -4029,7 +4034,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         clearTimeout(roundTimeoutId);
         
         if (!roundResponse.ok) {
-          console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed:`, roundResponse.status);
+          const errBody = await roundResponse.text().catch(() => 'no body');
+          console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed: ${roundResponse.status}`, errBody.slice(0, 500));
           if (!assistantReply) assistantReply = "I processed your request. How else can I help you?";
           break;
         }
@@ -4050,9 +4056,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         
         // Execute the new tool calls
         toolResults = [];
-        currentToolCalls = newToolCalls?.map((tc: any) => ({
-          id: tc.id, type: tc.type, function: tc.function,
-        }));
+        currentToolCalls = newToolCalls;
         aiData = roundData;
         
         for (const toolCall of newToolCalls) {
@@ -4077,8 +4081,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
               case 'get_company_statistics': bmsParams = {}; break;
               case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: args.items, client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
+              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
+              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
               case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
               case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
             }
