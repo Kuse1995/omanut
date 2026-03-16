@@ -1915,15 +1915,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
               } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — firing async with bossPhone delivery`);
-                // Original request is now cancelled (aborted). Fire a fresh async request for delivery.
-                fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
-                  body: JSON.stringify(imgGenBody),
-                }).catch(e => console.error('[BOSS-TOOL] Async image gen fire failed:', e));
+                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — server-side request may still be running`);
+                // Do NOT fire a new request — the server-side function continues even after abort.
+                // AbortController only cancels the client read, not the server execution.
                 (globalThis as any).__imageGenInProgress = true;
-                result = { success: true, message: '🎨 Image is generating asynchronously. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
+                result = { success: true, message: '🎨 Image is still generating on the server. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
               }
               break;
             }
