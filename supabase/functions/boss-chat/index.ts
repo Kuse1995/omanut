@@ -1317,12 +1317,19 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
+              // VIDEO PRIORITY: If video_url is provided, it takes precedence
+              const postVideoUrl = args.video_url || null;
+
               // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
               // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
               let postImageUrl = args.image_url || null;
-              if (!postImageUrl && toolImageUrl) {
-                console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
-                postImageUrl = toolImageUrl;
+              if (!postImageUrl && !postVideoUrl && toolImageUrl) {
+                // Only reuse toolImageUrl as image if it's not a video URL
+                if (!toolImageUrl.includes('/videos/')) {
+                  console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
+                  postImageUrl = toolImageUrl;
+                }
+              }
               }
 
               // ── AUTO-REUSE: query recent images if nothing in session ──
