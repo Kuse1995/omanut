@@ -1572,28 +1572,19 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       }
     }
 
-    // Add knowledge base
+    // Knowledge base & media library are now accessed via semantic search tools (search_knowledge, search_media)
+    // Only inject a lightweight hint instead of the full content to save tokens
     if (documents && documents.length > 0) {
-      instructions += '\n\n=== KNOWLEDGE BASE ===\n';
-      for (const doc of documents) {
-        instructions += `\nDocument: ${doc.filename}\n${doc.parsed_content}\n`;
-      }
+      instructions += `\n\n=== KNOWLEDGE BASE (${documents.length} documents available) ===\n`;
+      instructions += `You have ${documents.length} knowledge base documents available. Use the search_knowledge tool to find relevant information when customers ask about policies, procedures, fees, or detailed product info.\n`;
+      instructions += `Documents: ${documents.map((d: any) => d.filename).join(', ')}\n`;
     }
 
-    // Add media library
     if (mediaWithUrls && mediaWithUrls.length > 0) {
-      instructions += '\n\n=== MEDIA LIBRARY ===\n';
-      instructions += 'Available media files:\n';
-      for (const media of mediaWithUrls) {
-        const displayName = media.description || media.category;
-        instructions += `- ${displayName} (${media.category}, ${media.media_type}): ${media.full_url}\n`;
-      }
-      instructions += '\n⚠️ CRITICAL RULES FOR MEDIA:\n';
-      instructions += '1. ONLY use URLs from the list above - NEVER make up or guess URLs\n';
-      instructions += '2. If customer asks for more samples than available, tell them you have ' + mediaWithUrls.length + ' samples and offer to send what you have\n';
-      instructions += '3. When sending media, call send_media with ONLY the exact URLs listed above\n';
-      instructions += '4. DO NOT create fake URLs like "https://omanut.tech/media/..." or "https://example.com/..."\n';
-      instructions += '5. If no relevant media exists, tell the customer and offer alternatives\n';
+      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files available) ===\n`;
+      instructions += `You have ${mediaWithUrls.length} media files available. Use the search_media tool to find relevant photos/videos when customers ask for samples or product images.\n`;
+      instructions += '⚠️ CRITICAL: Always use search_media to find the right files. NEVER make up or guess URLs.\n';
+      instructions += 'After finding media via search_media, use send_media with the returned URLs.\n';
     } else {
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
@@ -2304,6 +2295,50 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
               sender_phone: { type: "string", description: "Phone number if provided" }
             },
             required: ["sender_name", "sender_email", "message"]
+          }
+        }
+      },
+      search_media: {
+        type: "function",
+        function: {
+          name: "search_media",
+          description: "Semantically search the company's media library (photos, videos, documents) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What the customer is looking for — product name, category, or description" },
+              count: { type: "integer", description: "Max results to return (default 5)" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      search_knowledge: {
+        type: "function",
+        function: {
+          name: "search_knowledge",
+          description: "Search the company's knowledge base documents for relevant information. Use when a customer asks about policies, procedures, detailed product info, or anything that might be in uploaded documents.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The question or topic to search for" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      search_past_conversations: {
+        type: "function",
+        function: {
+          name: "search_past_conversations",
+          description: "Search past conversations with this customer or similar topics. Use when a returning customer references a previous interaction, or when you need context from prior discussions.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What to search for in past conversations" },
+              customer_phone: { type: "string", description: "Optional: filter to a specific customer's conversations" }
+            },
+            required: ["query"]
           }
         }
       }
@@ -3590,6 +3625,119 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             } catch (error) {
               console.error('[LOOKUP-PRODUCT] Exception:', error);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }) });
+            }
+          } else if (toolCall.function.name === 'search_media') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-MEDIA] Query:', args.query);
+            try {
+              const expandedQuery = normalizeSearchQuery(args.query, company);
+              const queryVec = await embedQuery(expandedQuery);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.25,
+                match_count: args.count || 5,
+              });
+
+              let results: any[] = [];
+              if (!mediaErr && mediaResults && mediaResults.length > 0) {
+                results = mediaResults.map((m: any) => ({
+                  description: m.description,
+                  category: m.category,
+                  media_type: m.media_type,
+                  tags: m.tags,
+                  url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                  similarity: m.similarity,
+                }));
+              }
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_media found ${results.length} results for "${args.query}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Use send_media with the URLs above.' : 'No matching media found.' })
+              });
+            } catch (error) {
+              console.error('[SEARCH-MEDIA] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Media search failed' }) });
+            }
+          } else if (toolCall.function.name === 'search_knowledge') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-KNOWLEDGE] Query:', args.query);
+            try {
+              const queryVec = await embedQuery(args.query);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: docResults, error: docErr } = await supabase.rpc('match_documents', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.25,
+                match_count: 3,
+              });
+
+              let results: any[] = [];
+              if (!docErr && docResults && docResults.length > 0) {
+                results = docResults.map((d: any) => ({
+                  filename: d.filename,
+                  content: d.parsed_content?.substring(0, 800) || '',
+                  similarity: d.similarity,
+                }));
+              }
+
+              // Also check quick_reference_info as fallback
+              let quickRef = '';
+              if (results.length === 0 && company.quick_reference_info) {
+                quickRef = company.quick_reference_info;
+              }
+
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_knowledge found ${results.length} documents for "${args.query}"`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, documents: results, quick_reference: quickRef || undefined, message: results.length > 0 ? 'Found relevant knowledge base content.' : (quickRef ? 'No document matches but quick reference info available.' : 'No matching knowledge base content found.') })
+              });
+            } catch (error) {
+              console.error('[SEARCH-KNOWLEDGE] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Knowledge search failed' }) });
+            }
+          } else if (toolCall.function.name === 'search_past_conversations') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[SEARCH-CONVERSATIONS] Query:', args.query);
+            try {
+              const queryVec = await embedQuery(args.query);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: convResults, error: convErr } = await supabase.rpc('match_conversations', {
+                query_embedding: vectorStr,
+                match_company_id: company.id,
+                match_threshold: 0.3,
+                match_count: 5,
+              });
+
+              let results: any[] = [];
+              if (!convErr && convResults && convResults.length > 0) {
+                // Optionally filter by customer phone
+                let filtered = convResults;
+                if (args.customer_phone) {
+                  const normPhone = args.customer_phone.replace(/\D/g, '');
+                  filtered = convResults.filter((c: any) => c.phone && c.phone.includes(normPhone));
+                  if (filtered.length === 0) filtered = convResults; // fallback to all
+                }
+                results = filtered.map((c: any) => ({
+                  customer_name: c.customer_name,
+                  phone: c.phone,
+                  date: c.started_at,
+                  transcript_preview: c.transcript?.substring(0, 400) || 'No transcript available',
+                  similarity: c.similarity,
+                }));
+              }
+              anyToolExecuted = true;
+              toolExecutionContext.push(`search_past_conversations found ${results.length} results`);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, conversations: results, message: results.length > 0 ? 'Found past conversations.' : 'No matching past conversations found.' })
+              });
+            } catch (error) {
+              console.error('[SEARCH-CONVERSATIONS] Error:', error);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Conversation search failed' }) });
             }
           } else if (['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'].includes(toolCall.function.name)) {
             // === EXTERNAL CATALOG: Intercept list_products and check_stock ===

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { geminiChat } from "../_shared/gemini-client.ts";
+import { embedQuery } from "../_shared/embedding-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -103,11 +104,11 @@ The AI handles everything - generation, editing, posting. Just ask!`;
     const totalRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'completed' ? sum + Number(p.amount) : sum, 0) || 0;
     const pendingRevenue = paymentData?.reduce((sum, p) => p.payment_status === 'pending' ? sum + Number(p.amount) : sum, 0) || 0;
 
-    // Build context for AI
-    const knowledgeBase = company.company_documents
-      ?.map((doc: any) => doc.parsed_content)
-      .filter(Boolean)
-      .join('\n\n') || '';
+    // Knowledge base summary (actual content accessed via search_knowledge tool)
+    const docCount = company.company_documents?.length || 0;
+    const knowledgeBaseHint = docCount > 0
+      ? `You have ${docCount} knowledge base documents. Use the search_knowledge tool to find specific information.`
+      : '';
 
     const aiOverrides = company.company_ai_overrides?.[0];
     
@@ -189,7 +190,7 @@ BUSINESS STATISTICS (lightweight — use get_business_summary tool for detailed 
 📅 Total Reservations: ${totalReservations || 0}
 🔄 Conversion Rate: ${(totalConversations || 0) > 0 ? ((totalReservations || 0) / (totalConversations || 0) * 100).toFixed(1) : 0}%
 
-${knowledgeBase ? `\nKNOWLEDGE BASE:\n${knowledgeBase}` : ''}
+${knowledgeBaseHint ? `\n${knowledgeBaseHint}` : ''}
 
 YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 
@@ -958,6 +959,35 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               minutes_back: { type: "integer", description: "How many minutes back to look (default 30)" }
             },
             required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_knowledge",
+          description: "Semantically search the company's knowledge base documents. Use when the boss asks about policies, product details, procedures, or any information that might be in uploaded documents.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The topic or question to search for" }
+            },
+            required: ["query"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "search_media",
+          description: "Semantically search the company's media library to find relevant product photos, promotional images, or other media files.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "What to search for — product name, category, or description" },
+              count: { type: "integer", description: "Max results (default 5)" }
+            },
+            required: ["query"]
           }
         }
       }
@@ -1977,6 +2007,58 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   `${i + 1}. "${img.prompt.substring(0, 80)}"\n   URL: ${img.image_url}\n   Status: ${img.status}`
                 ).join('\n\n');
                 result = { success: true, message: `🖼️ ${recentImgs.length} recent images (last ${minutesBack} min):\n\n${imgList}\n\nUse these URLs as image_url when scheduling posts. Do NOT regenerate.` };
+              }
+              break;
+            }
+
+            case 'search_knowledge': {
+              try {
+                const queryVec = await embedQuery(args.query);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: docResults } = await supabase.rpc('match_documents', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: 3,
+                });
+                if (docResults && docResults.length > 0) {
+                  const docs = docResults.map((d: any, i: number) =>
+                    `${i + 1}. **${d.filename}** (relevance: ${(d.similarity * 100).toFixed(0)}%)\n${d.parsed_content?.substring(0, 600) || 'No content'}`
+                  ).join('\n\n');
+                  result = { success: true, message: `📚 Found ${docResults.length} relevant documents:\n\n${docs}` };
+                } else {
+                  // Fallback to quick_reference_info
+                  const { data: compData } = await supabase.from('companies').select('quick_reference_info').eq('id', company.id).single();
+                  result = { success: true, message: compData?.quick_reference_info ? `No document matches, but here's the quick reference:\n${compData.quick_reference_info.substring(0, 800)}` : 'No matching knowledge base content found.' };
+                }
+              } catch (searchErr) {
+                console.error('[BOSS-SEARCH-KNOWLEDGE] Error:', searchErr);
+                result = { success: false, message: 'Knowledge search failed.' };
+              }
+              break;
+            }
+
+            case 'search_media': {
+              try {
+                const queryVec = await embedQuery(args.query);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: mediaResults } = await supabase.rpc('match_media', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: args.count || 5,
+                });
+                if (mediaResults && mediaResults.length > 0) {
+                  const mediaList = mediaResults.map((m: any, i: number) =>
+                    `${i + 1}. ${m.description || m.category} (${m.media_type})\n   URL: https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}\n   Relevance: ${(m.similarity * 100).toFixed(0)}%`
+                  ).join('\n\n');
+                  result = { success: true, message: `📁 Found ${mediaResults.length} matching media:\n\n${mediaList}` };
+                } else {
+                  result = { success: true, message: 'No matching media found in the library.' };
+                }
+              } catch (searchErr) {
+                console.error('[BOSS-SEARCH-MEDIA] Error:', searchErr);
+                result = { success: false, message: 'Media search failed.' };
               }
               break;
             }

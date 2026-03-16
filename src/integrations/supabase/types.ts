@@ -1051,6 +1051,7 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string
+          embedding: string | null
           file_path: string
           file_size: number
           file_type: string
@@ -1063,6 +1064,7 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string
+          embedding?: string | null
           file_path: string
           file_size: number
           file_type: string
@@ -1075,6 +1077,7 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string
+          embedding?: string | null
           file_path?: string
           file_size?: number
           file_type?: string
@@ -1100,6 +1103,7 @@ export type Database = {
           company_id: string
           created_at: string
           description: string | null
+          embedding: string | null
           file_name: string
           file_path: string
           file_size: number
@@ -1116,6 +1120,7 @@ export type Database = {
           company_id: string
           created_at?: string
           description?: string | null
+          embedding?: string | null
           file_name: string
           file_path: string
           file_size: number
@@ -1132,6 +1137,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           description?: string | null
+          embedding?: string | null
           file_name?: string
           file_path?: string
           file_size?: number
@@ -1273,6 +1279,7 @@ export type Database = {
           quality_flag: string | null
           started_at: string
           status: string
+          summary_embedding: string | null
           takeover_at: string | null
           takeover_by: string | null
           transcript: string | null
@@ -1297,6 +1304,7 @@ export type Database = {
           quality_flag?: string | null
           started_at?: string
           status?: string
+          summary_embedding?: string | null
           takeover_at?: string | null
           takeover_by?: string | null
           transcript?: string | null
@@ -1321,6 +1329,7 @@ export type Database = {
           quality_flag?: string | null
           started_at?: string
           status?: string
+          summary_embedding?: string | null
           takeover_at?: string | null
           takeover_by?: string | null
           transcript?: string | null
@@ -2875,6 +2884,53 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      match_conversations: {
+        Args: {
+          match_company_id: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          customer_name: string
+          id: string
+          phone: string
+          similarity: number
+          started_at: string
+          transcript: string
+        }[]
+      }
+      match_documents: {
+        Args: {
+          match_company_id: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          filename: string
+          id: string
+          parsed_content: string
+          similarity: number
+        }[]
+      }
+      match_media: {
+        Args: {
+          match_company_id: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          category: string
+          description: string
+          file_path: string
+          id: string
+          media_type: string
+          similarity: number
+          tags: string[]
+        }[]
       }
       match_products: {
         Args: {

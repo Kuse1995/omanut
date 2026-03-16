@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.76.1";
+import { embedText } from '../_shared/embedding-client.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,24 +44,42 @@ serve(async (req) => {
     let parsedContent = '';
     
     if (document.file_type.includes('text') || document.file_type.includes('csv')) {
-      // Plain text or CSV
       parsedContent = await fileData.text();
     } else if (document.file_type.includes('pdf')) {
-      // For PDFs, we'd need a PDF parsing library
-      // For now, store a placeholder
       parsedContent = `[PDF Document: ${document.filename}]\nPDF parsing requires additional processing. Content will be available soon.`;
     } else if (document.file_type.includes('word') || document.file_type.includes('document')) {
-      // For Word docs, we'd need a DOCX parsing library
       parsedContent = `[Word Document: ${document.filename}]\nDocument parsing requires additional processing. Content will be available soon.`;
     } else if (document.file_type.includes('spreadsheet') || document.file_type.includes('excel')) {
-      // For Excel files
       parsedContent = `[Spreadsheet: ${document.filename}]\nSpreadsheet parsing requires additional processing. Content will be available soon.`;
     }
 
-    // Update document with parsed content
+    // Generate semantic embedding for the parsed content
+    let embeddingVector: string | null = null;
+    if (parsedContent && parsedContent.length > 10) {
+      try {
+        // Truncate to first ~2000 chars for embedding (avoid overly long texts)
+        const textToEmbed = `${document.filename}: ${parsedContent.substring(0, 2000)}`;
+        const embedding = await embedText({
+          text: textToEmbed,
+          dimensions: 768,
+          taskType: 'RETRIEVAL_DOCUMENT',
+        });
+        embeddingVector = `[${embedding.join(',')}]`;
+        console.log(`[PARSE-DOC] ✓ Embedding generated for "${document.filename}"`);
+      } catch (embErr) {
+        console.error('[PARSE-DOC] Embedding failed (non-fatal):', embErr);
+      }
+    }
+
+    // Update document with parsed content and embedding
+    const updatePayload: any = { parsed_content: parsedContent };
+    if (embeddingVector) {
+      updatePayload.embedding = embeddingVector;
+    }
+
     const { error: updateError } = await supabase
       .from('company_documents')
-      .update({ parsed_content: parsedContent })
+      .update(updatePayload)
       .eq('id', documentId);
 
     if (updateError) {
