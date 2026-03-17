@@ -260,9 +260,168 @@ export async function openaiImageEdit(options: {
 }
 
 /**
+ * Start a Veo video generation operation (fire-and-forget).
+ * Returns the operation name for later polling. Does NOT wait for completion.
+ */
+export async function veoStartGeneration(options: {
+  prompt: string;
+  model?: string;
+  inputImageUrl?: string;
+  durationSeconds?: number;
+  aspectRatio?: string;
+}): Promise<{ operationName: string }> {
+  const apiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
+  const model = normalizeModel(options.model || 'veo-3.0-fast-generate-preview');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
+
+  const instance: any = { prompt: options.prompt };
+
+  if (options.inputImageUrl) {
+    try {
+      let imgBase64: string;
+      if (options.inputImageUrl.startsWith('data:')) {
+        const match = options.inputImageUrl.match(/^data:image\/\w+;base64,(.+)$/);
+        imgBase64 = match ? match[1] : '';
+      } else {
+        const imgResponse = await fetch(options.inputImageUrl);
+        if (imgResponse.ok) {
+          const imgBuffer = await imgResponse.arrayBuffer();
+          const bytes = new Uint8Array(imgBuffer);
+          let raw = '';
+          const chunkSize = 32768;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            raw += String.fromCharCode.apply(null, [...chunk]);
+          }
+          imgBase64 = btoa(raw);
+        } else {
+          imgBase64 = '';
+        }
+      }
+      if (imgBase64) {
+        instance.image = { bytesBase64Encoded: imgBase64 };
+      }
+    } catch (e) {
+      console.error('Failed to fetch input image for Veo:', e);
+    }
+  }
+
+  const body = {
+    instances: [instance],
+    parameters: {
+      sampleCount: 1,
+      durationSeconds: options.durationSeconds || 8,
+      aspectRatio: options.aspectRatio || '9:16',
+    },
+  };
+
+  console.log(`[VEO] Starting video generation: model=${model}, hasImage=${!!instance.image}`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`[VEO] Start error (${response.status}):`, errText);
+    throw new Error(`Veo API error: ${response.status} - ${errText}`);
+  }
+
+  const opData = await response.json();
+  const operationName = opData.name;
+  if (!operationName) {
+    console.error('[VEO] No operation name returned:', opData);
+    throw new Error('No operation name from Veo');
+  }
+
+  console.log(`[VEO] Operation started: ${operationName}`);
+  return { operationName };
+}
+
+/**
+ * Poll a Veo operation once. Returns video data if done, null if still pending.
+ */
+export async function veoPollOperation(operationName: string): Promise<{
+  done: boolean;
+  videoBase64: string | null;
+  mimeType: string | null;
+  error?: string;
+}> {
+  const apiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+
+  const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${operationName}`;
+  const pollRes = await fetch(pollUrl, {
+    headers: { 'x-goog-api-key': apiKey },
+  });
+
+  if (!pollRes.ok) {
+    const errText = await pollRes.text();
+    console.error(`[VEO] Poll error (${pollRes.status}):`, errText);
+    return { done: false, videoBase64: null, mimeType: null };
+  }
+
+  const pollData = await pollRes.json();
+
+  if (pollData.error) {
+    return { done: true, videoBase64: null, mimeType: null, error: pollData.error.message || 'Veo generation error' };
+  }
+
+  if (!pollData.done) {
+    return { done: false, videoBase64: null, mimeType: null };
+  }
+
+  // Extract video data
+  const videos = pollData.response?.generateVideoResponse?.generatedSamples
+    || pollData.response?.videos
+    || [];
+
+  if (videos.length > 0) {
+    const video = videos[0];
+    const videoB64 = video.video?.bytesBase64Encoded || video.bytesBase64Encoded;
+    const mime = video.video?.mimeType || video.mimeType || 'video/mp4';
+    if (videoB64) {
+      return { done: true, videoBase64: videoB64, mimeType: mime };
+    }
+
+    // URI-based response
+    if (video.video?.uri) {
+      try {
+        const vidRes = await fetch(video.video.uri, {
+          headers: { 'x-goog-api-key': apiKey },
+        });
+        if (vidRes.ok) {
+          const vidBuffer = await vidRes.arrayBuffer();
+          const bytes = new Uint8Array(vidBuffer);
+          let raw = '';
+          const chunkSize = 32768;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            raw += String.fromCharCode.apply(null, [...chunk]);
+          }
+          return { done: true, videoBase64: btoa(raw), mimeType: 'video/mp4' };
+        }
+      } catch (e) {
+        console.error('[VEO] Failed to download video from URI:', e);
+      }
+    }
+  }
+
+  return { done: true, videoBase64: null, mimeType: null, error: 'No video data in response' };
+}
+
+/**
  * Generate video using Google Veo API (predictLongRunning).
  * Supports text-to-video and image-to-video (pass inputImageUrl for i2v).
  * Returns a public URL to the generated video stored in Supabase storage.
+ * @deprecated Use veoStartGeneration + veoPollOperation for async pipeline.
  */
 export async function veoGenerateVideo(options: {
   prompt: string;

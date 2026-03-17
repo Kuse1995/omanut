@@ -2759,6 +2759,62 @@ export type Database = {
           },
         ]
       }
+      video_generation_jobs: {
+        Row: {
+          aspect_ratio: string | null
+          boss_phone: string
+          company_id: string
+          created_at: string | null
+          error_message: string | null
+          id: string
+          operation_name: string
+          poll_count: number | null
+          prompt: string | null
+          scheduled_post_data: Json | null
+          status: string
+          updated_at: string | null
+          video_url: string | null
+        }
+        Insert: {
+          aspect_ratio?: string | null
+          boss_phone: string
+          company_id: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          operation_name: string
+          poll_count?: number | null
+          prompt?: string | null
+          scheduled_post_data?: Json | null
+          status?: string
+          updated_at?: string | null
+          video_url?: string | null
+        }
+        Update: {
+          aspect_ratio?: string | null
+          boss_phone?: string
+          company_id?: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          operation_name?: string
+          poll_count?: number | null
+          prompt?: string | null
+          scheduled_post_data?: Json | null
+          status?: string
+          updated_at?: string | null
+          video_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "video_generation_jobs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_messages: {
         Row: {
           company_id: string | null
