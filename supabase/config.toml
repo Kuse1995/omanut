@@ -121,3 +121,6 @@ project_id = "dzheddvoiauevcayifev"
   [functions.embed-catalog]
     timeout = 120
     verify_jwt = false
+  [functions.poll-video-generation]
+    timeout = 120
+    verify_jwt = false
