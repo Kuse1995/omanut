@@ -1068,6 +1068,60 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const MAX_IMAGE_GENS_PER_SESSION = 2;
     let socialPostCount = 0; // Per-session social post cap
     const MAX_SOCIAL_POSTS_PER_SESSION = 1;
+    const normalizedBody = Body.toLowerCase();
+    const isPublishIntentMessage = /\b(post it|publish it|go live|put it live|share it|post this|publish this)\b/.test(normalizedBody);
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const getLatestRecentImage = async (waitMs = 0): Promise<string | null> => {
+      const attempts = Math.max(1, Math.floor(waitMs / 3000) + 1);
+
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: recentImgs, error: recentImgErr } = await supabase
+          .from('generated_images')
+          .select('image_url, created_at')
+          .eq('company_id', company.id)
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (recentImgErr) {
+          console.error('[BOSS-CHAT] Recent image lookup failed:', recentImgErr);
+          return null;
+        }
+
+        const recentImageUrl = recentImgs?.[0]?.image_url;
+        if (recentImageUrl) {
+          return recentImageUrl;
+        }
+
+        if (attempt < attempts - 1) {
+          await sleep(3000);
+        }
+      }
+
+      return null;
+    };
+
+    const getLatestRecentVideoJob = async (statuses: string[] = ['pending', 'completed']) => {
+      const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const { data: recentJobs, error: recentJobErr } = await supabase
+        .from('video_generation_jobs')
+        .select('id, status, video_url, prompt, created_at')
+        .eq('company_id', company.id)
+        .eq('boss_phone', From)
+        .in('status', statuses)
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (recentJobErr) {
+        console.error('[BOSS-CHAT] Recent video lookup failed:', recentJobErr);
+        return null;
+      }
+
+      return recentJobs?.[0] || null;
+    };
 
     const toolLoopStartTime = Date.now();
     let thinkingAckSent = false;
