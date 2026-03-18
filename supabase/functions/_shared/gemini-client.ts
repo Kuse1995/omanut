@@ -273,7 +273,7 @@ export async function veoStartGeneration(options: {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
 
-  const model = normalizeModel(options.model || 'veo-3.0-fast-generate-preview');
+  const model = normalizeModel(options.model || 'veo-3.1-fast-generate-preview');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
 
   const instance: any = { prompt: options.prompt };
@@ -365,6 +365,16 @@ export async function veoPollOperation(operationName: string): Promise<{
   if (!pollRes.ok) {
     const errText = await pollRes.text();
     console.error(`[VEO] Poll error (${pollRes.status}):`, errText);
+
+    if (pollRes.status >= 400 && pollRes.status < 500) {
+      return {
+        done: true,
+        videoBase64: null,
+        mimeType: null,
+        error: `Veo poll error ${pollRes.status}: ${errText}`,
+      };
+    }
+
     return { done: false, videoBase64: null, mimeType: null };
   }
 
@@ -433,7 +443,7 @@ export async function veoGenerateVideo(options: {
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
 
-  const model = normalizeModel(options.model || 'veo-3.0-fast-generate-preview');
+  const model = normalizeModel(options.model || 'veo-3.1-fast-generate-preview');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
 
   // Build instance

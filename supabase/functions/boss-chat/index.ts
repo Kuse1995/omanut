@@ -2114,7 +2114,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 });
 
                 // Save job to DB for async polling
-                const { error: jobErr } = await supabase
+                const { data: queuedJob, error: jobErr } = await supabase
                   .from('video_generation_jobs')
                   .insert({
                     company_id: company.id,
@@ -2122,11 +2122,16 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     prompt: videoPrompt,
                     aspect_ratio: aspectRatio,
                     boss_phone: From,
-                  });
+                  })
+                  .select('id')
+                  .single();
 
-                if (jobErr) {
+                if (jobErr || !queuedJob?.id) {
                   console.error('[BOSS-VID] Failed to save video job:', jobErr);
+                  throw new Error(jobErr?.message || 'Failed to queue video generation');
                 }
+
+                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName });
 
                 result = { 
                   success: true, 
