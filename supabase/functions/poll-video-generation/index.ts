@@ -153,13 +153,26 @@ async function sendWhatsAppMessage(
     .eq('id', job.company_id)
     .single();
 
-  const fromNumber = company?.whatsapp_number?.startsWith('whatsapp:')
-    ? company.whatsapp_number
-    : `whatsapp:${company?.whatsapp_number}`;
+  const normalizeWhatsAppNumber = (value?: string | null) => {
+    if (!value) return null;
+    return value.startsWith('whatsapp:') ? value : `whatsapp:${value}`;
+  };
+
+  const fromNumber = normalizeWhatsAppNumber(company?.whatsapp_number);
+  const toNumber = normalizeWhatsAppNumber(job.boss_phone);
+
+  if (!fromNumber || !toNumber) {
+    console.error('[POLL-VIDEO] Missing WhatsApp sender or recipient', {
+      companyId: job.company_id,
+      hasFrom: !!fromNumber,
+      hasTo: !!toNumber,
+    });
+    return;
+  }
 
   const form = new URLSearchParams();
   form.append('From', fromNumber);
-  form.append('To', job.boss_phone);
+  form.append('To', toNumber);
   form.append('Body', body);
   if (mediaUrl) {
     form.append('MediaUrl', mediaUrl);
