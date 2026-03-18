@@ -1379,31 +1379,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 postVideoUrl = toolImageUrl;
               }
 
-              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
-              // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
+              if (!postVideoUrl && isPublishIntentMessage && !args.image_url && !args.needs_image_generation) {
+                const recentCompletedVideo = await getLatestRecentVideoJob(['completed']);
+                if (recentCompletedVideo?.video_url) {
+                  console.log('[BOSS-CHAT] Auto-reusing recent completed video for publish intent:', recentCompletedVideo.video_url);
+                  postVideoUrl = recentCompletedVideo.video_url;
+                  toolImageUrl = recentCompletedVideo.video_url;
+                }
+              }
+
+              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > recent image
               let postImageUrl = args.image_url || null;
-              if (!postImageUrl && !postVideoUrl && toolImageUrl) {
+              if (!postImageUrl && !postVideoUrl && toolImageUrl && !toolImageUrl.includes('/videos/')) {
                 console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
 
-              // ── AUTO-REUSE: query recent images if nothing in session ──
-              if (!postImageUrl) {
-                try {
-                  const { data: recentImgs } = await supabase
-                    .from('generated_images')
-                    .select('image_url')
-                    .eq('company_id', company.id)
-                    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-                  if (recentImgs?.[0]?.image_url) {
-                    console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImgs[0].image_url);
-                    postImageUrl = recentImgs[0].image_url;
-                    toolImageUrl = postImageUrl;
-                  }
-                } catch (e) {
-                  console.error('[BOSS-CHAT] Auto-reuse query failed:', e);
+              if (!postImageUrl && !postVideoUrl) {
+                const recentImageUrl = await getLatestRecentImage((globalThis as any).__imageGenInProgress ? 15000 : 0);
+                if (recentImageUrl) {
+                  console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImageUrl);
+                  postImageUrl = recentImageUrl;
+                  toolImageUrl = recentImageUrl;
+                  (globalThis as any).__imageGenInProgress = false;
                 }
               }
 
