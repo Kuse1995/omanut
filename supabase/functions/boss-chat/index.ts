@@ -1068,6 +1068,60 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const MAX_IMAGE_GENS_PER_SESSION = 2;
     let socialPostCount = 0; // Per-session social post cap
     const MAX_SOCIAL_POSTS_PER_SESSION = 1;
+    const normalizedBody = Body.toLowerCase();
+    const isPublishIntentMessage = /\b(post it|publish it|go live|put it live|share it|post this|publish this)\b/.test(normalizedBody);
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const getLatestRecentImage = async (waitMs = 0): Promise<string | null> => {
+      const attempts = Math.max(1, Math.floor(waitMs / 3000) + 1);
+
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: recentImgs, error: recentImgErr } = await supabase
+          .from('generated_images')
+          .select('image_url, created_at')
+          .eq('company_id', company.id)
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (recentImgErr) {
+          console.error('[BOSS-CHAT] Recent image lookup failed:', recentImgErr);
+          return null;
+        }
+
+        const recentImageUrl = recentImgs?.[0]?.image_url;
+        if (recentImageUrl) {
+          return recentImageUrl;
+        }
+
+        if (attempt < attempts - 1) {
+          await sleep(3000);
+        }
+      }
+
+      return null;
+    };
+
+    const getLatestRecentVideoJob = async (statuses: string[] = ['pending', 'completed']) => {
+      const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const { data: recentJobs, error: recentJobErr } = await supabase
+        .from('video_generation_jobs')
+        .select('id, status, video_url, prompt, created_at')
+        .eq('company_id', company.id)
+        .eq('boss_phone', From)
+        .in('status', statuses)
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (recentJobErr) {
+        console.error('[BOSS-CHAT] Recent video lookup failed:', recentJobErr);
+        return null;
+      }
+
+      return recentJobs?.[0] || null;
+    };
 
     const toolLoopStartTime = Date.now();
     let thinkingAckSent = false;
@@ -1325,31 +1379,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 postVideoUrl = toolImageUrl;
               }
 
-              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > generate new
-              // Hard-override: force reuse of toolImageUrl before evaluating needs_image_generation
+              if (!postVideoUrl && isPublishIntentMessage && !args.image_url && !args.needs_image_generation) {
+                const recentCompletedVideo = await getLatestRecentVideoJob(['completed']);
+                if (recentCompletedVideo?.video_url) {
+                  console.log('[BOSS-CHAT] Auto-reusing recent completed video for publish intent:', recentCompletedVideo.video_url);
+                  postVideoUrl = recentCompletedVideo.video_url;
+                  toolImageUrl = recentCompletedVideo.video_url;
+                }
+              }
+
+              // PRIORITY: Use explicit image_url > toolImageUrl (from prior generate_image) > recent image
               let postImageUrl = args.image_url || null;
-              if (!postImageUrl && !postVideoUrl && toolImageUrl) {
+              if (!postImageUrl && !postVideoUrl && toolImageUrl && !toolImageUrl.includes('/videos/')) {
                 console.log('[BOSS-CHAT] Reusing toolImageUrl for social post (hard-override):', toolImageUrl);
                 postImageUrl = toolImageUrl;
               }
 
-              // ── AUTO-REUSE: query recent images if nothing in session ──
-              if (!postImageUrl) {
-                try {
-                  const { data: recentImgs } = await supabase
-                    .from('generated_images')
-                    .select('image_url')
-                    .eq('company_id', company.id)
-                    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-                  if (recentImgs?.[0]?.image_url) {
-                    console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImgs[0].image_url);
-                    postImageUrl = recentImgs[0].image_url;
-                    toolImageUrl = postImageUrl;
-                  }
-                } catch (e) {
-                  console.error('[BOSS-CHAT] Auto-reuse query failed:', e);
+              if (!postImageUrl && !postVideoUrl) {
+                const recentImageUrl = await getLatestRecentImage((globalThis as any).__imageGenInProgress ? 15000 : 0);
+                if (recentImageUrl) {
+                  console.log('[BOSS-CHAT] Auto-reusing recent image (last 30 min):', recentImageUrl);
+                  postImageUrl = recentImageUrl;
+                  toolImageUrl = recentImageUrl;
+                  (globalThis as any).__imageGenInProgress = false;
                 }
               }
 
@@ -2103,8 +2155,56 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               
               try {
                 const videoPrompt = args.prompt;
-                const inputImageUrl = args.input_image_url || toolImageUrl || null;
                 const aspectRatio = args.aspect_ratio || '9:16';
+                const recentVideoJob = await getLatestRecentVideoJob(['pending', 'completed']);
+
+                if (isPublishIntentMessage && recentVideoJob) {
+                  if (recentVideoJob.status === 'completed' && recentVideoJob.video_url) {
+                    toolImageUrl = recentVideoJob.video_url;
+                    result = {
+                      success: true,
+                      message: '🎬 Your latest video is already ready, so I’m reusing it instead of creating another render.'
+                    };
+                  } else {
+                    result = {
+                      success: true,
+                      message: '🎬 Your latest video is already rendering, so I won’t start a second one. I’ll use that same video once it finishes.'
+                    };
+                  }
+                  break;
+                }
+
+                let inputImageUrl = args.input_image_url || (toolImageUrl && !toolImageUrl.includes('/videos/') ? toolImageUrl : null);
+
+                if (!inputImageUrl) {
+                  const recentImageUrl = await getLatestRecentImage((globalThis as any).__imageGenInProgress ? 18000 : 0);
+                  if (recentImageUrl) {
+                    console.log('[BOSS-VID] Reusing latest generated image as video starting frame:', recentImageUrl);
+                    inputImageUrl = recentImageUrl;
+                    toolImageUrl = recentImageUrl;
+                    (globalThis as any).__imageGenInProgress = false;
+                  }
+                }
+
+                const recentPrompt = typeof recentVideoJob?.prompt === 'string' ? recentVideoJob.prompt.trim() : '';
+                if (recentPrompt && recentPrompt === videoPrompt.trim()) {
+                  if (recentVideoJob?.status === 'completed' && recentVideoJob.video_url) {
+                    toolImageUrl = recentVideoJob.video_url;
+                    result = {
+                      success: true,
+                      message: '🎬 I already have this video ready, so I’m reusing it instead of rendering another one.'
+                    };
+                    break;
+                  }
+
+                  if (recentVideoJob?.status === 'pending') {
+                    result = {
+                      success: true,
+                      message: '🎬 I already have this video rendering, so I won’t start another one. I’ll send the existing render as soon as it’s ready.'
+                    };
+                    break;
+                  }
+                }
 
                 // Start Veo operation (returns immediately with operation name)
                 const { operationName } = await veoStartGeneration({
@@ -2131,11 +2231,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   throw new Error(jobErr?.message || 'Failed to queue video generation');
                 }
 
-                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName });
+                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName, inputImageUrl });
 
                 result = { 
                   success: true, 
-                  message: `🎬 Video generation started! ${inputImageUrl ? '📸 Using your product image as the starting frame. ' : ''}You'll receive it here in 1-4 minutes once it's ready.`,
+                  message: `🎬 Video generation started! ${inputImageUrl ? '📸 Using your latest generated image as the starting frame. ' : ''}You'll receive it here in 1-4 minutes once it's ready.`,
                 };
               } catch (vidErr: any) {
                 console.error('[BOSS-VID] Error starting video:', vidErr);
