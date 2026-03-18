@@ -672,15 +672,34 @@ async function runImagePipeline(
       'water purification': ['books', 'food', 'salon', 'restaurant'],
     };
     const btLower = businessType.toLowerCase();
-    // Find matching exclusions or generate generic ones
     const matchedExclusions = Object.entries(businessTypeExclusions).find(([key]) => btLower.includes(key));
     if (matchedExclusions) {
       effectiveExclusionList.push(...matchedExclusions[1]);
     }
-    // Always add a generic negative anchor based on business type
+    // Universal physical product exclusion for companies without profiles
+    effectiveExclusionList.push(
+      'water filter', 'water purifier', 'LifeStraw', 'bottle',
+      'consumer product', 'physical merchandise', 'packaged goods'
+    );
     console.log(`[PIPELINE] Auto-exclusion fallback active for "${businessType}" — added ${effectiveExclusionList.length} exclusion keywords`);
   }
   const exclusionPrompt = buildExclusionPrompt(effectiveExclusionList);
+
+  // ===== BRAND-ONLY MODE =====
+  // When a company has NO product identity profiles AND no confident product match,
+  // switch to brand-only mode: generate brand scenes, NEVER invent physical products
+  const brandOnlyMode = allProfiles.length === 0 && !productMatch;
+  if (brandOnlyMode) {
+    // Clear all product references — use only logo + brand context
+    bmsImageUrls = [];
+    const brandOnlyConstraint = `\n⛔ BRAND-ONLY MODE: This company has NO physical products to show. ` +
+      `Do NOT depict any physical consumer products, water filters, bottles, electronics, or merchandise. ` +
+      `Focus ONLY on: people, scenes, emotions, digital devices showing content, ` +
+      `the company logo, and brand colors. The business is a "${businessType}". ` +
+      `Create a scene that represents the brand's values and services without inventing products.\n`;
+    userPrompt = brandOnlyConstraint + userPrompt;
+    console.log(`[PIPELINE] ⛔ BRAND-ONLY MODE activated — no product identity profiles found, clearing product references`);
+  }
 
   // STAGE 1: Style Memory Agent — learn from past feedback
   const styleDNA = await styleMemoryAgent(supabase, companyId);
