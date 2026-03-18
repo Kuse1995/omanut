@@ -2155,8 +2155,56 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               
               try {
                 const videoPrompt = args.prompt;
-                const inputImageUrl = args.input_image_url || toolImageUrl || null;
                 const aspectRatio = args.aspect_ratio || '9:16';
+                const recentVideoJob = await getLatestRecentVideoJob(['pending', 'completed']);
+
+                if (isPublishIntentMessage && recentVideoJob) {
+                  if (recentVideoJob.status === 'completed' && recentVideoJob.video_url) {
+                    toolImageUrl = recentVideoJob.video_url;
+                    result = {
+                      success: true,
+                      message: '🎬 Your latest video is already ready, so I’m reusing it instead of creating another render.'
+                    };
+                  } else {
+                    result = {
+                      success: true,
+                      message: '🎬 Your latest video is already rendering, so I won’t start a second one. I’ll use that same video once it finishes.'
+                    };
+                  }
+                  break;
+                }
+
+                let inputImageUrl = args.input_image_url || (toolImageUrl && !toolImageUrl.includes('/videos/') ? toolImageUrl : null);
+
+                if (!inputImageUrl) {
+                  const recentImageUrl = await getLatestRecentImage((globalThis as any).__imageGenInProgress ? 18000 : 0);
+                  if (recentImageUrl) {
+                    console.log('[BOSS-VID] Reusing latest generated image as video starting frame:', recentImageUrl);
+                    inputImageUrl = recentImageUrl;
+                    toolImageUrl = recentImageUrl;
+                    (globalThis as any).__imageGenInProgress = false;
+                  }
+                }
+
+                const recentPrompt = typeof recentVideoJob?.prompt === 'string' ? recentVideoJob.prompt.trim() : '';
+                if (recentPrompt && recentPrompt === videoPrompt.trim()) {
+                  if (recentVideoJob?.status === 'completed' && recentVideoJob.video_url) {
+                    toolImageUrl = recentVideoJob.video_url;
+                    result = {
+                      success: true,
+                      message: '🎬 I already have this video ready, so I’m reusing it instead of rendering another one.'
+                    };
+                    break;
+                  }
+
+                  if (recentVideoJob?.status === 'pending') {
+                    result = {
+                      success: true,
+                      message: '🎬 I already have this video rendering, so I won’t start another one. I’ll send the existing render as soon as it’s ready.'
+                    };
+                    break;
+                  }
+                }
 
                 // Start Veo operation (returns immediately with operation name)
                 const { operationName } = await veoStartGeneration({
@@ -2183,11 +2231,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   throw new Error(jobErr?.message || 'Failed to queue video generation');
                 }
 
-                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName });
+                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName, inputImageUrl });
 
                 result = { 
                   success: true, 
-                  message: `🎬 Video generation started! ${inputImageUrl ? '📸 Using your product image as the starting frame. ' : ''}You'll receive it here in 1-4 minutes once it's ready.`,
+                  message: `🎬 Video generation started! ${inputImageUrl ? '📸 Using your latest generated image as the starting frame. ' : ''}You'll receive it here in 1-4 minutes once it's ready.`,
                 };
               } catch (vidErr: any) {
                 console.error('[BOSS-VID] Error starting video:', vidErr);
