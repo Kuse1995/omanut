@@ -2626,7 +2626,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   throw new Error(jobErr?.message || 'Failed to queue video generation');
                 }
 
-                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, operationName, inputImageUrl });
+                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, taskId, provider: 'minimax', inputImageUrl });
 
                 result = { 
                   success: true, 
