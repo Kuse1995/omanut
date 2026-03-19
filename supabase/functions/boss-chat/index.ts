@@ -1230,7 +1230,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "generate_video",
-          description: "Generate a short product video (8 seconds) using AI. PRIORITIZE image-to-video by passing an existing product image URL as input_image_url — this creates the best product-focused video content. Use for social media reels and video posts.",
+          description: "Generate a short product video (8 seconds). CRITICAL: You MUST provide input_image_url whenever possible — call search_media first to find a relevant product/brand image and pass its URL. Image-to-video produces dramatically better, brand-accurate results than text-to-video which hallucinates random products.",
           parameters: {
             type: "object",
             properties: {
