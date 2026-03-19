@@ -2520,7 +2520,22 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     const staticPrompt = videoPrompt
                       .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
                       .trim();
-                    const firstFramePrompt = `Professional product photo for video opening frame. ${staticPrompt}. Static composition, centered subject, clean background, studio lighting, high resolution.`;
+
+                    // Creative variation system — ensures each first frame looks unique
+                    const angles = ['overhead flat-lay shot', '45-degree angle', 'eye-level straight-on', 'low angle hero shot', 'three-quarter view', 'slight bird\'s-eye perspective'];
+                    const lighting = ['warm golden hour lighting', 'cool studio lighting', 'dramatic side lighting with deep shadows', 'soft diffused natural light', 'bright high-key lighting', 'moody backlit silhouette edge'];
+                    const backgrounds = ['clean gradient backdrop', 'lifestyle setting with props', 'minimalist white surface', 'textured concrete surface', 'blurred bokeh environment', 'rich dark background'];
+                    const compositions = ['rule of thirds placement', 'centered symmetrical composition', 'dynamic diagonal arrangement', 'close-up detail focus', 'negative space emphasis', 'layered depth composition'];
+
+                    const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+                    const angle = pick(angles);
+                    const light = pick(lighting);
+                    const bg = pick(backgrounds);
+                    const comp = pick(compositions);
+
+                    console.log('[BOSS-VID] First frame variation:', { angle, light, bg, comp, seed: Date.now() % 1000 });
+
+                    const firstFramePrompt = `Professional product photo for video opening frame. ${staticPrompt}. ${angle}, ${light}, ${bg}, ${comp}. High resolution, variation-${Date.now() % 1000}.`;
 
                     const imgGenResponse = await fetch(
                       `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-image-gen`,
