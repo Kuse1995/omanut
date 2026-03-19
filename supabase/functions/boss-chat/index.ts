@@ -326,7 +326,7 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
 10. **Video Generation**: You can create short product videos using the generate_video tool!
      - NEVER say you cannot generate videos. You HAVE the generate_video tool — use it directly.
      - Use when the boss asks for a video, reel, or animated content for social media.
-     - MANDATORY: Before calling generate_video, ALWAYS call search_media or list_product_images first to find a relevant product image. Then pass that URL as input_image_url. Image-to-video produces dramatically better, brand-accurate results than text-to-video. The system has a fallback, but AI-selected images are preferred.
+     - TIP: Before calling generate_video, try calling search_media or list_product_images first to find a relevant product image and pass it as input_image_url. This speeds things up. However, if you don't provide an image, the system will AUTOMATICALLY generate a brand-accurate first frame using the full image pipeline (with Product Identity Locks, Style Memory, and Reference Curator) before animating it into a video. So videos always show the real product.
      - Videos are 8 seconds long and optimized for social media (9:16 vertical by default for reels, or 16:9 for Facebook).
      - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
      - Chain: search_media (find product image) → generate_video (with the image as input_image_url) → schedule_social_post (with video_url)
@@ -1230,7 +1230,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "generate_video",
-          description: "Generate a short product video (8 seconds). CRITICAL: You MUST provide input_image_url whenever possible — call search_media first to find a relevant product/brand image and pass its URL. Image-to-video produces dramatically better, brand-accurate results than text-to-video which hallucinates random products.",
+          description: "Generate a short product video (8 seconds). TIP: Provide input_image_url if you already have one from search_media — it's faster. If omitted, the system automatically generates a brand-accurate first frame using the full image pipeline (Product Identity Locks + Style Memory) before animating. Videos always show the real product either way.",
           parameters: {
             type: "object",
             properties: {
@@ -2506,6 +2506,55 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     }
                   } catch (e) {
                     console.error('[BOSS-VID] Logo fallback failed:', e);
+                  }
+                }
+
+                // ===== AUTO FIRST-FRAME GENERATION =====
+                // If no image source was found through any fallback, generate a brand-accurate
+                // first frame using the full whatsapp-image-gen pipeline (Product Identity Locks,
+                // Style Memory Agent, Reference Curator, Exclusion Lists).
+                if (!inputImageUrl) {
+                  console.log('[BOSS-VID] No image source found — generating first frame via image pipeline');
+                  try {
+                    // Transform video motion prompt into a static first-frame composition prompt
+                    const staticPrompt = videoPrompt
+                      .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
+                      .trim();
+                    const firstFramePrompt = `Professional product photo for video opening frame. ${staticPrompt}. Static composition, centered subject, clean background, studio lighting, high resolution.`;
+
+                    const imgGenResponse = await fetch(
+                      `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-image-gen`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                        },
+                        body: JSON.stringify({
+                          companyId: company.id,
+                          customerPhone: '',
+                          conversationId: null,
+                          prompt: firstFramePrompt,
+                          messageType: 'generate',
+                        }),
+                      }
+                    );
+
+                    if (imgGenResponse.ok) {
+                      const imgGenResult = await imgGenResponse.json();
+                      if (imgGenResult.imageUrl) {
+                        inputImageUrl = imgGenResult.imageUrl;
+                        toolImageUrl = imgGenResult.imageUrl;
+                        console.log('[BOSS-VID] ✅ First frame auto-generated:', inputImageUrl);
+                      } else {
+                        console.warn('[BOSS-VID] Image pipeline returned no imageUrl:', imgGenResult.message);
+                      }
+                    } else {
+                      const errText = await imgGenResponse.text();
+                      console.error('[BOSS-VID] Image pipeline error:', imgGenResponse.status, errText.substring(0, 200));
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] First frame generation failed:', e);
                   }
                 }
 
