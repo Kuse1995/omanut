@@ -3827,23 +3827,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             const args = JSON.parse(toolCall.function.arguments);
             console.log(`[BMS] ${bmsToolName} called:`, JSON.stringify(args).slice(0, 200));
             
-            // Build params based on tool type
-            let bmsParams: Record<string, any> = {};
-            switch (bmsToolName) {
-              case 'check_stock': bmsParams = { product_name: args.product_name }; break;
-              case 'record_sale': bmsParams = { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }; break;
-              case 'get_product_variants': bmsParams = { product_name: args.product_name }; break;
-              case 'create_order': bmsParams = { customer_name: args.customer_name, customer_phone: args.customer_phone || customerPhone, customer_email: args.customer_email, items: args.items, payment_method: args.payment_method, delivery_address: args.delivery_address, notes: args.notes }; break;
-              case 'get_order_status': bmsParams = { order_number: args.order_number, order_id: args.order_id }; break;
-              case 'cancel_order': bmsParams = { order_number: args.order_number, order_id: args.order_id, reason: args.reason }; break;
-              case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
-              case 'get_company_statistics': bmsParams = {}; break;
-              case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
-              case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
-              case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
-            }
+            // Forward all args directly to bms-agent — it handles flattening
+            const bmsParams: Record<string, any> = { ...args };
 
             // Inject company_id for multi-tenant BMS routing
             bmsParams.company_id = company.id;
