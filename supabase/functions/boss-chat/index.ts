@@ -2509,6 +2509,55 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
 
+                // ===== AUTO FIRST-FRAME GENERATION =====
+                // If no image source was found through any fallback, generate a brand-accurate
+                // first frame using the full whatsapp-image-gen pipeline (Product Identity Locks,
+                // Style Memory Agent, Reference Curator, Exclusion Lists).
+                if (!inputImageUrl) {
+                  console.log('[BOSS-VID] No image source found — generating first frame via image pipeline');
+                  try {
+                    // Transform video motion prompt into a static first-frame composition prompt
+                    const staticPrompt = videoPrompt
+                      .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
+                      .trim();
+                    const firstFramePrompt = `Professional product photo for video opening frame. ${staticPrompt}. Static composition, centered subject, clean background, studio lighting, high resolution.`;
+
+                    const imgGenResponse = await fetch(
+                      `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-image-gen`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                        },
+                        body: JSON.stringify({
+                          companyId: company.id,
+                          customerPhone: '',
+                          conversationId: null,
+                          prompt: firstFramePrompt,
+                          messageType: 'generate',
+                        }),
+                      }
+                    );
+
+                    if (imgGenResponse.ok) {
+                      const imgGenResult = await imgGenResponse.json();
+                      if (imgGenResult.imageUrl) {
+                        inputImageUrl = imgGenResult.imageUrl;
+                        toolImageUrl = imgGenResult.imageUrl;
+                        console.log('[BOSS-VID] ✅ First frame auto-generated:', inputImageUrl);
+                      } else {
+                        console.warn('[BOSS-VID] Image pipeline returned no imageUrl:', imgGenResult.message);
+                      }
+                    } else {
+                      const errText = await imgGenResponse.text();
+                      console.error('[BOSS-VID] Image pipeline error:', imgGenResponse.status, errText.substring(0, 200));
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] First frame generation failed:', e);
+                  }
+                }
+
                 const recentPrompt = typeof recentVideoJob?.prompt === 'string' ? recentVideoJob.prompt.trim() : '';
                 if (recentPrompt && recentPrompt === videoPrompt.trim()) {
                   if (recentVideoJob?.status === 'completed' && recentVideoJob.video_url) {
