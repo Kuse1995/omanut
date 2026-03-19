@@ -2151,12 +2151,16 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     case 'record_sale':
                       formatted = `✅ Sale recorded!\n${d.product_name || args.product_name} x${args.quantity}\nTotal: ${company.currency_prefix}${d.total_amount || 'N/A'}`;
                       break;
+                    case 'credit_sale':
+                      formatted = `✅ Credit sale recorded!\n${d.product_name || args.product} x${args.quantity}\nCustomer: ${args.customer_name}\nAmount: ${company.currency_prefix}${args.amount}`;
+                      break;
                     case 'update_stock':
                       formatted = `✅ Stock updated for ${args.product_name}\nNew quantity: ${d.new_quantity ?? 'updated'}`;
                       break;
                     case 'get_low_stock_items':
+                    case 'low_stock_alerts':
                       if (Array.isArray(d) && d.length > 0) {
-                        formatted = d.map((p: any) => `⚠️ ${p.name}: ${p.quantity} left (reorder at ${p.reorder_level})`).join('\n');
+                        formatted = d.map((p: any) => `⚠️ ${p.name || p.product_name}: ${p.quantity || p.current_stock} left (reorder at ${p.reorder_level})`).join('\n');
                       } else {
                         formatted = '✅ All stock levels are healthy!';
                       }
