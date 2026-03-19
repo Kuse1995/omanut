@@ -314,6 +314,12 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
      - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
      - Chain: generate_image → generate_video (with the image) → schedule_social_post (with video_url)
      - ⚠️ Video generation takes 1-4 minutes. The boss will be notified when it's ready.
+     - When constructing the video prompt, be VERY SPECIFIC and LITERAL about what should appear on screen.
+     - For EXPLAINER videos: describe text titles appearing, key points shown as visual text/icons, transitions between concepts. Example: "Text title 'How E Library Works' fades in over a warm background, then shows a tablet screen displaying colorful ebook covers, camera zooms into a child's hands tapping to open a book, text overlay '1000+ Christian ebooks for kids' slides in from the right."
+     - For PRODUCT DEMO videos: describe the product being used step by step, close-up shots, feature callouts as on-screen text.
+     - For PROMO videos: describe the offer, brand visuals, and a clear call-to-action appearing as text on screen.
+     - ALWAYS include the company name and key message as text overlays in the prompt.
+     - Do NOT use vague/poetic descriptions. Be concrete about every visual element.
    
    ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in uploaded product photos. If no match is found, it will ask to check the product library first.
    
@@ -1011,7 +1017,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           parameters: {
             type: "object",
             properties: {
-              prompt: { type: "string", description: "Detailed description of what the video should show. Include camera movements, actions, and mood." },
+              prompt: { type: "string", description: "Detailed description of what the video should show. IMPORTANT: If the boss requested a specific video TYPE (explainer, tutorial, product demo, testimonial, promo), describe scenes that match that format: Explainer → show text titles appearing on screen, step-by-step visuals, infographics, key points as on-screen text. Product demo → show the product in use, close-ups, features highlighted with text labels. Testimonial → show happy customers, quotes on screen, real usage scenarios. Promo → show the brand, offers, call-to-action text. Always include: camera movements, transitions, specific text overlays to include, and visual mood. Be SPECIFIC and LITERAL — describe exactly what should appear on screen frame by frame. Include the company name and key message as visible text in the scene." },
               input_image_url: { type: "string", description: "URL of an existing product/brand image to use as the starting frame. ALWAYS pass this when available for best results." },
               aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Use 9:16 for reels/stories, 16:9 for feed videos, 1:1 for square. Default: 9:16" },
             },
@@ -2208,9 +2214,15 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
 
+                // Enrich video prompt with company context
+                const companyContext = company.business_type
+                  ? `This video is for "${company.name}", a ${company.business_type}. `
+                  : `This video is for "${company.name}". `;
+                const enrichedPrompt = companyContext + videoPrompt;
+
                 // Start Veo operation (returns immediately with operation name)
                 const { operationName } = await veoStartGeneration({
-                  prompt: videoPrompt,
+                  prompt: enrichedPrompt,
                   inputImageUrl: inputImageUrl || undefined,
                   aspectRatio,
                 });
