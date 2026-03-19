@@ -207,33 +207,50 @@ IMPORTANT: Only call get_business_summary when the boss asks about business perf
 
 10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
    - Use check_stock to look up current stock levels and pricing for any product
-   - Use record_sale to log completed sales with customer details
+   - Use record_sale to log completed cash/card sales with customer details
+   - Use credit_sale to record credit sales (customer pays later)
    - Use update_stock to adjust inventory quantities (restock, corrections, damage write-offs)
-   - Use sales_report to get sales summaries with date range filters
-   - Use get_low_stock_items to see which products need restocking
+   - Use get_sales_summary to get sales summaries (today, week, month)
+   - Use get_sales_details to get itemized sales data for a period
+   - Use low_stock_alerts to see which products need restocking
+   - Use bulk_add_inventory to add multiple new products at once
    - When the boss asks about stock, inventory, or product availability - use check_stock IMMEDIATELY
    - When the boss confirms a sale or wants to record a transaction - use record_sale
-   - When the boss asks "how are sales?" or "what did we sell today?" - use sales_report
+   - When the boss asks "how are sales?" or "what did we sell today?" - use get_sales_summary
 
 11. **Finance & Accounting (BMS)**: You have access to financial management tools.
    - Use record_expense to log business expenses (rent, supplies, transport, etc.)
    - Use get_expenses to view expense history with date/category filters
+   - Use who_owes to see a list of debtors and amounts owed
    - Use get_outstanding_receivables to see unpaid invoices (who owes you)
    - Use get_outstanding_payables to see pending bills (what you owe)
    - Use profit_loss_report to generate P&L statements for any date range
    - Use create_quotation and create_invoice for formal business documents
+   - Use daily_report to get end-of-day summary (revenue, expenses, profit, attendance, receivables)
      - Use generate_document to create BEAUTIFUL branded PDF documents and send them via WhatsApp
 
-12. **HR & Attendance (BMS)**: You can track employee attendance.
+12. **HR & Attendance (BMS)**: You can track employee attendance and view HR data.
     - Use clock_in when the boss says someone has arrived or started work
     - Use clock_out when an employee is leaving or finished for the day
+    - Use my_attendance/team_attendance to check attendance records
+    - Use my_tasks, my_pay, my_schedule to look up employee info
     - The BMS automatically calculates work hours
 
-13. **Document Generation (PDF)**: You can create professional branded PDF documents!
+13. **Documents (BMS)**: Send documents directly via WhatsApp from the BMS.
+    - Use send_receipt to send a sale receipt PDF to the customer
+    - Use send_invoice to send an invoice PDF
+    - Use send_quotation to send a quotation PDF
+    - Use send_payslip to send an employee payslip
+
+14. **Customers & Orders (BMS)**:
+    - Use check_customer to look up customer details and credit status
+    - Use pending_orders to see all pending/processing orders
+
+15. **Document Generation (PDF)**: You can create professional branded PDF documents!
      - Use generate_document to turn ANY report or document into a polished PDF
      - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
      - WORKFLOW: First fetch the data, then pass the result to generate_document
-     - "send me the sales report as PDF" → call sales_report → then generate_document with the result
+     - "send me the sales report as PDF" → call get_sales_summary → then generate_document with the result
      - "create a quotation for X" → call create_quotation → then generate_document with quotation type and the data
      - PDFs include company branding, header, footer, and professional formatting
      - PDFs are automatically sent to the boss via WhatsApp
@@ -647,15 +664,61 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "sales_report",
-          description: "Get a sales report with optional date range. Use when the boss asks about sales performance, revenue, or what was sold.",
+          description: "Get a sales report (alias for get_sales_summary). Use when the boss asks about sales performance, revenue, or what was sold.",
           parameters: {
             type: "object",
             properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period filter (default: today)" },
               start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
               end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
               limit: { type: "integer", description: "Max results to return" }
             },
             required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_sales_summary",
+          description: "Get aggregated sales summary for a period (today, week, month). Use when the boss asks 'how are sales?' or 'what did we sell today?'",
+          parameters: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period to summarize (default: today)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_sales_details",
+          description: "Get itemized sales data for a period. Use when the boss wants to see individual sale transactions.",
+          parameters: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period filter (default: today)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "credit_sale",
+          description: "Record a credit sale (customer pays later). Use when the boss says a customer bought on credit.",
+          parameters: {
+            type: "object",
+            properties: {
+              product: { type: "string", description: "Product name" },
+              quantity: { type: "integer", description: "Quantity sold" },
+              amount: { type: "number", description: "Total amount" },
+              customer_name: { type: "string", description: "Customer name (required for credit sales)" }
+            },
+            required: ["product", "quantity", "amount", "customer_name"]
           }
         }
       },
@@ -877,6 +940,160 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             },
             required: []
           }
+        }
+      },
+      // ── New spec-aligned BMS tools ──
+      {
+        type: "function",
+        function: {
+          name: "low_stock_alerts",
+          description: "Get all products below their reorder level. Use when the boss asks about low stock or items to reorder.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "bulk_add_inventory",
+          description: "Add multiple new products to inventory at once. Use when the boss wants to add several new items.",
+          parameters: {
+            type: "object",
+            properties: {
+              items: { type: "array", items: { type: "object", properties: { name: { type: "string" }, price: { type: "number" }, quantity: { type: "integer" }, sku: { type: "string" }, unit: { type: "string" } }, required: ["name", "price", "quantity"] }, description: "Array of products to add" }
+            },
+            required: ["items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "check_customer",
+          description: "Look up a customer's details, credit status, and balances. Use when the boss asks about a specific customer.",
+          parameters: {
+            type: "object",
+            properties: { customer_name: { type: "string", description: "Customer name to look up" } },
+            required: ["customer_name"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "who_owes",
+          description: "Get a list of all debtors and amounts owed to the business. Use when the boss asks 'who owes us?' or about outstanding debts.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_receipt",
+          description: "Generate and send a sale receipt PDF via WhatsApp. Use when the boss wants to send a receipt to a customer.",
+          parameters: {
+            type: "object",
+            properties: { sale_number: { type: "string", description: "The sale number/reference" } },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_invoice",
+          description: "Send an existing invoice PDF via WhatsApp. Use when the boss wants to deliver an invoice document.",
+          parameters: {
+            type: "object",
+            properties: { invoice_number: { type: "string", description: "The invoice number" } },
+            required: ["invoice_number"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_quotation",
+          description: "Send an existing quotation PDF via WhatsApp. Use when the boss wants to deliver a quotation document.",
+          parameters: {
+            type: "object",
+            properties: { quotation_number: { type: "string", description: "The quotation number" } },
+            required: ["quotation_number"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_payslip",
+          description: "Generate and send an employee payslip PDF via WhatsApp.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Employee name" },
+              period: { type: "string", description: "Pay period (e.g., 'March 2026')" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "daily_report",
+          description: "Get end-of-day summary: revenue, expenses, profit, attendance, receivables. Use when the boss asks for a daily report or end-of-day summary.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "pending_orders",
+          description: "Get all pending/processing orders. Use when the boss asks about open orders or what needs to be fulfilled.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_attendance",
+          description: "Check attendance records. Use when asking about attendance for today, this week, or month.",
+          parameters: {
+            type: "object",
+            properties: { period: { type: "string", enum: ["today", "week", "month"], description: "Period to check" } },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_tasks",
+          description: "Get assigned tasks for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_pay",
+          description: "Get pay/salary information for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_schedule",
+          description: "Get work schedule for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "team_attendance",
+          description: "Get attendance overview for all team members (managers only).",
+          parameters: { type: "object", properties: {}, required: [] }
         }
       },
       {
@@ -1799,8 +2016,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             // ========== BMS TOOLS (with streaming ack for slow calls) ==========
             case 'check_stock':
             case 'record_sale':
+            case 'credit_sale':
             case 'update_stock':
             case 'sales_report':
+            case 'get_sales_summary':
+            case 'get_sales_details':
             case 'get_order_status':
             case 'update_order_status':
             case 'cancel_order':
@@ -1809,27 +2029,53 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'create_quotation':
             case 'create_invoice':
             case 'get_low_stock_items':
+            case 'low_stock_alerts':
+            case 'bulk_add_inventory':
+            case 'check_customer':
+            case 'who_owes':
+            case 'send_receipt':
+            case 'send_invoice':
+            case 'send_quotation':
+            case 'send_payslip':
+            case 'daily_report':
+            case 'pending_orders':
             case 'record_expense':
             case 'get_expenses':
             case 'get_outstanding_receivables':
             case 'get_outstanding_payables':
             case 'profit_loss_report':
             case 'clock_in':
-            case 'clock_out': {
+            case 'clock_out':
+            case 'my_attendance':
+            case 'my_tasks':
+            case 'my_pay':
+            case 'my_schedule':
+            case 'team_attendance': {
               // bms-agent handles connection resolution internally via bms-connection.ts
 
               // Streaming ack config
               const BMS_ACK_TIMEOUT = 8000;
               const bmsAckMessages: Record<string, string> = {
                 check_stock: "Checking inventory... 🔍", get_product_variants: "Checking options... 🔍",
-                sales_report: "Pulling up reports... 📊", get_company_statistics: "Pulling up stats... 📊",
+                sales_report: "Pulling up reports... 📊", get_sales_summary: "Pulling up reports... 📊",
+                get_sales_details: "Pulling up sales details... 📊", get_company_statistics: "Pulling up stats... 📊",
                 profit_loss_report: "Generating P&L... 📊", get_expenses: "Looking up expenses... 📊",
                 get_outstanding_receivables: "Checking receivables... 📊", get_outstanding_payables: "Checking payables... 📊",
                 create_order: "Processing order... 🛒", record_sale: "Recording sale... 🛒",
+                credit_sale: "Recording credit sale... 🛒",
                 create_quotation: "Generating quotation... 📄", create_invoice: "Generating invoice... 📄",
                 get_order_status: "Checking order status... 📦", cancel_order: "Processing cancellation... ❌",
-                get_customer_history: "Looking up history... 📋", get_low_stock_items: "Checking low stock... ⚠️",
+                get_customer_history: "Looking up history... 📋",
+                get_low_stock_items: "Checking low stock... ⚠️", low_stock_alerts: "Checking low stock... ⚠️",
+                bulk_add_inventory: "Adding products... 📦",
+                check_customer: "Looking up customer... 👤", who_owes: "Checking debtors... 💰",
+                send_receipt: "Sending receipt... 📄", send_invoice: "Sending invoice... 📄",
+                send_quotation: "Sending quotation... 📄", send_payslip: "Sending payslip... 📄",
+                daily_report: "Generating daily report... 📊", pending_orders: "Checking orders... 📦",
                 clock_in: "Clocking in... ⏰", clock_out: "Clocking out... ⏰",
+                my_attendance: "Checking attendance... ⏰", team_attendance: "Checking team attendance... ⏰",
+                my_tasks: "Checking tasks... 📋", my_pay: "Checking pay info... 💰",
+                my_schedule: "Checking schedule... 📅",
                 record_expense: "Recording expense... 💰", update_stock: "Updating stock... 📦",
               };
 
@@ -1842,8 +2088,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   },
                   body: JSON.stringify({
                     action: functionName,
-                    params: args,
-                    companyId: company.id,
+                    params: { ...args, company_id: company.id },
                   }),
                 });
 
@@ -1906,12 +2151,16 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     case 'record_sale':
                       formatted = `✅ Sale recorded!\n${d.product_name || args.product_name} x${args.quantity}\nTotal: ${company.currency_prefix}${d.total_amount || 'N/A'}`;
                       break;
+                    case 'credit_sale':
+                      formatted = `✅ Credit sale recorded!\n${d.product_name || args.product} x${args.quantity}\nCustomer: ${args.customer_name}\nAmount: ${company.currency_prefix}${args.amount}`;
+                      break;
                     case 'update_stock':
                       formatted = `✅ Stock updated for ${args.product_name}\nNew quantity: ${d.new_quantity ?? 'updated'}`;
                       break;
                     case 'get_low_stock_items':
+                    case 'low_stock_alerts':
                       if (Array.isArray(d) && d.length > 0) {
-                        formatted = d.map((p: any) => `⚠️ ${p.name}: ${p.quantity} left (reorder at ${p.reorder_level})`).join('\n');
+                        formatted = d.map((p: any) => `⚠️ ${p.name || p.product_name}: ${p.quantity || p.current_stock} left (reorder at ${p.reorder_level})`).join('\n');
                       } else {
                         formatted = '✅ All stock levels are healthy!';
                       }

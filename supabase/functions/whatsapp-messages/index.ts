@@ -473,6 +473,8 @@ const BMS_ACK_MESSAGES: Record<string, string> = {
   list_products: "Looking up our catalog, one moment... 🔍",
   
   sales_report: "Pulling up your reports, one moment... 📊",
+  get_sales_summary: "Pulling up your reports, one moment... 📊",
+  get_sales_details: "Pulling up sales details, one moment... 📊",
   get_company_statistics: "Pulling up the stats, one moment... 📊",
   profit_loss_report: "Generating your financial report, one moment... 📊",
   get_expenses: "Looking up expenses, one moment... 📊",
@@ -480,6 +482,7 @@ const BMS_ACK_MESSAGES: Record<string, string> = {
   get_outstanding_payables: "Checking payables, one moment... 📊",
   create_order: "Processing your order, please hold... 🛒",
   record_sale: "Recording your sale, please hold... 🛒",
+  credit_sale: "Recording credit sale, please hold... 🛒",
   create_quotation: "Generating your quotation, just a moment... 📄",
   create_invoice: "Generating your invoice, just a moment... 📄",
   generate_payment_link: "Creating your payment link, one moment... 💳",
@@ -487,9 +490,24 @@ const BMS_ACK_MESSAGES: Record<string, string> = {
   cancel_order: "Processing cancellation, one moment... ❌",
   get_customer_history: "Looking up your history, one moment... 📋",
   get_low_stock_items: "Checking low stock items, one moment... ⚠️",
+  low_stock_alerts: "Checking low stock items, one moment... ⚠️",
+  bulk_add_inventory: "Adding products, one moment... 📦",
+  check_customer: "Looking up customer, one moment... 👤",
+  who_owes: "Checking debtors, one moment... 💰",
+  send_receipt: "Sending receipt, one moment... 📄",
+  send_invoice: "Sending invoice, one moment... 📄",
+  send_quotation: "Sending quotation, one moment... 📄",
+  send_payslip: "Sending payslip, one moment... 📄",
+  daily_report: "Generating daily report, one moment... 📊",
+  pending_orders: "Checking pending orders, one moment... 📦",
   create_contact: "Submitting your inquiry, one moment... 📝",
   clock_in: "Clocking you in, one moment... ⏰",
   clock_out: "Clocking you out, one moment... ⏰",
+  my_attendance: "Checking attendance, one moment... ⏰",
+  team_attendance: "Checking team attendance, one moment... ⏰",
+  my_tasks: "Checking tasks, one moment... 📋",
+  my_pay: "Checking pay info, one moment... 💰",
+  my_schedule: "Checking schedule, one moment... 📅",
   record_expense: "Recording expense, one moment... 💰",
   update_stock: "Updating stock levels, one moment... 📦",
 };
@@ -2357,7 +2375,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     
     // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
     if (!isSchool && !company.payments_disabled) {
-      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice'];
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'credit_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice', 'check_customer', 'who_owes', 'pending_orders'];
       for (const tool of mandatoryCheckoutTools) {
         if (!enabledToolNames.includes(tool)) {
           enabledToolNames.push(tool);
@@ -3809,23 +3827,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             const args = JSON.parse(toolCall.function.arguments);
             console.log(`[BMS] ${bmsToolName} called:`, JSON.stringify(args).slice(0, 200));
             
-            // Build params based on tool type
-            let bmsParams: Record<string, any> = {};
-            switch (bmsToolName) {
-              case 'check_stock': bmsParams = { product_name: args.product_name }; break;
-              case 'record_sale': bmsParams = { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }; break;
-              case 'get_product_variants': bmsParams = { product_name: args.product_name }; break;
-              case 'create_order': bmsParams = { customer_name: args.customer_name, customer_phone: args.customer_phone || customerPhone, customer_email: args.customer_email, items: args.items, payment_method: args.payment_method, delivery_address: args.delivery_address, notes: args.notes }; break;
-              case 'get_order_status': bmsParams = { order_number: args.order_number, order_id: args.order_id }; break;
-              case 'cancel_order': bmsParams = { order_number: args.order_number, order_id: args.order_id, reason: args.reason }; break;
-              case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
-              case 'get_company_statistics': bmsParams = {}; break;
-              case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
-              case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
-              case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
-            }
+            // Forward all args directly to bms-agent — it handles flattening
+            const bmsParams: Record<string, any> = { ...args };
 
             // Inject company_id for multi-tenant BMS routing
             bmsParams.company_id = company.id;
@@ -4067,27 +4070,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           const args = JSON.parse(toolCall.function.arguments);
           console.log(`[TOOL-LOOP] Round ${currentRound} executing: ${fnName}`);
           
-          const BMS_TOOLS = ['check_stock','record_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','create_quotation','create_invoice','create_contact','generate_payment_link'];
+          const BMS_TOOLS = ['check_stock','record_sale','credit_sale','get_product_variants','list_products','create_order','get_order_status','cancel_order','get_customer_history','get_company_statistics','get_sales_summary','get_sales_details','create_quotation','create_invoice','create_contact','generate_payment_link','low_stock_alerts','get_low_stock_items','bulk_add_inventory','check_customer','who_owes','send_receipt','send_invoice','send_quotation','send_payslip','daily_report','pending_orders','update_stock','update_order_status','record_expense','get_expenses','get_outstanding_receivables','get_outstanding_payables','profit_loss_report','clock_in','clock_out','my_attendance','my_tasks','my_pay','my_schedule','team_attendance','sales_report'];
           
           if (BMS_TOOLS.includes(fnName)) {
-            // Build params using same mapping as first-round handler
-            let bmsParams: Record<string, any> = {};
-            switch (fnName) {
-              case 'check_stock': bmsParams = { product_name: args.product_name }; break;
-              case 'record_sale': bmsParams = { product_name: args.product_name, quantity: args.quantity, payment_method: args.payment_method, customer_name: args.customer_name || null, customer_phone: args.customer_phone || null }; break;
-              case 'get_product_variants': bmsParams = { product_name: args.product_name }; break;
-              case 'create_order': bmsParams = { customer_name: args.customer_name, customer_phone: args.customer_phone || customerPhone, customer_email: args.customer_email, items: args.items, payment_method: args.payment_method, delivery_address: args.delivery_address, notes: args.notes }; break;
-              case 'get_order_status': bmsParams = { order_number: args.order_number, order_id: args.order_id }; break;
-              case 'cancel_order': bmsParams = { order_number: args.order_number, order_id: args.order_id, reason: args.reason }; break;
-              case 'get_customer_history': bmsParams = { customer_name: args.customer_name || customerName, customer_phone: args.customer_phone || customerPhone }; break;
-              case 'get_company_statistics': bmsParams = {}; break;
-              case 'list_products': bmsParams = { category: args.category || null }; break;
-              case 'create_quotation': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes }; break;
-              case 'create_invoice': bmsParams = { client_name: args.customer_name, items: (args.items || []).map((it: any) => ({ description: it.description || it.product_name || it.name, quantity: it.quantity, unit_price: it.unit_price || it.price })), client_phone: customerPhone, notes: args.notes, due_date: args.due_days ? new Date(Date.now() + args.due_days * 86400000).toISOString().split('T')[0] : null }; break;
-              case 'create_contact': bmsParams = { sender_name: args.sender_name, sender_email: args.sender_email, message: args.message, sender_phone: args.sender_phone || customerPhone }; break;
-              case 'generate_payment_link': bmsParams = { amount: args.amount, customer_name: args.customer_name, customer_phone: args.customer_phone, reference: args.reference }; break;
-            }
-            bmsParams.company_id = company.id;
+            // Forward all args directly to bms-agent
+            const bmsParams: Record<string, any> = { ...args, company_id: company.id };
             
             try {
               const bmsResult = await bmsCallWithAck(

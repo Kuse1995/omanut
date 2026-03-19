@@ -7,17 +7,26 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// Map legacy action names to spec-compliant intents
+const ACTION_ALIASES: Record<string, string> = {
+  sales_report: "get_sales_summary",
+  get_low_stock_items: "low_stock_alerts",
+  get_company_statistics: "get_sales_summary",
+};
+
 async function callBMS(
   connection: BmsConnection,
-  action: string,
+  intent: string,
   params: Record<string, any>
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // For multi-tenant, inject tenant_id into payload
-    const payload: Record<string, any> = { action, ...params };
-    if (connection.bms_type === "multi_tenant" && connection.tenant_id) {
-      payload.tenant_id = connection.tenant_id;
-    }
+    // Build spec-compliant payload: { intent, tenant_id, ...flat fields }
+    const { company_id, ...restParams } = params; // strip company_id from forwarded params
+    const payload: Record<string, any> = {
+      intent,
+      tenant_id: connection.tenant_id,
+      ...restParams,
+    };
 
     const res = await fetch(connection.bridge_url, {
       method: "POST",
@@ -36,7 +45,7 @@ async function callBMS(
 
     return { success: true, data: data.data || data };
   } catch (err) {
-    console.error(`[BMS-AGENT] callBMS(${action}) error:`, err);
+    console.error(`[BMS-AGENT] callBMS(${intent}) error:`, err);
     return { success: false, error: err instanceof Error ? err.message : "BMS connection failed" };
   }
 }
@@ -49,14 +58,32 @@ function respond(data: unknown, status = 200) {
 }
 
 const AVAILABLE_ACTIONS = [
-  "check_stock", "record_sale", "generate_payment_link", "list_products",
-  "get_product_variants", "update_stock", "sales_report",
-  "create_order", "get_order_status", "update_order_status", "cancel_order",
-  "get_customer_history", "get_company_statistics", "create_quotation",
-  "create_invoice", "list_quotations", "list_invoices", "get_low_stock_items",
-  "record_expense", "get_expenses", "get_outstanding_receivables",
-  "get_outstanding_payables", "profit_loss_report", "clock_in", "clock_out",
-  "create_contact",
+  // Health & Config
+  "health_check",
+  // Sales & Revenue
+  "check_stock", "record_sale", "credit_sale", "get_sales_summary", "get_sales_details",
+  // Legacy aliases (mapped above)
+  "sales_report", "get_company_statistics",
+  // Inventory
+  "list_products", "get_product_variants", "update_stock", "low_stock_alerts", "bulk_add_inventory",
+  // Legacy alias
+  "get_low_stock_items",
+  // Customers & Contacts
+  "create_contact", "check_customer", "who_owes",
+  // Invoices, Quotations & Orders
+  "create_invoice", "create_quotation", "create_order",
+  "get_order_status", "update_order_status", "cancel_order",
+  // Documents
+  "send_receipt", "send_invoice", "send_quotation", "send_payslip",
+  // HR & Attendance
+  "clock_in", "clock_out", "my_attendance", "my_tasks", "my_pay", "my_schedule", "team_attendance",
+  // Expenses & Finance
+  "record_expense", "get_expenses",
+  "get_outstanding_receivables", "get_outstanding_payables", "profit_loss_report",
+  // Reports
+  "daily_report",
+  // Misc
+  "get_customer_history", "generate_payment_link", "pending_orders",
 ];
 
 Deno.serve(async (req) => {
@@ -99,7 +126,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`[BMS-AGENT] Action: ${action}, Company: ${companyId}, BMS: ${connection.bms_type}, Bridge: ${connection.bridge_url}`);
+    // Resolve intent: apply aliases for backward compat
+    const resolvedIntent = ACTION_ALIASES[action] || action;
+
+    console.log(`[BMS-AGENT] Action: ${action} → Intent: ${resolvedIntent}, Company: ${companyId}, BMS: ${connection.bms_type}, Bridge: ${connection.bridge_url}`);
 
     if (!AVAILABLE_ACTIONS.includes(action)) {
       return respond({
@@ -109,10 +139,10 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
-    // Forward to BMS with all params
-    const result = await callBMS(connection, action, params);
+    // Forward to BMS with all params (flat payload)
+    const result = await callBMS(connection, resolvedIntent, params);
 
-    console.log(`[BMS-AGENT] ${action} result:`, JSON.stringify(result).slice(0, 500));
+    console.log(`[BMS-AGENT] ${resolvedIntent} result:`, JSON.stringify(result).slice(0, 500));
     return respond(result, result.success ? 200 : 502);
   } catch (err) {
     console.error("[BMS-AGENT] Error:", err);
