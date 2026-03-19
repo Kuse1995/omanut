@@ -1,74 +1,123 @@
 
 
-# Align BMS Integration to Spec
+# Fix: Force Image-to-Video in Video Generation Pipeline
 
-## Summary
+## Problem
 
-The current `bms-agent` sends `{ action: "check_stock", ...params }` to the BMS bridge, but the spec requires `{ intent: "check_stock", tenant_id: "<uuid>", ...fields }`. Additionally, several actions from the spec are missing. This plan updates `bms-agent`, `bms-callback`, and `boss-chat` tool definitions to match the spec.
+When the boss requests a video, the AI model often calls `generate_video` with only a text prompt, without passing `input_image_url`. The fallback only checks the `generated_images` table (last 30 min of AI-generated images). If nothing is found there, Veo runs as pure text-to-video and hallucinates random products.
 
-## Current vs Spec Gaps
+## Root Cause
 
-| Issue | Current | Spec |
-|---|---|---|
-| Payload key | `action` | `intent` |
-| Tenant ID | Only injected for `multi_tenant` type | Always required |
-| Missing actions | N/A | `credit_sale`, `get_sales_summary`, `get_sales_details`, `low_stock_alerts`, `bulk_add_inventory`, `check_customer`, `who_owes`, `create_contact`, `send_receipt`, `send_invoice`, `send_quotation`, `send_payslip`, `my_attendance`, `my_tasks`, `my_pay`, `my_schedule`, `team_attendance`, `pending_orders`, `daily_report` |
-| Action name mismatches | `sales_report` | `get_sales_summary` / `get_sales_details` |
-| Action name mismatches | `get_low_stock_items` | `low_stock_alerts` |
-| Callback events | Missing `large_sale` handling already exists, but field names differ slightly | Align field names |
+There's no automatic media library lookup for video generation. The image generation pipeline has product identity matching and brand asset lookups, but the video pipeline has none — it relies entirely on either:
+1. The AI model passing `input_image_url` (unreliable)
+2. A recently generated image existing in `generated_images` (situational)
 
-## Changes
+## Solution
 
-### 1. `supabase/functions/_shared/bms-connection.ts`
-- No structural changes needed. The `tenant_id` is already stored and retrieved.
+Add a **mandatory image source fallback chain** in the `generate_video` handler. Before calling Veo, if no `inputImageUrl` is resolved, search the company's media library for a relevant product image using the video prompt as a semantic search query.
 
-### 2. `supabase/functions/bms-agent/index.ts`
-- Change `callBMS` to send `intent` instead of `action` in the payload
-- Always inject `tenant_id` (not just for multi-tenant)
-- Update `AVAILABLE_ACTIONS` to include all spec actions
-- Add action name mapping for backward compatibility: `sales_report` → `get_sales_summary`, `get_low_stock_items` → `low_stock_alerts`
-- Flatten params into the payload body (spec expects flat fields, not nested `params`)
+### Changes to `supabase/functions/boss-chat/index.ts`
 
-### 3. `supabase/functions/boss-chat/index.ts`
-- Add new BMS tool definitions: `credit_sale`, `who_owes`, `send_receipt`, `send_invoice`, `send_quotation`, `send_payslip`, `daily_report`, `bulk_add_inventory`, `check_customer`, `pending_orders`
-- Add HR tools: `my_attendance`, `my_tasks`, `my_pay`, `my_schedule`, `team_attendance`
-- Add new case handlers in the BMS switch block
-- Update system prompt to reference new tools
-- Map legacy names: `sales_report` → `get_sales_summary` (keep `sales_report` as an alias for backward compat)
+**In the `generate_video` case handler (around line 2434-2475):**
 
-### 4. `supabase/functions/whatsapp-messages/index.ts`
-- Add new BMS tool names to the `BMS_ACK_MESSAGES` map
-- Add new tools to the mandatory checkout tools list where appropriate
-- Add tool definitions for customer-facing BMS actions (`check_customer`, `who_owes`, `send_receipt`, `pending_orders`)
+After the existing `getLatestRecentImage` fallback fails, add two more fallback layers:
 
-### 5. `supabase/functions/bms-callback/index.ts`
-- Align callback event field names to spec (minor adjustments to `buildEventMessages`)
-- No structural changes needed — already handles all spec events
+1. **Semantic media library search** — Use the video prompt to search `company_media` via the existing `match_company_media` RPC (same one used by `search_media` tool). Pick the highest-relevance product image.
 
-## Technical Detail
+2. **Product identity profile fallback** — Query `product_identity_profiles` for the company and use the first product's reference image URL.
 
-Key change in `bms-agent/callBMS`:
-```typescript
-// Before:
-const payload = { action, ...params };
+3. **Logo fallback** — If still nothing, find the company logo from `company_media` where `category = 'logo'`.
 
-// After:
-const payload = { intent: action, tenant_id: connection.tenant_id, ...params };
+If ALL fallbacks fail (company has zero media), proceed with text-to-video but inject the brand-only constraint into the prompt (similar to the image generation brand-only mode).
+
+```
+Fallback chain:
+1. args.input_image_url (AI provided)
+2. toolImageUrl from earlier in conversation  
+3. getLatestRecentImage (last 30 min generated images)
+4. NEW: Semantic search company_media using video prompt
+5. NEW: First product_identity_profile reference image
+6. NEW: Company logo from company_media
+7. Text-to-video with brand-only prompt constraint
 ```
 
-Action alias map in `bms-agent`:
+**Also update the system prompt** (video generation section, ~line 329):
+
+Add stronger instruction:
+```
+- MANDATORY: Before calling generate_video, ALWAYS call search_media or list_product_images 
+  first to find a relevant product image. Then pass that URL as input_image_url.
+  The system has a fallback, but AI-selected images produce better results.
+```
+
+**Update the `generate_video` tool description** (~line 1233):
+
+Change to emphasize that `input_image_url` is effectively required:
+```
+"Generate a short product video (8 seconds). CRITICAL: You MUST provide input_image_url 
+whenever possible. Before calling this, search the media library (search_media) to find 
+a relevant product/brand image and pass its URL. Image-to-video produces dramatically 
+better results than text-to-video."
+```
+
+### Technical Detail
+
+New fallback code in `generate_video` handler (after line 2444):
+
 ```typescript
-const ACTION_ALIASES: Record<string, string> = {
-  sales_report: "get_sales_summary",
-  get_low_stock_items: "low_stock_alerts",
-  get_company_statistics: "get_sales_summary",
-};
-const resolvedIntent = ACTION_ALIASES[action] || action;
+// Fallback 2: Semantic search company media library
+if (!inputImageUrl) {
+  try {
+    const queryEmbedding = await embedQuery(videoPrompt);
+    const vectorStr = `[${queryEmbedding.join(',')}]`;
+    const { data: mediaResults } = await supabase.rpc('match_company_media', {
+      query_embedding: vectorStr,
+      match_company_id: company.id,
+      match_threshold: 0.25,
+      match_count: 3,
+    });
+    const imageMedia = mediaResults?.find((m: any) => 
+      m.media_type?.startsWith('image') || m.file_path?.match(/\.(jpg|jpeg|png|webp)$/i)
+    );
+    if (imageMedia) {
+      inputImageUrl = `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${imageMedia.file_path}`;
+      console.log('[BOSS-VID] Using media library image as video source:', inputImageUrl);
+    }
+  } catch (e) {
+    console.error('[BOSS-VID] Media search fallback failed:', e);
+  }
+}
+
+// Fallback 3: Product identity profile reference
+if (!inputImageUrl) {
+  const { data: profiles } = await supabase
+    .from('product_identity_profiles')
+    .select('reference_image_urls')
+    .eq('company_id', company.id)
+    .eq('is_active', true)
+    .limit(1);
+  const refUrl = profiles?.[0]?.reference_image_urls?.[0];
+  if (refUrl) {
+    inputImageUrl = refUrl;
+    console.log('[BOSS-VID] Using product profile reference as video source:', inputImageUrl);
+  }
+}
+
+// Fallback 4: Company logo
+if (!inputImageUrl) {
+  const { data: logos } = await supabase
+    .from('company_media')
+    .select('file_path')
+    .eq('company_id', company.id)
+    .eq('category', 'logo')
+    .limit(1);
+  if (logos?.[0]) {
+    inputImageUrl = `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${logos[0].file_path}`;
+    console.log('[BOSS-VID] Using company logo as video source:', inputImageUrl);
+  }
+}
 ```
 
 ## Files Modified
-- `supabase/functions/bms-agent/index.ts` — intent field, tenant_id, aliases, expanded action list
-- `supabase/functions/boss-chat/index.ts` — new tool definitions, case handlers, system prompt
-- `supabase/functions/whatsapp-messages/index.ts` — new tool definitions, ack messages
-- `supabase/functions/bms-callback/index.ts` — minor field name alignment
+- `supabase/functions/boss-chat/index.ts` — media library fallback chain, updated tool description, updated system prompt
 
