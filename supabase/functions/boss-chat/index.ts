@@ -246,11 +246,11 @@ IMPORTANT: Only call get_business_summary when the boss asks about business perf
     - Use check_customer to look up customer details and credit status
     - Use pending_orders to see all pending/processing orders
 
-13. **Document Generation (PDF)**: You can create professional branded PDF documents!
+15. **Document Generation (PDF)**: You can create professional branded PDF documents!
      - Use generate_document to turn ANY report or document into a polished PDF
      - Supported types: invoice, quotation, sales_report, expense_report, profit_loss, receivables, payables, stock_report
      - WORKFLOW: First fetch the data, then pass the result to generate_document
-     - "send me the sales report as PDF" → call sales_report → then generate_document with the result
+     - "send me the sales report as PDF" → call get_sales_summary → then generate_document with the result
      - "create a quotation for X" → call create_quotation → then generate_document with quotation type and the data
      - PDFs include company branding, header, footer, and professional formatting
      - PDFs are automatically sent to the boss via WhatsApp
