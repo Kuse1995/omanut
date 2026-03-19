@@ -2214,9 +2214,15 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
 
+                // Enrich video prompt with company context
+                const companyContext = company.business_type
+                  ? `This video is for "${company.name}", a ${company.business_type}. `
+                  : `This video is for "${company.name}". `;
+                const enrichedPrompt = companyContext + videoPrompt;
+
                 // Start Veo operation (returns immediately with operation name)
                 const { operationName } = await veoStartGeneration({
-                  prompt: videoPrompt,
+                  prompt: enrichedPrompt,
                   inputImageUrl: inputImageUrl || undefined,
                   aspectRatio,
                 });
