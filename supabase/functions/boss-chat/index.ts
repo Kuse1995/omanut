@@ -2600,8 +2600,8 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   : `This video is for "${company.name}". `;
                 const enrichedPrompt = companyContext + videoPrompt;
 
-                // Start Veo operation (returns immediately with operation name)
-                const { operationName } = await veoStartGeneration({
+                // Start MiniMax video generation (returns immediately with task_id)
+                const { taskId } = await minimaxStartVideoGeneration({
                   prompt: enrichedPrompt,
                   inputImageUrl: inputImageUrl || undefined,
                   aspectRatio,
@@ -2612,10 +2612,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   .from('video_generation_jobs')
                   .insert({
                     company_id: company.id,
-                    operation_name: operationName,
+                    operation_name: taskId,
                     prompt: videoPrompt,
                     aspect_ratio: aspectRatio,
                     boss_phone: From,
+                    video_provider: 'minimax',
                   })
                   .select('id')
                   .single();
