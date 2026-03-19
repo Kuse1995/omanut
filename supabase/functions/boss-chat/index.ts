@@ -326,10 +326,10 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
 10. **Video Generation**: You can create short product videos using the generate_video tool!
      - NEVER say you cannot generate videos. You HAVE the generate_video tool — use it directly.
      - Use when the boss asks for a video, reel, or animated content for social media.
-     - PRIORITIZE IMAGE-TO-VIDEO: When a product image exists (from generate_image or media library), always pass it as input_image_url to create a video from that image. This produces the best product-focused content.
+     - MANDATORY: Before calling generate_video, ALWAYS call search_media or list_product_images first to find a relevant product image. Then pass that URL as input_image_url. Image-to-video produces dramatically better, brand-accurate results than text-to-video. The system has a fallback, but AI-selected images are preferred.
      - Videos are 8 seconds long and optimized for social media (9:16 vertical by default for reels, or 16:9 for Facebook).
      - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
-     - Chain: generate_image → generate_video (with the image) → schedule_social_post (with video_url)
+     - Chain: search_media (find product image) → generate_video (with the image as input_image_url) → schedule_social_post (with video_url)
      - ⚠️ Video generation takes 1-4 minutes. The boss will be notified when it's ready.
      - When constructing the video prompt, be VERY SPECIFIC and LITERAL about what should appear on screen.
      - For EXPLAINER videos: describe text titles appearing, key points shown as visual text/icons, transitions between concepts. Example: "Text title 'How E Library Works' fades in over a warm background, then shows a tablet screen displaying colorful ebook covers, camera zooms into a child's hands tapping to open a book, text overlay '1000+ Christian ebooks for kids' slides in from the right."
@@ -1230,7 +1230,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "generate_video",
-          description: "Generate a short product video (8 seconds) using AI. PRIORITIZE image-to-video by passing an existing product image URL as input_image_url — this creates the best product-focused video content. Use for social media reels and video posts.",
+          description: "Generate a short product video (8 seconds). CRITICAL: You MUST provide input_image_url whenever possible — call search_media first to find a relevant product/brand image and pass its URL. Image-to-video produces dramatically better, brand-accurate results than text-to-video which hallucinates random products.",
           parameters: {
             type: "object",
             properties: {
@@ -2440,6 +2440,72 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     inputImageUrl = recentImageUrl;
                     toolImageUrl = recentImageUrl;
                     (globalThis as any).__imageGenInProgress = false;
+                  }
+                }
+
+                // Fallback 2: Semantic search company media library
+                if (!inputImageUrl) {
+                  try {
+                    const queryEmbedding = await embedQuery(videoPrompt);
+                    const vectorStr = `[${queryEmbedding.join(',')}]`;
+                    const { data: mediaResults } = await supabase.rpc('match_company_media', {
+                      query_embedding: vectorStr,
+                      match_company_id: company.id,
+                      match_threshold: 0.25,
+                      match_count: 3,
+                    });
+                    const imageMedia = mediaResults?.find((m: any) =>
+                      m.media_type?.startsWith('image') || m.file_path?.match(/\.(jpg|jpeg|png|webp)$/i)
+                    );
+                    if (imageMedia) {
+                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${imageMedia.file_path}`;
+                      console.log('[BOSS-VID] Using media library image as video source:', inputImageUrl);
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Media search fallback failed:', e);
+                  }
+                }
+
+                // Fallback 3: Product identity profile reference image
+                if (!inputImageUrl) {
+                  try {
+                    const { data: profiles } = await supabase
+                      .from('product_identity_profiles')
+                      .select('media_id')
+                      .eq('company_id', company.id)
+                      .eq('is_active', true)
+                      .limit(1);
+                    if (profiles?.[0]?.media_id) {
+                      const { data: refMedia } = await supabase
+                        .from('company_media')
+                        .select('file_path')
+                        .eq('id', profiles[0].media_id)
+                        .single();
+                      if (refMedia?.file_path) {
+                        inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${refMedia.file_path}`;
+                        console.log('[BOSS-VID] Using product profile reference as video source:', inputImageUrl);
+                      }
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Product profile fallback failed:', e);
+                  }
+                }
+
+                // Fallback 4: Company logo
+                if (!inputImageUrl) {
+                  try {
+                    const { data: logos } = await supabase
+                      .from('company_media')
+                      .select('file_path')
+                      .eq('company_id', company.id)
+                      .eq('category', 'logo')
+                      .limit(1);
+                    if (logos?.[0]?.file_path) {
+                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${logos[0].file_path}`;
+                      console.log('[BOSS-VID] Using company logo as video source:', inputImageUrl);
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Logo fallback failed:', e);
                   }
                 }
 
