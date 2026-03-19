@@ -942,6 +942,160 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           }
         }
       },
+      // ── New spec-aligned BMS tools ──
+      {
+        type: "function",
+        function: {
+          name: "low_stock_alerts",
+          description: "Get all products below their reorder level. Use when the boss asks about low stock or items to reorder.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "bulk_add_inventory",
+          description: "Add multiple new products to inventory at once. Use when the boss wants to add several new items.",
+          parameters: {
+            type: "object",
+            properties: {
+              items: { type: "array", items: { type: "object", properties: { name: { type: "string" }, price: { type: "number" }, quantity: { type: "integer" }, sku: { type: "string" }, unit: { type: "string" } }, required: ["name", "price", "quantity"] }, description: "Array of products to add" }
+            },
+            required: ["items"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "check_customer",
+          description: "Look up a customer's details, credit status, and balances. Use when the boss asks about a specific customer.",
+          parameters: {
+            type: "object",
+            properties: { customer_name: { type: "string", description: "Customer name to look up" } },
+            required: ["customer_name"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "who_owes",
+          description: "Get a list of all debtors and amounts owed to the business. Use when the boss asks 'who owes us?' or about outstanding debts.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_receipt",
+          description: "Generate and send a sale receipt PDF via WhatsApp. Use when the boss wants to send a receipt to a customer.",
+          parameters: {
+            type: "object",
+            properties: { sale_number: { type: "string", description: "The sale number/reference" } },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_invoice",
+          description: "Send an existing invoice PDF via WhatsApp. Use when the boss wants to deliver an invoice document.",
+          parameters: {
+            type: "object",
+            properties: { invoice_number: { type: "string", description: "The invoice number" } },
+            required: ["invoice_number"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_quotation",
+          description: "Send an existing quotation PDF via WhatsApp. Use when the boss wants to deliver a quotation document.",
+          parameters: {
+            type: "object",
+            properties: { quotation_number: { type: "string", description: "The quotation number" } },
+            required: ["quotation_number"]
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "send_payslip",
+          description: "Generate and send an employee payslip PDF via WhatsApp.",
+          parameters: {
+            type: "object",
+            properties: {
+              employee_name: { type: "string", description: "Employee name" },
+              period: { type: "string", description: "Pay period (e.g., 'March 2026')" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "daily_report",
+          description: "Get end-of-day summary: revenue, expenses, profit, attendance, receivables. Use when the boss asks for a daily report or end-of-day summary.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "pending_orders",
+          description: "Get all pending/processing orders. Use when the boss asks about open orders or what needs to be fulfilled.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_attendance",
+          description: "Check attendance records. Use when asking about attendance for today, this week, or month.",
+          parameters: {
+            type: "object",
+            properties: { period: { type: "string", enum: ["today", "week", "month"], description: "Period to check" } },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_tasks",
+          description: "Get assigned tasks for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_pay",
+          description: "Get pay/salary information for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "my_schedule",
+          description: "Get work schedule for an employee.",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "team_attendance",
+          description: "Get attendance overview for all team members (managers only).",
+          parameters: { type: "object", properties: {}, required: [] }
+        }
+      },
       {
         type: "function",
         function: {
