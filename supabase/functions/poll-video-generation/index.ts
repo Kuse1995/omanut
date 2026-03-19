@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { veoPollOperation } from '../_shared/gemini-client.ts';
+import { minimaxPollVideoTask, minimaxDownloadFile } from '../_shared/minimax-client.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,7 +39,7 @@ Deno.serve(async (req) => {
 
     for (const job of jobs) {
       try {
-        const pollResult = await veoPollOperation(job.operation_name);
+        const provider = job.video_provider || 'veo';
 
         // Increment poll count
         await supabase
@@ -46,59 +47,11 @@ Deno.serve(async (req) => {
           .update({ poll_count: job.poll_count + 1, updated_at: new Date().toISOString() })
           .eq('id', job.id);
 
-        if (!pollResult.done) {
-          console.log(`[POLL-VIDEO] Job ${job.id} still pending (poll ${job.poll_count + 1})`);
-          continue;
+        if (provider === 'minimax') {
+          await handleMinimaxPoll(supabase, job);
+        } else {
+          await handleVeoPoll(supabase, job);
         }
-
-        if (pollResult.error || !pollResult.videoBase64) {
-          // Mark as failed
-          await supabase
-            .from('video_generation_jobs')
-            .update({ status: 'failed', error_message: pollResult.error || 'No video data', updated_at: new Date().toISOString() })
-            .eq('id', job.id);
-
-          // Notify boss of failure
-          await sendWhatsAppMessage(job, `❌ Video generation failed: ${pollResult.error || 'No video data returned'}`);
-          continue;
-        }
-
-        // Upload video to storage
-        const videoBytes = Uint8Array.from(atob(pollResult.videoBase64), c => c.charCodeAt(0));
-        const videoPath = `videos/${job.company_id}/${crypto.randomUUID()}.mp4`;
-
-        const { error: uploadErr } = await supabase.storage
-          .from('company-media')
-          .upload(videoPath, videoBytes, {
-            contentType: pollResult.mimeType || 'video/mp4',
-            upsert: false,
-          });
-
-        if (uploadErr) {
-          console.error(`[POLL-VIDEO] Upload error for job ${job.id}:`, uploadErr);
-          await supabase
-            .from('video_generation_jobs')
-            .update({ status: 'failed', error_message: `Upload failed: ${uploadErr.message}`, updated_at: new Date().toISOString() })
-            .eq('id', job.id);
-          await sendWhatsAppMessage(job, `❌ Video generated but upload failed: ${uploadErr.message}`);
-          continue;
-        }
-
-        const { data: publicData } = supabase.storage
-          .from('company-media')
-          .getPublicUrl(videoPath);
-        const videoUrl = publicData.publicUrl;
-
-        // Mark job as completed
-        await supabase
-          .from('video_generation_jobs')
-          .update({ status: 'completed', video_url: videoUrl, updated_at: new Date().toISOString() })
-          .eq('id', job.id);
-
-        console.log(`[POLL-VIDEO] Job ${job.id} completed: ${videoUrl}`);
-
-        // Send video to boss via WhatsApp
-        await sendWhatsAppMessage(job, `🎬 Your video is ready!`, videoUrl);
 
       } catch (jobErr) {
         console.error(`[POLL-VIDEO] Error processing job ${job.id}:`, jobErr);
@@ -130,6 +83,119 @@ Deno.serve(async (req) => {
   }
 });
 
+// ============ VEO POLLING ============
+async function handleVeoPoll(supabase: any, job: any) {
+  const pollResult = await veoPollOperation(job.operation_name);
+
+  if (!pollResult.done) {
+    console.log(`[POLL-VIDEO] Veo job ${job.id} still pending (poll ${job.poll_count + 1})`);
+    return;
+  }
+
+  if (pollResult.error || !pollResult.videoBase64) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: pollResult.error || 'No video data', updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video generation failed: ${pollResult.error || 'No video data returned'}`);
+    return;
+  }
+
+  const videoBytes = Uint8Array.from(atob(pollResult.videoBase64), c => c.charCodeAt(0));
+  await uploadAndComplete(supabase, job, videoBytes, pollResult.mimeType || 'video/mp4');
+}
+
+// ============ MINIMAX POLLING ============
+async function handleMinimaxPoll(supabase: any, job: any) {
+  const pollResult = await minimaxPollVideoTask(job.operation_name);
+
+  if (!pollResult.done) {
+    console.log(`[POLL-VIDEO] MiniMax job ${job.id} still pending (poll ${job.poll_count + 1})`);
+    return;
+  }
+
+  if (pollResult.error) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: pollResult.error, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video generation failed: ${pollResult.error}`);
+    return;
+  }
+
+  try {
+    let videoBytes: Uint8Array;
+    let mimeType = 'video/mp4';
+
+    if (pollResult.downloadUrl) {
+      // Download directly from the URL MiniMax provides
+      console.log(`[POLL-VIDEO] Downloading MiniMax video from URL for job ${job.id}`);
+      const dlRes = await fetch(pollResult.downloadUrl);
+      if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
+      mimeType = dlRes.headers.get('content-type') || 'video/mp4';
+      videoBytes = new Uint8Array(await dlRes.arrayBuffer());
+    } else if (pollResult.fileId) {
+      // Download via file API
+      console.log(`[POLL-VIDEO] Downloading MiniMax video via file API for job ${job.id}, fileId=${pollResult.fileId}`);
+      const dlResult = await minimaxDownloadFile(pollResult.fileId);
+      videoBytes = dlResult.videoBytes;
+      mimeType = dlResult.mimeType;
+    } else {
+      await supabase
+        .from('video_generation_jobs')
+        .update({ status: 'failed', error_message: 'No file_id or download URL returned', updated_at: new Date().toISOString() })
+        .eq('id', job.id);
+      await sendWhatsAppMessage(job, '❌ Video generation completed but no download link was provided.');
+      return;
+    }
+
+    await uploadAndComplete(supabase, job, videoBytes, mimeType);
+  } catch (dlErr: any) {
+    console.error(`[POLL-VIDEO] MiniMax download error for job ${job.id}:`, dlErr);
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: `Download failed: ${dlErr.message}`, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video generated but download failed: ${dlErr.message}`);
+  }
+}
+
+// ============ SHARED: UPLOAD & COMPLETE ============
+async function uploadAndComplete(supabase: any, job: any, videoBytes: Uint8Array, mimeType: string) {
+  const videoPath = `videos/${job.company_id}/${crypto.randomUUID()}.mp4`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from('company-media')
+    .upload(videoPath, videoBytes, {
+      contentType: mimeType,
+      upsert: false,
+    });
+
+  if (uploadErr) {
+    console.error(`[POLL-VIDEO] Upload error for job ${job.id}:`, uploadErr);
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: `Upload failed: ${uploadErr.message}`, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video generated but upload failed: ${uploadErr.message}`);
+    return;
+  }
+
+  const { data: publicData } = supabase.storage
+    .from('company-media')
+    .getPublicUrl(videoPath);
+  const videoUrl = publicData.publicUrl;
+
+  await supabase
+    .from('video_generation_jobs')
+    .update({ status: 'completed', video_url: videoUrl, updated_at: new Date().toISOString() })
+    .eq('id', job.id);
+
+  console.log(`[POLL-VIDEO] Job ${job.id} completed: ${videoUrl}`);
+  await sendWhatsAppMessage(job, `🎬 Your video is ready!`, videoUrl);
+}
+
+// ============ WHATSAPP NOTIFICATION ============
 async function sendWhatsAppMessage(
   job: { boss_phone: string; company_id: string },
   body: string,
@@ -142,7 +208,6 @@ async function sendWhatsAppMessage(
     return;
   }
 
-  // Get company whatsapp_number for the From field
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, serviceRoleKey);

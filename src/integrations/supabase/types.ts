@@ -2773,6 +2773,7 @@ export type Database = {
           scheduled_post_data: Json | null
           status: string
           updated_at: string | null
+          video_provider: string
           video_url: string | null
         }
         Insert: {
@@ -2788,6 +2789,7 @@ export type Database = {
           scheduled_post_data?: Json | null
           status?: string
           updated_at?: string | null
+          video_provider?: string
           video_url?: string | null
         }
         Update: {
@@ -2803,6 +2805,7 @@ export type Database = {
           scheduled_post_data?: Json | null
           status?: string
           updated_at?: string | null
+          video_provider?: string
           video_url?: string | null
         }
         Relationships: [
