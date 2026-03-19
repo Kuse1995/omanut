@@ -2443,6 +2443,72 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
 
+                // Fallback 2: Semantic search company media library
+                if (!inputImageUrl) {
+                  try {
+                    const queryEmbedding = await embedQuery(videoPrompt);
+                    const vectorStr = `[${queryEmbedding.join(',')}]`;
+                    const { data: mediaResults } = await supabase.rpc('match_company_media', {
+                      query_embedding: vectorStr,
+                      match_company_id: company.id,
+                      match_threshold: 0.25,
+                      match_count: 3,
+                    });
+                    const imageMedia = mediaResults?.find((m: any) =>
+                      m.media_type?.startsWith('image') || m.file_path?.match(/\.(jpg|jpeg|png|webp)$/i)
+                    );
+                    if (imageMedia) {
+                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${imageMedia.file_path}`;
+                      console.log('[BOSS-VID] Using media library image as video source:', inputImageUrl);
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Media search fallback failed:', e);
+                  }
+                }
+
+                // Fallback 3: Product identity profile reference image
+                if (!inputImageUrl) {
+                  try {
+                    const { data: profiles } = await supabase
+                      .from('product_identity_profiles')
+                      .select('media_id')
+                      .eq('company_id', company.id)
+                      .eq('is_active', true)
+                      .limit(1);
+                    if (profiles?.[0]?.media_id) {
+                      const { data: refMedia } = await supabase
+                        .from('company_media')
+                        .select('file_path')
+                        .eq('id', profiles[0].media_id)
+                        .single();
+                      if (refMedia?.file_path) {
+                        inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${refMedia.file_path}`;
+                        console.log('[BOSS-VID] Using product profile reference as video source:', inputImageUrl);
+                      }
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Product profile fallback failed:', e);
+                  }
+                }
+
+                // Fallback 4: Company logo
+                if (!inputImageUrl) {
+                  try {
+                    const { data: logos } = await supabase
+                      .from('company_media')
+                      .select('file_path')
+                      .eq('company_id', company.id)
+                      .eq('category', 'logo')
+                      .limit(1);
+                    if (logos?.[0]?.file_path) {
+                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${logos[0].file_path}`;
+                      console.log('[BOSS-VID] Using company logo as video source:', inputImageUrl);
+                    }
+                  } catch (e) {
+                    console.error('[BOSS-VID] Logo fallback failed:', e);
+                  }
+                }
+
                 const recentPrompt = typeof recentVideoJob?.prompt === 'string' ? recentVideoJob.prompt.trim() : '';
                 if (recentPrompt && recentPrompt === videoPrompt.trim()) {
                   if (recentVideoJob?.status === 'completed' && recentVideoJob.video_url) {
