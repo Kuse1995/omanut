@@ -2016,8 +2016,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             // ========== BMS TOOLS (with streaming ack for slow calls) ==========
             case 'check_stock':
             case 'record_sale':
+            case 'credit_sale':
             case 'update_stock':
             case 'sales_report':
+            case 'get_sales_summary':
+            case 'get_sales_details':
             case 'get_order_status':
             case 'update_order_status':
             case 'cancel_order':
@@ -2026,27 +2029,53 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             case 'create_quotation':
             case 'create_invoice':
             case 'get_low_stock_items':
+            case 'low_stock_alerts':
+            case 'bulk_add_inventory':
+            case 'check_customer':
+            case 'who_owes':
+            case 'send_receipt':
+            case 'send_invoice':
+            case 'send_quotation':
+            case 'send_payslip':
+            case 'daily_report':
+            case 'pending_orders':
             case 'record_expense':
             case 'get_expenses':
             case 'get_outstanding_receivables':
             case 'get_outstanding_payables':
             case 'profit_loss_report':
             case 'clock_in':
-            case 'clock_out': {
+            case 'clock_out':
+            case 'my_attendance':
+            case 'my_tasks':
+            case 'my_pay':
+            case 'my_schedule':
+            case 'team_attendance': {
               // bms-agent handles connection resolution internally via bms-connection.ts
 
               // Streaming ack config
               const BMS_ACK_TIMEOUT = 8000;
               const bmsAckMessages: Record<string, string> = {
                 check_stock: "Checking inventory... 🔍", get_product_variants: "Checking options... 🔍",
-                sales_report: "Pulling up reports... 📊", get_company_statistics: "Pulling up stats... 📊",
+                sales_report: "Pulling up reports... 📊", get_sales_summary: "Pulling up reports... 📊",
+                get_sales_details: "Pulling up sales details... 📊", get_company_statistics: "Pulling up stats... 📊",
                 profit_loss_report: "Generating P&L... 📊", get_expenses: "Looking up expenses... 📊",
                 get_outstanding_receivables: "Checking receivables... 📊", get_outstanding_payables: "Checking payables... 📊",
                 create_order: "Processing order... 🛒", record_sale: "Recording sale... 🛒",
+                credit_sale: "Recording credit sale... 🛒",
                 create_quotation: "Generating quotation... 📄", create_invoice: "Generating invoice... 📄",
                 get_order_status: "Checking order status... 📦", cancel_order: "Processing cancellation... ❌",
-                get_customer_history: "Looking up history... 📋", get_low_stock_items: "Checking low stock... ⚠️",
+                get_customer_history: "Looking up history... 📋",
+                get_low_stock_items: "Checking low stock... ⚠️", low_stock_alerts: "Checking low stock... ⚠️",
+                bulk_add_inventory: "Adding products... 📦",
+                check_customer: "Looking up customer... 👤", who_owes: "Checking debtors... 💰",
+                send_receipt: "Sending receipt... 📄", send_invoice: "Sending invoice... 📄",
+                send_quotation: "Sending quotation... 📄", send_payslip: "Sending payslip... 📄",
+                daily_report: "Generating daily report... 📊", pending_orders: "Checking orders... 📦",
                 clock_in: "Clocking in... ⏰", clock_out: "Clocking out... ⏰",
+                my_attendance: "Checking attendance... ⏰", team_attendance: "Checking team attendance... ⏰",
+                my_tasks: "Checking tasks... 📋", my_pay: "Checking pay info... 💰",
+                my_schedule: "Checking schedule... 📅",
                 record_expense: "Recording expense... 💰", update_stock: "Updating stock... 📦",
               };
 
@@ -2059,8 +2088,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   },
                   body: JSON.stringify({
                     action: functionName,
-                    params: args,
-                    companyId: company.id,
+                    params: { ...args, company_id: company.id },
                   }),
                 });
 
