@@ -1230,7 +1230,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "generate_video",
-          description: "Generate a short product video (8 seconds). CRITICAL: You MUST provide input_image_url whenever possible — call search_media first to find a relevant product/brand image and pass its URL. Image-to-video produces dramatically better, brand-accurate results than text-to-video which hallucinates random products.",
+          description: "Generate a short product video (8 seconds). TIP: Provide input_image_url if you already have one from search_media — it's faster. If omitted, the system automatically generates a brand-accurate first frame using the full image pipeline (Product Identity Locks + Style Memory) before animating. Videos always show the real product either way.",
           parameters: {
             type: "object",
             properties: {
