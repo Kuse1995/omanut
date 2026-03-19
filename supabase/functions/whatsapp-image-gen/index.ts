@@ -1151,12 +1151,19 @@ INSTRUCTIONS:
         if (matched) return { product: matched, bmsImageUrls };
       }
       return { product: null, bmsImageUrls: [] };
+    } else {
+      console.warn('[PRODUCT-SELECT] Vision AI response not ok, status:', response.status);
+      // Vision AI was called but failed — do NOT fall through to keyword matcher
+      // to prevent random product injection (ASK-FIRST safety rule)
+      return { product: null, bmsImageUrls: [] };
     }
   } catch (e) {
     console.error('[PRODUCT-SELECT] Vision selection failed:', e);
+    // Vision AI threw — do NOT fall through to keyword matcher
+    return { product: null, bmsImageUrls: [] };
   }
 
-  // Fallback keyword matching
+  // Fallback keyword matching — only reached if Vision AI was never attempted (no candidates)
   const promptLower = prompt.toLowerCase();
   const promptWords = promptLower.split(/\s+/).filter(w => w.length > 2);
   let bestMatch: ProductImage | null = null;
