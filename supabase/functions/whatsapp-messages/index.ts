@@ -2375,7 +2375,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     
     // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
     if (!isSchool && !company.payments_disabled) {
-      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice'];
+      const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'credit_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice', 'check_customer', 'who_owes', 'pending_orders'];
       for (const tool of mandatoryCheckoutTools) {
         if (!enabledToolNames.includes(tool)) {
           enabledToolNames.push(tool);
