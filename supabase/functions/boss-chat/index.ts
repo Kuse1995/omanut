@@ -664,15 +664,61 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "sales_report",
-          description: "Get a sales report with optional date range. Use when the boss asks about sales performance, revenue, or what was sold.",
+          description: "Get a sales report (alias for get_sales_summary). Use when the boss asks about sales performance, revenue, or what was sold.",
           parameters: {
             type: "object",
             properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period filter (default: today)" },
               start_date: { type: "string", description: "Start date filter (YYYY-MM-DD)" },
               end_date: { type: "string", description: "End date filter (YYYY-MM-DD)" },
               limit: { type: "integer", description: "Max results to return" }
             },
             required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_sales_summary",
+          description: "Get aggregated sales summary for a period (today, week, month). Use when the boss asks 'how are sales?' or 'what did we sell today?'",
+          parameters: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period to summarize (default: today)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "get_sales_details",
+          description: "Get itemized sales data for a period. Use when the boss wants to see individual sale transactions.",
+          parameters: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["today", "week", "month"], description: "Period filter (default: today)" }
+            },
+            required: []
+          }
+        }
+      },
+      {
+        type: "function",
+        function: {
+          name: "credit_sale",
+          description: "Record a credit sale (customer pays later). Use when the boss says a customer bought on credit.",
+          parameters: {
+            type: "object",
+            properties: {
+              product: { type: "string", description: "Product name" },
+              quantity: { type: "integer", description: "Quantity sold" },
+              amount: { type: "number", description: "Total amount" },
+              customer_name: { type: "string", description: "Customer name (required for credit sales)" }
+            },
+            required: ["product", "quantity", "amount", "customer_name"]
           }
         }
       },
