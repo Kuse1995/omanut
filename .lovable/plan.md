@@ -1,37 +1,36 @@
 
 
-# Fix: Add Variability to First-Frame Generation
+# Fix: Wrong Products in Images + Video Not Delivered
 
-## Problem
-The auto-generated first frame uses a deterministic prompt template. When a user requests the same type of video multiple times, the identical prompt produces the same image, leading to identical videos.
+## Problems Identified
 
-## Solution
-Inject creative variability into the first-frame prompt so each generation produces a unique composition, even for the same product/subject.
+1. **Image pipeline generates wrong products**: When Vision AI explicitly returns "NONE" (no matching product), the fallback keyword matcher still picks a random product based on loose word overlap. This causes completely unrelated products to appear.
+
+2. **Video not delivered**: The logs show the Veo path was still executing (400 error on image format). The MiniMax integration was added but the edge function deployment may not have completed. Additionally, the MiniMax client's `first_frame_image` field needs to be verified.
 
 ## Changes
 
-### `supabase/functions/boss-chat/index.ts` — First-frame prompt diversification
+### 1. `supabase/functions/whatsapp-image-gen/index.ts` — Stop keyword fallback after Vision AI says "NONE"
 
-1. **Add a creative variation system** before the `firstFramePrompt` construction (around line 2523):
-   - Define arrays of variation elements: camera angles (`overhead shot`, `45-degree angle`, `eye-level`, `low angle hero shot`), lighting styles (`warm golden hour`, `cool studio`, `dramatic side light`, `soft diffused`), background treatments (`gradient backdrop`, `lifestyle setting`, `minimalist white`, `textured surface`), and composition styles (`rule of thirds`, `centered symmetrical`, `dynamic diagonal`, `close-up detail`)
-   - Randomly pick one from each array using `Math.random()`
-   - Include a timestamp-based seed phrase (e.g., `variation ${Date.now() % 1000}`) for additional uniqueness
+After the Vision AI explicitly selects "NONE" (line ~1139-1141), the code falls through to a keyword matcher that always finds *something*. Fix: when Vision AI returns "NONE", return `{ product: null, bmsImageUrls: [] }` immediately — do not fall through to keyword matching.
 
-2. **Update the prompt template** to incorporate these variations:
-   ```
-   "Professional product photo for video opening frame. 
-    ${staticPrompt}. 
-    ${randomAngle}, ${randomLighting}, ${randomBackground}, 
-    ${randomComposition}. High resolution."
-   ```
+This ensures:
+- If Vision AI says no product matches, the pipeline generates a scene/brand image without anchoring to a wrong product
+- The "ASK-FIRST" safety rule is enforced
 
-3. **Log the variation** so we can debug which creative direction was chosen:
-   ```
-   console.log('[BOSS-VID] First frame variation:', { angle, lighting, background, composition });
-   ```
+### 2. `supabase/functions/boss-chat/index.ts` — Ensure MiniMax path is robust
 
-This keeps the Product Identity Lock and brand accuracy intact (those come from `whatsapp-image-gen`'s internal pipeline) while ensuring each first frame looks visually distinct.
+- Add a try/catch around the MiniMax call with a clear error if the API key is missing
+- Remove any remaining Veo references in the generate_video tool handler
+- Log the provider being used for debugging
+
+### 3. `supabase/functions/_shared/minimax-client.ts` — Verify URL-based image input
+
+- Confirm the `first_frame_image` field sends URLs correctly (current code looks correct)
+- Add better error logging for the API response
 
 ## Files Modified
-- `supabase/functions/boss-chat/index.ts` — randomized creative direction in first-frame prompt
+- `supabase/functions/whatsapp-image-gen/index.ts` — block keyword fallback when Vision says NONE
+- `supabase/functions/boss-chat/index.ts` — harden MiniMax video path
+- `supabase/functions/_shared/minimax-client.ts` — improve error handling
 
