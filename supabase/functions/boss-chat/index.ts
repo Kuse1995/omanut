@@ -314,6 +314,12 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
      - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
      - Chain: generate_image → generate_video (with the image) → schedule_social_post (with video_url)
      - ⚠️ Video generation takes 1-4 minutes. The boss will be notified when it's ready.
+     - When constructing the video prompt, be VERY SPECIFIC and LITERAL about what should appear on screen.
+     - For EXPLAINER videos: describe text titles appearing, key points shown as visual text/icons, transitions between concepts. Example: "Text title 'How E Library Works' fades in over a warm background, then shows a tablet screen displaying colorful ebook covers, camera zooms into a child's hands tapping to open a book, text overlay '1000+ Christian ebooks for kids' slides in from the right."
+     - For PRODUCT DEMO videos: describe the product being used step by step, close-up shots, feature callouts as on-screen text.
+     - For PROMO videos: describe the offer, brand visuals, and a clear call-to-action appearing as text on screen.
+     - ALWAYS include the company name and key message as text overlays in the prompt.
+     - Do NOT use vague/poetic descriptions. Be concrete about every visual element.
    
    ⚠️ BRANDING LOCK: Image generation is STRICTLY reference-locked. The system will ONLY generate images when it finds a confident match in uploaded product photos. If no match is found, it will ask to check the product library first.
    
