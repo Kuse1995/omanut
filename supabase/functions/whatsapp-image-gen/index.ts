@@ -342,6 +342,7 @@ RULES:
 6. Incorporate brand colors and style preferences from Style DNA
 7. NEVER include text/watermarks in the prompt unless specifically requested
 8. Consider the business type and what would work for their social media
+9. ALL images MUST be in VERTICAL PORTRAIT orientation (9:16 aspect ratio, taller than wide) — optimized for Instagram/Facebook Reels and Stories. Compose with vertical framing in mind.
 
 HARD GEOMETRY CONSTRAINT (when product reference is present):
 - The product label layout must be preserved EXACTLY — same text placement, same proportions, same font sizing
