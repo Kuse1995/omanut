@@ -2501,13 +2501,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                       .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
                       .trim();
 
-                    const firstFramePrompt = `Generate a professional product photo for a video opening frame.
+                    const firstFramePrompt = `Generate a professional product photo for a video opening frame. The image MUST be in VERTICAL PORTRAIT orientation (9:16 aspect ratio, taller than wide) — this is for Instagram/Facebook Reels.
 Product/scene requested: ${staticPrompt}
 Business type: ${company.business_type || 'business'}
 ${productContext ? `Related products in catalog: ${productContext}` : ''}
 ${identityContext ? `Brand identity:\n${identityContext}` : ''}
 Style: ${angle}, ${light}, ${bg}, ${comp}
-CRITICAL: Show the EXACT product described in the request. Do NOT substitute with a different product. Do NOT add text or watermarks.`;
+CRITICAL: Show the EXACT product described in the request. Do NOT substitute with a different product. Do NOT add text or watermarks. The composition MUST be vertical/portrait oriented.`;
 
                     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
                     if (!LOVABLE_API_KEY) {
