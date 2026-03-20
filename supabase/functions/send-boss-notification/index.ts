@@ -17,7 +17,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { companyId, notificationType, data } = await req.json();
+    const { companyId, notificationType, data, mediaUrl } = await req.json();
 
     console.log('Sending boss notification:', { companyId, notificationType });
 
@@ -111,6 +111,9 @@ serve(async (req) => {
       formData.append('From', fromNumber);
       formData.append('To', toNumber);
       formData.append('Body', message);
+      if (mediaUrl || data?.mediaUrl) {
+        formData.append('MediaUrl', mediaUrl || data.mediaUrl);
+      }
 
       const twilioResponse = await fetch(twilioUrl, {
         method: 'POST',
