@@ -390,7 +390,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
   }
 
   // Fallback: basic enhancement
-  const fallbackPrompt = `Professional ${businessType} marketing image for ${companyName}: ${userPrompt}. Ultra high resolution, commercial photography style, professional lighting, suitable for social media marketing.`;
+  const fallbackPrompt = `Professional ${businessType} marketing image for ${companyName}: ${userPrompt}. VERTICAL PORTRAIT orientation (9:16 aspect ratio). Ultra high resolution, commercial photography style, professional lighting, suitable for social media marketing.`;
   return { finalPrompt: fallbackPrompt, intent: 'general', brief: { fallback: true } };
 }
 
