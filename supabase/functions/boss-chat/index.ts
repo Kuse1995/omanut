@@ -2586,12 +2586,32 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
                   : `This video is for "${company.name}". `;
                 const enrichedPrompt = companyContext + videoPrompt;
 
-                // Start MiniMax video generation (returns immediately with task_id)
-                const { taskId } = await minimaxStartVideoGeneration({
-                  prompt: enrichedPrompt,
-                  inputImageUrl: inputImageUrl || undefined,
-                  aspectRatio,
-                });
+                // Determine video provider from AI config
+                const videoProvider = aiOverrides?.video_provider || 'minimax';
+                console.log('[BOSS-VID] Using video provider:', videoProvider);
+
+                let taskId: string;
+                let providerUsed: string;
+
+                if (videoProvider === 'veo') {
+                  // Use Google Veo for video generation
+                  const veoResult = await veoStartGeneration({
+                    prompt: enrichedPrompt,
+                    aspectRatio,
+                    inputImageUrl: inputImageUrl || undefined,
+                  });
+                  taskId = veoResult.operationName;
+                  providerUsed = 'veo';
+                } else {
+                  // Use MiniMax (default)
+                  const minimaxResult = await minimaxStartVideoGeneration({
+                    prompt: enrichedPrompt,
+                    inputImageUrl: inputImageUrl || undefined,
+                    aspectRatio,
+                  });
+                  taskId = minimaxResult.taskId;
+                  providerUsed = 'minimax';
+                }
 
                 // Save job to DB for async polling
                 const { data: queuedJob, error: jobErr } = await supabase
@@ -2602,7 +2622,7 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
                     prompt: videoPrompt,
                     aspect_ratio: aspectRatio,
                     boss_phone: From,
-                    video_provider: 'minimax',
+                    video_provider: providerUsed,
                   })
                   .select('id')
                   .single();
@@ -2612,7 +2632,7 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
                   throw new Error(jobErr?.message || 'Failed to queue video generation');
                 }
 
-                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, taskId, provider: 'minimax', inputImageUrl });
+                console.log('[BOSS-VID] Video job queued:', { jobId: queuedJob.id, taskId, provider: providerUsed, inputImageUrl });
 
                 result = { 
                   success: true, 
