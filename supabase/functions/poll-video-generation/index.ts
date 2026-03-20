@@ -249,6 +249,8 @@ async function sendWhatsAppMessage(
     form.append('MediaUrl', mediaUrl);
   }
 
+  console.log(`[POLL-VIDEO] Sending Twilio message from=${fromNumber} to=${toNumber} hasMedia=${!!mediaUrl}`);
+
   try {
     const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
       method: 'POST',
@@ -259,9 +261,11 @@ async function sendWhatsAppMessage(
       body: form.toString(),
     });
 
+    const resText = await res.text();
     if (!res.ok) {
-      const errText = await res.text();
-      console.error(`[POLL-VIDEO] Twilio send error (${res.status}):`, errText);
+      console.error(`[POLL-VIDEO] Twilio send error (${res.status}):`, resText);
+    } else {
+      console.log(`[POLL-VIDEO] Twilio send success:`, resText.substring(0, 200));
     }
   } catch (e) {
     console.error('[POLL-VIDEO] Twilio send failed:', e);
