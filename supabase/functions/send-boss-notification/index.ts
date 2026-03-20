@@ -111,6 +111,9 @@ serve(async (req) => {
       formData.append('From', fromNumber);
       formData.append('To', toNumber);
       formData.append('Body', message);
+      if (mediaUrl || data?.mediaUrl) {
+        formData.append('MediaUrl', mediaUrl || data.mediaUrl);
+      }
 
       const twilioResponse = await fetch(twilioUrl, {
         method: 'POST',
