@@ -192,7 +192,13 @@ async function uploadAndComplete(supabase: any, job: any, videoBytes: Uint8Array
     .eq('id', job.id);
 
   console.log(`[POLL-VIDEO] Job ${job.id} completed: ${videoUrl}`);
-  await sendWhatsAppMessage(job, `🎬 Your video is ready!`, videoUrl);
+  console.log(`[POLL-VIDEO] Sending WhatsApp notification to ${job.boss_phone}...`);
+  try {
+    await sendWhatsAppMessage(job, `🎬 Your video is ready!`, videoUrl);
+    console.log(`[POLL-VIDEO] WhatsApp notification sent for job ${job.id}`);
+  } catch (sendErr: any) {
+    console.error(`[POLL-VIDEO] WhatsApp send failed for job ${job.id}:`, sendErr?.message || sendErr);
+  }
 }
 
 // ============ WHATSAPP NOTIFICATION ============
