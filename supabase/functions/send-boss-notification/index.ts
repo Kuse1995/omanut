@@ -17,7 +17,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { companyId, notificationType, data } = await req.json();
+    const { companyId, notificationType, data, mediaUrl } = await req.json();
 
     console.log('Sending boss notification:', { companyId, notificationType });
 
