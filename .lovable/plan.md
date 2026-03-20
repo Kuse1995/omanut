@@ -1,42 +1,32 @@
 
 
-# Add Video Provider Switch (Veo ↔ MiniMax)
+# Fix: Veo Not Being Called + Videos Are Horizontal
 
-## Overview
-Add a `video_provider` column to `company_ai_overrides` so you can switch between `minimax` and `veo` per company — from the admin deep settings UI. No code redeployment needed.
+## Problem 1: Veo not used despite config saying "veo"
+The database has `video_provider = 'veo'` for your company, and the code already has the correct branching logic (line 2590-2614). The most recent logs show MiniMax was used — this means the edge function running in production hasn't picked up the latest deployment with the Veo branching code. 
 
-## Changes
+**Fix**: Force redeploy `boss-chat` edge function. No code change needed — the logic is already correct.
 
-### 1. Database migration — Add `video_provider` column
-Add a `video_provider` text column to `company_ai_overrides`, defaulting to `'minimax'`.
+## Problem 2: Videos are horizontal instead of vertical
+The tool definition tells the AI to default to 9:16, but the AI model is free to pass `16:9` explicitly. Two fixes:
 
-```sql
-ALTER TABLE public.company_ai_overrides 
-ADD COLUMN video_provider text NOT NULL DEFAULT 'minimax';
-```
+### `supabase/functions/boss-chat/index.ts`
+- **Override the aspect ratio** — ignore whatever the AI passes and always use `9:16` unless the boss explicitly said "landscape" or "widescreen" in their message. Change line 2416 from:
+  ```typescript
+  const aspectRatio = args.aspect_ratio || '9:16';
+  ```
+  to:
+  ```typescript
+  const aspectRatio = '9:16'; // Always vertical for social media
+  ```
+- Update the tool description to remove the `enum` choices entirely and just hardcode the explanation that all videos are vertical 9:16.
 
-### 2. `supabase/functions/boss-chat/index.ts` — Read provider from config
-Where the function fetches `company_ai_overrides`, include `video_provider` in the select. Then in the `generate_video` tool handler, use it to decide whether to call MiniMax or Veo:
+Alternatively, keep the option but make the system prompt more forceful about defaulting vertical.
 
-- If `minimax`: current MiniMax path (unchanged)
-- If `veo`: call `veoStartGeneration` from `gemini-client.ts` and store `video_provider: 'veo'` in the job row
-
-The polling function (`poll-video-generation`) already handles both providers based on the `video_provider` column in the job row — no changes needed there.
-
-### 3. `src/components/admin/deep-settings/ModelConfigPanel.tsx` — Add video provider selector
-Add a new card below the Voice Model section with a simple dropdown:
-
-- **MiniMax Hailuo 2.3** — $0.32/video, 768P, supports image-to-video and text-to-video
-- **Google Veo** — Higher quality, uses Gemini API key
-
-Wired to `video_provider` field in `AIConfig` / `company_ai_overrides`.
-
-### 4. `src/components/admin/AIDeepSettings.tsx` — Add `video_provider` to AIConfig type
-Add `video_provider: string` to the `AIConfig` interface and include it in the default config and save logic.
+### Approach chosen: Hardcode 9:16, remove aspect_ratio from tool params
+Since the primary use case is Facebook/Instagram Reels, hardcode vertical. If landscape is ever needed, it can be re-added later.
 
 ## Files Modified
-- Database migration (new column)
-- `supabase/functions/boss-chat/index.ts` — read config, branch on provider
-- `src/components/admin/deep-settings/ModelConfigPanel.tsx` — UI dropdown
-- `src/components/admin/AIDeepSettings.tsx` — type + default
+- `supabase/functions/boss-chat/index.ts` — hardcode 9:16 aspect ratio, remove `aspect_ratio` from tool params
+- Redeploy `boss-chat` to pick up Veo branching + aspect ratio fix
 
