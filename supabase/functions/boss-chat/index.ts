@@ -2444,85 +2444,45 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   }
                 }
 
-                // Fallback 2: Semantic search company media library
+                // ===== AUTO FIRST-FRAME GENERATION via Nano Banana =====
+                // Instead of using static media library images (which causes wrong products),
+                // generate a context-specific first frame using Lovable AI gateway directly.
                 if (!inputImageUrl) {
+                  console.log('[BOSS-VID] No image source — generating context-specific first frame via Nano Banana');
                   try {
-                    const queryEmbedding = await embedQuery(videoPrompt);
-                    const vectorStr = `[${queryEmbedding.join(',')}]`;
-                    const { data: mediaResults } = await supabase.rpc('match_company_media', {
-                      query_embedding: vectorStr,
-                      match_company_id: company.id,
-                      match_threshold: 0.25,
-                      match_count: 3,
-                    });
-                    const imageMedia = mediaResults?.find((m: any) =>
-                      m.media_type?.startsWith('image') || m.file_path?.match(/\.(jpg|jpeg|png|webp)$/i)
-                    );
-                    if (imageMedia) {
-                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${imageMedia.file_path}`;
-                      console.log('[BOSS-VID] Using media library image as video source:', inputImageUrl);
-                    }
-                  } catch (e) {
-                    console.error('[BOSS-VID] Media search fallback failed:', e);
-                  }
-                }
-
-                // Fallback 3: Product identity profile reference image
-                if (!inputImageUrl) {
-                  try {
-                    const { data: profiles } = await supabase
-                      .from('product_identity_profiles')
-                      .select('media_id')
-                      .eq('company_id', company.id)
-                      .eq('is_active', true)
-                      .limit(1);
-                    if (profiles?.[0]?.media_id) {
-                      const { data: refMedia } = await supabase
-                        .from('company_media')
-                        .select('file_path')
-                        .eq('id', profiles[0].media_id)
-                        .single();
-                      if (refMedia?.file_path) {
-                        inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${refMedia.file_path}`;
-                        console.log('[BOSS-VID] Using product profile reference as video source:', inputImageUrl);
+                    // Gather product context from media library (for prompt enrichment only, NOT as the image)
+                    let productContext = '';
+                    try {
+                      const queryEmbedding = await embedQuery(videoPrompt);
+                      const vectorStr = `[${queryEmbedding.join(',')}]`;
+                      const { data: mediaResults } = await supabase.rpc('match_company_media', {
+                        query_embedding: vectorStr,
+                        match_company_id: company.id,
+                        match_threshold: 0.3,
+                        match_count: 3,
+                      });
+                      if (mediaResults?.length) {
+                        productContext = mediaResults.map((m: any) => m.description || m.file_path).join('; ');
                       }
-                    }
-                  } catch (e) {
-                    console.error('[BOSS-VID] Product profile fallback failed:', e);
-                  }
-                }
+                    } catch (e) { /* non-fatal */ }
 
-                // Fallback 4: Company logo
-                if (!inputImageUrl) {
-                  try {
-                    const { data: logos } = await supabase
-                      .from('company_media')
-                      .select('file_path')
-                      .eq('company_id', company.id)
-                      .eq('category', 'logo')
-                      .limit(1);
-                    if (logos?.[0]?.file_path) {
-                      inputImageUrl = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/company-media/${logos[0].file_path}`;
-                      console.log('[BOSS-VID] Using company logo as video source:', inputImageUrl);
-                    }
-                  } catch (e) {
-                    console.error('[BOSS-VID] Logo fallback failed:', e);
-                  }
-                }
+                    // Get product identity constraints
+                    let identityContext = '';
+                    try {
+                      const { data: profiles } = await supabase
+                        .from('product_identity_profiles')
+                        .select('product_name, hex_colors, label_text, packaging_shape, exclusion_keywords')
+                        .eq('company_id', company.id)
+                        .eq('is_active', true)
+                        .limit(3);
+                      if (profiles?.length) {
+                        identityContext = profiles.map((p: any) =>
+                          `Product: ${p.product_name}, Colors: ${(p.hex_colors || []).join(',')}, Label: ${p.label_text || 'N/A'}, Shape: ${p.packaging_shape || 'N/A'}`
+                        ).join('\n');
+                      }
+                    } catch (e) { /* non-fatal */ }
 
-                // ===== AUTO FIRST-FRAME GENERATION =====
-                // If no image source was found through any fallback, generate a brand-accurate
-                // first frame using the full whatsapp-image-gen pipeline (Product Identity Locks,
-                // Style Memory Agent, Reference Curator, Exclusion Lists).
-                if (!inputImageUrl) {
-                  console.log('[BOSS-VID] No image source found — generating first frame via image pipeline');
-                  try {
-                    // Transform video motion prompt into a static first-frame composition prompt
-                    const staticPrompt = videoPrompt
-                      .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
-                      .trim();
-
-                    // Creative variation system — ensures each first frame looks unique
+                    // Creative variation system
                     const angles = ['overhead flat-lay shot', '45-degree angle', 'eye-level straight-on', 'low angle hero shot', 'three-quarter view', 'slight bird\'s-eye perspective'];
                     const lighting = ['warm golden hour lighting', 'cool studio lighting', 'dramatic side lighting with deep shadows', 'soft diffused natural light', 'bright high-key lighting', 'moody backlit silhouette edge'];
                     const backgrounds = ['clean gradient backdrop', 'lifestyle setting with props', 'minimalist white surface', 'textured concrete surface', 'blurred bokeh environment', 'rich dark background'];
@@ -2534,40 +2494,66 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     const bg = pick(backgrounds);
                     const comp = pick(compositions);
 
-                    console.log('[BOSS-VID] First frame variation:', { angle, light, bg, comp, seed: Date.now() % 1000 });
+                    console.log('[BOSS-VID] First frame variation:', { angle, light, bg, comp });
 
-                    const firstFramePrompt = `Professional product photo for video opening frame. ${staticPrompt}. ${angle}, ${light}, ${bg}, ${comp}. High resolution, variation-${Date.now() % 1000}.`;
+                    // Strip motion keywords from video prompt to get static scene description
+                    const staticPrompt = videoPrompt
+                      .replace(/\b(animate|animation|motion|zoom|pan|rotate|slide|transition|moving|flowing|spinning|tracking shot|camera move|fade in|fade out|dolly|orbit|swipe|scroll)\b/gi, '')
+                      .trim();
 
-                    const imgGenResponse = await fetch(
-                      `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-image-gen`,
-                      {
+                    const firstFramePrompt = `Generate a professional product photo for a video opening frame.
+Product/scene requested: ${staticPrompt}
+Company: ${company.name} (${company.business_type || 'business'})
+${productContext ? `Related products in catalog: ${productContext}` : ''}
+${identityContext ? `Brand identity:\n${identityContext}` : ''}
+Style: ${angle}, ${light}, ${bg}, ${comp}
+CRITICAL: Show the EXACT product described in the request. Do NOT substitute with a different product. Do NOT add text or watermarks.`;
+
+                    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+                    if (!LOVABLE_API_KEY) {
+                      console.error('[BOSS-VID] LOVABLE_API_KEY not configured, cannot generate first frame');
+                    } else {
+                      const aiRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
                         method: 'POST',
                         headers: {
+                          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
                           'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
                         },
                         body: JSON.stringify({
-                          companyId: company.id,
-                          customerPhone: '',
-                          conversationId: null,
-                          prompt: firstFramePrompt,
-                          messageType: 'generate',
+                          model: 'google/gemini-3-pro-image-preview',
+                          messages: [{ role: 'user', content: firstFramePrompt }],
+                          modalities: ['image', 'text'],
                         }),
-                      }
-                    );
+                      });
 
-                    if (imgGenResponse.ok) {
-                      const imgGenResult = await imgGenResponse.json();
-                      if (imgGenResult.imageUrl) {
-                        inputImageUrl = imgGenResult.imageUrl;
-                        toolImageUrl = imgGenResult.imageUrl;
-                        console.log('[BOSS-VID] ✅ First frame auto-generated:', inputImageUrl);
+                      if (aiRes.ok) {
+                        const aiData = await aiRes.json();
+                        const base64Url = aiData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+                        if (base64Url) {
+                          const base64Data = base64Url.replace(/^data:image\/\w+;base64,/, '');
+                          const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+                          const filePath = `first-frames/${company.id}/${crypto.randomUUID()}.png`;
+
+                          const { error: uploadErr } = await supabase.storage
+                            .from('company-media')
+                            .upload(filePath, imageBytes, { contentType: 'image/png', upsert: false });
+
+                          if (uploadErr) {
+                            console.error('[BOSS-VID] First frame upload error:', uploadErr);
+                          } else {
+                            const { data: pub } = supabase.storage.from('company-media').getPublicUrl(filePath);
+                            inputImageUrl = pub.publicUrl;
+                            toolImageUrl = inputImageUrl;
+                            console.log('[BOSS-VID] ✅ First frame generated and uploaded:', inputImageUrl);
+                          }
+                        } else {
+                          console.warn('[BOSS-VID] Nano Banana returned no image in response');
+                        }
                       } else {
-                        console.warn('[BOSS-VID] Image pipeline returned no imageUrl:', imgGenResult.message);
+                        const errText = await aiRes.text();
+                        console.error('[BOSS-VID] Nano Banana error:', aiRes.status, errText.substring(0, 300));
                       }
-                    } else {
-                      const errText = await imgGenResponse.text();
-                      console.error('[BOSS-VID] Image pipeline error:', imgGenResponse.status, errText.substring(0, 200));
                     }
                   } catch (e) {
                     console.error('[BOSS-VID] First frame generation failed:', e);
