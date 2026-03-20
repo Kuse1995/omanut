@@ -57,6 +57,9 @@ export interface AIConfig {
   auto_flag_threshold: number;
   content_filtering_level: string;
   
+  // Video Provider
+  video_provider: string;
+
   // A/B Testing
   ab_test_enabled: boolean;
   ab_test_variant: string;
