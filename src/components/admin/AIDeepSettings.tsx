@@ -57,6 +57,9 @@ export interface AIConfig {
   auto_flag_threshold: number;
   content_filtering_level: string;
   
+  // Video Provider
+  video_provider: string;
+
   // A/B Testing
   ab_test_enabled: boolean;
   ab_test_variant: string;
@@ -129,6 +132,7 @@ const defaultConfig: AIConfig = {
   quality_scoring_enabled: true,
   auto_flag_threshold: 70,
   content_filtering_level: 'standard',
+  video_provider: 'minimax',
   ab_test_enabled: false,
   ab_test_variant: '',
   ab_test_model: '',
@@ -227,6 +231,7 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
           quality_scoring_enabled: data.quality_scoring_enabled ?? defaultConfig.quality_scoring_enabled,
           auto_flag_threshold: data.auto_flag_threshold ?? defaultConfig.auto_flag_threshold,
           content_filtering_level: data.content_filtering_level || defaultConfig.content_filtering_level,
+          video_provider: (data as any).video_provider || defaultConfig.video_provider,
           ab_test_enabled: data.ab_test_enabled ?? defaultConfig.ab_test_enabled,
           ab_test_variant: data.ab_test_variant || '',
           ab_test_model: data.ab_test_model || '',

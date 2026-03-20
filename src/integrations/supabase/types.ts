@@ -826,6 +826,7 @@ export type Database = {
           support_agent_prompt: string | null
           system_instructions: string
           updated_at: string | null
+          video_provider: string
           voice_model: string | null
           voice_style: string | null
         }
@@ -883,6 +884,7 @@ export type Database = {
           support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
+          video_provider?: string
           voice_model?: string | null
           voice_style?: string | null
         }
@@ -940,6 +942,7 @@ export type Database = {
           support_agent_prompt?: string | null
           system_instructions?: string
           updated_at?: string | null
+          video_provider?: string
           voice_model?: string | null
           voice_style?: string | null
         }

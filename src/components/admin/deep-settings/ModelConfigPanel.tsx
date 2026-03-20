@@ -3,7 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { AIConfig } from "../AIDeepSettings";
-import { Cpu, Zap, Brain, Mic } from "lucide-react";
+import { Cpu, Zap, Brain, Mic, Video } from "lucide-react";
 
 interface ModelConfigPanelProps {
   config: AIConfig;
@@ -197,6 +197,43 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
               </Select>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Video Provider */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Video className="h-4 w-4 text-rose-500" />
+            Video Generation Provider
+          </CardTitle>
+          <CardDescription>Choose the engine used for video generation</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select value={config.video_provider} onValueChange={(v) => updateConfig({ video_provider: v })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="minimax">
+                <div className="flex items-center gap-2">
+                  <span>MiniMax Hailuo 2.3</span>
+                  <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">$0.32/video</Badge>
+                </div>
+              </SelectItem>
+              <SelectItem value="veo">
+                <div className="flex items-center gap-2">
+                  <span>Google Veo</span>
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">premium</Badge>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {config.video_provider === 'veo'
+              ? 'Higher quality video generation via Google Veo. Uses Gemini API.'
+              : 'Cost-effective 768P video at $0.32 per 10s clip. Supports image-to-video and text-to-video.'}
+          </p>
         </CardContent>
       </Card>
     </div>
