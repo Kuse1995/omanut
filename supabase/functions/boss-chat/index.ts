@@ -1237,7 +1237,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
             properties: {
               prompt: { type: "string", description: "Detailed description of what the video should show. IMPORTANT: If the boss requested a specific video TYPE (explainer, tutorial, product demo, testimonial, promo), describe scenes that match that format: Explainer → show text titles appearing on screen, step-by-step visuals, infographics, key points as on-screen text. Product demo → show the product in use, close-ups, features highlighted with text labels. Testimonial → show happy customers, quotes on screen, real usage scenarios. Promo → show the brand, offers, call-to-action text. Always include: camera movements, transitions, specific text overlays to include, and visual mood. Be SPECIFIC and LITERAL — describe exactly what should appear on screen frame by frame. Include the company name and key message as visible text in the scene." },
               input_image_url: { type: "string", description: "URL of an existing product/brand image to use as the starting frame. ALWAYS pass this when available for best results." },
-              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Use 9:16 for reels/stories, 16:9 for feed videos, 1:1 for square. Default: 9:16" },
+              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Default: 9:16 (vertical) for Instagram/Facebook Reels. Only use 16:9 if boss explicitly requests landscape/widescreen. 1:1 for square." },
             },
             required: ["prompt"]
           }
