@@ -134,12 +134,14 @@ async function handleMinimaxPoll(supabase: any, job: any) {
       if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
       mimeType = dlRes.headers.get('content-type') || 'video/mp4';
       videoBytes = new Uint8Array(await dlRes.arrayBuffer());
+      console.log(`[POLL-VIDEO] Downloaded MiniMax direct URL for job ${job.id}: mime=${mimeType}, bytes=${videoBytes.byteLength}`);
     } else if (pollResult.fileId) {
       // Download via file API
       console.log(`[POLL-VIDEO] Downloading MiniMax video via file API for job ${job.id}, fileId=${pollResult.fileId}`);
       const dlResult = await minimaxDownloadFile(pollResult.fileId);
       videoBytes = dlResult.videoBytes;
       mimeType = dlResult.mimeType;
+      console.log(`[POLL-VIDEO] Downloaded MiniMax file API video for job ${job.id}: mime=${mimeType}, bytes=${videoBytes.byteLength}`);
     } else {
       await supabase
         .from('video_generation_jobs')

@@ -136,19 +136,35 @@ export async function minimaxPollVideoTask(taskId: string): Promise<{
 export async function minimaxDownloadFile(fileId: string): Promise<{ videoBytes: Uint8Array; mimeType: string }> {
   const apiKey = getApiKey();
 
-  const response = await fetch(`${MINIMAX_BASE}/files/retrieve?file_id=${fileId}`, {
+  const metadataResponse = await fetch(`${MINIMAX_BASE}/files/retrieve?file_id=${fileId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
     },
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`MiniMax download error: ${response.status} - ${errText}`);
+  if (!metadataResponse.ok) {
+    const errText = await metadataResponse.text();
+    throw new Error(`MiniMax file metadata error: ${metadataResponse.status} - ${errText}`);
   }
 
-  const contentType = response.headers.get('content-type') || 'video/mp4';
-  const buffer = await response.arrayBuffer();
+  const metadata = await metadataResponse.json();
+  if (metadata.base_resp?.status_code !== 0 && metadata.base_resp?.status_code !== undefined) {
+    throw new Error(`MiniMax file metadata error: ${metadata.base_resp?.status_msg || 'Unknown error'}`);
+  }
+
+  const downloadUrl = metadata.file?.download_url || metadata.file?.backup_download_url;
+  if (!downloadUrl) {
+    throw new Error('MiniMax file metadata did not include a download URL');
+  }
+
+  const videoResponse = await fetch(downloadUrl, { method: 'GET' });
+  if (!videoResponse.ok) {
+    const errText = await videoResponse.text();
+    throw new Error(`MiniMax video download error: ${videoResponse.status} - ${errText}`);
+  }
+
+  const contentType = videoResponse.headers.get('content-type') || 'video/mp4';
+  const buffer = await videoResponse.arrayBuffer();
   return { videoBytes: new Uint8Array(buffer), mimeType: contentType };
 }
