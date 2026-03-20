@@ -22,6 +22,7 @@ export async function minimaxStartVideoGeneration(options: {
   inputImageUrl?: string;
   aspectRatio?: string;
   model?: string;
+  duration?: number;
 }): Promise<{ taskId: string }> {
   const apiKey = getApiKey();
   const model = options.model || 'MiniMax-Hailuo-2.3-Fast';
@@ -29,6 +30,7 @@ export async function minimaxStartVideoGeneration(options: {
   const payload: any = {
     model,
     prompt: options.prompt,
+    duration: options.duration || 10,
   };
 
   // Default to 768P vertical for social media reels (9:16)
