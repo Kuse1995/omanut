@@ -2503,7 +2503,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
                     const firstFramePrompt = `Generate a professional product photo for a video opening frame.
 Product/scene requested: ${staticPrompt}
-Company: ${company.name} (${company.business_type || 'business'})
+Business type: ${company.business_type || 'business'}
 ${productContext ? `Related products in catalog: ${productContext}` : ''}
 ${identityContext ? `Brand identity:\n${identityContext}` : ''}
 Style: ${angle}, ${light}, ${bg}, ${comp}
