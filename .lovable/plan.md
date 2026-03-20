@@ -1,29 +1,42 @@
 
 
-# Fix: Retry Video with Fallback Model When First Frame Fails
+# Add Video Provider Switch (Veo ↔ MiniMax)
 
-## Root Cause
-When Nano Banana fails to generate a first frame (credits, errors, etc.), `inputImageUrl` stays null. `MiniMax-Hailuo-2.3-Fast` is image-to-video only, so it rejects the request. The error is caught but no retry happens — the AI then independently calls `generate_image` which sends you the image but never feeds it into a video.
+## Overview
+Add a `video_provider` column to `company_ai_overrides` so you can switch between `minimax` and `veo` per company — from the admin deep settings UI. No code redeployment needed.
 
-## Solution — Two changes
+## Changes
 
-### 1. `supabase/functions/_shared/minimax-client.ts` — Auto-switch model when no image
-When `inputImageUrl` is absent, automatically use `MiniMax-Hailuo-2.3` (standard model that supports text-to-video) instead of `MiniMax-Hailuo-2.3-Fast` (image-to-video only).
+### 1. Database migration — Add `video_provider` column
+Add a `video_provider` text column to `company_ai_overrides`, defaulting to `'minimax'`.
 
-```typescript
-// Current (line 28):
-const model = options.model || 'MiniMax-Hailuo-2.3-Fast';
-
-// New:
-const model = options.model || (options.inputImageUrl ? 'MiniMax-Hailuo-2.3-Fast' : 'MiniMax-Hailuo-2.3');
+```sql
+ALTER TABLE public.company_ai_overrides 
+ADD COLUMN video_provider text NOT NULL DEFAULT 'minimax';
 ```
 
-This ensures a video is ALWAYS generated — with the Fast model when we have an image, with the standard model (text-to-video) when we don't.
+### 2. `supabase/functions/boss-chat/index.ts` — Read provider from config
+Where the function fetches `company_ai_overrides`, include `video_provider` in the select. Then in the `generate_video` tool handler, use it to decide whether to call MiniMax or Veo:
 
-### 2. `supabase/functions/boss-chat/index.ts` — Remove company name from first-frame prompt (line 2506)
-Remove `Company: ${company.name}` to stop "Omanut Technologies" from appearing in generated images. Product identity context already provides brand details.
+- If `minimax`: current MiniMax path (unchanged)
+- If `veo`: call `veoStartGeneration` from `gemini-client.ts` and store `video_provider: 'veo'` in the job row
+
+The polling function (`poll-video-generation`) already handles both providers based on the `video_provider` column in the job row — no changes needed there.
+
+### 3. `src/components/admin/deep-settings/ModelConfigPanel.tsx` — Add video provider selector
+Add a new card below the Voice Model section with a simple dropdown:
+
+- **MiniMax Hailuo 2.3** — $0.32/video, 768P, supports image-to-video and text-to-video
+- **Google Veo** — Higher quality, uses Gemini API key
+
+Wired to `video_provider` field in `AIConfig` / `company_ai_overrides`.
+
+### 4. `src/components/admin/AIDeepSettings.tsx` — Add `video_provider` to AIConfig type
+Add `video_provider: string` to the `AIConfig` interface and include it in the default config and save logic.
 
 ## Files Modified
-- `supabase/functions/_shared/minimax-client.ts` — auto-select model based on image availability
-- `supabase/functions/boss-chat/index.ts` — remove company name pollution from first-frame prompt
+- Database migration (new column)
+- `supabase/functions/boss-chat/index.ts` — read config, branch on provider
+- `src/components/admin/deep-settings/ModelConfigPanel.tsx` — UI dropdown
+- `src/components/admin/AIDeepSettings.tsx` — type + default
 
