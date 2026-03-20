@@ -45,7 +45,7 @@ export async function minimaxStartVideoGeneration(options: {
     payload.first_frame_image = options.inputImageUrl;
   }
 
-  console.log(`[MINIMAX] Starting video generation: model=${model}, hasImage=${!!options.inputImageUrl}`);
+  console.log(`[MINIMAX] Starting video generation: model=${model}, duration=${payload.duration}s, hasImage=${!!options.inputImageUrl}`);
 
   const response = await fetch(`${MINIMAX_BASE}/video_generation`, {
     method: 'POST',
