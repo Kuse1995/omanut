@@ -24,16 +24,19 @@ export async function minimaxStartVideoGeneration(options: {
   model?: string;
 }): Promise<{ taskId: string }> {
   const apiKey = getApiKey();
-  const model = options.model || 'MiniMax-Hailuo-2.6-Fast';
+  const model = options.model || 'MiniMax-Hailuo-2.3-Fast';
 
   const payload: any = {
     model,
     prompt: options.prompt,
   };
 
-  // Map aspect ratio to resolution
-  // MiniMax supports: 720P, 1080P
-  payload.resolution = '720P';
+  // Default to 768P vertical for social media reels (9:16)
+  payload.resolution = '768P';
+  
+  // Default aspect ratio to 9:16 (vertical) for Facebook/Instagram Reels
+  const aspectRatio = options.aspectRatio || '9:16';
+  payload.aspect_ratio = aspectRatio;
 
   if (options.inputImageUrl) {
     // Image-to-video mode

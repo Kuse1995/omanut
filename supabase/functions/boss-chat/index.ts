@@ -328,7 +328,7 @@ NEVER stop after just fetching data. If the boss asked you to CREATE something, 
      - NEVER say you cannot generate videos. You HAVE the generate_video tool — use it directly.
      - Use when the boss asks for a video, reel, or animated content for social media.
      - TIP: Before calling generate_video, try calling search_media or list_product_images first to find a relevant product image and pass it as input_image_url. This speeds things up. However, if you don't provide an image, the system will AUTOMATICALLY generate a brand-accurate first frame using the full image pipeline (with Product Identity Locks, Style Memory, and Reference Curator) before animating it into a video. So videos always show the real product.
-     - Videos are 8 seconds long and optimized for social media (9:16 vertical by default for reels, or 16:9 for Facebook).
+     - Videos are 8-10 seconds long, generated at 768P resolution using MiniMax. Default aspect ratio is 9:16 (vertical) for Instagram Reels and Facebook Reels. Use 16:9 only if the boss explicitly asks for landscape/widescreen.
      - After generating a video, you can schedule it as a social post by passing the video_url to schedule_social_post.
      - Chain: search_media (find product image) → generate_video (with the image as input_image_url) → schedule_social_post (with video_url)
      - ⚠️ Video generation takes 1-4 minutes. The boss will be notified when it's ready.
@@ -1231,13 +1231,13 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "generate_video",
-          description: "Generate a short product video (8 seconds). TIP: Provide input_image_url if you already have one from search_media — it's faster. If omitted, the system automatically generates a brand-accurate first frame using the full image pipeline (Product Identity Locks + Style Memory) before animating. Videos always show the real product either way.",
+          description: "Generate a short product video (8-10 seconds, 768P, MiniMax). Defaults to 9:16 vertical for Instagram/Facebook Reels. TIP: Provide input_image_url if you already have one from search_media — it's faster. If omitted, the system automatically generates a brand-accurate first frame using the full image pipeline (Product Identity Locks + Style Memory) before animating. Videos always show the real product either way.",
           parameters: {
             type: "object",
             properties: {
               prompt: { type: "string", description: "Detailed description of what the video should show. IMPORTANT: If the boss requested a specific video TYPE (explainer, tutorial, product demo, testimonial, promo), describe scenes that match that format: Explainer → show text titles appearing on screen, step-by-step visuals, infographics, key points as on-screen text. Product demo → show the product in use, close-ups, features highlighted with text labels. Testimonial → show happy customers, quotes on screen, real usage scenarios. Promo → show the brand, offers, call-to-action text. Always include: camera movements, transitions, specific text overlays to include, and visual mood. Be SPECIFIC and LITERAL — describe exactly what should appear on screen frame by frame. Include the company name and key message as visible text in the scene." },
               input_image_url: { type: "string", description: "URL of an existing product/brand image to use as the starting frame. ALWAYS pass this when available for best results." },
-              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Use 9:16 for reels/stories, 16:9 for feed videos, 1:1 for square. Default: 9:16" },
+              aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"], description: "Video aspect ratio. Default: 9:16 (vertical) for Instagram/Facebook Reels. Only use 16:9 if boss explicitly requests landscape/widescreen. 1:1 for square." },
             },
             required: ["prompt"]
           }
