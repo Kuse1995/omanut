@@ -25,7 +25,7 @@ export async function minimaxStartVideoGeneration(options: {
   duration?: number;
 }): Promise<{ taskId: string }> {
   const apiKey = getApiKey();
-  const model = options.model || 'MiniMax-Hailuo-2.3-Fast';
+  const model = options.model || (options.inputImageUrl ? 'MiniMax-Hailuo-2.3-Fast' : 'MiniMax-Hailuo-2.3');
 
   const payload: any = {
     model,
