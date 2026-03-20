@@ -1,36 +1,30 @@
 
 
-# Fix: Wrong Products in Images + Video Not Delivered
-
-## Problems Identified
-
-1. **Image pipeline generates wrong products**: When Vision AI explicitly returns "NONE" (no matching product), the fallback keyword matcher still picks a random product based on loose word overlap. This causes completely unrelated products to appear.
-
-2. **Video not delivered**: The logs show the Veo path was still executing (400 error on image format). The MiniMax integration was added but the edge function deployment may not have completed. Additionally, the MiniMax client's `first_frame_image` field needs to be verified.
+# Switch to MiniMax-Hailuo-2.3-Fast + Default Vertical (9:16)
 
 ## Changes
 
-### 1. `supabase/functions/whatsapp-image-gen/index.ts` — Stop keyword fallback after Vision AI says "NONE"
+### 1. `supabase/functions/_shared/minimax-client.ts`
+- Change default model from `MiniMax-Hailuo-2.6-Fast` to `MiniMax-Hailuo-2.3-Fast` (line 27)
+- Set default resolution to `768P` instead of `720P` (line 36)
+- Default to vertical 9:16 aspect ratio for social media reels — pass `"9:16"` as the aspect ratio in the payload when no specific ratio is given
 
-After the Vision AI explicitly selects "NONE" (line ~1139-1141), the code falls through to a keyword matcher that always finds *something*. Fix: when Vision AI returns "NONE", return `{ product: null, bmsImageUrls: [] }` immediately — do not fall through to keyword matching.
+### 2. `supabase/functions/boss-chat/index.ts`
+- Update the default `aspectRatio` from `'9:16'` (already correct on line 2416) — confirm it stays as 9:16
+- Update the system prompt video section (~line 331) to note that videos default to vertical 9:16 for Facebook/Instagram Reels
+- Update tool description to mention vertical-first default for social posting
 
-This ensures:
-- If Vision AI says no product matches, the pipeline generates a scene/brand image without anchoring to a wrong product
-- The "ASK-FIRST" safety rule is enforced
+## Technical Detail
 
-### 2. `supabase/functions/boss-chat/index.ts` — Ensure MiniMax path is robust
+In `minimax-client.ts`, the payload update:
+```typescript
+const model = options.model || 'MiniMax-Hailuo-2.3-Fast';
+payload.resolution = '768P';
+```
 
-- Add a try/catch around the MiniMax call with a clear error if the API key is missing
-- Remove any remaining Veo references in the generate_video tool handler
-- Log the provider being used for debugging
-
-### 3. `supabase/functions/_shared/minimax-client.ts` — Verify URL-based image input
-
-- Confirm the `first_frame_image` field sends URLs correctly (current code looks correct)
-- Add better error logging for the API response
+Cost drops from ~$0.50+ per video (2.6 Fast) to $0.32 per 768P 10s video.
 
 ## Files Modified
-- `supabase/functions/whatsapp-image-gen/index.ts` — block keyword fallback when Vision says NONE
-- `supabase/functions/boss-chat/index.ts` — harden MiniMax video path
-- `supabase/functions/_shared/minimax-client.ts` — improve error handling
+- `supabase/functions/_shared/minimax-client.ts` — model + resolution change
+- `supabase/functions/boss-chat/index.ts` — system prompt + tool description updates
 
