@@ -3,7 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { AIConfig } from "../AIDeepSettings";
-import { Cpu, Zap, Brain, Mic } from "lucide-react";
+import { Cpu, Zap, Brain, Mic, Video } from "lucide-react";
 
 interface ModelConfigPanelProps {
   config: AIConfig;

@@ -132,6 +132,7 @@ const defaultConfig: AIConfig = {
   quality_scoring_enabled: true,
   auto_flag_threshold: 70,
   content_filtering_level: 'standard',
+  video_provider: 'minimax',
   ab_test_enabled: false,
   ab_test_variant: '',
   ab_test_model: '',

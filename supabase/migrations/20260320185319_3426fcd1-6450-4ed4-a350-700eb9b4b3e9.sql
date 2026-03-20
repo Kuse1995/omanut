@@ -1,0 +1,1 @@
+ALTER TABLE public.company_ai_overrides ADD COLUMN video_provider text NOT NULL DEFAULT 'minimax';
