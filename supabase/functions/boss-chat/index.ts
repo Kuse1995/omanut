@@ -2413,7 +2413,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               
               try {
                 const videoPrompt = args.prompt;
-                const aspectRatio = args.aspect_ratio || '9:16';
+                const aspectRatio = '9:16'; // Always vertical for social media Reels
                 const recentVideoJob = await getLatestRecentVideoJob(['pending', 'completed']);
 
                 if (isPublishIntentMessage && recentVideoJob) {
