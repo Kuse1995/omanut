@@ -1,0 +1,44 @@
+{
+  "skill": {
+    "name": "omanut-ai",
+    "description": "Connect to Omanut AI platform — manage conversations, customers, tickets, media, analytics, and AI training.",
+    "transport": "streamable-http",
+    "url": "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
+    "headers": {
+      "x-api-key": "YOUR_API_KEY_HERE"
+    }
+  },
+  "tools_overview": {
+    "conversations": {
+      "list_conversations": "List recent customer conversations with filters",
+      "get_conversation": "Get full conversation with all messages for analysis"
+    },
+    "analytics": {
+      "get_analytics": "Business metrics: conversations, revenue, reservations",
+      "list_customers": "Customer segments with engagement and conversion scores"
+    },
+    "ai_quality": {
+      "get_ai_config": "Current AI model, temperature, prompt, and tool settings",
+      "list_ai_errors": "AI error logs — hallucinations, misroutes, quality issues"
+    },
+    "knowledge": {
+      "search_knowledge_base": "Search company documents by keyword",
+      "update_knowledge_base": "Add or update knowledge base documents"
+    },
+    "operations": {
+      "send_message": "Send WhatsApp message to a customer",
+      "list_tickets": "List support tickets",
+      "create_ticket": "Create a new support ticket",
+      "list_reservations": "List reservations/bookings",
+      "list_products": "List active payment products",
+      "list_media": "List company media assets",
+      "get_company_info": "Company profile and settings"
+    }
+  },
+  "setup_instructions": [
+    "1. Generate an API key in the Omanut dashboard (Settings → API Keys)",
+    "2. Replace YOUR_API_KEY_HERE with your key",
+    "3. Save this file to ~/.openclaw/skills/omanut-ai.json",
+    "4. Restart OpenClaw to load the skill"
+  ]
+}
