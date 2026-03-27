@@ -1,55 +1,162 @@
 
 
-# Expand MCP Server: Image/Video, Brand Alignment & Scheduling Tools
+# Autonomous Company-in-a-Box: Recursive Agent Loop via MCP
 
-## Problem
-The MCP server currently exposes zero tools for the image/video generation pipeline, brand identity profiles, scheduled posts, or generated content history. These are the exact areas where OpenClaw could provide the most value — auditing brand alignment, reviewing generated content, managing the post queue, and analyzing video generation success rates.
+## Overview
 
-## New MCP Tools to Add
+Transform OpenClaw from a reactive tool-caller into a self-directed autonomous agent by adding three capability layers to the MCP server: **BMS operations** (sell, invoice, stock), **Meta platform outbound** (post, message, reply), and **safety guardrails** (budget ceilings, HITL approval, P&L checks). The existing `bms-agent` edge function and `publish-meta-post`/`send-meta-dm` functions are already built — we just need to expose them as MCP tools.
 
-### Content Scheduling (3 tools)
+## Architecture
+
+```text
+OpenClaw "Mission" (recursive loop)
+    │
+    ├─ ANALYZE:  get_analytics + get_ai_config
+    ├─ RESEARCH: search_knowledge_base + web_search (external)
+    ├─ CREATE:   update_knowledge_base + bms_create_product
+    ├─ PROMOTE:  publish_facebook_post + create_scheduled_post
+    ├─ SELL:     bms_generate_payment_link + send_message
+    ├─ AUDIT:    list_ai_errors + bms_profit_loss_report
+    │
+    └─ GUARDRAILS (checked before risky actions):
+         ├─ get_spending_guard   → budget ceiling
+         ├─ request_approval     → WhatsApp HITL
+         └─ get_financial_health → P&L sanity check
+```
+
+## Changes
+
+### 1. Add BMS proxy tools to `mcp-server/index.ts` (~12 tools)
+
+Each tool calls the existing `bms-agent` edge function internally:
+
+| Tool | BMS Intent | Purpose |
+|---|---|---|
+| `bms_check_stock` | `check_stock` | Verify availability before selling |
+| `bms_record_sale` | `record_sale` | Record a completed sale |
+| `bms_create_invoice` | `create_invoice` | Generate invoice |
+| `bms_send_receipt` | `send_receipt` | Send receipt to customer |
+| `bms_generate_payment_link` | `generate_payment_link` | Lenco payment link |
+| `bms_get_sales_summary` | `get_sales_summary` | Revenue report |
+| `bms_list_products` | `list_products` | Full BMS catalog |
+| `bms_low_stock_alerts` | `low_stock_alerts` | Reorder warnings |
+| `bms_who_owes` | `who_owes` | Outstanding debts |
+| `bms_profit_loss_report` | `profit_loss_report` | P&L for financial health |
+| `bms_create_order` | `create_order` | Create order |
+| `bms_get_order_status` | `get_order_status` | Track fulfillment |
+
+Implementation: A shared `callBmsViaEdge(companyId, intent, params)` helper that POSTs to the `bms-agent` function with `action` and `params.company_id`.
+
+### 2. Add Meta platform outbound tools (~5 tools)
+
+| Tool | Edge Function Called | Purpose |
+|---|---|---|
+| `send_facebook_message` | `send-meta-dm` | Send Messenger DM |
+| `send_instagram_message` | `send-meta-dm` | Send IG DM |
+| `reply_facebook_comment` | `send-facebook-comment-reply` | Reply to FB comment |
+| `publish_facebook_post` | `publish-meta-post` | Publish to FB Page now |
+| `publish_instagram_post` | `publish-meta-post` | Publish to IG now |
+
+### 3. Add operational control tools (~3 tools)
+
 | Tool | Description |
 |---|---|
-| `list_scheduled_posts` | List posts by status (pending_approval, approved, published, failed). See the full content queue. |
-| `review_scheduled_post` | Approve, reject, or edit a scheduled post — enable OpenClaw to act as a content approval agent. |
-| `create_scheduled_post` | Create a new scheduled post with caption, image URL, platform target, and scheduled time. |
+| `update_ai_config` | Write to `company_ai_overrides` — change model, temperature, system prompt, enabled tools |
+| `list_payment_transactions` | Query `payment_transactions` for revenue tracking |
+| `get_agent_strategy` | Read current agent routing config from `company_ai_overrides` |
 
-### Image Generation (3 tools)
+### 4. Add safety guardrail tools (~3 tools)
+
+These are the critical "kill switches" that prevent runaway autonomy:
+
 | Tool | Description |
 |---|---|
-| `list_generated_images` | List AI-generated images with prompts, approval status, and URLs — audit what the AI is producing. |
-| `get_image_generation_settings` | Read the company's image gen config: style, tone, brand colors, visual guidelines. |
-| `update_image_generation_settings` | Tune style description, brand tone, visual guidelines, brand colors — fix brand drift without touching code. |
+| `get_spending_guard` | Reads today's total ad spend / payment link creations from DB. Returns `{ allowed: false }` if daily limit exceeded. Agent instructions will require calling this before any spend action. |
+| `request_approval` | Sends a WhatsApp message to the company owner with a summary of what the agent wants to do. Returns `{ status: "pending" }`. The agent must wait for approval before proceeding with high-risk actions (sales > threshold, AI config changes, ad spend). |
+| `get_financial_health` | Runs `bms_profit_loss_report` + checks `credit_balance` on the company. Returns a `mode` field: `"expansion"` if profitable, `"cost_cutting"` if in the red. Agent uses this to decide strategy. |
 
-### Brand Identity (2 tools)
-| Tool | Description |
-|---|---|
-| `list_product_identity_profiles` | List all product identity fingerprints — hex colors, labels, packaging shapes, exclusion keywords. Audit for brand contamination. |
-| `update_product_identity_profile` | Edit exclusion keywords, visual fingerprints, or brand colors on a profile — fix brand alignment issues directly. |
+### 5. Database: New `agent_spending_limits` table
 
-### Video Generation (1 tool)
-| Tool | Description |
-|---|---|
-| `list_video_jobs` | List video generation jobs with status, provider (MiniMax/Veo), aspect ratio, prompt, and result URL. Diagnose failures and track quality. |
+Stores per-company daily spending caps and approval thresholds:
 
-## High-Impact Use Cases
+```sql
+CREATE TABLE public.agent_spending_limits (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID REFERENCES companies(id) ON DELETE CASCADE NOT NULL,
+  daily_ad_budget_limit NUMERIC DEFAULT 50,
+  sale_approval_threshold NUMERIC DEFAULT 500,
+  require_approval_for_ai_config BOOLEAN DEFAULT true,
+  require_approval_for_publishing BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(company_id)
+);
 
-**1. Brand Alignment Auditor**
-OpenClaw pulls `list_generated_images` + `list_product_identity_profiles`, cross-references prompts against brand fingerprints, flags images that mention excluded products or wrong colors, and auto-updates exclusion keywords via `update_product_identity_profile`.
+ALTER TABLE public.agent_spending_limits ENABLE ROW LEVEL SECURITY;
 
-**2. Content Queue Manager**
-OpenClaw reviews `list_scheduled_posts` (pending_approval), analyzes caption quality and image-caption alignment, then batch-approves good posts and flags problematic ones — acting as a 24/7 content approval agent.
+CREATE POLICY "Company users can view spending limits"
+  ON public.agent_spending_limits FOR SELECT TO authenticated
+  USING (public.user_has_company_access_v2(company_id));
 
-**3. Image Style Drift Detector**
-OpenClaw periodically reads `get_image_generation_settings` and compares recent `list_generated_images` prompts against the configured style/tone. If prompts are drifting from brand guidelines, it updates settings via `update_image_generation_settings`.
+CREATE POLICY "Managers can update spending limits"
+  ON public.agent_spending_limits FOR ALL TO authenticated
+  USING (public.has_company_role(company_id, 'manager'));
+```
 
-**4. Video Generation Monitor**
-OpenClaw checks `list_video_jobs` for failed jobs, wrong aspect ratios, or provider misroutes. Creates tickets for systematic failures and adjusts AI config if needed.
+### 6. Database: New `agent_approval_requests` table
 
-**5. Automated Post Creation Pipeline**
-OpenClaw analyzes customer conversations for trending topics → generates caption ideas → creates scheduled posts via `create_scheduled_post` with appropriate timing from `best_posting_times` in image gen settings.
+Tracks HITL approval requests sent via WhatsApp:
+
+```sql
+CREATE TABLE public.agent_approval_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID REFERENCES companies(id) ON DELETE CASCADE NOT NULL,
+  action_type TEXT NOT NULL,
+  action_summary TEXT NOT NULL,
+  action_params JSONB DEFAULT '{}',
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+  requested_at TIMESTAMPTZ DEFAULT now(),
+  responded_at TIMESTAMPTZ,
+  responded_by TEXT
+);
+
+ALTER TABLE public.agent_approval_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Company users can view approval requests"
+  ON public.agent_approval_requests FOR SELECT TO authenticated
+  USING (public.user_has_company_access_v2(company_id));
+```
+
+### 7. Update `openclaw-skill.json`
+
+Add all new tools to the `tools_overview` organized by category: `bms_operations`, `meta_platform`, `operational_control`, `safety_guardrails`.
 
 ## Files Modified
-- `supabase/functions/mcp-server/index.ts` — add 9 new tools
-- `openclaw-skill.json` — update tools_overview with new capabilities
+
+- `supabase/functions/mcp-server/index.ts` — add ~23 new tools (BMS, Meta, control, guardrails)
+- `openclaw-skill.json` — expanded tools overview
+- **New migration** — `agent_spending_limits` + `agent_approval_requests` tables with RLS
+
+## Autonomous Loop Example
+
+```text
+1. ANALYZE:  get_analytics → "Revenue dropped 30% this week"
+2. RESEARCH: search_knowledge_base → "No new products in 60 days"
+3. DECIDE:   get_financial_health → mode: "expansion" (still profitable)
+4. CREATE:   update_knowledge_base → save product spec
+5. STOCK:    bms_list_products → verify no duplicate
+6. GUARD:    get_spending_guard → { allowed: true, remaining: $45 }
+7. PROMOTE:  create_scheduled_post → FB + IG post with payment link
+8. GUARD:    request_approval → WhatsApp to owner: "Publish product X at $29?"
+9. SELL:     (after approval) bms_generate_payment_link → attach to post
+10. AUDIT:   list_ai_errors + bms_profit_loss_report → log results
+```
+
+## Security Notes
+
+- All BMS calls proxied through `bms-agent` (validates BMS connection per company)
+- All Meta calls go through existing edge functions with company-scoped credentials
+- Guardrail tools are **read-only checks** — they don't block directly, but the agent's mission instructions enforce calling them before risky actions
+- `request_approval` creates an audit trail in `agent_approval_requests`
+- AI config updates scoped to authenticated company only
 
