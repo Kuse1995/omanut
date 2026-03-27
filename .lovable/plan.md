@@ -1,69 +1,55 @@
 
 
-# Connect OpenClaw via MCP Server
+# Expand MCP Server: Image/Video, Brand Alignment & Scheduling Tools
 
-## Overview
-Create an MCP-compatible edge function that exposes your existing `agent-api` actions as MCP tools. OpenClaw connects to it as an MCP skill and gets full access to conversations, analytics, training, and more.
+## Problem
+The MCP server currently exposes zero tools for the image/video generation pipeline, brand identity profiles, scheduled posts, or generated content history. These are the exact areas where OpenClaw could provide the most value — auditing brand alignment, reviewing generated content, managing the post queue, and analyzing video generation success rates.
 
-## Architecture
+## New MCP Tools to Add
 
-```text
-OpenClaw Agent
-    │
-    │  MCP Protocol (SSE + JSON-RPC)
-    ▼
-mcp-server (edge function)
-    │
-    │  Internal calls
-    ▼
-agent-api (existing) + direct DB queries
-```
-
-## Changes
-
-### 1. New edge function: `supabase/functions/mcp-server/index.ts`
-An MCP-compliant server using SSE transport that:
-- Authenticates via the same `x-api-key` system as `agent-api`
-- Exposes tools matching agent-api actions: `list_conversations`, `get_conversation`, `get_analytics`, `list_customers`, `list_tickets`, `send_message`, etc.
-- Adds new analysis-focused tools not in agent-api:
-  - `analyze_conversation_quality` — scores a conversation's AI responses for tone, accuracy, helpfulness
-  - `get_ai_config` — reads current AI overrides/settings for the company
-  - `update_knowledge_base` — adds/updates knowledge base entries
-  - `search_knowledge_base` — searches existing KB entries
-  - `list_recent_errors` — pulls AI error logs for review
-
-### 2. New agent-api actions (in existing `agent-api/index.ts`)
-Add these actions to support OpenClaw analysis workflows:
-- `get_ai_config` — returns `company_ai_overrides` settings
-- `update_knowledge_base` — insert/update `company_knowledge_base` entries
-- `search_knowledge_base` — search KB by keyword
-- `list_ai_errors` — query `ai_error_logs` table
-- `get_conversation_messages` — get full message history with metadata for analysis
-
-### 3. OpenClaw configuration file
-Generate an `openclaw-skill.json` config file the user can drop into their OpenClaw `~/.openclaw/skills/` directory, pre-configured with:
-- MCP endpoint URL pointing to the edge function
-- API key header configuration
-- Tool descriptions for OpenClaw's agent to understand capabilities
-
-## Use Cases Enabled
-
-| Use Case | Tools Used |
+### Content Scheduling (3 tools)
+| Tool | Description |
 |---|---|
-| Conversation QA | `list_conversations` → `get_conversation` → analyze patterns |
-| Auto-train KB | `get_conversation` → extract facts → `update_knowledge_base` |
-| Error monitoring | `list_ai_errors` → categorize → `create_ticket` |
-| Performance dashboards | `get_analytics` → trend analysis |
-| Customer insights | `list_customers` → segment analysis |
-| Config optimization | `get_ai_config` → suggest improvements |
+| `list_scheduled_posts` | List posts by status (pending_approval, approved, published, failed). See the full content queue. |
+| `review_scheduled_post` | Approve, reject, or edit a scheduled post — enable OpenClaw to act as a content approval agent. |
+| `create_scheduled_post` | Create a new scheduled post with caption, image URL, platform target, and scheduled time. |
+
+### Image Generation (3 tools)
+| Tool | Description |
+|---|---|
+| `list_generated_images` | List AI-generated images with prompts, approval status, and URLs — audit what the AI is producing. |
+| `get_image_generation_settings` | Read the company's image gen config: style, tone, brand colors, visual guidelines. |
+| `update_image_generation_settings` | Tune style description, brand tone, visual guidelines, brand colors — fix brand drift without touching code. |
+
+### Brand Identity (2 tools)
+| Tool | Description |
+|---|---|
+| `list_product_identity_profiles` | List all product identity fingerprints — hex colors, labels, packaging shapes, exclusion keywords. Audit for brand contamination. |
+| `update_product_identity_profile` | Edit exclusion keywords, visual fingerprints, or brand colors on a profile — fix brand alignment issues directly. |
+
+### Video Generation (1 tool)
+| Tool | Description |
+|---|---|
+| `list_video_jobs` | List video generation jobs with status, provider (MiniMax/Veo), aspect ratio, prompt, and result URL. Diagnose failures and track quality. |
+
+## High-Impact Use Cases
+
+**1. Brand Alignment Auditor**
+OpenClaw pulls `list_generated_images` + `list_product_identity_profiles`, cross-references prompts against brand fingerprints, flags images that mention excluded products or wrong colors, and auto-updates exclusion keywords via `update_product_identity_profile`.
+
+**2. Content Queue Manager**
+OpenClaw reviews `list_scheduled_posts` (pending_approval), analyzes caption quality and image-caption alignment, then batch-approves good posts and flags problematic ones — acting as a 24/7 content approval agent.
+
+**3. Image Style Drift Detector**
+OpenClaw periodically reads `get_image_generation_settings` and compares recent `list_generated_images` prompts against the configured style/tone. If prompts are drifting from brand guidelines, it updates settings via `update_image_generation_settings`.
+
+**4. Video Generation Monitor**
+OpenClaw checks `list_video_jobs` for failed jobs, wrong aspect ratios, or provider misroutes. Creates tickets for systematic failures and adjusts AI config if needed.
+
+**5. Automated Post Creation Pipeline**
+OpenClaw analyzes customer conversations for trending topics → generates caption ideas → creates scheduled posts via `create_scheduled_post` with appropriate timing from `best_posting_times` in image gen settings.
 
 ## Files Modified
-- `supabase/functions/mcp-server/index.ts` — new MCP-compatible edge function
-- `supabase/functions/agent-api/index.ts` — add 5 new actions for analysis workflows
-- Generate `openclaw-skill.json` configuration template
-
-## Security
-- Same API key auth as existing agent-api (SHA-256 hashed, company-scoped)
-- All queries scoped to the authenticated company
-- KB updates validated before insertion
+- `supabase/functions/mcp-server/index.ts` — add 9 new tools
+- `openclaw-skill.json` — update tools_overview with new capabilities
 
