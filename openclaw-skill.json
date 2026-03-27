@@ -1,7 +1,7 @@
 {
   "skill": {
     "name": "omanut-ai",
-    "description": "Connect to Omanut AI platform — manage conversations, customers, tickets, media, analytics, and AI training.",
+    "description": "Connect to Omanut AI platform — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, and brand alignment.",
     "transport": "streamable-http",
     "url": "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
     "headers": {
@@ -24,6 +24,23 @@
     "knowledge": {
       "search_knowledge_base": "Search company documents by keyword",
       "update_knowledge_base": "Add or update knowledge base documents"
+    },
+    "content_scheduling": {
+      "list_scheduled_posts": "List posts by status: pending_approval, approved, published, failed",
+      "review_scheduled_post": "Approve, reject, or edit a scheduled post — content approval agent",
+      "create_scheduled_post": "Create a new post with caption, image, platform, and timing"
+    },
+    "image_generation": {
+      "list_generated_images": "Audit AI-generated images: prompts, approval status, brand assets used",
+      "get_image_generation_settings": "Read style, tone, brand colors, visual guidelines",
+      "update_image_generation_settings": "Tune style/tone/colors to fix brand drift"
+    },
+    "brand_identity": {
+      "list_product_identity_profiles": "Audit product fingerprints: hex colors, labels, exclusion keywords",
+      "update_product_identity_profile": "Fix brand alignment: edit exclusions, colors, labels"
+    },
+    "video_generation": {
+      "list_video_jobs": "Monitor video jobs: status, provider, aspect ratio, failures"
     },
     "operations": {
       "send_message": "Send WhatsApp message to a customer",

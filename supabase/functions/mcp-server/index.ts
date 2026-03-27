@@ -419,6 +419,241 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       }
     },
   });
+  // ── list_scheduled_posts ──
+  server.tool({
+    name: "list_scheduled_posts",
+    description: "List scheduled social media posts. Filter by status: pending_approval, approved, published, failed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 50)" },
+        status: { type: "string", description: "Filter: pending_approval, approved, published, failed" },
+        platform: { type: "string", description: "Filter: facebook, instagram, both" },
+      },
+    },
+    handler: async (params: any) => {
+      let query = supabase
+        .from("scheduled_posts")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("scheduled_time", { ascending: false })
+        .limit(params?.limit || 50);
+      if (params?.status) query = query.eq("status", params.status);
+      if (params?.platform) query = query.eq("platform", params.platform);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ scheduled_posts: data }, null, 2) }] };
+    },
+  });
+
+  // ── review_scheduled_post ──
+  server.tool({
+    name: "review_scheduled_post",
+    description: "Approve, reject, or edit a scheduled post. Use to act as a content approval agent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        post_id: { type: "string", description: "UUID of the scheduled post" },
+        action: { type: "string", enum: ["approve", "reject"], description: "Approve or reject" },
+        updated_caption: { type: "string", description: "Optional: new caption text" },
+        rejection_reason: { type: "string", description: "Reason for rejection (if rejecting)" },
+      },
+      required: ["post_id", "action"],
+    },
+    handler: async (params: any) => {
+      const updates: any = {
+        status: params.action === "approve" ? "approved" : "rejected",
+        updated_at: new Date().toISOString(),
+      };
+      if (params.updated_caption) updates.caption = params.updated_caption;
+      if (params.rejection_reason) updates.rejection_reason = params.rejection_reason;
+      const { data, error } = await supabase
+        .from("scheduled_posts")
+        .update(updates)
+        .eq("id", params.post_id)
+        .eq("company_id", companyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ action: params.action, post: data }, null, 2) }] };
+    },
+  });
+
+  // ── create_scheduled_post ──
+  server.tool({
+    name: "create_scheduled_post",
+    description: "Create a new scheduled social media post with caption, image, platform, and timing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        caption: { type: "string", description: "Post caption text" },
+        image_url: { type: "string", description: "Image URL for the post" },
+        video_url: { type: "string", description: "Video URL for the post (reels)" },
+        platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Target platform" },
+        scheduled_time: { type: "string", description: "ISO 8601 datetime for publishing" },
+      },
+      required: ["caption", "platform", "scheduled_time"],
+    },
+    handler: async (params: any) => {
+      const { data, error } = await supabase
+        .from("scheduled_posts")
+        .insert({
+          company_id: companyId,
+          caption: params.caption,
+          image_url: params.image_url || null,
+          video_url: params.video_url || null,
+          platform: params.platform,
+          scheduled_time: params.scheduled_time,
+          status: "pending_approval",
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ action: "created", post: data }, null, 2) }] };
+    },
+  });
+
+  // ── list_generated_images ──
+  server.tool({
+    name: "list_generated_images",
+    description: "List AI-generated images with prompts, approval status, brand assets used, and URLs. Audit what the AI is producing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 50)" },
+        status: { type: "string", description: "Filter: draft, approved, rejected" },
+      },
+    },
+    handler: async (params: any) => {
+      let query = supabase
+        .from("generated_images")
+        .select("id, prompt, image_url, status, brand_assets_used, generation_params, created_at, approved_at, rejected_at, rejection_reason")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(params?.limit || 50);
+      if (params?.status) query = query.eq("status", params.status);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ generated_images: data }, null, 2) }] };
+    },
+  });
+
+  // ── get_image_generation_settings ──
+  server.tool({
+    name: "get_image_generation_settings",
+    description: "Read the company's image generation config: style, tone, brand colors, visual guidelines, best posting times.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const { data, error } = await supabase
+        .from("image_generation_settings")
+        .select("*")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ image_settings: data }, null, 2) }] };
+    },
+  });
+
+  // ── update_image_generation_settings ──
+  server.tool({
+    name: "update_image_generation_settings",
+    description: "Update image generation settings: style description, brand tone, visual guidelines, brand colors. Fix brand drift without code changes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        style_description: { type: "string", description: "Visual style description" },
+        brand_tone: { type: "string", description: "Brand tone of voice" },
+        visual_guidelines: { type: "string", description: "Visual guidelines text" },
+        brand_colors: { type: "string", description: "Brand color palette description" },
+      },
+    },
+    handler: async (params: any) => {
+      const updates: any = {};
+      if (params.style_description) updates.style_description = params.style_description;
+      if (params.brand_tone) updates.brand_tone = params.brand_tone;
+      if (params.visual_guidelines) updates.visual_guidelines = params.visual_guidelines;
+      if (params.brand_colors) updates.brand_colors = params.brand_colors;
+      const { data, error } = await supabase
+        .from("image_generation_settings")
+        .update(updates)
+        .eq("company_id", companyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", settings: data }, null, 2) }] };
+    },
+  });
+
+  // ── list_product_identity_profiles ──
+  server.tool({
+    name: "list_product_identity_profiles",
+    description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords. Audit for brand contamination.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const { data, error } = await supabase
+        .from("product_identity_profiles")
+        .select("*")
+        .eq("company_id", companyId);
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ profiles: data }, null, 2) }] };
+    },
+  });
+
+  // ── update_product_identity_profile ──
+  server.tool({
+    name: "update_product_identity_profile",
+    description: "Edit a product identity profile: exclusion keywords, visual fingerprints, brand colors. Fix brand alignment issues directly.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        profile_id: { type: "string", description: "UUID of the profile to update" },
+        exclusion_keywords: { type: "array", items: { type: "string" }, description: "Keywords to exclude from generation" },
+        hex_colors: { type: "array", items: { type: "string" }, description: "Brand hex colors" },
+        verbatim_labels: { type: "array", items: { type: "string" }, description: "Verbatim text labels on packaging" },
+      },
+      required: ["profile_id"],
+    },
+    handler: async (params: any) => {
+      const updates: any = {};
+      if (params.exclusion_keywords) updates.exclusion_keywords = params.exclusion_keywords;
+      if (params.hex_colors) updates.hex_colors = params.hex_colors;
+      if (params.verbatim_labels) updates.verbatim_labels = params.verbatim_labels;
+      const { data, error } = await supabase
+        .from("product_identity_profiles")
+        .update(updates)
+        .eq("id", params.profile_id)
+        .eq("company_id", companyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", profile: data }, null, 2) }] };
+    },
+  });
+
+  // ── list_video_jobs ──
+  server.tool({
+    name: "list_video_jobs",
+    description: "List video generation jobs with status, provider (MiniMax/Veo), aspect ratio, prompt, and result URL. Diagnose failures and track quality.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 30)" },
+        status: { type: "string", description: "Filter: pending, processing, completed, failed" },
+      },
+    },
+    handler: async (params: any) => {
+      let query = supabase
+        .from("video_generation_jobs")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(params?.limit || 30);
+      if (params?.status) query = query.eq("status", params.status);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ video_jobs: data }, null, 2) }] };
+    },
+  });
 
   return server;
 }
