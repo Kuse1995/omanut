@@ -80,6 +80,50 @@ export type Database = {
           },
         ]
       }
+      agent_approval_requests: {
+        Row: {
+          action_params: Json | null
+          action_summary: string
+          action_type: string
+          company_id: string
+          id: string
+          requested_at: string | null
+          responded_at: string | null
+          responded_by: string | null
+          status: string | null
+        }
+        Insert: {
+          action_params?: Json | null
+          action_summary: string
+          action_type: string
+          company_id: string
+          id?: string
+          requested_at?: string | null
+          responded_at?: string | null
+          responded_by?: string | null
+          status?: string | null
+        }
+        Update: {
+          action_params?: Json | null
+          action_summary?: string
+          action_type?: string
+          company_id?: string
+          id?: string
+          requested_at?: string | null
+          responded_at?: string | null
+          responded_by?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_approval_requests_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_config: {
         Row: {
           branches: string
@@ -301,6 +345,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "agent_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_spending_limits: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          daily_ad_budget_limit: number | null
+          id: string
+          require_approval_for_ai_config: boolean | null
+          require_approval_for_publishing: boolean | null
+          sale_approval_threshold: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          daily_ad_budget_limit?: number | null
+          id?: string
+          require_approval_for_ai_config?: boolean | null
+          require_approval_for_publishing?: boolean | null
+          sale_approval_threshold?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          daily_ad_budget_limit?: number | null
+          id?: string
+          require_approval_for_ai_config?: boolean | null
+          require_approval_for_publishing?: boolean | null
+          sale_approval_threshold?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_spending_limits_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: true
             referencedRelation: "companies"
