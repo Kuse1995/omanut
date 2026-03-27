@@ -232,6 +232,105 @@ Deno.serve(async (req) => {
       return respond({ customers: data });
     }
 
+    if (action === "get_ai_config") {
+      const { data, error } = await supabase
+        .from("company_ai_overrides")
+        .select("*")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (error) throw error;
+      return respond({ ai_config: data });
+    }
+
+    if (action === "list_ai_errors") {
+      const limit = params?.limit || 50;
+      const severity = params?.severity;
+      const errStatus = params?.status;
+      let query = supabase
+        .from("ai_error_logs")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (severity) query = query.eq("severity", severity);
+      if (errStatus) query = query.eq("status", errStatus);
+      const { data, error } = await query;
+      if (error) throw error;
+      return respond({ errors: data });
+    }
+
+    if (action === "get_conversation_messages") {
+      const { conversation_id } = params || {};
+      if (!conversation_id) {
+        return respond({ error: "conversation_id is required" }, 400);
+      }
+      // Verify belongs to company
+      const { error: accessErr } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("id", conversation_id)
+        .eq("company_id", companyId)
+        .single();
+      if (accessErr) throw accessErr;
+
+      const { data: msgs, error: msgsErr } = await supabase
+        .from("messages")
+        .select("id, role, content, created_at, message_metadata")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", { ascending: true });
+      if (msgsErr) throw msgsErr;
+      return respond({ messages: msgs });
+    }
+
+    if (action === "search_knowledge_base") {
+      const { query: searchQuery, limit: searchLimit } = params || {};
+      if (!searchQuery) return respond({ error: "query is required" }, 400);
+      const { data, error } = await supabase
+        .from("company_documents")
+        .select("id, filename, file_type, parsed_content, created_at")
+        .eq("company_id", companyId)
+        .ilike("parsed_content", `%${searchQuery}%`)
+        .limit(searchLimit || 10);
+      if (error) throw error;
+      return respond({ documents: data });
+    }
+
+    if (action === "update_knowledge_base") {
+      const { filename, content } = params || {};
+      if (!filename || !content) return respond({ error: "filename and content are required" }, 400);
+      const { data: existing } = await supabase
+        .from("company_documents")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("filename", filename)
+        .maybeSingle();
+      if (existing) {
+        const { data, error } = await supabase
+          .from("company_documents")
+          .update({ parsed_content: content, updated_at: new Date().toISOString() })
+          .eq("id", existing.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return respond({ action: "updated", document: data });
+      } else {
+        const { data, error } = await supabase
+          .from("company_documents")
+          .insert({
+            company_id: companyId,
+            filename,
+            file_path: `kb/${filename}`,
+            file_type: "text/plain",
+            file_size: new TextEncoder().encode(content).length,
+            parsed_content: content,
+          })
+          .select()
+          .single();
+        if (error) throw error;
+        return respond({ action: "created", document: data });
+      }
+    }
+
     if (action === "list_media") {
       const { data, error } = await supabase
         .from("company_media")
