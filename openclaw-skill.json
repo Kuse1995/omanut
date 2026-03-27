@@ -1,7 +1,7 @@
 {
   "skill": {
     "name": "omanut-ai",
-    "description": "Connect to Omanut AI platform — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, and brand alignment.",
+    "description": "Autonomous Company-in-a-Box — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, brand alignment, BMS operations (sales, invoices, stock, payments), Meta platform publishing (Facebook, Instagram), and safety guardrails (budget ceilings, HITL approval, P&L checks).",
     "transport": "streamable-http",
     "url": "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
     "headers": {
@@ -11,15 +11,19 @@
   "tools_overview": {
     "conversations": {
       "list_conversations": "List recent customer conversations with filters",
-      "get_conversation": "Get full conversation with all messages for analysis"
+      "get_conversation": "Get full conversation with all messages for analysis",
+      "send_message": "Send WhatsApp message to a customer"
     },
     "analytics": {
       "get_analytics": "Business metrics: conversations, revenue, reservations",
-      "list_customers": "Customer segments with engagement and conversion scores"
+      "list_customers": "Customer segments with engagement and conversion scores",
+      "list_payment_transactions": "Payment history and status for revenue tracking"
     },
     "ai_quality": {
       "get_ai_config": "Current AI model, temperature, prompt, and tool settings",
-      "list_ai_errors": "AI error logs — hallucinations, misroutes, quality issues"
+      "list_ai_errors": "AI error logs — hallucinations, misroutes, quality issues",
+      "update_ai_config": "Self-tune: change model, temperature, system prompt, enabled tools",
+      "get_agent_strategy": "Read agent routing, strategy, and content scheduling preferences"
     },
     "knowledge": {
       "search_knowledge_base": "Search company documents by keyword",
@@ -42,8 +46,33 @@
     "video_generation": {
       "list_video_jobs": "Monitor video jobs: status, provider, aspect ratio, failures"
     },
+    "bms_operations": {
+      "bms_check_stock": "Check product stock levels in the business management system",
+      "bms_record_sale": "Record a completed sale transaction",
+      "bms_create_invoice": "Generate an invoice for a customer",
+      "bms_send_receipt": "Send receipt to customer",
+      "bms_generate_payment_link": "Create a Lenco payment link for checkout",
+      "bms_get_sales_summary": "Revenue and sales summary report",
+      "bms_list_products": "List all products from the BMS catalog",
+      "bms_low_stock_alerts": "Get items below reorder threshold",
+      "bms_who_owes": "Outstanding customer debts",
+      "bms_profit_loss_report": "Profit & loss financial report",
+      "bms_create_order": "Create a new order",
+      "bms_get_order_status": "Track order fulfillment status"
+    },
+    "meta_platform": {
+      "send_facebook_message": "Send a Facebook Messenger DM to a customer",
+      "send_instagram_message": "Send an Instagram DM to a customer",
+      "reply_facebook_comment": "Reply to a Facebook or Instagram comment",
+      "publish_facebook_post": "Publish immediately to the company's Facebook Page",
+      "publish_instagram_post": "Publish immediately to the company's Instagram account"
+    },
+    "safety_guardrails": {
+      "get_spending_guard": "Check daily budget ceiling — MUST call before any spend action",
+      "request_approval": "Human-in-the-Loop: send WhatsApp approval request to owner before high-risk actions",
+      "get_financial_health": "P&L sanity check — returns 'expansion' or 'cost_cutting' mode"
+    },
     "operations": {
-      "send_message": "Send WhatsApp message to a customer",
       "list_tickets": "List support tickets",
       "create_ticket": "Create a new support ticket",
       "list_reservations": "List reservations/bookings",
@@ -52,10 +81,28 @@
       "get_company_info": "Company profile and settings"
     }
   },
+  "autonomous_loop": {
+    "description": "The agent can run a recursive Analyze → Research → Create → Promote → Sell → Audit loop autonomously.",
+    "phases": {
+      "analyze": ["get_analytics", "get_ai_config", "get_financial_health"],
+      "research": ["search_knowledge_base", "list_customers", "bms_list_products"],
+      "create": ["update_knowledge_base", "bms_create_order"],
+      "promote": ["create_scheduled_post", "publish_facebook_post", "publish_instagram_post"],
+      "sell": ["bms_generate_payment_link", "bms_record_sale", "send_message", "send_facebook_message", "send_instagram_message"],
+      "audit": ["list_ai_errors", "bms_profit_loss_report", "list_payment_transactions"]
+    },
+    "guardrails": {
+      "before_spend": "get_spending_guard",
+      "before_high_risk": "request_approval",
+      "before_strategy_change": "get_financial_health"
+    }
+  },
   "setup_instructions": [
     "1. Generate an API key in the Omanut dashboard (Settings → API Keys)",
     "2. Replace YOUR_API_KEY_HERE with your key",
     "3. Save this file to ~/.openclaw/skills/omanut-ai.json",
-    "4. Restart OpenClaw to load the skill"
+    "4. Restart OpenClaw to load the skill",
+    "5. Configure agent_spending_limits in the database for budget guardrails",
+    "6. Set the company boss_phone for HITL approval notifications"
   ]
 }

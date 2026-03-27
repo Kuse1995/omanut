@@ -655,6 +655,351 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     },
   });
 
+  // ═══════════════════════════════════════════════════════════
+  // BMS PROXY TOOLS — route through bms-agent edge function
+  // ═══════════════════════════════════════════════════════════
+
+  async function callBmsViaEdge(intent: string, params: Record<string, any> = {}) {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bms-agent`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+      body: JSON.stringify({ action: intent, params: { company_id: companyId, ...params } }),
+    });
+    return await res.json();
+  }
+
+  async function callEdgeFunction(fnName: string, body: Record<string, any>) {
+    const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/${fnName}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  }
+
+  const bmsTools: Array<{ name: string; intent: string; description: string; inputSchema: any }> = [
+    { name: "bms_check_stock", intent: "check_stock", description: "Check product stock levels in the BMS.", inputSchema: { type: "object", properties: { product_name: { type: "string" } } } },
+    { name: "bms_record_sale", intent: "record_sale", description: "Record a completed sale transaction in the BMS.", inputSchema: { type: "object", properties: { product_name: { type: "string" }, quantity: { type: "number" }, customer_phone: { type: "string" }, amount: { type: "number" } }, required: ["product_name", "quantity"] } },
+    { name: "bms_create_invoice", intent: "create_invoice", description: "Generate an invoice for a customer.", inputSchema: { type: "object", properties: { customer_name: { type: "string" }, customer_phone: { type: "string" }, items: { type: "array", items: { type: "object" } } }, required: ["customer_name", "items"] } },
+    { name: "bms_send_receipt", intent: "send_receipt", description: "Send a receipt to a customer.", inputSchema: { type: "object", properties: { customer_phone: { type: "string" }, transaction_id: { type: "string" } }, required: ["customer_phone"] } },
+    { name: "bms_generate_payment_link", intent: "generate_payment_link", description: "Create a Lenco payment link for checkout.", inputSchema: { type: "object", properties: { amount: { type: "number" }, description: { type: "string" }, customer_phone: { type: "string" } }, required: ["amount", "description"] } },
+    { name: "bms_get_sales_summary", intent: "get_sales_summary", description: "Get revenue and sales summary report from BMS.", inputSchema: { type: "object", properties: { period: { type: "string", description: "today, week, month" } } } },
+    { name: "bms_list_products", intent: "list_products", description: "List all products from the BMS catalog.", inputSchema: { type: "object", properties: { category: { type: "string" } } } },
+    { name: "bms_low_stock_alerts", intent: "low_stock_alerts", description: "Get items below reorder threshold.", inputSchema: { type: "object", properties: {} } },
+    { name: "bms_who_owes", intent: "who_owes", description: "Get outstanding customer debts.", inputSchema: { type: "object", properties: {} } },
+    { name: "bms_profit_loss_report", intent: "profit_loss_report", description: "Get profit and loss financial report.", inputSchema: { type: "object", properties: { period: { type: "string" } } } },
+    { name: "bms_create_order", intent: "create_order", description: "Create a new order in the BMS.", inputSchema: { type: "object", properties: { customer_name: { type: "string" }, customer_phone: { type: "string" }, items: { type: "array", items: { type: "object" } } }, required: ["customer_name", "items"] } },
+    { name: "bms_get_order_status", intent: "get_order_status", description: "Track order fulfillment status.", inputSchema: { type: "object", properties: { order_id: { type: "string" } }, required: ["order_id"] } },
+  ];
+
+  for (const tool of bmsTools) {
+    server.tool({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      handler: async (params: any) => {
+        const result = await callBmsViaEdge(tool.intent, params || {});
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      },
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // META PLATFORM OUTBOUND TOOLS
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool({
+    name: "send_facebook_message",
+    description: "Send a Facebook Messenger DM to a customer via their conversation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string", description: "Conversation UUID (must be a Messenger conversation)" },
+        text: { type: "string", description: "Message text" },
+      },
+      required: ["conversation_id", "text"],
+    },
+    handler: async (params: any) => {
+      const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "send_instagram_message",
+    description: "Send an Instagram DM to a customer via their conversation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversation_id: { type: "string", description: "Conversation UUID (must be an IG DM conversation)" },
+        text: { type: "string", description: "Message text" },
+      },
+      required: ["conversation_id", "text"],
+    },
+    handler: async (params: any) => {
+      const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "reply_facebook_comment",
+    description: "Reply to a Facebook or Instagram comment on a post.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        comment_id: { type: "string", description: "The Meta comment ID to reply to" },
+        message: { type: "string", description: "Reply text" },
+        company_id_override: { type: "string", description: "Optional company ID override" },
+      },
+      required: ["comment_id", "message"],
+    },
+    handler: async (params: any) => {
+      const result = await callEdgeFunction("send-facebook-comment-reply", {
+        comment_id: params.comment_id,
+        message: params.message,
+        company_id: params.company_id_override || companyId,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "publish_facebook_post",
+    description: "Publish a post immediately to the company's Facebook Page.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        caption: { type: "string", description: "Post caption/text" },
+        image_url: { type: "string", description: "Image URL to attach" },
+        video_url: { type: "string", description: "Video URL to attach" },
+      },
+      required: ["caption"],
+    },
+    handler: async (params: any) => {
+      const result = await callEdgeFunction("publish-meta-post", {
+        company_id: companyId,
+        platform: "facebook",
+        caption: params.caption,
+        image_url: params.image_url || null,
+        video_url: params.video_url || null,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "publish_instagram_post",
+    description: "Publish a post immediately to the company's Instagram Business account.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        caption: { type: "string", description: "Post caption/text" },
+        image_url: { type: "string", description: "Image URL (required for IG)" },
+        video_url: { type: "string", description: "Video URL for Reels" },
+      },
+      required: ["caption", "image_url"],
+    },
+    handler: async (params: any) => {
+      const result = await callEdgeFunction("publish-meta-post", {
+        company_id: companyId,
+        platform: "instagram",
+        caption: params.caption,
+        image_url: params.image_url,
+        video_url: params.video_url || null,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // OPERATIONAL CONTROL TOOLS
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool({
+    name: "update_ai_config",
+    description: "Update AI configuration: model, temperature, system prompt, enabled tools, response style. Allows the agent to self-tune.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        primary_model: { type: "string" },
+        primary_temperature: { type: "number" },
+        system_instructions: { type: "string" },
+        enabled_tools: { type: "array", items: { type: "string" } },
+        response_length: { type: "string", enum: ["short", "medium", "long"] },
+        fallback_message: { type: "string" },
+        max_tokens: { type: "number" },
+      },
+    },
+    handler: async (params: any) => {
+      const updates: any = { updated_at: new Date().toISOString() };
+      for (const key of ["primary_model", "primary_temperature", "system_instructions", "enabled_tools", "response_length", "fallback_message", "max_tokens"]) {
+        if (params[key] !== undefined) updates[key] = params[key];
+      }
+      const { data, error } = await supabase
+        .from("company_ai_overrides")
+        .update(updates)
+        .eq("company_id", companyId)
+        .select()
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", config: data }, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "list_payment_transactions",
+    description: "List payment transactions for revenue tracking and financial analysis.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Max results (default 50)" },
+        status: { type: "string", description: "Filter: completed, pending, failed" },
+      },
+    },
+    handler: async (params: any) => {
+      let query = supabase
+        .from("payment_transactions")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(params?.limit || 50);
+      if (params?.status) query = query.eq("payment_status", params.status);
+      const { data, error } = await query;
+      if (error) throw error;
+      return { content: [{ type: "text", text: JSON.stringify({ transactions: data }, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "get_agent_strategy",
+    description: "Read current agent routing, strategy settings, and content scheduling preferences.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const [aiRes, agentRes] = await Promise.all([
+        supabase.from("company_ai_overrides").select("routing_enabled, routing_model, routing_confidence_threshold, enabled_tools, service_mode, supervisor_enabled").eq("company_id", companyId).maybeSingle(),
+        supabase.from("agent_settings").select("*").eq("company_id", companyId).maybeSingle(),
+      ]);
+      return { content: [{ type: "text", text: JSON.stringify({ routing: aiRes.data, content_strategy: agentRes.data }, null, 2) }] };
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // SAFETY GUARDRAIL TOOLS
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool({
+    name: "get_spending_guard",
+    description: "Check if the agent is within daily spending limits. MUST be called before any spend action (ads, payment links, sales above threshold).",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const { data: limits } = await supabase
+        .from("agent_spending_limits")
+        .select("*")
+        .eq("company_id", companyId)
+        .maybeSingle();
+
+      // Count today's payment links created
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { data: todayTxns } = await supabase
+        .from("payment_transactions")
+        .select("amount")
+        .eq("company_id", companyId)
+        .gte("created_at", todayStart.toISOString());
+
+      const todaySpend = (todayTxns || []).reduce((s: number, t: any) => s + Number(t.amount || 0), 0);
+      const dailyLimit = limits?.daily_ad_budget_limit || 50;
+      const saleThreshold = limits?.sale_approval_threshold || 500;
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          allowed: todaySpend < dailyLimit,
+          today_spend: todaySpend,
+          daily_limit: dailyLimit,
+          remaining: Math.max(0, dailyLimit - todaySpend),
+          sale_approval_threshold: saleThreshold,
+          require_approval_for_ai_config: limits?.require_approval_for_ai_config ?? true,
+          require_approval_for_publishing: limits?.require_approval_for_publishing ?? false,
+        }, null, 2) }],
+      };
+    },
+  });
+
+  server.tool({
+    name: "request_approval",
+    description: "Send a Human-in-the-Loop approval request to the company owner via WhatsApp. Use before high-risk actions: large sales, AI config changes, ad spend.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action_type: { type: "string", description: "Type: sale, ai_config_change, publish, expense" },
+        action_summary: { type: "string", description: "Human-readable summary of what you want to do" },
+        action_params: { type: "object", description: "Parameters of the proposed action" },
+      },
+      required: ["action_type", "action_summary"],
+    },
+    handler: async (params: any) => {
+      // Save approval request
+      const { data: request, error: insertErr } = await supabase
+        .from("agent_approval_requests")
+        .insert({
+          company_id: companyId,
+          action_type: params.action_type,
+          action_summary: params.action_summary,
+          action_params: params.action_params || {},
+        })
+        .select()
+        .single();
+      if (insertErr) throw insertErr;
+
+      // Send WhatsApp notification to boss
+      const { data: company } = await supabase.from("companies").select("boss_phone, name").eq("id", companyId).single();
+      if (company?.boss_phone) {
+        const msg = `🤖 *Agent Approval Request*\n\nAction: ${params.action_type}\n${params.action_summary}\n\nReply YES to approve or NO to reject.\n\n_Request ID: ${request.id}_`;
+        await callEdgeFunction("send-whatsapp-message", {
+          company_id: companyId,
+          phone: company.boss_phone,
+          message: msg,
+        });
+      }
+
+      return { content: [{ type: "text", text: JSON.stringify({ status: "pending", request_id: request.id, notified: !!company?.boss_phone }, null, 2) }] };
+    },
+  });
+
+  server.tool({
+    name: "get_financial_health",
+    description: "Check company financial health: credit balance + BMS P&L. Returns mode: 'expansion' if profitable, 'cost_cutting' if in the red. Use to decide strategy.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const { data: company } = await supabase.from("companies").select("credit_balance, name").eq("id", companyId).single();
+      
+      // Try to get P&L from BMS
+      let bmsHealth: any = null;
+      try {
+        bmsHealth = await callBmsViaEdge("profit_loss_report", {});
+      } catch (_e) {
+        // BMS may not be connected
+      }
+
+      const creditBalance = company?.credit_balance || 0;
+      const mode = creditBalance > 0 ? "expansion" : "cost_cutting";
+
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          mode,
+          credit_balance: creditBalance,
+          bms_pnl: bmsHealth?.data || null,
+          recommendation: mode === "expansion"
+            ? "Company is healthy. Proceed with growth initiatives."
+            : "Company credits are low. Focus on revenue-generating activities and minimize spend.",
+        }, null, 2) }],
+      };
+    },
+  });
+
   return server;
 }
 
