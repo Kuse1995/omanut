@@ -1,61 +1,78 @@
 
 
-# Update OpenClaw Skill Config for stdio Transport (mcp-remote bridge)
+# Fix MCP Server 500 Error — Wrong `mcp-lite` API Usage
 
-## Problem
-OpenClaw (v2026.3.22) only supports **stdio** MCP transport — not `streamable-http`. The current `openclaw-skill.json` advertises `"transport": "streamable-http"` with a direct URL, which causes OpenClaw to skip the server entirely:
+## Root Cause
+
+The edge function logs show this error on every request:
 ```
-[bundle-mcp] skipped server "omanut-ai" because only stdio MCP servers are supported right now.
+TypeError: Cannot read properties of undefined (reading 'inputSchema')
+    at McpServer.tool (mcp-lite/dist/index.js:726:61)
 ```
+
+The `mcp-lite` library expects this call signature:
+```ts
+mcp.tool('toolName', { description, inputSchema: z.object({...}), handler })
+```
+
+Our code uses:
+```ts
+server.tool({ name: "toolName", description, inputSchema: { type: "object", ... }, handler })
+```
+
+Three issues:
+1. **Name must be the first argument** (string), not inside the config object
+2. **inputSchema must be a Zod schema**, not a plain JSON Schema object
+3. **McpServer needs a `schemaAdapter`** to convert Zod → JSON Schema
 
 ## Fix
-Update `openclaw-skill.json` to use the `mcp-remote` npm bridge pattern, which wraps the HTTP endpoint as a local stdio process.
 
-### Changes to `openclaw-skill.json`
+### 1. Update `deno.json` — add Zod dependency
 
-Replace the current `skill` block:
 ```json
 {
-  "skill": {
-    "name": "omanut-ai",
-    "description": "Autonomous Company-in-a-Box — ...",
-    "transport": "streamable-http",
-    "url": "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
-    "headers": { "x-api-key": "YOUR_API_KEY_HERE" }
+  "imports": {
+    "hono": "npm:hono@^4.7.10",
+    "mcp-lite": "npm:mcp-lite@^0.10.0",
+    "zod": "npm:zod@^4.1.12"
   }
 }
 ```
 
-With the stdio/mcp-remote config:
-```json
-{
-  "skill": {
-    "name": "omanut-ai",
-    "description": "Autonomous Company-in-a-Box — ...",
-    "transport": "stdio",
-    "command": "npx",
-    "args": [
-      "-y",
-      "mcp-remote",
-      "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
-      "--header",
-      "x-api-key:YOUR_API_KEY_HERE"
-    ]
-  }
-}
+### 2. Rewrite `mcp-server/index.ts` — all ~40 tool registrations
+
+Every `server.tool({...})` call must be converted from:
+```ts
+server.tool({
+  name: "list_conversations",
+  description: "...",
+  inputSchema: { type: "object", properties: { limit: { type: "number" } } },
+  handler: async (params) => { ... }
+});
 ```
 
-Update the `setup_instructions` to reflect the new setup:
-1. Generate an API key in the Omanut dashboard (Settings → API Keys)
-2. Replace `YOUR_API_KEY_HERE` in the args array with your key
-3. Save this file to `~/.openclaw/skills/omanut-ai.json`
-4. Make sure Node.js (v18+) is installed (needed for `npx`)
-5. Restart OpenClaw — first launch takes a few seconds as `mcp-remote` downloads
-6. Test with: "List my recent conversations"
+To:
+```ts
+server.tool("list_conversations", {
+  description: "...",
+  inputSchema: z.object({ limit: z.number().optional() }),
+  handler: async (params) => { ... }
+});
+```
 
-### Why mcp-remote?
-`mcp-remote` is an npm package that runs as a local stdio process and relays JSON-RPC messages to the remote HTTP MCP server. This bridges the gap between OpenClaw's stdio-only requirement and our HTTP-based edge function.
+Also update the McpServer constructor:
+```ts
+import { z } from "zod";
+const server = new McpServer({
+  name: "omanut-ai",
+  version: "1.0.0",
+  schemaAdapter: (schema) => z.toJSONSchema(schema as z.ZodType),
+});
+```
+
+This is a large mechanical refactor (~40 tools, ~1000 lines) but each change follows the same pattern. No logic changes — only the tool registration API format.
 
 ## Files Modified
-- `openclaw-skill.json` — update transport from `streamable-http` to `stdio` with `mcp-remote` bridge args, update setup instructions
+- `supabase/functions/mcp-server/deno.json` — add `zod` import
+- `supabase/functions/mcp-server/index.ts` — fix all tool registrations to use correct mcp-lite API
 
