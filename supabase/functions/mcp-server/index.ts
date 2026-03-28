@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "zod";
+import zodToJsonSchema from "zod-to-json-schema";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,7 +58,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
     version: "1.0.0",
-    schemaAdapter: (schema: unknown) => z.toJSONSchema(schema as z.ZodType),
+    schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
   // ── list_conversations ──
