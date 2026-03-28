@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,19 +54,19 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<{ compan
 }
 
 function createMcpServer(supabase: any, companyId: string): McpServer {
-  const server = new McpServer({ name: "omanut-ai", version: "1.0.0" });
+  const server = new McpServer({
+    name: "omanut-ai",
+    version: "1.0.0",
+    schemaAdapter: (schema: unknown) => z.toJSONSchema(schema as z.ZodType),
+  });
 
   // ── list_conversations ──
-  server.tool({
-    name: "list_conversations",
+  server.tool("list_conversations", {
     description: "List recent conversations with customers. Filter by status (active/ended).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 50)" },
-        status: { type: "string", description: "Filter by status: active, ended" },
-      },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      status: z.string().optional().describe("Filter by status: active, ended"),
+    }),
     handler: async (params: any) => {
       const limit = params?.limit || 50;
       let query = supabase
@@ -77,21 +78,16 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ conversations: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ conversations: data }, null, 2) }] };
     },
   });
 
   // ── get_conversation ──
-  server.tool({
-    name: "get_conversation",
+  server.tool("get_conversation", {
     description: "Get full conversation details and all messages for analysis.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        conversation_id: { type: "string", description: "UUID of the conversation" },
-      },
-      required: ["conversation_id"],
-    },
+    inputSchema: z.object({
+      conversation_id: z.string().describe("UUID of the conversation"),
+    }),
     handler: async (params: any) => {
       const { data: conv, error: convErr } = await supabase
         .from("conversations")
@@ -106,20 +102,16 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .eq("conversation_id", params.conversation_id)
         .order("created_at", { ascending: true });
       if (msgsErr) throw msgsErr;
-      return { content: [{ type: "text", text: JSON.stringify({ conversation: conv, messages: msgs }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ conversation: conv, messages: msgs }, null, 2) }] };
     },
   });
 
   // ── get_analytics ──
-  server.tool({
-    name: "get_analytics",
+  server.tool("get_analytics", {
     description: "Get business analytics: conversation count, revenue, reservations over a period.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        days: { type: "number", description: "Period in days (default 30)" },
-      },
-    },
+    inputSchema: z.object({
+      days: z.number().optional().describe("Period in days (default 30)"),
+    }),
     handler: async (params: any) => {
       const days = params?.days || 30;
       const since = new Date();
@@ -132,7 +124,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       ]);
       const totalRevenue = (payRes.data || []).reduce((sum: number, t: any) => sum + Number(t.amount), 0);
       return {
-        content: [{ type: "text", text: JSON.stringify({
+        content: [{ type: "text" as const, text: JSON.stringify({
           period_days: days,
           total_conversations: convRes.count || 0,
           total_reservations: resRes.count || 0,
@@ -144,13 +136,11 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   });
 
   // ── list_customers ──
-  server.tool({
-    name: "list_customers",
+  server.tool("list_customers", {
     description: "List customer segments with engagement scores, interests, and conversion potential.",
-    inputSchema: {
-      type: "object",
-      properties: { limit: { type: "number", description: "Max results (default 100)" } },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 100)"),
+    }),
     handler: async (params: any) => {
       const { data, error } = await supabase
         .from("customer_segments")
@@ -159,47 +149,38 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .order("last_interaction_at", { ascending: false })
         .limit(params?.limit || 100);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ customers: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ customers: data }, null, 2) }] };
     },
   });
 
   // ── list_tickets ──
-  server.tool({
-    name: "list_tickets",
+  server.tool("list_tickets", {
     description: "List support tickets. Filter by status or priority.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number" },
-        status: { type: "string" },
-        priority: { type: "string" },
-      },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional(),
+      status: z.string().optional(),
+      priority: z.string().optional(),
+    }),
     handler: async (params: any) => {
       let query = supabase.from("support_tickets").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(params?.limit || 50);
       if (params?.status) query = query.eq("status", params.status);
       if (params?.priority) query = query.eq("priority", params.priority);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ tickets: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ tickets: data }, null, 2) }] };
     },
   });
 
   // ── create_ticket ──
-  server.tool({
-    name: "create_ticket",
+  server.tool("create_ticket", {
     description: "Create a support ticket for tracking an issue.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        customer_phone: { type: "string" },
-        customer_name: { type: "string" },
-        issue_summary: { type: "string" },
-        issue_category: { type: "string" },
-        priority: { type: "string", enum: ["low", "medium", "high", "critical"] },
-      },
-      required: ["customer_phone", "issue_summary"],
-    },
+    inputSchema: z.object({
+      customer_phone: z.string(),
+      customer_name: z.string().optional(),
+      issue_summary: z.string(),
+      issue_category: z.string().optional(),
+      priority: z.enum(["low", "medium", "high", "critical"]).optional(),
+    }),
     handler: async (params: any) => {
       const { data, error } = await supabase.from("support_tickets").insert({
         company_id: companyId,
@@ -212,23 +193,18 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         status: "open",
       }).select().single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ ticket: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ticket: data }, null, 2) }] };
     },
   });
 
   // ── send_message ──
-  server.tool({
-    name: "send_message",
+  server.tool("send_message", {
     description: "Send a WhatsApp message to a customer.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        phone: { type: "string", description: "Customer phone number" },
-        message: { type: "string", description: "Message text" },
-        media_url: { type: "string", description: "Optional media URL" },
-      },
-      required: ["phone", "message"],
-    },
+    inputSchema: z.object({
+      phone: z.string().describe("Customer phone number"),
+      message: z.string().describe("Message text"),
+      media_url: z.string().optional().describe("Optional media URL"),
+    }),
     handler: async (params: any) => {
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
       const res = await fetch(url, {
@@ -237,15 +213,14 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         body: JSON.stringify({ company_id: companyId, phone: params.phone, message: params.message, media_url: params.media_url }),
       });
       const result = await res.json();
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
   // ── get_ai_config ──
-  server.tool({
-    name: "get_ai_config",
+  server.tool("get_ai_config", {
     description: "Get AI configuration and overrides: model, temperature, system prompt, tools, supervisor settings.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase
         .from("company_ai_overrides")
@@ -253,22 +228,18 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .eq("company_id", companyId)
         .maybeSingle();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ ai_config: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ai_config: data }, null, 2) }] };
     },
   });
 
   // ── list_ai_errors ──
-  server.tool({
-    name: "list_ai_errors",
+  server.tool("list_ai_errors", {
     description: "List AI error logs to identify quality issues, hallucinations, and misroutes.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 50)" },
-        severity: { type: "string", description: "Filter: low, medium, high, critical" },
-        status: { type: "string", description: "Filter: new, reviewed, fixed" },
-      },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      severity: z.string().optional().describe("Filter: low, medium, high, critical"),
+      status: z.string().optional().describe("Filter: new, reviewed, fixed"),
+    }),
     handler: async (params: any) => {
       let query = supabase
         .from("ai_error_logs")
@@ -280,33 +251,30 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ errors: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ errors: data }, null, 2) }] };
     },
   });
 
   // ── list_media ──
-  server.tool({
-    name: "list_media",
+  server.tool("list_media", {
     description: "List company media assets (images, videos, documents).",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase
         .from("company_media")
         .select("id, file_name, file_path, media_type, category, description, tags")
         .eq("company_id", companyId);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ media: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ media: data }, null, 2) }] };
     },
   });
 
   // ── list_reservations ──
-  server.tool({
-    name: "list_reservations",
+  server.tool("list_reservations", {
     description: "List reservations/bookings.",
-    inputSchema: {
-      type: "object",
-      properties: { limit: { type: "number" } },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional(),
+    }),
     handler: async (params: any) => {
       const { data, error } = await supabase
         .from("reservations")
@@ -315,15 +283,14 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .order("date", { ascending: false })
         .limit(params?.limit || 50);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ reservations: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ reservations: data }, null, 2) }] };
     },
   });
 
   // ── list_products ──
-  server.tool({
-    name: "list_products",
+  server.tool("list_products", {
     description: "List active payment products.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase
         .from("payment_products")
@@ -331,34 +298,28 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .eq("company_id", companyId)
         .eq("is_active", true);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ products: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ products: data }, null, 2) }] };
     },
   });
 
   // ── get_company_info ──
-  server.tool({
-    name: "get_company_info",
+  server.tool("get_company_info", {
     description: "Get company profile and settings.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase.from("companies").select("*").eq("id", companyId).single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ company: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ company: data }, null, 2) }] };
     },
   });
 
   // ── search_knowledge_base ──
-  server.tool({
-    name: "search_knowledge_base",
+  server.tool("search_knowledge_base", {
     description: "Search company documents by keyword in parsed content.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Search keyword" },
-        limit: { type: "number" },
-      },
-      required: ["query"],
-    },
+    inputSchema: z.object({
+      query: z.string().describe("Search keyword"),
+      limit: z.number().optional(),
+    }),
     handler: async (params: any) => {
       const { data, error } = await supabase
         .from("company_documents")
@@ -367,24 +328,18 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .ilike("parsed_content", `%${params.query}%`)
         .limit(params?.limit || 10);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ documents: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ documents: data }, null, 2) }] };
     },
   });
 
   // ── update_knowledge_base ──
-  server.tool({
-    name: "update_knowledge_base",
+  server.tool("update_knowledge_base", {
     description: "Add or update a knowledge base document. Provide filename and content to upsert.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        filename: { type: "string", description: "Document filename (used as key)" },
-        content: { type: "string", description: "Document text content" },
-      },
-      required: ["filename", "content"],
-    },
+    inputSchema: z.object({
+      filename: z.string().describe("Document filename (used as key)"),
+      content: z.string().describe("Document text content"),
+    }),
     handler: async (params: any) => {
-      // Check if doc exists
       const { data: existing } = await supabase
         .from("company_documents")
         .select("id")
@@ -400,7 +355,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
           .select()
           .single();
         if (error) throw error;
-        return { content: [{ type: "text", text: JSON.stringify({ action: "updated", document: data }, null, 2) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", document: data }, null, 2) }] };
       } else {
         const { data, error } = await supabase
           .from("company_documents")
@@ -415,22 +370,19 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
           .select()
           .single();
         if (error) throw error;
-        return { content: [{ type: "text", text: JSON.stringify({ action: "created", document: data }, null, 2) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify({ action: "created", document: data }, null, 2) }] };
       }
     },
   });
+
   // ── list_scheduled_posts ──
-  server.tool({
-    name: "list_scheduled_posts",
+  server.tool("list_scheduled_posts", {
     description: "List scheduled social media posts. Filter by status: pending_approval, approved, published, failed.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 50)" },
-        status: { type: "string", description: "Filter: pending_approval, approved, published, failed" },
-        platform: { type: "string", description: "Filter: facebook, instagram, both" },
-      },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      status: z.string().optional().describe("Filter: pending_approval, approved, published, failed"),
+      platform: z.string().optional().describe("Filter: facebook, instagram, both"),
+    }),
     handler: async (params: any) => {
       let query = supabase
         .from("scheduled_posts")
@@ -442,24 +394,19 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.platform) query = query.eq("platform", params.platform);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ scheduled_posts: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ scheduled_posts: data }, null, 2) }] };
     },
   });
 
   // ── review_scheduled_post ──
-  server.tool({
-    name: "review_scheduled_post",
+  server.tool("review_scheduled_post", {
     description: "Approve, reject, or edit a scheduled post. Use to act as a content approval agent.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        post_id: { type: "string", description: "UUID of the scheduled post" },
-        action: { type: "string", enum: ["approve", "reject"], description: "Approve or reject" },
-        updated_caption: { type: "string", description: "Optional: new caption text" },
-        rejection_reason: { type: "string", description: "Reason for rejection (if rejecting)" },
-      },
-      required: ["post_id", "action"],
-    },
+    inputSchema: z.object({
+      post_id: z.string().describe("UUID of the scheduled post"),
+      action: z.enum(["approve", "reject"]).describe("Approve or reject"),
+      updated_caption: z.string().optional().describe("Optional: new caption text"),
+      rejection_reason: z.string().optional().describe("Reason for rejection (if rejecting)"),
+    }),
     handler: async (params: any) => {
       const updates: any = {
         status: params.action === "approve" ? "approved" : "rejected",
@@ -475,25 +422,20 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ action: params.action, post: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: params.action, post: data }, null, 2) }] };
     },
   });
 
   // ── create_scheduled_post ──
-  server.tool({
-    name: "create_scheduled_post",
+  server.tool("create_scheduled_post", {
     description: "Create a new scheduled social media post with caption, image, platform, and timing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        caption: { type: "string", description: "Post caption text" },
-        image_url: { type: "string", description: "Image URL for the post" },
-        video_url: { type: "string", description: "Video URL for the post (reels)" },
-        platform: { type: "string", enum: ["facebook", "instagram", "both"], description: "Target platform" },
-        scheduled_time: { type: "string", description: "ISO 8601 datetime for publishing" },
-      },
-      required: ["caption", "platform", "scheduled_time"],
-    },
+    inputSchema: z.object({
+      caption: z.string().describe("Post caption text"),
+      image_url: z.string().optional().describe("Image URL for the post"),
+      video_url: z.string().optional().describe("Video URL for the post (reels)"),
+      platform: z.enum(["facebook", "instagram", "both"]).describe("Target platform"),
+      scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
+    }),
     handler: async (params: any) => {
       const { data, error } = await supabase
         .from("scheduled_posts")
@@ -509,21 +451,17 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ action: "created", post: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "created", post: data }, null, 2) }] };
     },
   });
 
   // ── list_generated_images ──
-  server.tool({
-    name: "list_generated_images",
-    description: "List AI-generated images with prompts, approval status, brand assets used, and URLs. Audit what the AI is producing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 50)" },
-        status: { type: "string", description: "Filter: draft, approved, rejected" },
-      },
-    },
+  server.tool("list_generated_images", {
+    description: "List AI-generated images with prompts, approval status, brand assets used, and URLs.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      status: z.string().optional().describe("Filter: draft, approved, rejected"),
+    }),
     handler: async (params: any) => {
       let query = supabase
         .from("generated_images")
@@ -534,15 +472,14 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ generated_images: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ generated_images: data }, null, 2) }] };
     },
   });
 
   // ── get_image_generation_settings ──
-  server.tool({
-    name: "get_image_generation_settings",
+  server.tool("get_image_generation_settings", {
     description: "Read the company's image generation config: style, tone, brand colors, visual guidelines, best posting times.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase
         .from("image_generation_settings")
@@ -550,23 +487,19 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .eq("company_id", companyId)
         .maybeSingle();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ image_settings: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ image_settings: data }, null, 2) }] };
     },
   });
 
   // ── update_image_generation_settings ──
-  server.tool({
-    name: "update_image_generation_settings",
-    description: "Update image generation settings: style description, brand tone, visual guidelines, brand colors. Fix brand drift without code changes.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        style_description: { type: "string", description: "Visual style description" },
-        brand_tone: { type: "string", description: "Brand tone of voice" },
-        visual_guidelines: { type: "string", description: "Visual guidelines text" },
-        brand_colors: { type: "string", description: "Brand color palette description" },
-      },
-    },
+  server.tool("update_image_generation_settings", {
+    description: "Update image generation settings: style description, brand tone, visual guidelines, brand colors.",
+    inputSchema: z.object({
+      style_description: z.string().optional().describe("Visual style description"),
+      brand_tone: z.string().optional().describe("Brand tone of voice"),
+      visual_guidelines: z.string().optional().describe("Visual guidelines text"),
+      brand_colors: z.string().optional().describe("Brand color palette description"),
+    }),
     handler: async (params: any) => {
       const updates: any = {};
       if (params.style_description) updates.style_description = params.style_description;
@@ -580,39 +513,33 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", settings: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", settings: data }, null, 2) }] };
     },
   });
 
   // ── list_product_identity_profiles ──
-  server.tool({
-    name: "list_product_identity_profiles",
-    description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords. Audit for brand contamination.",
-    inputSchema: { type: "object", properties: {} },
+  server.tool("list_product_identity_profiles", {
+    description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
+    inputSchema: z.object({}),
     handler: async () => {
       const { data, error } = await supabase
         .from("product_identity_profiles")
         .select("*")
         .eq("company_id", companyId);
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ profiles: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ profiles: data }, null, 2) }] };
     },
   });
 
   // ── update_product_identity_profile ──
-  server.tool({
-    name: "update_product_identity_profile",
-    description: "Edit a product identity profile: exclusion keywords, visual fingerprints, brand colors. Fix brand alignment issues directly.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        profile_id: { type: "string", description: "UUID of the profile to update" },
-        exclusion_keywords: { type: "array", items: { type: "string" }, description: "Keywords to exclude from generation" },
-        hex_colors: { type: "array", items: { type: "string" }, description: "Brand hex colors" },
-        verbatim_labels: { type: "array", items: { type: "string" }, description: "Verbatim text labels on packaging" },
-      },
-      required: ["profile_id"],
-    },
+  server.tool("update_product_identity_profile", {
+    description: "Edit a product identity profile: exclusion keywords, visual fingerprints, brand colors.",
+    inputSchema: z.object({
+      profile_id: z.string().describe("UUID of the profile to update"),
+      exclusion_keywords: z.array(z.string()).optional().describe("Keywords to exclude from generation"),
+      hex_colors: z.array(z.string()).optional().describe("Brand hex colors"),
+      verbatim_labels: z.array(z.string()).optional().describe("Verbatim text labels on packaging"),
+    }),
     handler: async (params: any) => {
       const updates: any = {};
       if (params.exclusion_keywords) updates.exclusion_keywords = params.exclusion_keywords;
@@ -626,21 +553,17 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", profile: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", profile: data }, null, 2) }] };
     },
   });
 
   // ── list_video_jobs ──
-  server.tool({
-    name: "list_video_jobs",
-    description: "List video generation jobs with status, provider (MiniMax/Veo), aspect ratio, prompt, and result URL. Diagnose failures and track quality.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 30)" },
-        status: { type: "string", description: "Filter: pending, processing, completed, failed" },
-      },
-    },
+  server.tool("list_video_jobs", {
+    description: "List video generation jobs with status, provider, aspect ratio, prompt, and result URL.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 30)"),
+      status: z.string().optional().describe("Filter: pending, processing, completed, failed"),
+    }),
     handler: async (params: any) => {
       let query = supabase
         .from("video_generation_jobs")
@@ -651,7 +574,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ video_jobs: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ video_jobs: data }, null, 2) }] };
     },
   });
 
@@ -679,29 +602,29 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     return await res.json();
   }
 
-  const bmsTools: Array<{ name: string; intent: string; description: string; inputSchema: any }> = [
-    { name: "bms_check_stock", intent: "check_stock", description: "Check product stock levels in the BMS.", inputSchema: { type: "object", properties: { product_name: { type: "string" } } } },
-    { name: "bms_record_sale", intent: "record_sale", description: "Record a completed sale transaction in the BMS.", inputSchema: { type: "object", properties: { product_name: { type: "string" }, quantity: { type: "number" }, customer_phone: { type: "string" }, amount: { type: "number" } }, required: ["product_name", "quantity"] } },
-    { name: "bms_create_invoice", intent: "create_invoice", description: "Generate an invoice for a customer.", inputSchema: { type: "object", properties: { customer_name: { type: "string" }, customer_phone: { type: "string" }, items: { type: "array", items: { type: "object" } } }, required: ["customer_name", "items"] } },
-    { name: "bms_send_receipt", intent: "send_receipt", description: "Send a receipt to a customer.", inputSchema: { type: "object", properties: { customer_phone: { type: "string" }, transaction_id: { type: "string" } }, required: ["customer_phone"] } },
-    { name: "bms_generate_payment_link", intent: "generate_payment_link", description: "Create a Lenco payment link for checkout.", inputSchema: { type: "object", properties: { amount: { type: "number" }, description: { type: "string" }, customer_phone: { type: "string" } }, required: ["amount", "description"] } },
-    { name: "bms_get_sales_summary", intent: "get_sales_summary", description: "Get revenue and sales summary report from BMS.", inputSchema: { type: "object", properties: { period: { type: "string", description: "today, week, month" } } } },
-    { name: "bms_list_products", intent: "list_products", description: "List all products from the BMS catalog.", inputSchema: { type: "object", properties: { category: { type: "string" } } } },
-    { name: "bms_low_stock_alerts", intent: "low_stock_alerts", description: "Get items below reorder threshold.", inputSchema: { type: "object", properties: {} } },
-    { name: "bms_who_owes", intent: "who_owes", description: "Get outstanding customer debts.", inputSchema: { type: "object", properties: {} } },
-    { name: "bms_profit_loss_report", intent: "profit_loss_report", description: "Get profit and loss financial report.", inputSchema: { type: "object", properties: { period: { type: "string" } } } },
-    { name: "bms_create_order", intent: "create_order", description: "Create a new order in the BMS.", inputSchema: { type: "object", properties: { customer_name: { type: "string" }, customer_phone: { type: "string" }, items: { type: "array", items: { type: "object" } } }, required: ["customer_name", "items"] } },
-    { name: "bms_get_order_status", intent: "get_order_status", description: "Track order fulfillment status.", inputSchema: { type: "object", properties: { order_id: { type: "string" } }, required: ["order_id"] } },
+  // BMS tools
+  const bmsToolDefs: Array<{ name: string; intent: string; description: string; schema: z.ZodType }> = [
+    { name: "bms_check_stock", intent: "check_stock", description: "Check product stock levels in the BMS.", schema: z.object({ product_name: z.string().optional() }) },
+    { name: "bms_record_sale", intent: "record_sale", description: "Record a completed sale transaction in the BMS.", schema: z.object({ product_name: z.string(), quantity: z.number(), customer_phone: z.string().optional(), amount: z.number().optional() }) },
+    { name: "bms_create_invoice", intent: "create_invoice", description: "Generate an invoice for a customer.", schema: z.object({ customer_name: z.string(), customer_phone: z.string().optional(), items: z.array(z.any()) }) },
+    { name: "bms_send_receipt", intent: "send_receipt", description: "Send a receipt to a customer.", schema: z.object({ customer_phone: z.string(), transaction_id: z.string().optional() }) },
+    { name: "bms_generate_payment_link", intent: "generate_payment_link", description: "Create a Lenco payment link for checkout.", schema: z.object({ amount: z.number(), description: z.string(), customer_phone: z.string().optional() }) },
+    { name: "bms_get_sales_summary", intent: "get_sales_summary", description: "Get revenue and sales summary report from BMS.", schema: z.object({ period: z.string().optional().describe("today, week, month") }) },
+    { name: "bms_list_products", intent: "list_products", description: "List all products from the BMS catalog.", schema: z.object({ category: z.string().optional() }) },
+    { name: "bms_low_stock_alerts", intent: "low_stock_alerts", description: "Get items below reorder threshold.", schema: z.object({}) },
+    { name: "bms_who_owes", intent: "who_owes", description: "Get outstanding customer debts.", schema: z.object({}) },
+    { name: "bms_profit_loss_report", intent: "profit_loss_report", description: "Get profit and loss financial report.", schema: z.object({ period: z.string().optional() }) },
+    { name: "bms_create_order", intent: "create_order", description: "Create a new order in the BMS.", schema: z.object({ customer_name: z.string(), customer_phone: z.string().optional(), items: z.array(z.any()) }) },
+    { name: "bms_get_order_status", intent: "get_order_status", description: "Track order fulfillment status.", schema: z.object({ order_id: z.string() }) },
   ];
 
-  for (const tool of bmsTools) {
-    server.tool({
-      name: tool.name,
+  for (const tool of bmsToolDefs) {
+    server.tool(tool.name, {
       description: tool.description,
-      inputSchema: tool.inputSchema,
+      inputSchema: tool.schema,
       handler: async (params: any) => {
         const result = await callBmsViaEdge(tool.intent, params || {});
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
     });
   }
@@ -710,74 +633,54 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // META PLATFORM OUTBOUND TOOLS
   // ═══════════════════════════════════════════════════════════
 
-  server.tool({
-    name: "send_facebook_message",
+  server.tool("send_facebook_message", {
     description: "Send a Facebook Messenger DM to a customer via their conversation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        conversation_id: { type: "string", description: "Conversation UUID (must be a Messenger conversation)" },
-        text: { type: "string", description: "Message text" },
-      },
-      required: ["conversation_id", "text"],
-    },
+    inputSchema: z.object({
+      conversation_id: z.string().describe("Conversation UUID (must be a Messenger conversation)"),
+      text: z.string().describe("Message text"),
+    }),
     handler: async (params: any) => {
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "send_instagram_message",
+  server.tool("send_instagram_message", {
     description: "Send an Instagram DM to a customer via their conversation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        conversation_id: { type: "string", description: "Conversation UUID (must be an IG DM conversation)" },
-        text: { type: "string", description: "Message text" },
-      },
-      required: ["conversation_id", "text"],
-    },
+    inputSchema: z.object({
+      conversation_id: z.string().describe("Conversation UUID (must be an IG DM conversation)"),
+      text: z.string().describe("Message text"),
+    }),
     handler: async (params: any) => {
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "reply_facebook_comment",
+  server.tool("reply_facebook_comment", {
     description: "Reply to a Facebook or Instagram comment on a post.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        comment_id: { type: "string", description: "The Meta comment ID to reply to" },
-        message: { type: "string", description: "Reply text" },
-        company_id_override: { type: "string", description: "Optional company ID override" },
-      },
-      required: ["comment_id", "message"],
-    },
+    inputSchema: z.object({
+      comment_id: z.string().describe("The Meta comment ID to reply to"),
+      message: z.string().describe("Reply text"),
+      company_id_override: z.string().optional().describe("Optional company ID override"),
+    }),
     handler: async (params: any) => {
       const result = await callEdgeFunction("send-facebook-comment-reply", {
         comment_id: params.comment_id,
         message: params.message,
         company_id: params.company_id_override || companyId,
       });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "publish_facebook_post",
+  server.tool("publish_facebook_post", {
     description: "Publish a post immediately to the company's Facebook Page.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        caption: { type: "string", description: "Post caption/text" },
-        image_url: { type: "string", description: "Image URL to attach" },
-        video_url: { type: "string", description: "Video URL to attach" },
-      },
-      required: ["caption"],
-    },
+    inputSchema: z.object({
+      caption: z.string().describe("Post caption/text"),
+      image_url: z.string().optional().describe("Image URL to attach"),
+      video_url: z.string().optional().describe("Video URL to attach"),
+    }),
     handler: async (params: any) => {
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
@@ -786,22 +689,17 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         image_url: params.image_url || null,
         video_url: params.video_url || null,
       });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "publish_instagram_post",
+  server.tool("publish_instagram_post", {
     description: "Publish a post immediately to the company's Instagram Business account.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        caption: { type: "string", description: "Post caption/text" },
-        image_url: { type: "string", description: "Image URL (required for IG)" },
-        video_url: { type: "string", description: "Video URL for Reels" },
-      },
-      required: ["caption", "image_url"],
-    },
+    inputSchema: z.object({
+      caption: z.string().describe("Post caption/text"),
+      image_url: z.string().describe("Image URL (required for IG)"),
+      video_url: z.string().optional().describe("Video URL for Reels"),
+    }),
     handler: async (params: any) => {
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
@@ -810,7 +708,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         image_url: params.image_url,
         video_url: params.video_url || null,
       });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });
 
@@ -818,21 +716,17 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // OPERATIONAL CONTROL TOOLS
   // ═══════════════════════════════════════════════════════════
 
-  server.tool({
-    name: "update_ai_config",
-    description: "Update AI configuration: model, temperature, system prompt, enabled tools, response style. Allows the agent to self-tune.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        primary_model: { type: "string" },
-        primary_temperature: { type: "number" },
-        system_instructions: { type: "string" },
-        enabled_tools: { type: "array", items: { type: "string" } },
-        response_length: { type: "string", enum: ["short", "medium", "long"] },
-        fallback_message: { type: "string" },
-        max_tokens: { type: "number" },
-      },
-    },
+  server.tool("update_ai_config", {
+    description: "Update AI configuration: model, temperature, system prompt, enabled tools, response style.",
+    inputSchema: z.object({
+      primary_model: z.string().optional(),
+      primary_temperature: z.number().optional(),
+      system_instructions: z.string().optional(),
+      enabled_tools: z.array(z.string()).optional(),
+      response_length: z.enum(["short", "medium", "long"]).optional(),
+      fallback_message: z.string().optional(),
+      max_tokens: z.number().optional(),
+    }),
     handler: async (params: any) => {
       const updates: any = { updated_at: new Date().toISOString() };
       for (const key of ["primary_model", "primary_temperature", "system_instructions", "enabled_tools", "response_length", "fallback_message", "max_tokens"]) {
@@ -845,20 +739,16 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ action: "updated", config: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", config: data }, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "list_payment_transactions",
+  server.tool("list_payment_transactions", {
     description: "List payment transactions for revenue tracking and financial analysis.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        limit: { type: "number", description: "Max results (default 50)" },
-        status: { type: "string", description: "Filter: completed, pending, failed" },
-      },
-    },
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      status: z.string().optional().describe("Filter: completed, pending, failed"),
+    }),
     handler: async (params: any) => {
       let query = supabase
         .from("payment_transactions")
@@ -869,20 +759,19 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("payment_status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text", text: JSON.stringify({ transactions: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ transactions: data }, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "get_agent_strategy",
+  server.tool("get_agent_strategy", {
     description: "Read current agent routing, strategy settings, and content scheduling preferences.",
-    inputSchema: { type: "object", properties: {} },
+    inputSchema: z.object({}),
     handler: async () => {
       const [aiRes, agentRes] = await Promise.all([
         supabase.from("company_ai_overrides").select("routing_enabled, routing_model, routing_confidence_threshold, enabled_tools, service_mode, supervisor_enabled").eq("company_id", companyId).maybeSingle(),
         supabase.from("agent_settings").select("*").eq("company_id", companyId).maybeSingle(),
       ]);
-      return { content: [{ type: "text", text: JSON.stringify({ routing: aiRes.data, content_strategy: agentRes.data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ routing: aiRes.data, content_strategy: agentRes.data }, null, 2) }] };
     },
   });
 
@@ -890,10 +779,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // SAFETY GUARDRAIL TOOLS
   // ═══════════════════════════════════════════════════════════
 
-  server.tool({
-    name: "get_spending_guard",
-    description: "Check if the agent is within daily spending limits. MUST be called before any spend action (ads, payment links, sales above threshold).",
-    inputSchema: { type: "object", properties: {} },
+  server.tool("get_spending_guard", {
+    description: "Check if the agent is within daily spending limits. MUST be called before any spend action.",
+    inputSchema: z.object({}),
     handler: async () => {
       const { data: limits } = await supabase
         .from("agent_spending_limits")
@@ -901,7 +789,6 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .eq("company_id", companyId)
         .maybeSingle();
 
-      // Count today's payment links created
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const { data: todayTxns } = await supabase
@@ -915,7 +802,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       const saleThreshold = limits?.sale_approval_threshold || 500;
 
       return {
-        content: [{ type: "text", text: JSON.stringify({
+        content: [{ type: "text" as const, text: JSON.stringify({
           allowed: todaySpend < dailyLimit,
           today_spend: todaySpend,
           daily_limit: dailyLimit,
@@ -928,20 +815,14 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     },
   });
 
-  server.tool({
-    name: "request_approval",
-    description: "Send a Human-in-the-Loop approval request to the company owner via WhatsApp. Use before high-risk actions: large sales, AI config changes, ad spend.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        action_type: { type: "string", description: "Type: sale, ai_config_change, publish, expense" },
-        action_summary: { type: "string", description: "Human-readable summary of what you want to do" },
-        action_params: { type: "object", description: "Parameters of the proposed action" },
-      },
-      required: ["action_type", "action_summary"],
-    },
+  server.tool("request_approval", {
+    description: "Send a Human-in-the-Loop approval request to the company owner via WhatsApp.",
+    inputSchema: z.object({
+      action_type: z.string().describe("Type: sale, ai_config_change, publish, expense"),
+      action_summary: z.string().describe("Human-readable summary of what you want to do"),
+      action_params: z.any().optional().describe("Parameters of the proposed action"),
+    }),
     handler: async (params: any) => {
-      // Save approval request
       const { data: request, error: insertErr } = await supabase
         .from("agent_approval_requests")
         .insert({
@@ -954,7 +835,6 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .single();
       if (insertErr) throw insertErr;
 
-      // Send WhatsApp notification to boss
       const { data: company } = await supabase.from("companies").select("boss_phone, name").eq("id", companyId).single();
       if (company?.boss_phone) {
         const msg = `🤖 *Agent Approval Request*\n\nAction: ${params.action_type}\n${params.action_summary}\n\nReply YES to approve or NO to reject.\n\n_Request ID: ${request.id}_`;
@@ -965,18 +845,16 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         });
       }
 
-      return { content: [{ type: "text", text: JSON.stringify({ status: "pending", request_id: request.id, notified: !!company?.boss_phone }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ status: "pending", request_id: request.id, notified: !!company?.boss_phone }, null, 2) }] };
     },
   });
 
-  server.tool({
-    name: "get_financial_health",
-    description: "Check company financial health: credit balance + BMS P&L. Returns mode: 'expansion' if profitable, 'cost_cutting' if in the red. Use to decide strategy.",
-    inputSchema: { type: "object", properties: {} },
+  server.tool("get_financial_health", {
+    description: "Check company financial health: credit balance + BMS P&L. Returns mode: 'expansion' if profitable, 'cost_cutting' if in the red.",
+    inputSchema: z.object({}),
     handler: async () => {
       const { data: company } = await supabase.from("companies").select("credit_balance, name").eq("id", companyId).single();
       
-      // Try to get P&L from BMS
       let bmsHealth: any = null;
       try {
         bmsHealth = await callBmsViaEdge("profit_loss_report", {});
@@ -988,7 +866,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       const mode = creditBalance > 0 ? "expansion" : "cost_cutting";
 
       return {
-        content: [{ type: "text", text: JSON.stringify({
+        content: [{ type: "text" as const, text: JSON.stringify({
           mode,
           credit_balance: creditBalance,
           bms_pnl: bmsHealth?.data || null,
@@ -1010,7 +888,6 @@ app.use("*", async (c, next) => {
     return new Response(null, { headers: corsHeaders });
   }
   await next();
-  // Add CORS headers to all responses
   Object.entries(corsHeaders).forEach(([k, v]) => c.res.headers.set(k, v));
 });
 
