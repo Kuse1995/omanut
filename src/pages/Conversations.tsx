@@ -69,7 +69,7 @@ const Conversations = () => {
       .eq('company_id', userData.company_id)
       .eq('archived', false)
       .order('pinned', { ascending: false })
-      .order('started_at', { ascending: false })
+      .order('last_message_at', { ascending: false })
       .limit(50);
 
     if (convError) {
