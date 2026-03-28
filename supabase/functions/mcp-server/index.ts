@@ -58,7 +58,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
     version: "1.0.0",
-    schemaAdapter: (schema: unknown) => z.toJSONSchema(schema as z.ZodType),
+    schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
   // ── list_conversations ──
