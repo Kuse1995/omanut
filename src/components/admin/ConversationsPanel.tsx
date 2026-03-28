@@ -108,9 +108,11 @@ export const ConversationsPanel = () => {
     
     const { data: convData, error: convError } = await supabase
       .from('conversations')
-      .select('id, customer_name, phone, started_at, human_takeover, active_agent, unread_count')
+      .select('id, customer_name, phone, started_at, last_message_at, last_message_preview, human_takeover, active_agent, unread_count, pinned, archived, platform')
       .eq('company_id', selectedCompany.id)
-      .order('started_at', { ascending: false })
+      .eq('archived', false)
+      .order('pinned', { ascending: false })
+      .order('last_message_at', { ascending: false })
       .limit(50);
 
     if (convError) {
@@ -340,7 +342,7 @@ export const ConversationsPanel = () => {
                           {conv.customer_name || conv.phone || 'Unknown'}
                         </span>
                         <span className="text-[10px] text-muted-foreground shrink-0">
-                          {formatDistanceToNow(new Date(conv.started_at), { addSuffix: false })}
+                          {formatDistanceToNow(new Date(conv.last_message_at || conv.started_at), { addSuffix: false })}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate mb-1">
