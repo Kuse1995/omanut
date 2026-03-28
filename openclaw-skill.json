@@ -2,11 +2,15 @@
   "skill": {
     "name": "omanut-ai",
     "description": "Autonomous Company-in-a-Box — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, brand alignment, BMS operations (sales, invoices, stock, payments), Meta platform publishing (Facebook, Instagram), and safety guardrails (budget ceilings, HITL approval, P&L checks).",
-    "transport": "streamable-http",
-    "url": "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
-    "headers": {
-      "x-api-key": "YOUR_API_KEY_HERE"
-    }
+    "transport": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "mcp-remote",
+      "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
+      "--header",
+      "x-api-key:YOUR_API_KEY_HERE"
+    ]
   },
   "tools_overview": {
     "conversations": {
@@ -99,10 +103,10 @@
   },
   "setup_instructions": [
     "1. Generate an API key in the Omanut dashboard (Settings → API Keys)",
-    "2. Replace YOUR_API_KEY_HERE with your key",
+    "2. Replace YOUR_API_KEY_HERE in the args array with your key",
     "3. Save this file to ~/.openclaw/skills/omanut-ai.json",
-    "4. Restart OpenClaw to load the skill",
-    "5. Configure agent_spending_limits in the database for budget guardrails",
-    "6. Set the company boss_phone for HITL approval notifications"
+    "4. Make sure Node.js (v18+) is installed (needed for npx)",
+    "5. Restart OpenClaw — first launch takes a few seconds as mcp-remote downloads",
+    "6. Test with: 'List my recent conversations'"
   ]
 }
