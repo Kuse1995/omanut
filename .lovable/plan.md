@@ -1,78 +1,49 @@
 
+Root cause is now clear from the live logs: the deployed `mcp-server` is crashing at startup because `schemaAdapter` calls `z.toJSONSchema(...)`, but the function is importing `zod@^3.25.0`, and that helper is not available there. So the earlier tool-registration refactor likely deployed, but the schema conversion approach is incompatible with the actual runtime version.
 
-# Fix MCP Server 500 Error — Wrong `mcp-lite` API Usage
+Plan:
+1. Fix the MCP server bootstrap
+   - Update `supabase/functions/mcp-server/index.ts` to stop using `z.toJSONSchema(...)` in `schemaAdapter`.
+   - Replace it with a schema conversion approach that works in the edge runtime:
+     - either upgrade to a Zod/runtime combination that definitely supports `toJSONSchema`
+     - or preferably remove the dependency on that helper and use the `mcp-lite`-supported schema format directly in a stable way.
 
-## Root Cause
+2. Keep the current tool definitions compatible
+   - Review how all `server.tool(...)` registrations are currently structured.
+   - Preserve the corrected `server.tool("name", { ... })` shape.
+   - Make sure the chosen schema approach works for every existing tool without rewriting business logic.
 
-The edge function logs show this error on every request:
-```
-TypeError: Cannot read properties of undefined (reading 'inputSchema')
-    at McpServer.tool (mcp-lite/dist/index.js:726:61)
-```
+3. Align dependency config
+   - Update `supabase/functions/mcp-server/deno.json` so the declared imports match the implementation.
+   - Avoid version drift between the code pattern and the available Zod API.
 
-The `mcp-lite` library expects this call signature:
-```ts
-mcp.tool('toolName', { description, inputSchema: z.object({...}), handler })
-```
+4. Verify HTTP transport assumptions
+   - Keep the existing `StreamableHttpTransport` route and API-key auth flow intact.
+   - Ensure the function can complete server creation before handling requests, since the current failure happens before any MCP request is processed.
 
-Our code uses:
-```ts
-server.tool({ name: "toolName", description, inputSchema: { type: "object", ... }, handler })
-```
+5. Re-test the expected failure mode
+   - After the fix, validate that:
+     - invalid API keys return 401/403
+     - valid requests no longer return 500
+     - OpenClaw no longer sees `MCP error -32000: Connection closed`
 
-Three issues:
-1. **Name must be the first argument** (string), not inside the config object
-2. **inputSchema must be a Zod schema**, not a plain JSON Schema object
-3. **McpServer needs a `schemaAdapter`** to convert Zod → JSON Schema
+Files to update:
+- `supabase/functions/mcp-server/index.ts`
+- `supabase/functions/mcp-server/deno.json`
 
-## Fix
-
-### 1. Update `deno.json` — add Zod dependency
-
-```json
-{
-  "imports": {
-    "hono": "npm:hono@^4.7.10",
-    "mcp-lite": "npm:mcp-lite@^0.10.0",
-    "zod": "npm:zod@^4.1.12"
-  }
-}
-```
-
-### 2. Rewrite `mcp-server/index.ts` — all ~40 tool registrations
-
-Every `server.tool({...})` call must be converted from:
-```ts
-server.tool({
-  name: "list_conversations",
-  description: "...",
-  inputSchema: { type: "object", properties: { limit: { type: "number" } } },
-  handler: async (params) => { ... }
-});
+Technical note:
+```text
+Current failing path:
+request -> authenticateApiKey -> createMcpServer()
+                              -> schemaAdapter(...)
+                              -> z.toJSONSchema is undefined
+                              -> startup crash -> HTTP 500 -> mcp-remote disconnects
 ```
 
-To:
-```ts
-server.tool("list_conversations", {
-  description: "...",
-  inputSchema: z.object({ limit: z.number().optional() }),
-  handler: async (params) => { ... }
-});
+Expected result after fix:
+```text
+request -> authenticateApiKey -> createMcpServer()
+                              -> tools register successfully
+                              -> StreamableHttpTransport handles MCP request
+                              -> OpenClaw connects normally
 ```
-
-Also update the McpServer constructor:
-```ts
-import { z } from "zod";
-const server = new McpServer({
-  name: "omanut-ai",
-  version: "1.0.0",
-  schemaAdapter: (schema) => z.toJSONSchema(schema as z.ZodType),
-});
-```
-
-This is a large mechanical refactor (~40 tools, ~1000 lines) but each change follows the same pattern. No logic changes — only the tool registration API format.
-
-## Files Modified
-- `supabase/functions/mcp-server/deno.json` — add `zod` import
-- `supabase/functions/mcp-server/index.ts` — fix all tool registrations to use correct mcp-lite API
-
