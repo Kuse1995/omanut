@@ -1360,6 +1360,7 @@ export type Database = {
           human_takeover: boolean | null
           id: string
           is_paused_for_human: boolean | null
+          last_message_at: string | null
           last_message_preview: string | null
           phone: string | null
           pinned: boolean | null
@@ -1385,6 +1386,7 @@ export type Database = {
           human_takeover?: boolean | null
           id?: string
           is_paused_for_human?: boolean | null
+          last_message_at?: string | null
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
@@ -1410,6 +1412,7 @@ export type Database = {
           human_takeover?: boolean | null
           id?: string
           is_paused_for_human?: boolean | null
+          last_message_at?: string | null
           last_message_preview?: string | null
           phone?: string | null
           pinned?: boolean | null
