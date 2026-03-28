@@ -19,25 +19,38 @@ async function hashKey(key: string): Promise<string> {
 }
 
 async function authenticateApiKey(req: Request, supabase: any): Promise<{ companyId: string } | Response> {
-  const apiKey = req.headers.get("x-api-key");
-  if (!apiKey) {
+  const rawApiKey = req.headers.get("x-api-key");
+  if (!rawApiKey) {
     return new Response(JSON.stringify({ error: "Missing x-api-key header" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+
+  // Trim whitespace/newlines that mcp-remote bridge might add
+  const apiKey = rawApiKey.trim();
+  const keyPrefix = apiKey.substring(0, 12);
   const keyHash = await hashKey(apiKey);
+
+  console.log(`[MCP-AUTH] Key prefix: ${keyPrefix}, computed hash: ${keyHash.substring(0, 16)}...`);
+
   const { data: keyRecord, error } = await supabase
     .from("company_api_keys")
     .select("id, company_id, is_active, expires_at")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
-  if (error || !keyRecord) {
+  if (error) {
+    console.error("[MCP-AUTH] DB query error:", error.message);
+  }
+
+  if (!keyRecord) {
+    console.warn(`[MCP-AUTH] No key found for prefix ${keyPrefix} hash ${keyHash.substring(0, 16)}...`);
     return new Response(JSON.stringify({ error: "Invalid API key" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
   if (!keyRecord.is_active) {
+    console.warn(`[MCP-AUTH] Key ${keyPrefix} is inactive`);
     return new Response(JSON.stringify({ error: "API key revoked" }), {
       status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -48,6 +61,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<{ compan
     });
   }
 
+  console.log(`[MCP-AUTH] Authenticated company: ${keyRecord.company_id}`);
   // fire-and-forget last_used_at update
   supabase.from("company_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRecord.id).then(() => {});
 
