@@ -903,7 +903,8 @@ app.all("/*", async (c) => {
 
   const mcpServer = createMcpServer(supabase, authResult.companyId);
   const transport = new StreamableHttpTransport();
-  return await transport.handleRequest(c.req.raw, mcpServer);
+  const httpHandler = transport.bind(mcpServer);
+  return await httpHandler(c.req.raw);
 });
 
 Deno.serve(app.fetch);
