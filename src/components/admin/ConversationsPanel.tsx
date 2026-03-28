@@ -31,9 +31,14 @@ interface Conversation {
   customer_name: string | null;
   phone: string | null;
   started_at: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
   human_takeover: boolean;
   active_agent: string | null;
   unread_count: number;
+  pinned: boolean | null;
+  archived: boolean | null;
+  platform: string;
   messages: Message[];
 }
 
