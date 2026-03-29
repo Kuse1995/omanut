@@ -453,7 +453,6 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     onError: (err: any) => toast.error(err.message),
   });
 
-  const [testError, setTestError] = useState<string | null>(null);
 
   const handleTest = async () => {
     setTesting(true);
