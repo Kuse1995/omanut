@@ -462,16 +462,23 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
       const { data, error } = await supabase.functions.invoke('bms-agent', {
         body: { action: 'list_products', params: { company_id: companyId, limit: 1 } },
       });
+
       if (error) throw error;
+
       if (data?.success) {
         setTestResult('success');
+        toast.success('BMS connected successfully');
       } else {
+        const message = data?.error || 'Unknown error from BMS';
         setTestResult('error');
-        setTestError(data?.error || 'Unknown error from BMS');
+        setTestError(message);
+        toast.error(`BMS test failed: ${message}`);
       }
     } catch (err: any) {
+      const message = err?.message || 'Connection failed';
       setTestResult('error');
-      setTestError(err?.message || 'Connection failed');
+      setTestError(message);
+      toast.error(`BMS test failed: ${message}`);
     } finally {
       setTesting(false);
     }
@@ -566,15 +573,16 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
             disabled={testing || !bmsConnection}
             className="gap-1"
           >
-            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : testResult === 'success' ? <CheckCircle className="h-3 w-3 text-green-500" /> : testResult === 'error' ? <XCircle className="h-3 w-3 text-destructive" /> : null}
-            Test
+            {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : testResult === 'success' ? <CheckCircle className="h-3 w-3 text-primary" /> : testResult === 'error' ? <XCircle className="h-3 w-3 text-destructive" /> : null}
+            {testing ? 'Testing...' : testResult === 'success' ? 'Connected' : testResult === 'error' ? 'Failed' : 'Test'}
           </Button>
         </div>
 
         {testResult === 'error' && testError && (
-          <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1.5">
-            ⚠️ {testError}
-          </p>
+          <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+            <p className="text-xs font-medium text-destructive">BMS test failed</p>
+            <p className="text-xs text-destructive/90 break-words">{testError}</p>
+          </div>
         )}
       </CardContent>
     </Card>

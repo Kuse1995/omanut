@@ -20,30 +20,67 @@ async function callBMS(
   params: Record<string, any>
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
-    // Build spec-compliant payload: { intent, tenant_id, ...flat fields }
-    const { company_id, ...restParams } = params; // strip company_id from forwarded params
+    const { company_id, ...restParams } = params;
     const payload: Record<string, any> = {
       intent,
       tenant_id: connection.tenant_id,
       ...restParams,
     };
 
-    const res = await fetch(connection.bridge_url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-secret": connection.api_secret,
+    const attempts = [
+      {
+        label: "x-api-secret",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-secret": connection.api_secret,
+        },
       },
-      body: JSON.stringify(payload),
-    });
+      {
+        label: "authorization-fallback",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-secret": connection.api_secret,
+          "Authorization": `Bearer ${connection.api_secret}`,
+        },
+      },
+    ];
 
-    const data = await res.json();
+    let lastError = "BMS connection failed";
 
-    if (!res.ok || !data.success) {
-      return { success: false, error: data.error || data.message || `BMS returned status ${res.status}` };
+    for (const attempt of attempts) {
+      const res = await fetch(connection.bridge_url, {
+        method: "POST",
+        headers: attempt.headers,
+        body: JSON.stringify(payload),
+      });
+
+      const rawBody = await res.text();
+      let data: any = {};
+
+      try {
+        data = rawBody ? JSON.parse(rawBody) : {};
+      } catch {
+        data = { raw: rawBody };
+      }
+
+      if (res.ok && data.success !== false) {
+        return { success: true, data: data.data || data };
+      }
+
+      lastError = data.error || data.message || data.raw || `BMS returned status ${res.status}`;
+      const normalizedError = String(lastError).toLowerCase();
+      const shouldRetryWithAuthorization =
+        attempt.label === "x-api-secret" &&
+        (normalizedError.includes("missing authorization") || normalizedError.includes("unauthorized"));
+
+      if (!shouldRetryWithAuthorization) {
+        return { success: false, error: lastError };
+      }
+
+      console.warn(`[BMS-AGENT] ${attempt.label} failed, retrying with Authorization fallback: ${lastError}`);
     }
 
-    return { success: true, data: data.data || data };
+    return { success: false, error: lastError };
   } catch (err) {
     console.error(`[BMS-AGENT] callBMS(${intent}) error:`, err);
     return { success: false, error: err instanceof Error ? err.message : "BMS connection failed" };
