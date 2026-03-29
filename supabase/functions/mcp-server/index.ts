@@ -427,7 +427,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         status: params.action === "approve" ? "approved" : "rejected",
         updated_at: new Date().toISOString(),
       };
-      if (params.updated_caption) updates.caption = params.updated_caption;
+      if (params.updated_caption) updates.content = params.updated_caption;
       if (params.rejection_reason) updates.rejection_reason = params.rejection_reason;
       const { data, error } = await supabase
         .from("scheduled_posts")
@@ -452,16 +452,32 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
     }),
     handler: async (params: any) => {
+      // Fetch page_id from meta_credentials (required NOT NULL column)
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("page_id")
+        .eq("company_id", companyId)
+        .limit(1)
+        .maybeSingle();
+
+      if (!cred?.page_id) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          error: "No Meta credentials configured. Add a Facebook Page in Meta Integrations first."
+        }) }] };
+      }
+
       const { data, error } = await supabase
         .from("scheduled_posts")
         .insert({
           company_id: companyId,
-          caption: params.caption,
+          page_id: cred.page_id,
+          content: params.caption,
           image_url: params.image_url || null,
           video_url: params.video_url || null,
-          platform: params.platform,
+          target_platform: params.platform,
           scheduled_time: params.scheduled_time,
           status: "pending_approval",
+          created_by: "00000000-0000-0000-0000-000000000000",
         })
         .select()
         .single();
