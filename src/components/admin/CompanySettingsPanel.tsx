@@ -393,6 +393,7 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
   const [isActive, setIsActive] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   const { data: bmsConnection, isLoading } = useQuery({
     queryKey: ['bms-connection', companyId],
@@ -452,17 +453,25 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     onError: (err: any) => toast.error(err.message),
   });
 
+
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
+    setTestError(null);
     try {
       const { data, error } = await supabase.functions.invoke('bms-agent', {
         body: { action: 'list_products', params: { company_id: companyId, limit: 1 } },
       });
       if (error) throw error;
-      setTestResult(data?.success ? 'success' : 'error');
-    } catch {
+      if (data?.success) {
+        setTestResult('success');
+      } else {
+        setTestResult('error');
+        setTestError(data?.error || 'Unknown error from BMS');
+      }
+    } catch (err: any) {
       setTestResult('error');
+      setTestError(err?.message || 'Connection failed');
     } finally {
       setTesting(false);
     }
@@ -561,6 +570,12 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
             Test
           </Button>
         </div>
+
+        {testResult === 'error' && testError && (
+          <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1.5">
+            ⚠️ {testError}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
