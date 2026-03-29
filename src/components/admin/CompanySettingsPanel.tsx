@@ -460,7 +460,7 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     setTestError(null);
     try {
       const { data, error } = await supabase.functions.invoke('bms-agent', {
-        body: { action: 'list_products', params: { company_id: companyId, limit: 1 } },
+        body: { action: 'health_check', params: { company_id: companyId } },
       });
 
       if (error) throw error;

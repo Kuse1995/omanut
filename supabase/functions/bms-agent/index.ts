@@ -22,6 +22,7 @@ async function callBMS(
   try {
     const { company_id, ...restParams } = params;
     const payload: Record<string, any> = {
+      action: intent,
       intent,
       tenant_id: connection.tenant_id,
       ...restParams,
