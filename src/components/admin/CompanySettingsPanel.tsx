@@ -393,6 +393,7 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
   const [isActive, setIsActive] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
   const { data: bmsConnection, isLoading } = useQuery({
     queryKey: ['bms-connection', companyId],
