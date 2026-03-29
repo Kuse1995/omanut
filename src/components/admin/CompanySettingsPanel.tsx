@@ -570,6 +570,12 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
             Test
           </Button>
         </div>
+
+        {testResult === 'error' && testError && (
+          <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1.5">
+            ⚠️ {testError}
+          </p>
+        )}
       </CardContent>
     </Card>
   );
