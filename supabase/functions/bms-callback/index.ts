@@ -26,7 +26,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { event, company_id: payloadCompanyId, tenant_id: payloadTenantId, data } = body;
+    // Accept secret from x-api-secret header (preferred) or Authorization: Bearer header (legacy)
+    const customSecret = req.headers.get("x-api-secret");
     const authHeader = req.headers.get("Authorization");
+    const incomingSecret = customSecret || (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null);
 
     // --- Authentication: resolve company and validate secret ---
     let resolvedCompanyId: string | null = payloadCompanyId || null;
@@ -38,7 +41,7 @@ Deno.serve(async (req) => {
         console.error(`[BMS-CALLBACK] Unknown tenant_id: ${payloadTenantId}`);
         return respond({ success: false, error: "Unknown tenant" }, 401);
       }
-      if (!authHeader || authHeader !== `Bearer ${lookup.api_secret}`) {
+      if (!incomingSecret || incomingSecret !== lookup.api_secret) {
         console.error("[BMS-CALLBACK] Invalid secret for tenant:", payloadTenantId);
         return respond({ success: false, error: "Unauthorized" }, 401);
       }
@@ -46,7 +49,7 @@ Deno.serve(async (req) => {
     } else {
       // Legacy single-tenant path (Finch): validate against global secret
       const BMS_API_SECRET = Deno.env.get("BMS_API_SECRET");
-      if (!BMS_API_SECRET || !authHeader || authHeader !== `Bearer ${BMS_API_SECRET}`) {
+      if (!BMS_API_SECRET || !incomingSecret || incomingSecret !== BMS_API_SECRET) {
         console.error("[BMS-CALLBACK] Unauthorized request (legacy)");
         return respond({ success: false, error: "Unauthorized" }, 401);
       }

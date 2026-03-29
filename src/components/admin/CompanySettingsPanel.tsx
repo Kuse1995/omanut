@@ -452,17 +452,26 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     onError: (err: any) => toast.error(err.message),
   });
 
+  const [testError, setTestError] = useState<string | null>(null);
+
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
+    setTestError(null);
     try {
       const { data, error } = await supabase.functions.invoke('bms-agent', {
         body: { action: 'list_products', params: { company_id: companyId, limit: 1 } },
       });
       if (error) throw error;
-      setTestResult(data?.success ? 'success' : 'error');
-    } catch {
+      if (data?.success) {
+        setTestResult('success');
+      } else {
+        setTestResult('error');
+        setTestError(data?.error || 'Unknown error from BMS');
+      }
+    } catch (err: any) {
       setTestResult('error');
+      setTestError(err?.message || 'Connection failed');
     } finally {
       setTesting(false);
     }
