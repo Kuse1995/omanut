@@ -1,45 +1,77 @@
 
 
-# Fix: BMS Connection Between Omanut OS and Omanut Automation
+# Fix: `create_scheduled_post` MCP Tool -32603 Internal Error
 
-## Problem
+## Root Cause
 
-The `bms-agent` function sends the API secret as `Authorization: Bearer <raw-hex-string>`. The Omanut OS bridge (`pkiajhllkihkuchbwrgz`) is a Supabase Edge Function. Supabase's gateway intercepts the `Authorization` header and tries to validate it as a JWT. A raw hex string is not a valid JWT, so the gateway returns "Unauthorized" before your bridge code even executes.
+The `scheduled_posts` table schema and the MCP tool's insert are mismatched in three ways:
 
-This affects both directions:
-- **Outbound** (Automation → OS): `bms-agent` calls fail with "Unauthorized"
-- **Inbound** (OS → Automation): `bms-callback` webhook may have the same issue if the OS side sends the secret in the Authorization header
+| MCP tool uses | Actual column | Issue |
+|---|---|---|
+| `caption` | `content` | Wrong column name — insert silently fails or is ignored |
+| `platform` | `target_platform` | Wrong column name |
+| *(missing)* | `page_id` (NOT NULL, no default) | Missing required field — causes the DB error |
 
-## Fix (Two Parts)
+The tool inserts `caption` and `platform` (which don't exist as columns), while the actual NOT NULL columns `content`, `page_id`, and `target_platform` are left empty. This causes a Postgres NOT NULL violation, which mcp-lite wraps as `-32603 Internal Error`.
 
-### Part 1: On the Omanut OS side (the other Supabase project)
+It "worked once" likely because the caller happened to provide data that matched a different code path, or the error was masked.
 
-You need to do ONE of these on the `pkiajhllkihkuchbwrgz` project:
+## Fix
 
-**Option A (Recommended):** Set `verify_jwt = false` on the `bms-api-bridge` function in that project's `supabase/config.toml`, then redeploy. Your bridge code should validate the secret itself (not rely on Supabase's JWT check).
+**File: `supabase/functions/mcp-server/index.ts`** (lines 454-470)
 
-**Option B:** Change the bridge to accept the secret via a custom header (e.g., `x-api-secret`) instead of `Authorization`, so it doesn't clash with Supabase's JWT validation.
+1. Map `caption` param → `content` column
+2. Map `platform` param → `target_platform` column  
+3. Look up the company's `page_id` from `meta_credentials` before inserting (same pattern used by `auto-content-creator`)
+4. Add a `created_by` field with the system UUID default
+5. Wrap the handler in try/catch to return a clear MCP error message instead of an unhandled throw
 
-### Part 2: On this project (Omanut Automation)
+Updated handler:
+```typescript
+handler: async (params: any) => {
+  // Fetch page_id from meta_credentials
+  const { data: cred } = await supabase
+    .from("meta_credentials")
+    .select("page_id")
+    .eq("company_id", companyId)
+    .limit(1)
+    .maybeSingle();
+  
+  if (!cred?.page_id) {
+    return { content: [{ type: "text", text: JSON.stringify({ 
+      error: "No Meta credentials configured. Add a Facebook Page in Meta Integrations first." 
+    }) }] };
+  }
 
-If you go with Option B above, update `bms-agent` and `bms-callback` to use the custom header:
+  const { data, error } = await supabase
+    .from("scheduled_posts")
+    .insert({
+      company_id: companyId,
+      page_id: cred.page_id,
+      content: params.caption,           // caption → content column
+      image_url: params.image_url || null,
+      video_url: params.video_url || null,
+      target_platform: params.platform,   // platform → target_platform column
+      scheduled_time: params.scheduled_time,
+      status: "pending_approval",
+      created_by: "00000000-0000-0000-0000-000000000000",
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return { content: [{ type: "text", text: JSON.stringify({ action: "created", post: data }, null, 2) }] };
+},
+```
 
-**File: `supabase/functions/bms-agent/index.ts`**
-- Change `"Authorization": \`Bearer ${connection.api_secret}\`` to `"x-api-secret": connection.api_secret`
+## Also Fix: `review_scheduled_post` (same column mismatch)
 
-**File: `supabase/functions/_shared/bms-connection.ts`**
-- No changes needed (it just loads config)
+Line 430 updates `caption` but the column is `content`. Change:
+```typescript
+if (params.updated_caption) updates.content = params.updated_caption;
+```
 
-**File: `supabase/functions/bms-callback/index.ts`**
-- Update the inbound auth check to also accept `x-api-secret` header (for when Omanut OS sends callbacks)
+## Scope
 
-### Part 3: Better error feedback in UI
-
-**File: `src/components/admin/CompanySettingsPanel.tsx`**
-- Show the actual error message from the BMS test instead of just a red X
-- Display text like "Unauthorized — check API secret and bridge JWT settings" so you can debug faster
-
-## Summary
-
-The root cause is a Supabase gateway behavior: it rejects non-JWT `Authorization` headers when `verify_jwt` is `true` (the default). The simplest fix is to set `verify_jwt = false` on the Omanut OS bridge function and let the bridge validate the secret in its own code. No changes needed on this side if you go that route — only the OS project config needs updating.
+- One file changed: `supabase/functions/mcp-server/index.ts`
+- Redeploy the `mcp-server` edge function
 
