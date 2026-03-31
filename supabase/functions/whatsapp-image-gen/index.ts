@@ -1701,7 +1701,7 @@ serve(async (req) => {
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
           const failMsg = `⚠️ Sorry, I couldn't generate that image. Please try again with a different description.`;
           const formData = new URLSearchParams();
-          formData.append('To', `whatsapp:${bossPhone}`);
+          formData.append('To', normalizeBossPhone(bossPhone));
           const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
           formData.append('From', fromNum);
           formData.append('Body', failMsg);

@@ -228,7 +228,8 @@ async function sendWhatsAppMessage(
 
   const normalizeWhatsAppNumber = (value?: string | null) => {
     if (!value) return null;
-    return value.startsWith('whatsapp:') ? value : `whatsapp:${value}`;
+    const clean = value.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+    return `whatsapp:${clean}`;
   };
 
   const fromNumber = normalizeWhatsAppNumber(company?.whatsapp_number);
