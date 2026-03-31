@@ -1389,6 +1389,13 @@ async function sendWhatsAppImage(
     body: formData.toString(),
   });
   
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[IMAGE-GEN] Failed to send WhatsApp image to ${customerPhone}:`, response.status, errorText);
+  } else {
+    console.log(`[IMAGE-GEN] WhatsApp image sent successfully to ${customerPhone}`);
+  }
+  
   return response.ok;
 }
 
