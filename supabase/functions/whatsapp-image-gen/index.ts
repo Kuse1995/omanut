@@ -1612,7 +1612,7 @@ serve(async (req) => {
               const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
               const confirmMsg = `✅ Your post has been published with the brand image!\n\n🖼️ Image attached below.`;
               const formData = new URLSearchParams();
-              formData.append('To', `whatsapp:${bossPhone}`);
+              formData.append('To', normalizeBossPhone(bossPhone));
               const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
               formData.append('From', fromNum);
               formData.append('Body', confirmMsg);
