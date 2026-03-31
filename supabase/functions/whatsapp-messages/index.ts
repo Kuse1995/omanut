@@ -2398,7 +2398,16 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
       enabledToolNames = enabledToolNames.filter(t => !paymentTools.includes(t));
       console.log('[TOOLS] Payments disabled for company - excluded payment tools:', paymentTools);
     }
-    
+
+    // Auto-merge core search & notification tools — these are always safe and required
+    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss'];
+    for (const tool of alwaysEnabledTools) {
+      if (!enabledToolNames.includes(tool)) {
+        enabledToolNames.push(tool);
+      }
+    }
+    console.log('[TOOLS] Auto-merged always-enabled tools:', alwaysEnabledTools);
+
     // Filter tools array based on enabled tools
     const filteredTools = enabledToolNames
       .filter(toolName => allToolDefinitions[toolName])
