@@ -8,6 +8,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function normalizeBossPhone(phone: string): string {
+  const clean = phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+  return `whatsapp:${clean}`;
+}
+
 // ============================================================
 // ROBUST JSON PARSER — handles malformed AI responses
 // ============================================================
