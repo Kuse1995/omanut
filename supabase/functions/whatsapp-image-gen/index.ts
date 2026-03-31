@@ -8,6 +8,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function normalizeBossPhone(phone: string): string {
+  const clean = phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+  return `whatsapp:${clean}`;
+}
+
 // ============================================================
 // ROBUST JSON PARSER — handles malformed AI responses
 // ============================================================
@@ -1607,7 +1612,7 @@ serve(async (req) => {
               const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
               const confirmMsg = `✅ Your post has been published with the brand image!\n\n🖼️ Image attached below.`;
               const formData = new URLSearchParams();
-              formData.append('To', `whatsapp:${bossPhone}`);
+              formData.append('To', normalizeBossPhone(bossPhone));
               const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
               formData.append('From', fromNum);
               formData.append('Body', confirmMsg);
@@ -1644,7 +1649,7 @@ serve(async (req) => {
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
             const failMsg = `⚠️ Image generation failed for your post. The post was NOT published.\n\nJust ask me to post again and I'll retry!`;
             const formData = new URLSearchParams();
-            formData.append('To', `whatsapp:${bossPhone}`);
+            formData.append('To', normalizeBossPhone(bossPhone));
             const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
             formData.append('From', fromNum);
             formData.append('Body', failMsg);
@@ -1670,7 +1675,7 @@ serve(async (req) => {
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
           const deliverMsg = `🎨 Your image is ready!`;
           const formData = new URLSearchParams();
-          formData.append('To', `whatsapp:${bossPhone}`);
+          formData.append('To', normalizeBossPhone(bossPhone));
           const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
           formData.append('From', fromNum);
           formData.append('Body', deliverMsg);
@@ -1696,7 +1701,7 @@ serve(async (req) => {
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
           const failMsg = `⚠️ Sorry, I couldn't generate that image. Please try again with a different description.`;
           const formData = new URLSearchParams();
-          formData.append('To', `whatsapp:${bossPhone}`);
+          formData.append('To', normalizeBossPhone(bossPhone));
           const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
           formData.append('From', fromNum);
           formData.append('Body', failMsg);
