@@ -247,7 +247,7 @@ const Conversations = () => {
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
-          companyId: userData.company_id,
+          companyId: selectedCompany.id,
           hoursBack: 23, // 23 hours
           stream: true
         }),
