@@ -214,18 +214,22 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
 
   // ── send_message ──
   server.tool("send_message", {
-    description: "Send a WhatsApp message to a customer.",
+    description: "Send a WhatsApp message to a customer. Provide either conversation_id (preferred) or phone number.",
     inputSchema: z.object({
-      phone: z.string().describe("Customer phone number"),
+      phone: z.string().optional().describe("Customer phone number (used if conversation_id not provided)"),
+      conversation_id: z.string().optional().describe("Conversation ID to send message to (preferred)"),
       message: z.string().describe("Message text"),
       media_url: z.string().optional().describe("Optional media URL"),
     }),
     handler: async (params: any) => {
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
+      const body: any = { company_id: companyId, message: params.message, media_url: params.media_url };
+      if (params.conversation_id) body.conversationId = params.conversation_id;
+      if (params.phone) body.phone = params.phone;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-        body: JSON.stringify({ company_id: companyId, phone: params.phone, message: params.message, media_url: params.media_url }),
+        body: JSON.stringify(body),
       });
       const result = await res.json();
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
