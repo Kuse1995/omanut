@@ -34,6 +34,7 @@ const Conversations = () => {
   const [followUpProgress, setFollowUpProgress] = useState<{ current: number; total: number } | null>(null);
 
   useEffect(() => {
+    if (!selectedCompany) return;
     fetchConversations();
 
     const channel = supabase
@@ -45,7 +46,7 @@ const Conversations = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [selectedCompany]);
 
   const fetchConversations = async () => {
     const { data: { session } } = await supabase.auth.getSession();
