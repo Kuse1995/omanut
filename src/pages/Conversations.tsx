@@ -231,21 +231,8 @@ const Conversations = () => {
   };
 
   const triggerAutoFollowUp = async () => {
-    // Get current user's company
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({ title: "Authentication Required", description: "Please log in first.", variant: "destructive" });
-      return;
-    }
-
-    const { data: userData } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (!userData?.company_id) {
-      toast({ title: "Error", description: "Company not found.", variant: "destructive" });
+    if (!selectedCompany) {
+      toast({ title: "Error", description: "No company selected.", variant: "destructive" });
       return;
     }
 
