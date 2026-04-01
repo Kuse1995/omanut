@@ -49,22 +49,7 @@ const Conversations = () => {
   }, [selectedCompany]);
 
   const fetchConversations = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({ title: "Authentication Required", description: "Please log in to view conversations.", variant: "destructive" });
-      return;
-    }
-
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.company_id) {
-      toast({ title: "Error", description: "Failed to load user data.", variant: "destructive" });
-      return;
-    }
+    if (!selectedCompany) return;
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
