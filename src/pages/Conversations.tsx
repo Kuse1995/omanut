@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 
 const Conversations = () => {
   const { toast } = useToast();
+  const { selectedCompany } = useCompany();
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
