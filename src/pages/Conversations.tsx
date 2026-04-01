@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCompany } from '@/context/CompanyContext';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
 import { MediaViewer } from '@/components/MediaViewer';
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button';
 
 const Conversations = () => {
   const { toast } = useToast();
+  const { selectedCompany } = useCompany();
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -32,6 +34,7 @@ const Conversations = () => {
   const [followUpProgress, setFollowUpProgress] = useState<{ current: number; total: number } | null>(null);
 
   useEffect(() => {
+    if (!selectedCompany) return;
     fetchConversations();
 
     const channel = supabase
@@ -43,30 +46,15 @@ const Conversations = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [selectedCompany]);
 
   const fetchConversations = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({ title: "Authentication Required", description: "Please log in to view conversations.", variant: "destructive" });
-      return;
-    }
-
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (userError || !userData?.company_id) {
-      toast({ title: "Error", description: "Failed to load user data.", variant: "destructive" });
-      return;
-    }
+    if (!selectedCompany) return;
 
     const { data: convData, error: convError } = await supabase
       .from('conversations')
       .select('id, customer_name, phone, started_at, status, human_takeover, unread_count, last_message_preview, pinned, archived, active_agent, platform')
-      .eq('company_id', userData.company_id)
+      .eq('company_id', selectedCompany.id)
       .eq('archived', false)
       .order('pinned', { ascending: false })
       .order('last_message_at', { ascending: false })
@@ -243,21 +231,8 @@ const Conversations = () => {
   };
 
   const triggerAutoFollowUp = async () => {
-    // Get current user's company
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      toast({ title: "Authentication Required", description: "Please log in first.", variant: "destructive" });
-      return;
-    }
-
-    const { data: userData } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
-
-    if (!userData?.company_id) {
-      toast({ title: "Error", description: "Company not found.", variant: "destructive" });
+    if (!selectedCompany) {
+      toast({ title: "Error", description: "No company selected.", variant: "destructive" });
       return;
     }
 
@@ -272,7 +247,7 @@ const Conversations = () => {
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
-          companyId: userData.company_id,
+          companyId: selectedCompany.id,
           hoursBack: 23, // 23 hours
           stream: true
         }),
