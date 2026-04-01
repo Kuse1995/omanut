@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCompany } from '@/context/CompanyContext';
 import BackButton from '@/components/BackButton';
 import ThemeToggle from '@/components/ThemeToggle';
 import { MediaViewer } from '@/components/MediaViewer';
