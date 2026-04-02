@@ -68,7 +68,7 @@ export const BillingPanel = () => {
     });
 
     if (error) {
-      toast.error('Failed to add credits');
+      toast.error(`Failed to add credits: ${error.message}`);
     } else {
       toast.success(`Added ${amount} credits`);
       setCreditsToAdd('');
