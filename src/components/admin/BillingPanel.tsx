@@ -56,8 +56,8 @@ export const BillingPanel = () => {
     if (!selectedCompany?.id || !creditsToAdd) return;
 
     const amount = parseInt(creditsToAdd);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid amount');
+    if (isNaN(amount) || amount <= 0 || amount > 1000000) {
+      toast.error('Please enter a valid amount (1 – 1,000,000)');
       return;
     }
 
@@ -68,7 +68,7 @@ export const BillingPanel = () => {
     });
 
     if (error) {
-      toast.error('Failed to add credits');
+      toast.error(`Failed to add credits: ${error.message}`);
     } else {
       toast.success(`Added ${amount} credits`);
       setCreditsToAdd('');
@@ -127,6 +127,8 @@ export const BillingPanel = () => {
                   id="credits"
                   type="number"
                   placeholder="Enter amount"
+                  min={1}
+                  max={1000000}
                   value={creditsToAdd}
                   onChange={(e) => setCreditsToAdd(e.target.value)}
                   className="bg-[#0A0A0A] border-white/20 text-white"
