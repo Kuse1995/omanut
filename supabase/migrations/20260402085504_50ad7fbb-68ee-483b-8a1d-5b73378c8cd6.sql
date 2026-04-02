@@ -1,0 +1,1 @@
+UPDATE public.company_ai_overrides SET primary_model = 'google/gemini-2.5-flash' WHERE company_id = '3408d643-8e9c-4c46-b684-4960fba1e0e9';
