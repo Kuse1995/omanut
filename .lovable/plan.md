@@ -1,30 +1,32 @@
 
 
-# Fix: Conversations Page Not Showing Messages
+# Fix: Credit Addition & WhatsApp Message Blocking
 
-## Root Cause
+## Root Cause Analysis
 
-The Conversations page (`src/pages/Conversations.tsx`) queries the legacy `users` table to get the logged-in user's `company_id` (line 55-59). However, the currently logged-in user (`30a33c2b-...`) has **no record in the `users` table** — they only exist in `auth.users`.
+**Both issues are connected.** Omanut Technologies has **0 credits**, and the `whatsapp-messages` function blocks all AI responses when `credit_balance <= 0` (line 5441), returning "Our assistant is currently offline." So WhatsApp messages ARE arriving (confirmed in logs) but the AI won't respond.
 
-The rest of the app uses `CompanyContext` which calls the `get_user_companies()` RPC (querying `company_users` junction table). The Conversations page bypasses this and hits a dead end.
+The credit addition likely failed because someone entered an extremely large number — the database logs show: `value "1000000000000000" is out of range for type integer`. The `add_credits` RPC parameter `p_amount` is typed as `int4` (max ~2.1B), and the UI has no validation cap.
 
-## Fix
+Additionally, the `BillingPanel` shows a generic "Failed to add credits" toast without the actual error message, making debugging impossible.
 
-### Update `src/pages/Conversations.tsx`
+## Fix Plan
 
-Replace the manual `users` table lookup with the `CompanyContext`:
+### 1. Add input validation in `BillingPanel.tsx`
+- Cap the credit input at a reasonable maximum (e.g., 1,000,000)
+- Show the actual error message from Supabase when the RPC fails
+- Add `max` attribute to the input field
 
-1. Import and use `useCompany()` from `CompanyContext`
-2. Get `selectedCompany` from context instead of querying `users` table
-3. Use `selectedCompany.id` as the `company_id` for all conversation queries
-4. Remove the redundant auth session + users table lookup from `fetchConversations`
-5. Add a guard: if no selected company, show a message instead of silently failing
+### 2. Immediately add credits to Omanut via migration
+- Run a one-time SQL migration to set Omanut's credit balance to a reasonable amount (e.g., 10,000 credits) so WhatsApp messages start flowing again immediately
 
-This aligns the Conversations page with how every other page in the app resolves the current company.
+### 3. Improve error feedback in `BillingPanel.tsx`
+- Display `error.message` in the toast so admins can see what went wrong
 
 ## Files to Edit
 
 | File | Change |
 |------|--------|
-| `src/pages/Conversations.tsx` | Replace `users` table query with `useCompany()` context |
+| `src/components/admin/BillingPanel.tsx` | Add max validation (1,000,000), show error details in toast |
+| Database migration | Set Omanut credit_balance to 10,000 |
 
