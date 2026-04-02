@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const AUTHORIZED_ADMIN_EMAIL = "Abkanyanta@gmail.com";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,11 +23,38 @@ const handler = async (req: Request): Promise<Response> => {
     
     console.log("Admin access link request for:", email);
 
-    // Validate email
-    if (email.toLowerCase() !== AUTHORIZED_ADMIN_EMAIL.toLowerCase()) {
-      console.log("Unauthorized email attempt:", email);
+    // Validate admin role via user_roles table instead of hardcoded email
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    // Look up user by email in auth.users
+    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.listUsers();
+    const authUser = userData?.users?.find(
+      (u) => u.email?.toLowerCase() === email.toLowerCase()
+    );
+
+    if (!authUser) {
+      console.log("No auth user found for email:", email);
       return new Response(
-        JSON.stringify({ error: "Unauthorized email" }),
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Check if user has admin role in user_roles table
+    const { data: roleData } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", authUser.id)
+      .eq("role", "admin")
+      .maybeSingle();
+
+    if (!roleData) {
+      console.log("User does not have admin role:", email);
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -69,7 +96,7 @@ const handler = async (req: Request): Promise<Response> => {
     if (!resendResponse.ok) {
       const error = await resendResponse.text();
       console.error("Resend API error:", error);
-      throw new Error(`Failed to send email: ${error}`);
+      throw new Error("Failed to send email");
     }
 
     const result = await resendResponse.json();
@@ -82,7 +109,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     console.error("Error in send-admin-access-link:", error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: "An error occurred processing your request" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
