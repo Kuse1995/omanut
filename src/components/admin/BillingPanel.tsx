@@ -127,6 +127,8 @@ export const BillingPanel = () => {
                   id="credits"
                   type="number"
                   placeholder="Enter amount"
+                  min={1}
+                  max={1000000}
                   value={creditsToAdd}
                   onChange={(e) => setCreditsToAdd(e.target.value)}
                   className="bg-[#0A0A0A] border-white/20 text-white"
