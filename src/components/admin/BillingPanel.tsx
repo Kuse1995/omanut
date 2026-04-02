@@ -56,8 +56,8 @@ export const BillingPanel = () => {
     if (!selectedCompany?.id || !creditsToAdd) return;
 
     const amount = parseInt(creditsToAdd);
-    if (isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid amount');
+    if (isNaN(amount) || amount <= 0 || amount > 1000000) {
+      toast.error('Please enter a valid amount (1 – 1,000,000)');
       return;
     }
 
