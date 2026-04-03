@@ -1,32 +1,63 @@
 
 
-# Fix: Credit Addition & WhatsApp Message Blocking
+# Switch All AI Text/Tool-Calling to GLM 4.7 (Zhipu AI)
 
-## Root Cause Analysis
+## Summary
+Route all text and tool-calling AI through Zhipu AI's `glm-4.7` model. Image generation (Gemini/OpenAI) and video generation (Veo/MiniMax) remain unchanged.
 
-**Both issues are connected.** Omanut Technologies has **0 credits**, and the `whatsapp-messages` function blocks all AI responses when `credit_balance <= 0` (line 5441), returning "Our assistant is currently offline." So WhatsApp messages ARE arriving (confirmed in logs) but the AI won't respond.
+## Prerequisites
+You'll need to provide your **ZHIPU_API_KEY** from [open.bigmodel.cn](https://open.bigmodel.cn). I'll prompt you to add it as a secret.
 
-The credit addition likely failed because someone entered an extremely large number — the database logs show: `value "1000000000000000" is out of range for type integer`. The `add_credits` RPC parameter `p_amount` is typed as `int4` (max ~2.1B), and the UI has no validation cap.
+## Changes
 
-Additionally, the `BillingPanel` shows a generic "Failed to add credits" toast without the actual error message, making debugging impossible.
+### 1. Add Zhipu routing to `gemini-client.ts`
+Modify `geminiChat()` to detect `glm-` prefixed models and route to Zhipu's OpenAI-compatible endpoint (`https://open.bigmodel.cn/api/paas/v4/chat/completions`) using `ZHIPU_API_KEY`. Image/video/vision functions stay untouched.
 
-## Fix Plan
+### 2. Update database: set `primary_model` for all companies
+```sql
+UPDATE company_ai_overrides SET primary_model = 'glm-4.7';
+```
 
-### 1. Add input validation in `BillingPanel.tsx`
-- Cap the credit input at a reasonable maximum (e.g., 1,000,000)
-- Show the actual error message from Supabase when the RPC fails
-- Add `max` attribute to the input field
+### 3. Update hardcoded fallback defaults (3 files)
+| File | Current fallback | New fallback |
+|------|-----------------|--------------|
+| `whatsapp-messages/index.ts` | `google/gemini-2.5-flash` | `glm-4.7` |
+| `boss-chat/index.ts` | `google/gemini-3-pro-preview` | `glm-4.7` |
+| `ai-playground/index.ts` | `google/gemini-2.5-flash` | `glm-4.7` |
 
-### 2. Immediately add credits to Omanut via migration
-- Run a one-time SQL migration to set Omanut's credit balance to a reasonable amount (e.g., 10,000 credits) so WhatsApp messages start flowing again immediately
+### 4. Update hardcoded models in 13 additional edge functions
+All `geminiChat()` calls with hardcoded Gemini models (non-vision, non-image tasks) switch to `glm-4.7`:
 
-### 3. Improve error feedback in `BillingPanel.tsx`
-- Display `error.message` in the toast so admins can see what went wrong
+`analyze-conversation`, `analyze-and-followup`, `auto-content-creator`, `ai-training-coach`, `generate-reply-draft`, `meta-webhook`, `meta-lead-alert`, `research-company`, `smart-configure`, `supervisor-agent`, `extract-product-identity`, `test-image-generation` (text calls only), `whatsapp-image-gen` (text/caption calls only).
+
+### What stays on Gemini
+- `geminiImageGenerate()` — image generation
+- `openaiImageGenerate/Edit()` — OpenAI image gen
+- `veoStartGeneration/veoPollOperation()` — video generation
+- `analyze-media` — vision analysis (multimodal image input)
+- `reindex-company-media` — direct Gemini vision API
+- `whatsapp-image-gen` image generation calls
+
+## Technical Detail
+Zhipu's API is OpenAI-compatible. Routing change in `gemini-client.ts`:
+
+```text
+if model starts with "glm-"
+  → endpoint: https://open.bigmodel.cn/api/paas/v4/chat/completions
+  → auth: ZHIPU_API_KEY
+else
+  → existing Gemini endpoint
+  → auth: GEMINI_API_KEY
+```
 
 ## Files to Edit
 
 | File | Change |
 |------|--------|
-| `src/components/admin/BillingPanel.tsx` | Add max validation (1,000,000), show error details in toast |
-| Database migration | Set Omanut credit_balance to 10,000 |
+| `supabase/functions/_shared/gemini-client.ts` | Add Zhipu provider routing |
+| `supabase/functions/whatsapp-messages/index.ts` | Default fallback → `glm-4.7` |
+| `supabase/functions/boss-chat/index.ts` | Default fallback → `glm-4.7` |
+| `supabase/functions/ai-playground/index.ts` | Default fallback → `glm-4.7` |
+| 13 additional edge functions | Hardcoded model → `glm-4.7` |
+| Database (data update) | `primary_model = 'glm-4.7'` for all companies |
 
