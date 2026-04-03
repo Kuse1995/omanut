@@ -171,7 +171,7 @@ Provide brief market insights, pricing context, or competitive positioning that 
 
       try {
         const researchResponse = await geminiChat({
-          model: 'gemini-3-flash-preview',
+          model: 'glm-4.7',
           messages: [{ role: 'user', content: researchPrompt }],
           max_tokens: 500
         });

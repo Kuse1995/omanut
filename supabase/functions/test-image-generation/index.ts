@@ -151,7 +151,7 @@ Respond ONLY with JSON: {"intent":"...", "photographyStyle":"...", "finalPrompt"
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Optimize: "${userPrompt}"` }
@@ -186,7 +186,7 @@ async function supervisorReviewAgent(
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: `You are a brand guardian reviewing an image prompt for ${companyName}.
 ${productMatch ? `Product: ${productMatch.description || productMatch.file_name}` : ''}
@@ -221,7 +221,7 @@ async function qualityAssessmentAgent(
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: `Score this AI-generated marketing image for ${companyName} on: prompt adherence, brand accuracy, composition, quality, marketing value (each 0-10).
 ${productMatch ? `Expected product: ${productMatch.description || productMatch.file_name}` : ''}

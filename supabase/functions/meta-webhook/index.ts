@@ -977,7 +977,7 @@ async function generateAIReply(
   messages.push({ role: 'user', content: userPrompt });
 
   const response = await geminiChat({
-    model: 'gemini-3-flash-preview',
+    model: 'glm-4.7',
     messages,
     max_tokens: 1024,
   });

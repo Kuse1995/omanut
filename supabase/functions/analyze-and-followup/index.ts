@@ -289,7 +289,7 @@ async function processCompany(
 
         // Use Gemini to craft follow-up message
         const geminiResponse = await geminiChat({
-          model: 'gemini-3-pro-preview',
+          model: 'glm-4.7',
           messages: [
             {
               role: 'system',
