@@ -1088,7 +1088,7 @@ async function processAIResponse(
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
-            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+            model: aiOverrides?.primary_model || 'glm-4.7',
             messages: [
               {
                 role: 'system',
