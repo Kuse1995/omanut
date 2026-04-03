@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
 
     if (error) {
       console.error('[POLL-VIDEO] Query error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: 'An error occurred processing your request' }), { status: 500, headers: corsHeaders });
     }
 
     if (!jobs || jobs.length === 0) {

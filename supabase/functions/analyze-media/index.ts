@@ -102,7 +102,7 @@ Return your response as JSON with this exact structure:
   } catch (error) {
     console.error('Error in analyze-media function:', error);
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'An error occurred processing your request',
       fallback: {
         category: 'other',
         description: 'Unable to analyze - please add details manually',

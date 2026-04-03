@@ -133,7 +133,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[SEND-FLOW] Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = 'An error occurred processing your request';
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

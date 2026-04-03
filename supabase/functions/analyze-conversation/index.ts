@@ -203,7 +203,7 @@ Only include items that are genuinely important. If there's nothing significant,
   } catch (error) {
     console.error("Error:", error);
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+      error: 'An error occurred processing your request' 
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
