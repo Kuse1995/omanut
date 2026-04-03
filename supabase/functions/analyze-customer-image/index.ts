@@ -294,7 +294,7 @@ serve(async (req) => {
 
   } catch (error: unknown) {
     console.error('[ANALYZE] Error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = 'An error occurred processing your request';
     return new Response(
       JSON.stringify({
         error: errorMessage,

@@ -214,7 +214,7 @@ Only include fields in extracted_fields if you found relevant information. Skip 
     console.error('[SMART-CONFIG] Error:', error);
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Smart configuration failed',
+        error: 'An error occurred processing your request',
         details: 'Please try again or configure fields manually'
       }),
       { 

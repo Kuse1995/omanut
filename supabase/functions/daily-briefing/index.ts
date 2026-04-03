@@ -371,7 +371,7 @@ Be specific with client names and phone numbers when flagging issues. Focus on a
     console.error('Daily briefing error:', error);
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: 'An error occurred processing your request',
         details: error
       }),
       { 

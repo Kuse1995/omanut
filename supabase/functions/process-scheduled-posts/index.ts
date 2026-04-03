@@ -262,7 +262,7 @@ serve(async (req) => {
           );
         }
 
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = 'An error occurred processing your request';
         await supabase
           .from('facebook_scheduled_posts')
           .update({
@@ -284,7 +284,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in scheduled posts processor:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = 'An error occurred processing your request';
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

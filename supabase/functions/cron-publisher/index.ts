@@ -95,7 +95,7 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('[CRON-PUBLISHER] Fatal error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: 'An error occurred processing your request' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

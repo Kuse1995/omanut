@@ -54,7 +54,7 @@ serve(async (req) => {
             sendEvent({ type: 'complete' });
             controller.close();
           } catch (error) {
-            sendEvent({ type: 'error', message: error instanceof Error ? error.message : 'Unknown error' });
+            sendEvent({ type: 'error', message: 'An error occurred processing your request' });
             controller.close();
           }
         }
@@ -89,7 +89,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error:', error);
     return new Response(
-      JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ success: false, error: 'An error occurred processing your request' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

@@ -102,7 +102,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('[EMBED-CATALOG] Error:', error);
     return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: 'An error occurred processing your request',
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

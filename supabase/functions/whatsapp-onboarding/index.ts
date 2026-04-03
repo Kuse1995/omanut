@@ -136,7 +136,7 @@ serve(async (req) => {
     console.error('Onboarding error:', error);
     return new Response(
       JSON.stringify({ 
-        error: error.message,
+        error: 'An error occurred processing your request',
         response: "I'm having trouble processing your request. Please try again or type RESTART to begin again."
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
