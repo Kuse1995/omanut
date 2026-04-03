@@ -71,7 +71,7 @@ Return ONLY valid JSON with this exact structure:
 }`;
 
     const aiResponse = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         {
           role: 'system',

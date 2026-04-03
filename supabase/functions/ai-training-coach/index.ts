@@ -323,7 +323,7 @@ START by warmly greeting them and asking about a specific aspect of their custom
 
     // First AI call
     const firstResponse = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'glm-4.7',
       messages,
       temperature: 0.8,
       max_tokens: 1024,
@@ -391,7 +391,7 @@ START by warmly greeting them and asking about a specific aspect of their custom
     ];
 
     const secondResponse = await geminiChat({
-      model: 'gemini-2.5-flash',
+      model: 'glm-4.7',
       messages: secondMessages,
       temperature: 0.8,
       max_tokens: 1024,

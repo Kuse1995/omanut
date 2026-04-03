@@ -1088,7 +1088,7 @@ async function processAIResponse(
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
-            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+            model: aiOverrides?.primary_model || 'glm-4.7',
             messages: [
               {
                 role: 'system',
@@ -1906,8 +1906,8 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
-    const fallbackModel = 'google/gemini-2.5-flash-lite';
+    const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
+    const fallbackModel = 'glm-4.7';
     
     // Select model based on complexity - flash for complex (tool-calling), flash-lite for simple
     const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;

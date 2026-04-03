@@ -1,9 +1,11 @@
 /**
- * Shared Gemini API client for all edge functions.
- * All models (text + image) route through direct Gemini OpenAI-compatible endpoint.
+ * Shared AI client for all edge functions.
+ * Text/tool-calling models route through Zhipu (GLM) or Gemini based on model prefix.
+ * Image/video generation always uses Gemini/OpenAI native APIs.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash") */
 function normalizeModel(model: string): string {
@@ -23,15 +25,22 @@ export interface GeminiChatOptions {
 }
 
 /**
- * Call Gemini API directly for all models (text and image).
+ * Call AI API for text/tool-calling models.
+ * Routes GLM models to Zhipu, everything else to Gemini.
  */
 export async function geminiChat(options: GeminiChatOptions): Promise<Response> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY');
+  const normalizedModel = normalizeModel(options.model);
+  const isZhipu = normalizedModel.startsWith('glm-');
+
+  const apiKey = isZhipu
+    ? Deno.env.get('ZHIPU_API_KEY')
+    : Deno.env.get('GEMINI_API_KEY');
+
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured');
+    throw new Error(isZhipu ? 'ZHIPU_API_KEY is not configured' : 'GEMINI_API_KEY is not configured');
   }
 
-  const normalizedModel = normalizeModel(options.model);
+  const apiUrl = isZhipu ? ZHIPU_OPENAI_URL : GEMINI_OPENAI_URL;
 
   const body: any = {
     model: normalizedModel,
@@ -42,7 +51,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
   if (options.tools) body.tools = options.tools;
   if (options.tool_choice) body.tool_choice = options.tool_choice;
-  if (options.modalities) body.modalities = options.modalities;
+  if (!isZhipu && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
 
   const fetchOptions: RequestInit = {
@@ -58,7 +67,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
     fetchOptions.signal = options.signal;
   }
 
-  return fetch(GEMINI_OPENAI_URL, fetchOptions);
+  return fetch(apiUrl, fetchOptions);
 }
 
 /**

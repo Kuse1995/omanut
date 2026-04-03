@@ -67,7 +67,7 @@ serve(async (req) => {
 
     try {
       const classifyResponse = await geminiChat({
-        model: 'gemini-2.5-flash-lite',
+        model: 'glm-4.7',
         messages: [
           {
             role: 'system',

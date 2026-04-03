@@ -70,7 +70,7 @@ serve(async (req) => {
       .maybeSingle();
 
     // Get configured model or use defaults
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
     const temperature = aiOverrides?.primary_temperature ?? 0.7;
     const maxTokens = aiOverrides?.max_tokens ?? 2048;
 

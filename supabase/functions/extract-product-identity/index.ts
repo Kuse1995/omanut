@@ -76,7 +76,7 @@ Respond with RAW JSON only. No markdown, no code fences.
 }`;
 
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: systemPrompt },
         {

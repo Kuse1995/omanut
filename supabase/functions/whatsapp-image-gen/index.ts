@@ -373,7 +373,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Optimize this image request: "${userPrompt}"` }
@@ -457,7 +457,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Review this image generation prompt:\n\nOPTIMIZED PROMPT: "${optimizedPrompt}"\n\nBRIEF: ${JSON.stringify(brief)}` }
@@ -578,7 +578,7 @@ Respond with RAW JSON only. No markdown, no code fences, no trailing text.
     ];
 
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: contentParts }
@@ -1133,7 +1133,7 @@ INSTRUCTIONS:
 
   try {
     const response = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [{ role: 'user', content: contentParts }],
       temperature: 0.1,
       max_tokens: 50,
@@ -1256,7 +1256,7 @@ async function generateCaption(
   const timeContext = `Current time context: It is ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'It is the weekend.' : 'It is a weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-3-flash-preview',
+    model: 'glm-4.7',
     messages: [
       { role: 'system', content: `You are a social media marketing expert for ${companyName}. Generate engaging captions for product images. Respond in JSON format only.` },
       { role: 'user', content: `${context}\n\n${timeContext}\n\nGenerate a caption for this image: "${imagePrompt}"\n\nRespond with JSON: {"caption": "engaging caption text", "hashtags": ["tag1", "tag2"], "bestTime": "suggested posting time"}` }
@@ -1298,7 +1298,7 @@ async function generateSuggestions(
   const timeContext = `Current time: ${timeOfDay} on ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}. ${isWeekend ? 'Weekend.' : 'Weekday.'}`;
   
   const response = await geminiChat({
-    model: 'gemini-3-flash-preview',
+    model: 'glm-4.7',
     messages: [
       { role: 'system', content: `You are a creative marketing strategist for ${companyName}, a ${businessType}.` },
       { role: 'user', content: `${context}\n\n${timeContext}\n\nSuggest 3 creative image ideas I should create for social media. Be specific. Format as a numbered list.` }

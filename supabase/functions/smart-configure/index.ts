@@ -135,7 +135,7 @@ Return ONLY valid JSON with this structure:
 Only include fields in extracted_fields if you found relevant information. Skip fields with no data.`;
 
     const aiResponse = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [
         {
           role: 'system',

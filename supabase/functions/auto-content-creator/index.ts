@@ -108,7 +108,7 @@ Create ONE highly engaging social media post caption for Facebook and Instagram.
 Return ONLY the caption text, nothing else.`;
 
     const captionResponse = await geminiChat({
-      model: 'gemini-3-flash-preview',
+      model: 'glm-4.7',
       messages: [{ role: 'user', content: captionPrompt }],
     });
 
