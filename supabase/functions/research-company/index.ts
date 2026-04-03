@@ -169,7 +169,7 @@ Return ONLY valid JSON with this exact structure:
     console.error('[RESEARCH] Error:', error);
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Research failed',
+        error: 'An error occurred processing your request',
         details: 'Please try again or fill in the fields manually'
       }),
       { 
