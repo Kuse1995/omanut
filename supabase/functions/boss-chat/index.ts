@@ -1643,10 +1643,6 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   imageGenFailed = true;
                 } else {
                   try {
-                    const IMG_TIMEOUT = 50000; // 50s — fits within function timeout with room for response
-                    const imgAbortController = new AbortController();
-                    const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_TIMEOUT);
-                    
                     const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
@@ -1657,24 +1653,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                         prompt: args.image_prompt,
                         messageType: 'generate',
                       }),
-                      signal: imgAbortController.signal,
                     });
-                    clearTimeout(imgTimeoutId);
                     
-                    if (imgGenResponse.ok) {
+                    if (imgGenResponse.ok && imgGenResponse.status !== 202) {
                       const imgResult = await imgGenResponse.json();
                       if (imgResult.imageUrl) {
                         postImageUrl = imgResult.imageUrl;
-                        toolImageUrl = imgResult.imageUrl; // Store for reuse in conversation
+                        toolImageUrl = imgResult.imageUrl;
                         imageGenCount++;
                       } else {
                         imageGenFailed = true;
                       }
+                    } else if (imgGenResponse.status === 202) {
+                      // Image is generating in background — post will be saved as pending_image
+                      imageGenFailed = true; // Treat as "not ready yet" for inline flow
+                      console.log('[BOSS-CHAT] Image gen accepted (202) — will be delivered async');
                     } else {
                       imageGenFailed = true;
                     }
                   } catch (e: any) {
-                    console.error('[BOSS-CHAT] Image gen for post failed/timed out:', e.message);
+                    console.error('[BOSS-CHAT] Image gen for post failed:', e.message);
                     imageGenFailed = true;
                   }
                 }
