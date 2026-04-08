@@ -2259,7 +2259,6 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              const IMG_GEN_TIMEOUT = 30000;
               const imgGenBody = {
                 companyId: company.id,
                 customerPhone: '',
@@ -2270,18 +2269,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
 
               try {
-                // AbortController pattern: cancels the sync request on timeout
-                // so it doesn't ghost-complete alongside the async retry
-                const imgAbortController = new AbortController();
-                const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_GEN_TIMEOUT);
-
                 const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
                   body: JSON.stringify(imgGenBody),
-                  signal: imgAbortController.signal,
                 });
-                clearTimeout(imgTimeoutId);
 
                 if (!imageGenResponse.ok) {
                   const errorText = await imageGenResponse.text();
@@ -2289,22 +2281,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
                 } else {
                   const imageGenResult = await imageGenResponse.json();
-                  result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
-                  if (imageGenResult.imageUrl) {
-                    toolImageUrl = imageGenResult.imageUrl;
-                    imageGenCount++;
-                    toolMediaMessages.push({
-                      body: imageGenResult.message || '🎨 Here is your generated image!',
-                      imageUrl: imageGenResult.imageUrl
-                    });
+                  // 202 = accepted for background processing, image will be delivered via WhatsApp
+                  if (imageGenResponse.status === 202) {
+                    (globalThis as any).__imageGenInProgress = true;
+                    result = { success: true, message: '🎨 Image is generating in the background and will be delivered to your WhatsApp when ready! This usually takes 30-60 seconds.' };
+                  } else {
+                    result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                    if (imageGenResult.imageUrl) {
+                      toolImageUrl = imageGenResult.imageUrl;
+                      imageGenCount++;
+                      toolMediaMessages.push({
+                        body: imageGenResult.message || '🎨 Here is your generated image!',
+                        imageUrl: imageGenResult.imageUrl
+                      });
+                    }
                   }
                 }
-              } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — server-side request may still be running`);
-                // Do NOT fire a new request — the server-side function continues even after abort.
-                // AbortController only cancels the client read, not the server execution.
-                (globalThis as any).__imageGenInProgress = true;
-                result = { success: true, message: '🎨 Image is still generating on the server. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
+              } catch (fetchErr: any) {
+                console.error(`[BOSS-TOOL-${functionName}] Fetch error:`, fetchErr.message);
+                result = { success: false, message: 'Sorry, there was an error connecting to the image generator. Please try again.' };
               }
               break;
             }
