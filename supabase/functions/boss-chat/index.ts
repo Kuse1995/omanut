@@ -1643,10 +1643,6 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   imageGenFailed = true;
                 } else {
                   try {
-                    const IMG_TIMEOUT = 50000; // 50s — fits within function timeout with room for response
-                    const imgAbortController = new AbortController();
-                    const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_TIMEOUT);
-                    
                     const imgGenResponse = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-image-gen`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
@@ -1657,24 +1653,26 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                         prompt: args.image_prompt,
                         messageType: 'generate',
                       }),
-                      signal: imgAbortController.signal,
                     });
-                    clearTimeout(imgTimeoutId);
                     
-                    if (imgGenResponse.ok) {
+                    if (imgGenResponse.ok && imgGenResponse.status !== 202) {
                       const imgResult = await imgGenResponse.json();
                       if (imgResult.imageUrl) {
                         postImageUrl = imgResult.imageUrl;
-                        toolImageUrl = imgResult.imageUrl; // Store for reuse in conversation
+                        toolImageUrl = imgResult.imageUrl;
                         imageGenCount++;
                       } else {
                         imageGenFailed = true;
                       }
+                    } else if (imgGenResponse.status === 202) {
+                      // Image is generating in background — post will be saved as pending_image
+                      imageGenFailed = true; // Treat as "not ready yet" for inline flow
+                      console.log('[BOSS-CHAT] Image gen accepted (202) — will be delivered async');
                     } else {
                       imageGenFailed = true;
                     }
                   } catch (e: any) {
-                    console.error('[BOSS-CHAT] Image gen for post failed/timed out:', e.message);
+                    console.error('[BOSS-CHAT] Image gen for post failed:', e.message);
                     imageGenFailed = true;
                   }
                 }
@@ -2259,7 +2257,6 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
-              const IMG_GEN_TIMEOUT = 30000;
               const imgGenBody = {
                 companyId: company.id,
                 customerPhone: '',
@@ -2270,18 +2267,11 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               };
 
               try {
-                // AbortController pattern: cancels the sync request on timeout
-                // so it doesn't ghost-complete alongside the async retry
-                const imgAbortController = new AbortController();
-                const imgTimeoutId = setTimeout(() => imgAbortController.abort(), IMG_GEN_TIMEOUT);
-
                 const imageGenResponse = await fetch(`${SUPABASE_URL_IMG}/functions/v1/whatsapp-image-gen`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK_IMG}` },
                   body: JSON.stringify(imgGenBody),
-                  signal: imgAbortController.signal,
                 });
-                clearTimeout(imgTimeoutId);
 
                 if (!imageGenResponse.ok) {
                   const errorText = await imageGenResponse.text();
@@ -2289,22 +2279,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   result = { success: false, message: 'Sorry, there was an error with image generation. Please try again.' };
                 } else {
                   const imageGenResult = await imageGenResponse.json();
-                  result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
-                  if (imageGenResult.imageUrl) {
-                    toolImageUrl = imageGenResult.imageUrl;
-                    imageGenCount++;
-                    toolMediaMessages.push({
-                      body: imageGenResult.message || '🎨 Here is your generated image!',
-                      imageUrl: imageGenResult.imageUrl
-                    });
+                  // 202 = accepted for background processing, image will be delivered via WhatsApp
+                  if (imageGenResponse.status === 202) {
+                    (globalThis as any).__imageGenInProgress = true;
+                    result = { success: true, message: '🎨 Image is generating in the background and will be delivered to your WhatsApp when ready! This usually takes 30-60 seconds.' };
+                  } else {
+                    result = { success: imageGenResult.success !== false, message: imageGenResult.message || 'Image operation complete!' };
+                    if (imageGenResult.imageUrl) {
+                      toolImageUrl = imageGenResult.imageUrl;
+                      imageGenCount++;
+                      toolMediaMessages.push({
+                        body: imageGenResult.message || '🎨 Here is your generated image!',
+                        imageUrl: imageGenResult.imageUrl
+                      });
+                    }
                   }
                 }
-              } catch (timeoutErr: any) {
-                console.error(`[BOSS-TOOL-${functionName}] Timeout/abort — server-side request may still be running`);
-                // Do NOT fire a new request — the server-side function continues even after abort.
-                // AbortController only cancels the client read, not the server execution.
-                (globalThis as any).__imageGenInProgress = true;
-                result = { success: true, message: '🎨 Image is still generating on the server. It will be delivered to you via WhatsApp shortly. Do NOT request another image — it is already being created.' };
+              } catch (fetchErr: any) {
+                console.error(`[BOSS-TOOL-${functionName}] Fetch error:`, fetchErr.message);
+                result = { success: false, message: 'Sorry, there was an error connecting to the image generator. Please try again.' };
               }
               break;
             }
