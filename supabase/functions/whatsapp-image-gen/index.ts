@@ -1422,24 +1422,127 @@ serve(async (req) => {
 
     console.log(`[IMAGE-GEN] Request: type=${messageType}, company=${companyId}, prompt="${prompt?.substring(0, 50)}..."`);
 
+    // Quick validation before going async
     const { data: company } = await supabase.from('companies').select('*').eq('id', companyId).single();
-    if (!company) throw new Error('Company not found');
+    if (!company) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Company not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     const { data: settings } = await supabase.from('image_generation_settings').select('enabled').eq('company_id', companyId).single();
     if (!settings?.enabled) {
       return new Response(
-        JSON.stringify({ success: false, message: "Image generation is not enabled for this business. Please contact your administrator." }),
+        JSON.stringify({ success: false, message: "Image generation is not enabled for this business." }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const context = await buildMediaContext(supabase, companyId);
-    let responseMessage = '';
-    let imageUrl = '';
+    // For lightweight operations, run synchronously
+    if (messageType === 'feedback' || messageType === 'history' || messageType === 'caption' || messageType === 'suggest') {
+      return await handleLightweightRequest(supabase, supabaseUrl, body, company);
+    }
 
+    // For heavy operations (generate, edit), use background processing
+    // @ts-ignore - EdgeRuntime is a Deno Deploy global
+    EdgeRuntime.waitUntil(
+      handleHeavyRequest(supabase, supabaseUrl, body, company).catch(err => {
+        console.error('[IMAGE-GEN] Background processing error:', err);
+      })
+    );
+
+    // Return immediately with 202 Accepted
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: '🎨 Image is being generated! It will be delivered via WhatsApp when ready.',
+        status: 'processing'
+      }),
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('[IMAGE-GEN] Error:', error);
+    return new Response(
+      JSON.stringify({ success: false, error: 'An error occurred processing your request' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
+
+// ============================================================
+// LIGHTWEIGHT HANDLER (sync) — feedback, history, caption, suggest
+// ============================================================
+async function handleLightweightRequest(supabase: any, supabaseUrl: string, body: any, company: any) {
+  const { companyId, customerPhone, conversationId, prompt, messageType, feedbackData } = body as ImageGenRequest;
+  const context = await buildMediaContext(supabase, companyId);
+  let responseMessage = '';
+
+  switch (messageType) {
+    case 'feedback': {
+      responseMessage = await processFeedback(supabase, companyId, feedbackData?.feedbackType || 'thumbs_up', feedbackData?.imageId);
+      break;
+    }
+    case 'history': {
+      let historyQuery = supabase.from('generated_images').select('id, prompt, image_url, created_at').eq('company_id', companyId).order('created_at', { ascending: false }).limit(5);
+      if (conversationId) historyQuery = historyQuery.eq('conversation_id', conversationId);
+      const { data: recentImages } = await historyQuery;
+      
+      if (!recentImages || recentImages.length === 0) {
+        responseMessage = "📸 No images yet!\n\nTry: 'Generate: a promotional image for [product]'";
+      } else {
+        const firstImage = recentImages[0];
+        const galleryList = recentImages.map((img: any, i: number) => {
+          const date = new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const shortPrompt = img.prompt.replace(/^\[Edit.*?\]\s*/i, '').replace(/^\[Product:.*?\]\s*/i, '').substring(0, 40);
+          return `${i + 1}. ${shortPrompt}${shortPrompt.length >= 40 ? '...' : ''} (${date})`;
+        }).join('\n');
+        
+        responseMessage = `📸 *Your Recent Images (${recentImages.length}):*\n\n${galleryList}\n\n👆 Here's your most recent image!`;
+        if (customerPhone && firstImage.image_url) await sendWhatsAppImage(customerPhone, firstImage.image_url, responseMessage, company);
+      }
+      break;
+    }
+    case 'caption': {
+      const captionResult = await generateCaption(prompt, context, company.name);
+      responseMessage = `📝 *Caption Suggestion:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map((h: string) => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}`;
+      break;
+    }
+    case 'suggest': {
+      const suggestions = await generateSuggestions(context, company.name, company.business_type || 'business');
+      responseMessage = `💡 *Content Ideas for Today:*\n\n${suggestions.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n\n')}\n\nWant me to create any of these? Just say "Generate: [idea]" 🎨`;
+      break;
+    }
+  }
+
+  if (conversationId) {
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: responseMessage,
+      message_metadata: {}
+    });
+  }
+
+  return new Response(
+    JSON.stringify({ success: true, message: responseMessage }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+// ============================================================
+// HEAVY HANDLER (async via waitUntil) — generate, edit
+// ============================================================
+async function handleHeavyRequest(supabase: any, supabaseUrl: string, body: any, company: any) {
+  const { companyId, customerPhone, conversationId, prompt, messageType, editData } = body as ImageGenRequest;
+  const context = await buildMediaContext(supabase, companyId);
+  let responseMessage = '';
+  let imageUrl = '';
+
+  try {
     switch (messageType) {
       case 'generate': {
-        // === 6-AGENT PIPELINE ===
         const { product: productImage, bmsImageUrls } = await selectProductImageForPrompt(supabase, companyId, prompt);
         
         const result = await runImagePipeline(
@@ -1450,7 +1553,6 @@ serve(async (req) => {
         
         imageUrl = result.imageUrl;
         
-        // Save to generated_images with pipeline data
         const savedPrompt = productImage ? `[Product: ${productImage.file_name}] ${prompt}` : prompt;
         const { data: savedImage } = await supabase
           .from('generated_images')
@@ -1465,10 +1567,8 @@ serve(async (req) => {
           .select()
           .single();
         
-        // Generate caption
         const captionResult = await generateCaption(prompt, context, company.name);
         
-        // Record for learning
         await supabase.from('image_generation_feedback').insert({
           company_id: companyId,
           generated_image_id: savedImage?.id,
@@ -1488,18 +1588,6 @@ serve(async (req) => {
         if (customerPhone) {
           await sendWhatsAppImage(customerPhone, imageUrl, responseMessage, company);
         }
-        break;
-      }
-      
-      case 'caption': {
-        const captionResult = await generateCaption(prompt, context, company.name);
-        responseMessage = `📝 *Caption Suggestion:*\n${captionResult.caption}\n\n#️⃣ *Hashtags:* ${captionResult.hashtags.map((h: string) => `#${h}`).join(' ')}\n\n⏰ *Best time to post:* ${captionResult.bestTime}`;
-        break;
-      }
-      
-      case 'suggest': {
-        const suggestions = await generateSuggestions(context, company.name, company.business_type || 'business');
-        responseMessage = `💡 *Content Ideas for Today:*\n\n${suggestions.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n\n')}\n\nWant me to create any of these? Just say "Generate: [idea]" 🎨`;
         break;
       }
       
@@ -1538,35 +1626,9 @@ serve(async (req) => {
         if (customerPhone) await sendWhatsAppImage(customerPhone, imageUrl, responseMessage, company);
         break;
       }
-      
-      case 'feedback': {
-        responseMessage = await processFeedback(supabase, companyId, feedbackData?.feedbackType || 'thumbs_up', feedbackData?.imageId);
-        break;
-      }
-      
-      case 'history': {
-        let historyQuery = supabase.from('generated_images').select('id, prompt, image_url, created_at').eq('company_id', companyId).order('created_at', { ascending: false }).limit(5);
-        if (conversationId) historyQuery = historyQuery.eq('conversation_id', conversationId);
-        const { data: recentImages } = await historyQuery;
-        
-        if (!recentImages || recentImages.length === 0) {
-          responseMessage = "📸 No images yet!\n\nTry: 'Generate: a promotional image for [product]'";
-        } else {
-          const firstImage = recentImages[0];
-          const galleryList = recentImages.map((img: any, i: number) => {
-            const date = new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            const shortPrompt = img.prompt.replace(/^\[Edit.*?\]\s*/i, '').replace(/^\[Product:.*?\]\s*/i, '').substring(0, 40);
-            return `${i + 1}. ${shortPrompt}${shortPrompt.length >= 40 ? '...' : ''} (${date})`;
-          }).join('\n');
-          
-          responseMessage = `📸 *Your Recent Images (${recentImages.length}):*\n\n${galleryList}\n\n👆 Here's your most recent image!`;
-          if (customerPhone && firstImage.image_url) await sendWhatsAppImage(customerPhone, firstImage.image_url, responseMessage, company);
-        }
-        break;
-      }
     }
 
-    if (conversationId) {
+    if (conversationId && responseMessage) {
       await supabase.from('messages').insert({
         conversation_id: conversationId,
         role: 'assistant',
@@ -1576,104 +1638,68 @@ serve(async (req) => {
     }
 
     // ── AUTO-PUBLISH CALLBACK ──
-    // If this generation was triggered for a pending_image scheduled post,
-    // attach the image and auto-publish it, then notify the boss.
     const scheduledPostId = body.scheduledPostId;
     const bossPhone = body.bossPhone;
     if (scheduledPostId && imageUrl) {
       try {
         console.log(`[IMAGE-GEN] Auto-publish callback for post ${scheduledPostId}`);
-        // Update the post with the generated image and set to 'publishing' (not 'approved')
-        // This prevents cron-publisher from also picking it up — atomic claim pattern.
         await supabase.from('scheduled_posts').update({
           image_url: imageUrl,
           status: 'publishing',
           updated_at: new Date().toISOString(),
         }).eq('id', scheduledPostId).eq('status', 'pending_image');
 
-        // Trigger publish-meta-post
-        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
         const srkKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const publishRes = await fetch(`${supabaseUrl}/functions/v1/publish-meta-post`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${srkKey}` },
           body: JSON.stringify({ post_id: scheduledPostId }),
         });
-        const publishResult = await publishRes.json();
 
-        if (publishResult.success) {
-          console.log(`[IMAGE-GEN] Auto-published post ${scheduledPostId} successfully`);
-          // Notify boss via WhatsApp with the image preview
+        if (publishRes.ok) {
+          console.log(`[IMAGE-GEN] Auto-publish triggered for post ${scheduledPostId}`);
           if (bossPhone) {
-            const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-            const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
-            const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
-            if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
-              const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-              const confirmMsg = `✅ Your post has been published with the brand image!\n\n🖼️ Image attached below.`;
-              const formData = new URLSearchParams();
-              formData.append('To', normalizeBossPhone(bossPhone));
-              const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
-              formData.append('From', fromNum);
-              formData.append('Body', confirmMsg);
-              formData.append('MediaUrl', imageUrl);
-              await fetch(twilioUrl, {
-                method: 'POST',
-                headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: formData.toString(),
-              });
+            try {
+              const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+              const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
+              if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+                const publishMsg = `✅ Your post has been published to Facebook with the generated image!\n\n📝 Post ID: ${scheduledPostId}`;
+                const formData = new URLSearchParams();
+                formData.append('To', normalizeBossPhone(bossPhone));
+                const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
+                formData.append('From', fromNum);
+                formData.append('Body', publishMsg);
+                formData.append('MediaUrl', imageUrl);
+                await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: formData.toString(),
+                });
+              }
+            } catch (notifyErr: any) {
+              console.error('[IMAGE-GEN] Failed to notify boss of auto-publish:', notifyErr.message);
             }
           }
         } else {
-          console.error(`[IMAGE-GEN] Auto-publish failed for post ${scheduledPostId}:`, publishResult.error);
+          console.error(`[IMAGE-GEN] Auto-publish failed for post ${scheduledPostId}:`, await publishRes.text());
+          await supabase.from('scheduled_posts').update({ status: 'pending_image' }).eq('id', scheduledPostId);
         }
-      } catch (autoPublishErr: any) {
-        console.error(`[IMAGE-GEN] Auto-publish callback error:`, autoPublishErr.message);
+      } catch (publishErr: any) {
+        console.error('[IMAGE-GEN] Auto-publish error:', publishErr.message);
       }
-    } else if (scheduledPostId && !imageUrl) {
-      // Image gen failed — mark post as failed so it doesn't sit in limbo
-      console.error(`[IMAGE-GEN] Image gen failed for scheduled post ${scheduledPostId}, marking as failed`);
-      await supabase.from('scheduled_posts').update({
-        status: 'failed',
-        error_message: 'Image generation failed. You can retry by asking to post again.',
-        updated_at: new Date().toISOString(),
-      }).eq('id', scheduledPostId).eq('status', 'pending_image');
+    }
 
-      // Notify boss of failure
-      if (bossPhone) {
-        try {
-          const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-          const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
-          const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
-          if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
-            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-            const failMsg = `⚠️ Image generation failed for your post. The post was NOT published.\n\nJust ask me to post again and I'll retry!`;
-            const formData = new URLSearchParams();
-            formData.append('To', normalizeBossPhone(bossPhone));
-            const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
-            formData.append('From', fromNum);
-            formData.append('Body', failMsg);
-            await fetch(twilioUrl, {
-              method: 'POST',
-              headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: formData.toString(),
-            });
-          }
-        } catch (notifyErr: any) {
-          console.error('[IMAGE-GEN] Failed to notify boss of image gen failure:', notifyErr.message);
-        }
-      }
-    } else if (!scheduledPostId && bossPhone && imageUrl) {
-      // ── STANDALONE BOSS IMAGE DELIVERY ──
-      // Image was generated async for the boss (not for a post) — deliver it directly via WhatsApp
-      console.log(`[IMAGE-GEN] Standalone boss delivery to ${bossPhone}`);
+    // Standalone boss delivery
+    if (!scheduledPostId && bossPhone && imageUrl) {
       try {
         const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
         const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
         const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
         if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-          const deliverMsg = `🎨 Your image is ready!`;
+          const deliverMsg = responseMessage || '🎨 Here is your generated image!';
           const formData = new URLSearchParams();
           formData.append('To', normalizeBossPhone(bossPhone));
           const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
@@ -1691,7 +1717,6 @@ serve(async (req) => {
         console.error('[IMAGE-GEN] Failed to deliver standalone image to boss:', deliverErr.message);
       }
     } else if (!scheduledPostId && bossPhone && !imageUrl) {
-      // Standalone boss image gen failed — notify
       console.error(`[IMAGE-GEN] Standalone boss image gen failed, notifying ${bossPhone}`);
       try {
         const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
@@ -1716,16 +1741,30 @@ serve(async (req) => {
       }
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: responseMessage, imageUrl: imageUrl || null }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    console.log(`[IMAGE-GEN] Background processing complete: imageUrl=${imageUrl ? 'yes' : 'no'}`);
 
   } catch (error) {
-    console.error('[IMAGE-GEN] Error:', error);
-    return new Response(
-      JSON.stringify({ success: false, error: 'An error occurred processing your request' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    console.error('[IMAGE-GEN] Background processing error:', error);
+    // Try to notify boss of failure
+    const bossPhone = body.bossPhone;
+    if (bossPhone) {
+      try {
+        const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
+        if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('To', normalizeBossPhone(bossPhone));
+          formData.append('From', postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`);
+          formData.append('Body', '⚠️ Sorry, image generation failed. Please try again.');
+          await fetch(twilioUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString(),
+          });
+        }
+      } catch (_) { /* best effort */ }
+    }
   }
-});
+}
