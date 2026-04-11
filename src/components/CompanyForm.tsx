@@ -331,6 +331,36 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         if (aiError) throw aiError;
 
+        // Sync boss phones
+        if (companyId) {
+          // Delete existing entries and re-insert
+          await supabase
+            .from('company_boss_phones')
+            .delete()
+            .eq('company_id', companyId);
+
+          if (bossPhones.length > 0) {
+            const phonesToInsert = bossPhones
+              .filter(p => p.phone.trim())
+              .map(p => ({
+                company_id: companyId,
+                phone: p.phone.trim(),
+                label: p.label || null,
+                is_primary: p.is_primary,
+                notify_reservations: p.notify_reservations,
+                notify_payments: p.notify_payments,
+                notify_alerts: p.notify_alerts,
+              }));
+
+            if (phonesToInsert.length > 0) {
+              const { error: phoneError } = await supabase
+                .from('company_boss_phones')
+                .insert(phonesToInsert);
+              if (phoneError) console.error('Error saving boss phones:', phoneError);
+            }
+          }
+        }
+
         toast({
           title: "Success",
           description: "Company updated successfully",
