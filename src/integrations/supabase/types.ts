@@ -556,6 +556,7 @@ export type Database = {
           message_content: string
           message_from: string
           response: string | null
+          tool_context: Json | null
         }
         Insert: {
           company_id: string
@@ -565,6 +566,7 @@ export type Database = {
           message_content: string
           message_from: string
           response?: string | null
+          tool_context?: Json | null
         }
         Update: {
           company_id?: string
@@ -574,6 +576,7 @@ export type Database = {
           message_content?: string
           message_from?: string
           response?: string | null
+          tool_context?: Json | null
         }
         Relationships: [
           {
