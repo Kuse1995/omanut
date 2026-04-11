@@ -245,6 +245,34 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             banned_topics: aiData.banned_topics || ""
           });
         }
+
+        // Load boss phones
+        const { data: phonesData } = await supabase
+          .from('company_boss_phones')
+          .select('*')
+          .eq('company_id', data.id);
+
+        if (phonesData && phonesData.length > 0) {
+          setBossPhones(phonesData.map((p: any) => ({
+            id: p.id,
+            phone: p.phone,
+            label: p.label || '',
+            is_primary: p.is_primary,
+            notify_reservations: p.notify_reservations,
+            notify_payments: p.notify_payments,
+            notify_alerts: p.notify_alerts,
+          })));
+        } else if (data.boss_phone) {
+          // Fallback: show legacy boss_phone as single entry
+          setBossPhones([{
+            phone: data.boss_phone,
+            label: 'Owner',
+            is_primary: true,
+            notify_reservations: true,
+            notify_payments: true,
+            notify_alerts: true,
+          }]);
+        }
       }
     } catch (error) {
       console.error('Error loading company:', error);
@@ -276,7 +304,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             service_locations: formData.service_locations,
             twilio_number: formData.twilio_number,
             whatsapp_number: formData.whatsapp_number,
-            boss_phone: formData.boss_phone,
+            boss_phone: bossPhones.find(p => p.is_primary)?.phone || formData.boss_phone,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             test_mode: formData.test_mode,
             quick_reference_info: formData.quick_reference_info,
