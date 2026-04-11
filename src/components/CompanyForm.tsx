@@ -7,9 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Search, Loader2, Sparkles, Check, X } from "lucide-react";
+import { ArrowLeft, Search, Loader2, Sparkles, Check, X, Plus, Trash2, Star } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+
+interface BossPhoneEntry {
+  id?: string;
+  phone: string;
+  label: string;
+  is_primary: boolean;
+  notify_reservations: boolean;
+  notify_payments: boolean;
+  notify_alerts: boolean;
+}
 
 interface CompanyFormProps {
   companyId?: string;
