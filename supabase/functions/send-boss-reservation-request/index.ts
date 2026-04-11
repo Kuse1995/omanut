@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-
+import { getBossPhones } from "../_shared/boss-phones.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -34,12 +34,15 @@ serve(async (req) => {
     // Fetch company details
     const { data: company, error: compError } = await supabase
       .from('companies')
-      .select('boss_phone, name, test_mode')
+      .select('name, test_mode')
       .eq('id', reservation.company_id)
       .single();
 
-    if (compError || !company?.boss_phone) {
-      console.log('[BOSS-REQUEST] No boss phone configured');
+    // Get boss phones with reservation notification preference
+    const bossPhones = await getBossPhones(supabase, reservation.company_id, { notify_reservations: true });
+
+    if (compError || !company || bossPhones.length === 0) {
+      console.log('[BOSS-REQUEST] No boss phones configured for reservations');
       return new Response(
         JSON.stringify({ success: false, message: 'No boss phone configured' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -51,8 +54,7 @@ serve(async (req) => {
       console.log('═══════════════════════════════════════════════');
       console.log('🧪 TEST MODE - BOSS NOTIFICATION (NOT SENT)');
       console.log('═══════════════════════════════════════════════');
-      console.log('Boss Phone:', company.boss_phone);
-      console.log('Company:', company.name);
+      console.log('Boss Phones:', bossPhones.map(p => p.phone).join(', '));
       console.log('Reservation ID:', reservation_id);
       console.log('Customer:', reservation.name);
       console.log('Date/Time:', reservation.date, reservation.time);
@@ -136,10 +138,10 @@ Reply with:
 ❌ "REJECT ${reservation_id.slice(0, 8)} [reason]" to decline
 💬 "SUGGEST ${reservation_id.slice(0, 8)} [alternative]" to propose different time`;
 
-    console.log('[BOSS-REQUEST] Sending notification to boss:', company.boss_phone);
+    console.log('[BOSS-REQUEST] Sending notification to boss phones:', bossPhones.map(p => p.phone));
     console.log('[BOSS-REQUEST] Message:', message);
 
-    // Send via Twilio
+    // Send via Twilio to all boss phones
     const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     
@@ -147,21 +149,32 @@ Reply with:
       throw new Error('Twilio credentials not configured');
     }
 
-    const twilioResponse = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          To: company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`,
-          From: `whatsapp:${company.boss_phone.includes('+260') ? '+13344685065' : Deno.env.get('TWILIO_WHATSAPP_NUMBER') || '+13344685065'}`,
-          Body: message,
-        }),
+    for (const bossPhone of bossPhones) {
+      const cleanPhone = bossPhone.phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+      
+      const twilioResponse = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            To: `whatsapp:${cleanPhone}`,
+            From: `whatsapp:${cleanPhone.includes('+260') ? '+13344685065' : Deno.env.get('TWILIO_WHATSAPP_NUMBER') || '+13344685065'}`,
+            Body: message,
+          }),
+        }
+      );
+
+      if (!twilioResponse.ok) {
+        const errorText = await twilioResponse.text();
+        console.error(`[BOSS-REQUEST] Twilio error for ${bossPhone.phone}:`, errorText);
+      } else {
+        console.log(`[BOSS-REQUEST] Notification sent to ${bossPhone.label || bossPhone.phone}`);
       }
-    );
+    }
 
     if (!twilioResponse.ok) {
       const errorText = await twilioResponse.text();
