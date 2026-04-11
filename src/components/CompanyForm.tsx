@@ -722,14 +722,121 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               />
             </div>
 
-            <div>
-              <Label htmlFor="boss_phone">Boss/Manager Phone (for notifications)</Label>
-              <Input
-                id="boss_phone"
-                value={formData.boss_phone}
-                onChange={(e) => setFormData({ ...formData, boss_phone: e.target.value })}
-                placeholder="whatsapp:+1234567890"
-              />
+            {/* Boss/Manager Phones */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Boss/Manager Phones (for notifications)</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBossPhones([...bossPhones, {
+                    phone: '',
+                    label: '',
+                    is_primary: bossPhones.length === 0,
+                    notify_reservations: true,
+                    notify_payments: true,
+                    notify_alerts: true,
+                  }])}
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Phone
+                </Button>
+              </div>
+
+              {bossPhones.map((entry, idx) => (
+                <div key={idx} className="border border-border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={entry.phone}
+                      onChange={(e) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = { ...updated[idx], phone: e.target.value };
+                        setBossPhones(updated);
+                      }}
+                      placeholder="+260971234567"
+                      className="flex-1"
+                    />
+                    <Input
+                      value={entry.label}
+                      onChange={(e) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = { ...updated[idx], label: e.target.value };
+                        setBossPhones(updated);
+                      }}
+                      placeholder="Label (e.g. Owner)"
+                      className="w-36"
+                    />
+                    <Button
+                      type="button"
+                      variant={entry.is_primary ? "default" : "ghost"}
+                      size="icon"
+                      title="Set as primary"
+                      onClick={() => {
+                        const updated = bossPhones.map((p, i) => ({ ...p, is_primary: i === idx }));
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <Star className={`h-4 w-4 ${entry.is_primary ? 'fill-current' : ''}`} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const updated = bossPhones.filter((_, i) => i !== idx);
+                        if (entry.is_primary && updated.length > 0) {
+                          updated[0].is_primary = true;
+                        }
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_reservations}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_reservations: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Reservations
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_payments}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_payments: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Payments
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_alerts}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_alerts: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Alerts
+                    </label>
+                  </div>
+                </div>
+              ))}
+
+              {bossPhones.length === 0 && (
+                <p className="text-xs text-muted-foreground">No boss phones configured. Add one to receive WhatsApp notifications.</p>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">
