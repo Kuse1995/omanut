@@ -1210,6 +1210,7 @@ async function _processAIResponseInner(
         });
 
         console.log(`[CSAT] Recorded score ${score}/5 for ticket ${ticket.ticket_number}`);
+        markResponseSent();
         return; // Don't process further
       }
     }
@@ -1344,6 +1345,7 @@ async function _processAIResponseInner(
       }).eq('id', conversationId);
 
       console.log(`[HUMAN-FIRST] Queued successfully. Ticket: ${ticketNumber}, Drafts: ${aiDrafts.length}`);
+      markResponseSent(); // Human queue counts as handled — no fallback needed
       return; // Exit - no AI auto-response
     }
 
