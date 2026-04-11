@@ -1,0 +1,1 @@
+ALTER TABLE public.boss_conversations ADD COLUMN tool_context jsonb DEFAULT NULL;
