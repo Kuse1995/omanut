@@ -160,6 +160,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [isResearching, setIsResearching] = useState(false);
   const [researchResults, setResearchResults] = useState<any>(null);
   const [showResearchPreview, setShowResearchPreview] = useState(false);
+  const [bossPhones, setBossPhones] = useState<BossPhoneEntry[]>([]);
 
   const [aiInstructions, setAiInstructions] = useState({
     system_instructions: "",
