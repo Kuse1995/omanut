@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getBossPhones } from "../_shared/boss-phones.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -51,14 +52,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Notify boss via WhatsApp
+      // Notify all boss phones with alert preference via WhatsApp
+      const bossPhones = await getBossPhones(supabase, item.company_id, { notify_alerts: true });
+      
       const { data: company } = await supabase
         .from('companies')
-        .select('boss_phone, whatsapp_number, name')
+        .select('whatsapp_number, name')
         .eq('id', item.company_id)
         .single()
 
-      if (company?.boss_phone) {
+      if (bossPhones.length > 0 && company) {
         const ticketNum = item.support_tickets?.ticket_number || 'N/A'
         const message = `⚠️ *SLA BREACH - ${company.name}*\n\n` +
           `Ticket: ${ticketNum}\n` +
@@ -68,16 +71,18 @@ Deno.serve(async (req) => {
           `Summary: ${item.ai_summary || 'No summary'}\n\n` +
           `This ticket has exceeded its SLA deadline and needs immediate attention.`
 
-        try {
-          await supabase.functions.invoke('send-whatsapp-message', {
-            body: { 
-              to: company.boss_phone, 
-              message,
-              from: company.whatsapp_number 
-            }
-          })
-        } catch (e) {
-          console.error('Failed to notify boss:', e)
+        for (const bossPhone of bossPhones) {
+          try {
+            await supabase.functions.invoke('send-whatsapp-message', {
+              body: { 
+                to: bossPhone.phone, 
+                message,
+                from: company.whatsapp_number 
+              }
+            })
+          } catch (e) {
+            console.error(`Failed to notify boss ${bossPhone.phone}:`, e)
+          }
         }
       }
 
