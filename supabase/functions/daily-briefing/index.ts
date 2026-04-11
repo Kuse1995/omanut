@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { getBossPhones } from "../_shared/boss-phones.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,11 +34,27 @@ Deno.serve(async (req) => {
         .single();
       if (company) companies = [company];
     } else {
-      const { data: allCompanies } = await supabase
-        .from('companies')
-        .select('*')
-        .not('boss_phone', 'is', null);
-      companies = allCompanies || [];
+      // Get all companies that have at least one boss phone configured
+      const { data: allBossPhones } = await supabase
+        .from('company_boss_phones')
+        .select('company_id');
+      
+      const companyIds = [...new Set((allBossPhones || []).map((bp: any) => bp.company_id))];
+      
+      if (companyIds.length > 0) {
+        const { data: allCompanies } = await supabase
+          .from('companies')
+          .select('*')
+          .in('id', companyIds);
+        companies = allCompanies || [];
+      } else {
+        // Fallback to legacy boss_phone column
+        const { data: allCompanies } = await supabase
+          .from('companies')
+          .select('*')
+          .not('boss_phone', 'is', null);
+        companies = allCompanies || [];
+      }
     }
 
     console.log(`Analyzing ${companies.length} companies`);
@@ -312,31 +329,36 @@ Be specific with client names and phone numbers when flagging issues. Focus on a
 
         console.log('Formatted briefing message:', briefingMessage);
 
-        // Send WhatsApp message to boss
-        if (company.boss_phone && company.whatsapp_number) {
-          const twilioResponse = await fetch(
-            `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                'Content-Type': 'application/x-www-form-urlencoded',
-              },
-              body: new URLSearchParams({
-                From: `whatsapp:${company.whatsapp_number}`,
-                To: `whatsapp:${company.boss_phone}`,
-                Body: briefingMessage,
-              }),
+        // Send WhatsApp message to all boss phones
+        const bossPhones = await getBossPhones(supabase, company.id);
+        
+        if (bossPhones.length > 0 && company.whatsapp_number) {
+          for (const bossPhone of bossPhones) {
+            const cleanPhone = bossPhone.phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+            
+            const twilioResponse = await fetch(
+              `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                  From: `whatsapp:${company.whatsapp_number}`,
+                  To: `whatsapp:${cleanPhone}`,
+                  Body: briefingMessage,
+                }),
+              }
+            );
+
+            if (!twilioResponse.ok) {
+              const errorText = await twilioResponse.text();
+              console.error(`Twilio error for ${bossPhone.phone}:`, errorText);
+            } else {
+              console.log(`WhatsApp briefing sent to ${bossPhone.label || bossPhone.phone}`);
             }
-          );
-
-          if (!twilioResponse.ok) {
-            const errorText = await twilioResponse.text();
-            console.error('Twilio error:', errorText);
-            throw new Error(`Failed to send WhatsApp: ${twilioResponse.status}`);
           }
-
-          console.log('WhatsApp briefing sent successfully');
         }
 
         // Log briefing to boss_conversations

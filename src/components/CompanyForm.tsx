@@ -7,9 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Search, Loader2, Sparkles, Check, X } from "lucide-react";
+import { ArrowLeft, Search, Loader2, Sparkles, Check, X, Plus, Trash2, Star } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+
+interface BossPhoneEntry {
+  id?: string;
+  phone: string;
+  label: string;
+  is_primary: boolean;
+  notify_reservations: boolean;
+  notify_payments: boolean;
+  notify_alerts: boolean;
+}
 
 interface CompanyFormProps {
   companyId?: string;
@@ -149,6 +160,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
   const [isResearching, setIsResearching] = useState(false);
   const [researchResults, setResearchResults] = useState<any>(null);
   const [showResearchPreview, setShowResearchPreview] = useState(false);
+  const [bossPhones, setBossPhones] = useState<BossPhoneEntry[]>([]);
 
   const [aiInstructions, setAiInstructions] = useState({
     system_instructions: "",
@@ -233,6 +245,34 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             banned_topics: aiData.banned_topics || ""
           });
         }
+
+        // Load boss phones
+        const { data: phonesData } = await supabase
+          .from('company_boss_phones')
+          .select('*')
+          .eq('company_id', data.id);
+
+        if (phonesData && phonesData.length > 0) {
+          setBossPhones(phonesData.map((p: any) => ({
+            id: p.id,
+            phone: p.phone,
+            label: p.label || '',
+            is_primary: p.is_primary,
+            notify_reservations: p.notify_reservations,
+            notify_payments: p.notify_payments,
+            notify_alerts: p.notify_alerts,
+          })));
+        } else if (data.boss_phone) {
+          // Fallback: show legacy boss_phone as single entry
+          setBossPhones([{
+            phone: data.boss_phone,
+            label: 'Owner',
+            is_primary: true,
+            notify_reservations: true,
+            notify_payments: true,
+            notify_alerts: true,
+          }]);
+        }
       }
     } catch (error) {
       console.error('Error loading company:', error);
@@ -264,7 +304,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             service_locations: formData.service_locations,
             twilio_number: formData.twilio_number,
             whatsapp_number: formData.whatsapp_number,
-            boss_phone: formData.boss_phone,
+            boss_phone: bossPhones.find(p => p.is_primary)?.phone || formData.boss_phone,
             whatsapp_voice_enabled: formData.whatsapp_voice_enabled,
             test_mode: formData.test_mode,
             quick_reference_info: formData.quick_reference_info,
@@ -290,6 +330,36 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
           });
 
         if (aiError) throw aiError;
+
+        // Sync boss phones
+        if (companyId) {
+          // Delete existing entries and re-insert
+          await supabase
+            .from('company_boss_phones')
+            .delete()
+            .eq('company_id', companyId);
+
+          if (bossPhones.length > 0) {
+            const phonesToInsert = bossPhones
+              .filter(p => p.phone.trim())
+              .map(p => ({
+                company_id: companyId,
+                phone: p.phone.trim(),
+                label: p.label || null,
+                is_primary: p.is_primary,
+                notify_reservations: p.notify_reservations,
+                notify_payments: p.notify_payments,
+                notify_alerts: p.notify_alerts,
+              }));
+
+            if (phonesToInsert.length > 0) {
+              const { error: phoneError } = await supabase
+                .from('company_boss_phones')
+                .insert(phonesToInsert);
+              if (phoneError) console.error('Error saving boss phones:', phoneError);
+            }
+          }
+        }
 
         toast({
           title: "Success",
@@ -652,14 +722,121 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               />
             </div>
 
-            <div>
-              <Label htmlFor="boss_phone">Boss/Manager Phone (for notifications)</Label>
-              <Input
-                id="boss_phone"
-                value={formData.boss_phone}
-                onChange={(e) => setFormData({ ...formData, boss_phone: e.target.value })}
-                placeholder="whatsapp:+1234567890"
-              />
+            {/* Boss/Manager Phones */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Boss/Manager Phones (for notifications)</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBossPhones([...bossPhones, {
+                    phone: '',
+                    label: '',
+                    is_primary: bossPhones.length === 0,
+                    notify_reservations: true,
+                    notify_payments: true,
+                    notify_alerts: true,
+                  }])}
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Phone
+                </Button>
+              </div>
+
+              {bossPhones.map((entry, idx) => (
+                <div key={idx} className="border border-border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={entry.phone}
+                      onChange={(e) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = { ...updated[idx], phone: e.target.value };
+                        setBossPhones(updated);
+                      }}
+                      placeholder="+260971234567"
+                      className="flex-1"
+                    />
+                    <Input
+                      value={entry.label}
+                      onChange={(e) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = { ...updated[idx], label: e.target.value };
+                        setBossPhones(updated);
+                      }}
+                      placeholder="Label (e.g. Owner)"
+                      className="w-36"
+                    />
+                    <Button
+                      type="button"
+                      variant={entry.is_primary ? "default" : "ghost"}
+                      size="icon"
+                      title="Set as primary"
+                      onClick={() => {
+                        const updated = bossPhones.map((p, i) => ({ ...p, is_primary: i === idx }));
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <Star className={`h-4 w-4 ${entry.is_primary ? 'fill-current' : ''}`} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const updated = bossPhones.filter((_, i) => i !== idx);
+                        if (entry.is_primary && updated.length > 0) {
+                          updated[0].is_primary = true;
+                        }
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_reservations}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_reservations: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Reservations
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_payments}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_payments: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Payments
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_alerts}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_alerts: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Alerts
+                    </label>
+                  </div>
+                </div>
+              ))}
+
+              {bossPhones.length === 0 && (
+                <p className="text-xs text-muted-foreground">No boss phones configured. Add one to receive WhatsApp notifications.</p>
+              )}
             </div>
 
             <div className="flex items-center space-x-2">

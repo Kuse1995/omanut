@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
+import { getBossPhones } from "../_shared/boss-phones.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -21,15 +21,26 @@ serve(async (req) => {
 
     console.log('Sending boss notification:', { companyId, notificationType });
 
-    // Get company and boss phone
+    // Get company whatsapp number
     const { data: company, error: companyError } = await supabase
       .from('companies')
-      .select('name, boss_phone, whatsapp_number')
+      .select('name, whatsapp_number')
       .eq('id', companyId)
       .single();
 
-    if (companyError || !company || !company.boss_phone) {
-      console.log('No boss phone configured for company:', companyId);
+    if (companyError || !company) {
+      console.log('Company not found:', companyId);
+      return new Response(JSON.stringify({ success: false, message: 'Company not found' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Get boss phones from the new table
+    const bossPhones = await getBossPhones(supabase, companyId);
+
+    if (bossPhones.length === 0) {
+      console.log('No boss phones configured for company:', companyId);
       return new Response(JSON.stringify({ success: false, message: 'No boss phone' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -91,44 +102,50 @@ serve(async (req) => {
         message = data.message || 'Notification from AI assistant';
     }
 
-    // Send via Twilio
+    // Send via Twilio to ALL boss phones
     const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
     const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
     if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
       
-      const formData = new URLSearchParams();
-      // Normalize From number - ensure whatsapp: prefix exactly once
+      // Normalize From number
       const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
         ? company.whatsapp_number 
         : `whatsapp:${company.whatsapp_number}`;
-      
-      // Normalize To number - strip any existing whatsapp: prefix, ensure E.164 with +, then add whatsapp:
-      const cleanBossPhone = company.boss_phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
-      const toNumber = `whatsapp:${cleanBossPhone}`;
-      
-      formData.append('From', fromNumber);
-      formData.append('To', toNumber);
-      formData.append('Body', message);
-      if (mediaUrl || data?.mediaUrl) {
-        formData.append('MediaUrl', mediaUrl || data.mediaUrl);
-      }
 
-      const twilioResponse = await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: formData.toString(),
-      });
+      for (const bossPhone of bossPhones) {
+        // Normalize To number
+        const cleanBossPhone = bossPhone.phone.replace(/^whatsapp:/, '').replace(/^\+?/, '+');
+        const toNumber = `whatsapp:${cleanBossPhone}`;
+        
+        const formData = new URLSearchParams();
+        formData.append('From', fromNumber);
+        formData.append('To', toNumber);
+        formData.append('Body', message);
+        if (mediaUrl || data?.mediaUrl) {
+          formData.append('MediaUrl', mediaUrl || data.mediaUrl);
+        }
 
-      if (!twilioResponse.ok) {
-        const errorText = await twilioResponse.text();
-        console.error('Twilio error:', errorText);
-      } else {
-        console.log('Management notification sent successfully');
+        try {
+          const twilioResponse = await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData.toString(),
+          });
+
+          if (!twilioResponse.ok) {
+            const errorText = await twilioResponse.text();
+            console.error(`Twilio error for ${bossPhone.phone}:`, errorText);
+          } else {
+            console.log(`Management notification sent to ${bossPhone.label || bossPhone.phone}`);
+          }
+        } catch (e) {
+          console.error(`Failed to send to ${bossPhone.phone}:`, e);
+        }
       }
     }
 
