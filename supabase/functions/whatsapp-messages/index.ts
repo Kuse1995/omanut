@@ -4116,8 +4116,95 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       clearTimeout(timeoutId);
     } catch (error) {
       clearTimeout(timeoutId);
-      console.error('[BACKGROUND] AI processing error:', error);
-      assistantReply = `I apologize, but I'm experiencing some technical difficulties. Please try again in a moment. If this persists, contact us at ${company.phone || 'our main number'}.`;
+      const originalError = error instanceof Error ? error.message : String(error);
+      console.error('[BACKGROUND] AI processing error:', originalError);
+
+      // Log the original error for monitoring
+      try {
+        await supabase.from('ai_error_logs').insert({
+          company_id: company.id,
+          conversation_id: conversationId,
+          error_type: 'ai_call_failed',
+          severity: 'high',
+          original_message: lastUserMessage || '',
+          ai_response: '',
+          analysis_details: { original_error: originalError, stage: 'primary_ai_call' },
+        });
+      } catch (logErr) { console.error('[ERROR-LOG] Failed to log error:', logErr); }
+
+      // --- Retry 1: fallback model, NO tools, same context ---
+      console.log('[RETRY-1] Attempting fallback model with no tools...');
+      try {
+        const retry1Controller = new AbortController();
+        const retry1Timeout = setTimeout(() => retry1Controller.abort(), 30000);
+        const retry1Response = await geminiChat({
+          model: 'glm-4.7',
+          messages: sanitizeMessages(messages),
+          temperature: 1.0,
+          max_tokens: 1024,
+          signal: retry1Controller.signal,
+        });
+        clearTimeout(retry1Timeout);
+        if (retry1Response.ok) {
+          const retry1Data = await retry1Response.json();
+          const retry1Reply = retry1Data.choices?.[0]?.message?.content;
+          if (retry1Reply) {
+            console.log('[RETRY-1] Success — got response from fallback model');
+            assistantReply = retry1Reply;
+          }
+        }
+      } catch (retry1Err) {
+        console.error('[RETRY-1] Failed:', retry1Err instanceof Error ? retry1Err.message : retry1Err);
+      }
+
+      // --- Retry 2: fallback model, NO tools, truncated context (last 3 msgs) ---
+      if (!assistantReply) {
+        console.log('[RETRY-2] Attempting with truncated context (last 3 messages)...');
+        try {
+          const systemMsg = messages.find((m: any) => m.role === 'system');
+          const userMsgs = messages.filter((m: any) => m.role !== 'system').slice(-3);
+          const truncatedMessages = systemMsg ? [systemMsg, ...userMsgs] : userMsgs;
+
+          const retry2Controller = new AbortController();
+          const retry2Timeout = setTimeout(() => retry2Controller.abort(), 30000);
+          const retry2Response = await geminiChat({
+            model: 'glm-4.7',
+            messages: sanitizeMessages(truncatedMessages),
+            temperature: 1.0,
+            max_tokens: 512,
+            signal: retry2Controller.signal,
+          });
+          clearTimeout(retry2Timeout);
+          if (retry2Response.ok) {
+            const retry2Data = await retry2Response.json();
+            const retry2Reply = retry2Data.choices?.[0]?.message?.content;
+            if (retry2Reply) {
+              console.log('[RETRY-2] Success — got response from truncated context');
+              assistantReply = retry2Reply;
+            }
+          }
+        } catch (retry2Err) {
+          console.error('[RETRY-2] Failed:', retry2Err instanceof Error ? retry2Err.message : retry2Err);
+        }
+      }
+
+      // --- Final: use company's configured fallback message + notify boss ---
+      if (!assistantReply) {
+        console.warn('[RETRY-EXHAUSTED] All retries failed, using company fallback message');
+        assistantReply = fallbackMessage;
+
+        // Notify boss about complete AI failure
+        try {
+          const bossPhones = await getBossPhones(supabase, company.id, company.boss_phone);
+          for (const bp of bossPhones) {
+            await sendTwilioMessage(
+              bp,
+              `⚠️ AI completely failed for customer ${customerName || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
+              company.whatsapp_number || company.twilio_number || ''
+            );
+          }
+        } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
+      }
     }
 
     // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
