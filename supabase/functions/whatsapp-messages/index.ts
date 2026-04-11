@@ -755,6 +755,103 @@ Reply with 'Unmute' to resume AI for this client.`;
 }
 
 // Background processing function that handles AI response
+// ========== LAYER 1: GLOBAL TIMEOUT WATCHDOG ==========
+async function sendFallbackToCustomer(
+  supabase: any,
+  conversationId: string,
+  companyId: string,
+  customerPhone: string,
+  reason: string
+) {
+  try {
+    const { data: company } = await supabase
+      .from('companies')
+      .select('whatsapp_number, boss_phone, name')
+      .eq('id', companyId)
+      .single();
+
+    if (!company?.whatsapp_number) return;
+
+    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return;
+
+    // Get company's configured fallback message
+    const { data: aiOverrides } = await supabase
+      .from('company_ai_overrides')
+      .select('fallback_message')
+      .eq('company_id', companyId)
+      .single();
+
+    const fallbackMsg = aiOverrides?.fallback_message || 
+      "I'm experiencing a brief delay. Let me get back to you shortly — or feel free to send your message again.";
+
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+    const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
+      ? company.whatsapp_number 
+      : `whatsapp:${company.whatsapp_number}`;
+
+    const formData = new URLSearchParams();
+    formData.append('From', fromNumber);
+    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('Body', fallbackMsg);
+
+    await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+
+    // Save fallback message to DB
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: fallbackMsg
+    });
+
+    // Log to ai_error_logs
+    await supabase.from('ai_error_logs').insert({
+      company_id: companyId,
+      conversation_id: conversationId,
+      error_type: reason,
+      severity: 'high',
+      original_message: `Customer: ${customerPhone}`,
+      ai_response: fallbackMsg,
+      status: 'new'
+    });
+
+    // Mark for human takeover
+    await supabase.from('conversations').update({
+      human_takeover: true,
+      takeover_at: new Date().toISOString()
+    }).eq('id', conversationId);
+
+    // Notify boss
+    if (company.boss_phone) {
+      const bossMsg = `⚠️ AI ${reason}\n\nCustomer: ${customerPhone}\nCompany: ${company.name}\n\nFallback sent. Conversation marked for takeover.`;
+      const bossForm = new URLSearchParams();
+      bossForm.append('From', fromNumber);
+      bossForm.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
+      bossForm.append('Body', bossMsg);
+      await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: bossForm.toString(),
+      });
+    }
+
+    console.log(`[WATCHDOG] Fallback sent for ${reason}: ${conversationId}`);
+  } catch (e) {
+    console.error('[WATCHDOG] Failed to send fallback:', e);
+  }
+}
+
 async function processAIResponse(
   conversationId: string,
   companyId: string,
@@ -763,13 +860,56 @@ async function processAIResponse(
   storedMediaTypes: string[],
   customerPhone: string
 ) {
-  console.log('[BACKGROUND] Starting AI processing for conversation:', conversationId);
-  
-  // AI calls use geminiChat() with GEMINI_API_KEY
+  const HARD_TIMEOUT_MS = 55000;
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
+
+  // Track whether we successfully sent a response
+  let responseSent = false;
+
+  const actualProcessing = async () => {
+    await _processAIResponseInner(conversationId, companyId, userMessage, storedMediaUrls, storedMediaTypes, customerPhone, supabase, () => { responseSent = true; });
+  };
+
+  const timeoutPromise = new Promise<string>((resolve) =>
+    setTimeout(() => resolve('TIMEOUT'), HARD_TIMEOUT_MS)
+  );
+
+  try {
+    const result = await Promise.race([actualProcessing(), timeoutPromise]);
+    if (result === 'TIMEOUT') {
+      console.error(`[WATCHDOG] TIMEOUT after ${HARD_TIMEOUT_MS}ms for conversation ${conversationId}`);
+      if (!responseSent) {
+        await sendFallbackToCustomer(supabase, conversationId, companyId, customerPhone, 'timeout');
+      }
+    }
+  } catch (outerError) {
+    console.error('[WATCHDOG] Uncaught error in processAIResponse:', outerError);
+    if (!responseSent) {
+      await sendFallbackToCustomer(supabase, conversationId, companyId, customerPhone, 'crash');
+    }
+  } finally {
+    // LAYER 3: Final safety net — if nothing was sent, fire fallback
+    if (!responseSent) {
+      console.warn(`[WATCHDOG-FINALLY] No response sent for ${conversationId}, sending fallback`);
+      await sendFallbackToCustomer(supabase, conversationId, companyId, customerPhone, 'silent_failure');
+    }
+  }
+}
+
+async function _processAIResponseInner(
+  conversationId: string,
+  companyId: string,
+  userMessage: string,
+  storedMediaUrls: string[],
+  storedMediaTypes: string[],
+  customerPhone: string,
+  supabase: any,
+  markResponseSent: () => void
+) {
+  console.log('[BACKGROUND] Starting AI processing for conversation:', conversationId);
 
   // ========== IMAGE GENERATION COMMAND DETECTION ==========
   // GATE 1: Check if company has image generation enabled before running detection
