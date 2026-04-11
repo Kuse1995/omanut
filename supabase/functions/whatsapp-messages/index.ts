@@ -4496,6 +4496,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
       if (twilioResponse.ok) {
         console.log('[BACKGROUND] Response sent successfully via Twilio');
+        markResponseSent();
       } else {
         const errorText = await twilioResponse.text();
         console.error('[BACKGROUND] Twilio send error:', twilioResponse.status, errorText);
