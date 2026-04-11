@@ -55,6 +55,7 @@ Deno.serve(async (req) => {
           .not('boss_phone', 'is', null);
         companies = allCompanies || [];
       }
+    }
 
     console.log(`Analyzing ${companies.length} companies`);
 
