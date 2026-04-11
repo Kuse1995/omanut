@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { geminiChat, veoStartGeneration } from "../_shared/gemini-client.ts";
 import { minimaxStartVideoGeneration } from "../_shared/minimax-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
+import { resolveCompaniesForPhone } from "../_shared/boss-phones.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,15 +47,47 @@ serve(async (req) => {
       company = result.data;
       companyError = result.error;
     } else {
-      // Fallback: find by management phone (may fail if multiple companies share same boss_phone)
-      const result = await supabase
-        .from('companies')
-        .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
-        .ilike('boss_phone', `%${normalizedFrom}%`)
-        .limit(1)
-        .maybeSingle();
-      company = result.data;
-      companyError = result.error;
+      // Resolve using company_boss_phones table (supports multi-company)
+      const matchedCompanies = await resolveCompaniesForPhone(supabase, From || '');
+
+      if (matchedCompanies.length === 0) {
+        console.error('Management phone not found:', From);
+        return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml' }
+        });
+      }
+
+      if (matchedCompanies.length > 1) {
+        // Check if the message is a company selection (e.g. "1", "2", etc.)
+        const selectionNum = parseInt((Body || '').trim());
+        if (!isNaN(selectionNum) && selectionNum >= 1 && selectionNum <= matchedCompanies.length) {
+          // Boss selected a company
+          const selected = matchedCompanies[selectionNum - 1];
+          const result = await supabase
+            .from('companies')
+            .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
+            .eq('id', selected.company_id)
+            .single();
+          company = result.data;
+          companyError = result.error;
+        } else {
+          // Present selection menu
+          const menu = matchedCompanies.map((c, i) => `${i + 1}. ${c.company_name}`).join('\n');
+          const selectionMessage = `You manage multiple companies. Reply with the number:\n\n${menu}`;
+          return new Response(JSON.stringify({ response: selectionMessage }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      } else {
+        // Single match — use it directly
+        const result = await supabase
+          .from('companies')
+          .select('*, company_ai_overrides(*), company_documents(*), image_generation_settings(*)')
+          .eq('id', matchedCompanies[0].company_id)
+          .single();
+        company = result.data;
+        companyError = result.error;
+      }
     }
 
     if (companyError || !company) {
