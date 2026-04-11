@@ -1,63 +1,80 @@
 
 
-# Switch All AI Text/Tool-Calling to GLM 4.7 (Zhipu AI)
+## Current State
 
-## Summary
-Route all text and tool-calling AI through Zhipu AI's `glm-4.7` model. Image generation (Gemini/OpenAI) and video generation (Veo/MiniMax) remain unchanged.
+1. **Same boss number for multiple companies**: Already possible at the database level (no unique constraint). However, the `boss-chat` function resolves company by phone with `ilike` + `limit(1)`, so when a boss texts in, it picks one company arbitrarily. This needs a selection mechanism.
 
-## Prerequisites
-You'll need to provide your **ZHIPU_API_KEY** from [open.bigmodel.cn](https://open.bigmodel.cn). I'll prompt you to add it as a secret.
+2. **Multiple boss numbers per company**: Not supported. `boss_phone` is a single `text` column on `companies`. All notification functions (`send-boss-notification`, `send-boss-reservation-request`, `daily-briefing`, etc.) read `company.boss_phone` as a single value.
 
-## Changes
+---
 
-### 1. Add Zhipu routing to `gemini-client.ts`
-Modify `geminiChat()` to detect `glm-` prefixed models and route to Zhipu's OpenAI-compatible endpoint (`https://open.bigmodel.cn/api/paas/v4/chat/completions`) using `ZHIPU_API_KEY`. Image/video/vision functions stay untouched.
+## Plan
 
-### 2. Update database: set `primary_model` for all companies
-```sql
-UPDATE company_ai_overrides SET primary_model = 'glm-4.7';
+### Step 1: Create a `company_boss_phones` table
+
+New junction table to support multiple boss numbers per company:
+
+```
+company_boss_phones
+- id (uuid, PK)
+- company_id (uuid, FK → companies)
+- phone (text, NOT NULL)
+- label (text) — e.g. "Owner", "Manager", "Night shift"
+- is_primary (boolean, default false)
+- notify_reservations (boolean, default true)
+- notify_payments (boolean, default true)
+- notify_alerts (boolean, default true)
+- created_at (timestamptz)
 ```
 
-### 3. Update hardcoded fallback defaults (3 files)
-| File | Current fallback | New fallback |
-|------|-----------------|--------------|
-| `whatsapp-messages/index.ts` | `google/gemini-2.5-flash` | `glm-4.7` |
-| `boss-chat/index.ts` | `google/gemini-3-pro-preview` | `glm-4.7` |
-| `ai-playground/index.ts` | `google/gemini-2.5-flash` | `glm-4.7` |
+- Unique constraint on `(company_id, phone)` to prevent duplicates within a company.
+- No cross-company uniqueness — same phone can exist in multiple companies.
+- RLS: company members can read; owners/managers can write.
+- Migration seeds existing `boss_phone` values into the new table as `is_primary = true`.
 
-### 4. Update hardcoded models in 13 additional edge functions
-All `geminiChat()` calls with hardcoded Gemini models (non-vision, non-image tasks) switch to `glm-4.7`:
+### Step 2: Update boss-chat company resolution
 
-`analyze-conversation`, `analyze-and-followup`, `auto-content-creator`, `ai-training-coach`, `generate-reply-draft`, `meta-webhook`, `meta-lead-alert`, `research-company`, `smart-configure`, `supervisor-agent`, `extract-product-identity`, `test-image-generation` (text calls only), `whatsapp-image-gen` (text/caption calls only).
+When an inbound message arrives without a `companyId`:
+- Query `company_boss_phones` for all companies matching the sender's phone.
+- If exactly 1 match → use that company (current behavior).
+- If multiple matches → present a numbered menu: "You manage multiple companies. Reply with the number: 1. Company A, 2. Company B" and track the selection in session state (e.g. `boss_conversations` or in-memory for the request).
 
-### What stays on Gemini
-- `geminiImageGenerate()` — image generation
-- `openaiImageGenerate/Edit()` — OpenAI image gen
-- `veoStartGeneration/veoPollOperation()` — video generation
-- `analyze-media` — vision analysis (multimodal image input)
-- `reindex-company-media` — direct Gemini vision API
-- `whatsapp-image-gen` image generation calls
+### Step 3: Update all notification functions to send to multiple numbers
 
-## Technical Detail
-Zhipu's API is OpenAI-compatible. Routing change in `gemini-client.ts`:
+Affected functions (~8):
+- `send-boss-notification` — loop over all boss phones for the company
+- `send-boss-reservation-request` — send to all phones with `notify_reservations = true`
+- `daily-briefing` — send to all phones
+- `boss-media-watchdog` — send to all phones
+- `sla-escalation` — send to all phones with `notify_alerts = true`
+- `csat-followup` — send to primary phone
+- `handle-boss-response` — already receives `From`, no change needed
+- `whatsapp-image-gen` — uses `bossPhone` from request, no change needed
 
-```text
-if model starts with "glm-"
-  → endpoint: https://open.bigmodel.cn/api/paas/v4/chat/completions
-  → auth: ZHIPU_API_KEY
-else
-  → existing Gemini endpoint
-  → auth: GEMINI_API_KEY
-```
+Each function will query `company_boss_phones` instead of `companies.boss_phone`. A shared helper in `_shared/` will provide `getBossPhones(supabase, companyId, filter?)`.
 
-## Files to Edit
+### Step 4: Update the CompanyForm UI
 
-| File | Change |
-|------|--------|
-| `supabase/functions/_shared/gemini-client.ts` | Add Zhipu provider routing |
-| `supabase/functions/whatsapp-messages/index.ts` | Default fallback → `glm-4.7` |
-| `supabase/functions/boss-chat/index.ts` | Default fallback → `glm-4.7` |
-| `supabase/functions/ai-playground/index.ts` | Default fallback → `glm-4.7` |
-| 13 additional edge functions | Hardcoded model → `glm-4.7` |
-| Database (data update) | `primary_model = 'glm-4.7'` for all companies |
+Replace the single "Boss Phone" text input with a multi-entry UI:
+- List of phone entries with label, phone number, and notification toggles.
+- Add/remove buttons.
+- Mark one as primary.
+- On save, sync to `company_boss_phones` table.
+
+### Step 5: Keep backward compatibility
+
+- Keep `companies.boss_phone` column as a computed/synced field (primary phone) for any code not yet migrated, updated via a trigger on `company_boss_phones`.
+- Gradually deprecate direct reads of `companies.boss_phone`.
+
+---
+
+## Summary of changes
+
+| Area | Files | Change |
+|------|-------|--------|
+| Database | Migration | New `company_boss_phones` table + seed from existing data + sync trigger |
+| Shared helper | `_shared/boss-phones.ts` | `getBossPhones()` utility |
+| Edge functions | ~6 notification functions | Query new table, loop sends |
+| Boss chat | `boss-chat/index.ts` | Multi-company selection menu |
+| Frontend | `CompanyForm.tsx` | Multi-phone management UI |
 
