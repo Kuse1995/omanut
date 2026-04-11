@@ -3058,6 +3058,16 @@ export type Database = {
         Returns: undefined
       }
       delete_company: { Args: { p_company_id: string }; Returns: Json }
+      find_unanswered_conversations: {
+        Args: { cutoff_time: string }
+        Returns: {
+          company_id: string
+          customer_name: string
+          id: string
+          last_message_at: string
+          phone: string
+        }[]
+      }
       get_user_companies: {
         Args: never
         Returns: {
