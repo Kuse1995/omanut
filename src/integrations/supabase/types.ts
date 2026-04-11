@@ -1091,6 +1091,50 @@ export type Database = {
           },
         ]
       }
+      company_boss_phones: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          is_primary: boolean
+          label: string | null
+          notify_alerts: boolean
+          notify_payments: boolean
+          notify_reservations: boolean
+          phone: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          label?: string | null
+          notify_alerts?: boolean
+          notify_payments?: boolean
+          notify_reservations?: boolean
+          phone: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          is_primary?: boolean
+          label?: string | null
+          notify_alerts?: boolean
+          notify_payments?: boolean
+          notify_reservations?: boolean
+          phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_boss_phones_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_departments: {
         Row: {
           company_id: string
