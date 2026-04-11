@@ -1301,16 +1301,37 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     // Fetch recent conversation history for multi-turn context
     const { data: recentHistory } = await supabase
       .from('boss_conversations')
-      .select('message_content, response, created_at')
+      .select('message_content, response, created_at, tool_context')
       .eq('company_id', company.id)
       .order('created_at', { ascending: false })
       .limit(12);
+
+    // Restore image context from most recent tool_context with a last_image_url (within 60 min)
+    let restoredImageUrl: string | null = null;
+    let restoredImageId: string | null = null;
+    const sixtyMinAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    for (const h of (recentHistory || [])) {
+      const ctx = h.tool_context as any;
+      if (ctx?.last_image_url && h.created_at > sixtyMinAgo) {
+        restoredImageUrl = ctx.last_image_url;
+        restoredImageId = ctx.last_image_id || null;
+        break; // Most recent first
+      }
+    }
 
     // Build conversation messages with history (oldest first)
     const historyMessages = (recentHistory || []).reverse().flatMap((h: any) => [
       { role: 'user' as const, content: h.message_content },
       ...(h.response ? [{ role: 'assistant' as const, content: h.response }] : [])
     ]);
+
+    // Inject image context so the AI knows about the active image
+    if (restoredImageUrl) {
+      historyMessages.push({
+        role: 'user' as const,
+        content: `[SYSTEM CONTEXT — DO NOT REPEAT THIS TO THE USER] The last generated image URL is: ${restoredImageUrl} — REUSE this URL for any scheduling, posting, or publishing. Do NOT call generate_image again unless the boss explicitly asks for a NEW or DIFFERENT image.`
+      });
+    }
 
     // ========== MULTI-ROUND TOOL EXECUTION LOOP ==========
     // Allows AI to chain tools: e.g. check_stock → create_quotation → generate_document
@@ -1321,7 +1342,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       { role: 'user', content: Body }
     ];
     let aiResponse = '';
-    let toolImageUrl: string | null = null;
+    let toolImageUrl: string | null = restoredImageUrl;
     let toolMediaMessages: { body: string; imageUrl: string | null }[] = [];
     let imageGenCount = 0; // Per-session image generation cap
     const MAX_IMAGE_GENS_PER_SESSION = 2;
@@ -2278,6 +2299,14 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 break;
               }
 
+              // HARD GATE: If we already have an image and this is a publish-intent message, skip regeneration
+              const isPublishIntent = /\b(post it|publish it|go live|put it live|share it|post this|publish this|schedule it|schedule this|approve|yes|ok|sure|do it|go ahead|confirmed|like it|looks good|perfect)\b/i.test(normalizedBody);
+              if (toolImageUrl && isPublishIntent) {
+                console.log(`[BOSS-TOOL-${functionName}] SKIPPED — toolImageUrl already set and message is publish-intent. Reusing: ${toolImageUrl}`);
+                result = { success: true, message: `✅ Using the existing image: ${toolImageUrl}`, image_url: toolImageUrl };
+                break;
+              }
+
               const SUPABASE_URL_IMG = Deno.env.get('SUPABASE_URL')!;
               const SUPABASE_SRK_IMG = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
               const messageType = functionName === 'generate_image' ? 'generate' : 'edit';
@@ -2702,6 +2731,13 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
 
     console.log('Final AI response:', aiResponse.substring(0, 100) + '...');
 
+    // Build tool_context to persist image state across messages
+    const toolContext = (toolImageUrl || imageGenCount > 0) ? {
+      last_image_url: toolImageUrl,
+      last_image_id: restoredImageId,
+      image_gen_count: imageGenCount,
+    } : null;
+
     // Log management conversation
     await supabase
       .from('boss_conversations')
@@ -2709,7 +2745,8 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
         company_id: company.id,
         message_from: 'management',
         message_content: Body,
-        response: aiResponse
+        response: aiResponse,
+        tool_context: toolContext
       });
 
     // Return JSON response (not TwiML) for whatsapp-messages to handle
