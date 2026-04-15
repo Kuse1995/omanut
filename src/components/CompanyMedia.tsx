@@ -6,8 +6,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, Trash2, Image as ImageIcon, Video } from "lucide-react";
+import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2 } from "lucide-react";
+
+interface BmsProduct {
+  id?: string;
+  name?: string;
+  product_name?: string;
+  sku?: string;
+  price?: number;
+  selling_price?: number;
+}
 
 interface CompanyMediaProps {
   companyId: string;
@@ -15,6 +26,7 @@ interface CompanyMediaProps {
 
 interface Media {
   id: string;
+  bms_product_id: string | null;
   file_name: string;
   file_path: string;
   file_type: string;
@@ -57,6 +69,26 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [compressing, setCompressing] = useState(false);
   const [compressionProgress, setCompressionProgress] = useState(0);
   const { toast } = useToast();
+
+  // BMS products state
+  const [bmsProducts, setBmsProducts] = useState<BmsProduct[]>([]);
+  const [selectedBmsProductId, setSelectedBmsProductId] = useState('');
+
+  useEffect(() => {
+    const fetchBmsProducts = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('bms-agent', {
+          body: { action: 'list_products', params: { company_id: companyId } }
+        });
+        if (!error && data?.success && Array.isArray(data.data)) {
+          setBmsProducts(data.data);
+        }
+      } catch (e) {
+        console.log('BMS products not available:', e);
+      }
+    };
+    fetchBmsProducts();
+  }, [companyId]);
 
   useEffect(() => {
     loadMedia();
@@ -476,7 +508,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           tags: tags ? tags.split(',').map(t => t.trim()) : [],
           uploaded_by: user.id,
           thumbnail_url: thumbnailUrl,
-          category: selectedCategory
+          category: selectedCategory,
+          bms_product_id: (selectedBmsProductId && selectedBmsProductId !== 'none') ? selectedBmsProductId : null
         });
 
       if (dbError) {
@@ -495,6 +528,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       setTags("");
       setSelectedCategory('other');
       setAiSuggested(false);
+      setSelectedBmsProductId('');
       setSelectedFile(null);
       setUploadProgress(0);
       loadMedia();
@@ -650,7 +684,28 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               disabled={analyzing}
             />
           </div>
-          
+
+          <div className="space-y-2">
+            <Label>5. Link to BMS Product (optional)</Label>
+            <Select value={selectedBmsProductId} onValueChange={setSelectedBmsProductId}>
+              <SelectTrigger>
+                <SelectValue placeholder={bmsProducts.length === 0 ? 'No BMS products found' : 'Select a BMS product'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— No link —</SelectItem>
+                {bmsProducts.map((p, i) => {
+                  const productId = p.id || p.sku || String(i);
+                  const productName = p.name || p.product_name || 'Unknown';
+                  return (
+                    <SelectItem key={productId} value={productId}>
+                      {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+
           {uploading && uploadProgress > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
@@ -674,7 +729,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
             ) : (
               <>
                 <Upload className="mr-2 h-4 w-4" />
-                5. Upload Media
+                6. Upload Media
               </>
             )}
           </Button>
@@ -735,8 +790,15 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                       <Video className="h-12 w-12 text-muted-foreground" />
                     </div>
                   )}
-                  <div className="p-2 space-y-1">
-                    <p className="text-sm font-medium truncate">{item.file_name}</p>
+                   <div className="p-2 space-y-1">
+                    <div className="flex items-center gap-1">
+                      <p className="text-sm font-medium truncate flex-1">{item.file_name}</p>
+                      {item.bms_product_id && (
+                        <Badge variant="outline" className="text-[10px] gap-0.5 shrink-0">
+                          <Link2 className="h-2.5 w-2.5" />BMS
+                        </Badge>
+                      )}
+                    </div>
                     {item.description && (
                       <p className="text-xs text-muted-foreground line-clamp-2">
                         {item.description}
