@@ -665,7 +665,7 @@ async function sendFallbackMessage(
   if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
     const formData = new URLSearchParams();
-    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+    formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
     formData.append('To', normalizeWhatsAppTo(customerPhone));
     formData.append('Body', fallbackMsg);
     
@@ -1414,7 +1414,7 @@ async function _processAIResponseInner(
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           formData.append('To', normalizeWhatsAppTo(customerPhone));
           formData.append('Body', thankYouMsg);
           await fetch(twilioUrl, {
@@ -3667,7 +3667,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
                     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
                     const formData = new URLSearchParams();
-                    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+                    formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
                     formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
                     formData.append('Body', notifMsg);
                     await fetch(twilioUrl, { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
@@ -5237,7 +5237,7 @@ serve(async (req) => {
             
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const notifFormData = new URLSearchParams();
-            notifFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            notifFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             notifFormData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
             notifFormData.append('Body', bossMsg);
             
@@ -5344,7 +5344,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const twilioFormData = new URLSearchParams();
-          twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           twilioFormData.append('To', From);
           twilioFormData.append('Body', confirmMessage);
           
@@ -5374,7 +5374,7 @@ serve(async (req) => {
             
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', From);
             twilioFormData.append('Body', noConvsMessage);
             
@@ -5403,7 +5403,7 @@ serve(async (req) => {
           if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', From);
             twilioFormData.append('Body', menuMessage);
             
@@ -5466,7 +5466,7 @@ serve(async (req) => {
           if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', conversation.phone);
             twilioFormData.append('Body', Body);
             
@@ -5563,7 +5563,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
           formData.append('Body', confirmMsg);
           
@@ -5581,7 +5581,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
           formData.append('Body', errorMsg);
           
