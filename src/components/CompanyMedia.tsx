@@ -692,6 +692,211 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  // Bulk auto-link: AI-analyze all unlinked images and auto-set BMS product
+  const handleBulkAutoLink = async () => {
+    const unlinkable = media.filter(m => m.media_type === 'image' && !m.bms_product_id && m.signed_url);
+    if (unlinkable.length === 0) {
+      toast({ title: "Nothing to link", description: "All images are already linked or no images found" });
+      return;
+    }
+    if (bmsProducts.length === 0) {
+      toast({ title: "No BMS products", description: "Connect to a BMS first to auto-link products", variant: "destructive" });
+      return;
+    }
+
+    setBulkLinking(true);
+    setBulkProgress({ current: 0, total: unlinkable.length, linked: 0 });
+
+    const { data: company } = await supabase
+      .from('companies')
+      .select('business_type')
+      .eq('id', companyId)
+      .single();
+
+    const bmsProductList = bmsProducts.map(p => ({
+      id: p.id || p.sku || p.product_name || p.name,
+      name: p.product_name || p.name || p.sku || 'Unknown'
+    }));
+
+    let linked = 0;
+
+    for (let i = 0; i < unlinkable.length; i++) {
+      const item = unlinkable[i];
+      setBulkProgress(prev => ({ ...prev, current: i + 1 }));
+
+      try {
+        const response = await fetch(item.signed_url!);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const imageDataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        const { data, error } = await supabase.functions.invoke('analyze-media', {
+          body: {
+            imageDataUrl,
+            fileName: item.file_name,
+            fileType: item.file_type,
+            businessType: company?.business_type || 'business',
+            bmsProducts: bmsProductList
+          }
+        });
+
+        if (!error && data && !data.error) {
+          const updatePayload: any = {};
+          if (data.description) updatePayload.description = data.description;
+          if (data.tags) updatePayload.tags = Array.isArray(data.tags) ? data.tags : data.tags.split(',').map((t: string) => t.trim());
+          if (data.category) updatePayload.category = data.category;
+          if (data.bms_product_id) {
+            updatePayload.bms_product_id = data.bms_product_id;
+            linked++;
+          }
+
+          if (Object.keys(updatePayload).length > 0) {
+            await supabase.from('company_media').update(updatePayload).eq('id', item.id);
+          }
+
+          // Re-index in background
+          supabase.functions.invoke('index-brand-asset', {
+            body: { media_id: item.id, company_id: companyId }
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.error(`Auto-link failed for ${item.file_name}:`, e);
+      }
+
+      setBulkProgress(prev => ({ ...prev, linked }));
+
+      // Rate limit delay
+      if (i < unlinkable.length - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    setBulkLinking(false);
+    toast({
+      title: "✨ Bulk Auto-Link Complete",
+      description: `Analyzed ${unlinkable.length} images, linked ${linked} to BMS products`,
+    });
+    loadMedia();
+  };
+
+  // Multi-file upload handler
+  const handleMultiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    const validFiles = files.filter(f => {
+      if (f.size > 150 * 1024 * 1024) return false;
+      return f.type.startsWith('image/') || f.type.startsWith('video/');
+    });
+    if (validFiles.length < files.length) {
+      toast({ title: "Some files skipped", description: "Only images/videos under 150MB are accepted" });
+    }
+    setSelectedFiles(validFiles);
+  };
+
+  const handleBulkUpload = async () => {
+    if (selectedFiles.length === 0) return;
+
+    setBulkUploading(true);
+    setBulkUploadProgress({ current: 0, total: selectedFiles.length });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in", variant: "destructive" });
+      setBulkUploading(false);
+      return;
+    }
+
+    const { data: company } = await supabase
+      .from('companies')
+      .select('business_type')
+      .eq('id', companyId)
+      .single();
+
+    const bmsProductList = bmsProducts.map(p => ({
+      id: p.id || p.sku || p.product_name || p.name,
+      name: p.product_name || p.name || p.sku || 'Unknown'
+    }));
+
+    let uploaded = 0;
+    let linked = 0;
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      setBulkUploadProgress({ current: i + 1, total: selectedFiles.length });
+
+      try {
+        const isImage = file.type.startsWith('image/');
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${companyId}/products/${Date.now()}_${i}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('company-media')
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        // AI analyze if image
+        let aiData: any = null;
+        if (isImage) {
+          try {
+            const reader = new FileReader();
+            const imageDataUrl = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+
+            const { data } = await supabase.functions.invoke('analyze-media', {
+              body: {
+                imageDataUrl,
+                fileName: file.name,
+                fileType: file.type,
+                businessType: company?.business_type || 'business',
+                bmsProducts: bmsProductList.length > 0 ? bmsProductList : undefined
+              }
+            });
+            if (data && !data.error) aiData = data;
+          } catch (e) {
+            console.error('AI analysis failed for', file.name, e);
+          }
+        }
+
+        const bmsProductId = aiData?.bms_product_id || null;
+        if (bmsProductId) linked++;
+
+        await supabase.from('company_media').insert({
+          company_id: companyId,
+          file_name: file.name,
+          file_path: fileName,
+          file_type: file.type,
+          file_size: file.size,
+          media_type: isImage ? 'image' : 'video',
+          description: aiData?.description || null,
+          tags: aiData?.tags ? (Array.isArray(aiData.tags) ? aiData.tags : []) : [],
+          uploaded_by: user.id,
+          category: aiData?.category || 'products',
+          bms_product_id: bmsProductId,
+        });
+
+        uploaded++;
+      } catch (e: any) {
+        console.error(`Upload failed for ${file.name}:`, e);
+      }
+
+      // Rate limit between AI calls
+      if (i < selectedFiles.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+
+    setBulkUploading(false);
+    setSelectedFiles([]);
+    toast({
+      title: "✨ Bulk Upload Complete",
+      description: `Uploaded ${uploaded}/${selectedFiles.length} files. ${linked} auto-linked to BMS.`,
+    });
+    loadMedia();
+  };
+
   const renderBmsDropdown = (value: string, onChange: (v: string) => void, disabled?: boolean) => (
     <div className="space-y-2">
       <Label className="flex items-center gap-2">
