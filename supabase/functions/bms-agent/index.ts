@@ -98,7 +98,7 @@ function respond(data: unknown, status = 200) {
 
 const AVAILABLE_ACTIONS = [
   // Health & Config
-  "health_check",
+  "health_check", "register_omanut_link",
   // Sales & Revenue
   "check_stock", "record_sale", "credit_sale", "get_sales_summary", "get_sales_details",
   // Legacy aliases (mapped above)
