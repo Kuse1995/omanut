@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2, Pencil, Sparkles, Save } from "lucide-react";
+import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2, Pencil, Sparkles, Save, Wand2 } from "lucide-react";
 
 interface BmsProduct {
   id?: string;
@@ -84,6 +84,15 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [editBmsProductId, setEditBmsProductId] = useState('');
   const [editAnalyzing, setEditAnalyzing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+
+  // Bulk auto-link state
+  const [bulkLinking, setBulkLinking] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, linked: 0 });
+
+  // Multi-file upload state
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
     const fetchBmsProducts = async () => {
@@ -683,6 +692,211 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  // Bulk auto-link: AI-analyze all unlinked images and auto-set BMS product
+  const handleBulkAutoLink = async () => {
+    const unlinkable = media.filter(m => m.media_type === 'image' && !m.bms_product_id && m.signed_url);
+    if (unlinkable.length === 0) {
+      toast({ title: "Nothing to link", description: "All images are already linked or no images found" });
+      return;
+    }
+    if (bmsProducts.length === 0) {
+      toast({ title: "No BMS products", description: "Connect to a BMS first to auto-link products", variant: "destructive" });
+      return;
+    }
+
+    setBulkLinking(true);
+    setBulkProgress({ current: 0, total: unlinkable.length, linked: 0 });
+
+    const { data: company } = await supabase
+      .from('companies')
+      .select('business_type')
+      .eq('id', companyId)
+      .single();
+
+    const bmsProductList = bmsProducts.map(p => ({
+      id: p.id || p.sku || p.product_name || p.name,
+      name: p.product_name || p.name || p.sku || 'Unknown'
+    }));
+
+    let linked = 0;
+
+    for (let i = 0; i < unlinkable.length; i++) {
+      const item = unlinkable[i];
+      setBulkProgress(prev => ({ ...prev, current: i + 1 }));
+
+      try {
+        const response = await fetch(item.signed_url!);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const imageDataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        const { data, error } = await supabase.functions.invoke('analyze-media', {
+          body: {
+            imageDataUrl,
+            fileName: item.file_name,
+            fileType: item.file_type,
+            businessType: company?.business_type || 'business',
+            bmsProducts: bmsProductList
+          }
+        });
+
+        if (!error && data && !data.error) {
+          const updatePayload: any = {};
+          if (data.description) updatePayload.description = data.description;
+          if (data.tags) updatePayload.tags = Array.isArray(data.tags) ? data.tags : data.tags.split(',').map((t: string) => t.trim());
+          if (data.category) updatePayload.category = data.category;
+          if (data.bms_product_id) {
+            updatePayload.bms_product_id = data.bms_product_id;
+            linked++;
+          }
+
+          if (Object.keys(updatePayload).length > 0) {
+            await supabase.from('company_media').update(updatePayload).eq('id', item.id);
+          }
+
+          // Re-index in background
+          supabase.functions.invoke('index-brand-asset', {
+            body: { media_id: item.id, company_id: companyId }
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.error(`Auto-link failed for ${item.file_name}:`, e);
+      }
+
+      setBulkProgress(prev => ({ ...prev, linked }));
+
+      // Rate limit delay
+      if (i < unlinkable.length - 1) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    setBulkLinking(false);
+    toast({
+      title: "✨ Bulk Auto-Link Complete",
+      description: `Analyzed ${unlinkable.length} images, linked ${linked} to BMS products`,
+    });
+    loadMedia();
+  };
+
+  // Multi-file upload handler
+  const handleMultiFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    const validFiles = files.filter(f => {
+      if (f.size > 150 * 1024 * 1024) return false;
+      return f.type.startsWith('image/') || f.type.startsWith('video/');
+    });
+    if (validFiles.length < files.length) {
+      toast({ title: "Some files skipped", description: "Only images/videos under 150MB are accepted" });
+    }
+    setSelectedFiles(validFiles);
+  };
+
+  const handleBulkUpload = async () => {
+    if (selectedFiles.length === 0) return;
+
+    setBulkUploading(true);
+    setBulkUploadProgress({ current: 0, total: selectedFiles.length });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in", variant: "destructive" });
+      setBulkUploading(false);
+      return;
+    }
+
+    const { data: company } = await supabase
+      .from('companies')
+      .select('business_type')
+      .eq('id', companyId)
+      .single();
+
+    const bmsProductList = bmsProducts.map(p => ({
+      id: p.id || p.sku || p.product_name || p.name,
+      name: p.product_name || p.name || p.sku || 'Unknown'
+    }));
+
+    let uploaded = 0;
+    let linked = 0;
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      setBulkUploadProgress({ current: i + 1, total: selectedFiles.length });
+
+      try {
+        const isImage = file.type.startsWith('image/');
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${companyId}/products/${Date.now()}_${i}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('company-media')
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        // AI analyze if image
+        let aiData: any = null;
+        if (isImage) {
+          try {
+            const reader = new FileReader();
+            const imageDataUrl = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+
+            const { data } = await supabase.functions.invoke('analyze-media', {
+              body: {
+                imageDataUrl,
+                fileName: file.name,
+                fileType: file.type,
+                businessType: company?.business_type || 'business',
+                bmsProducts: bmsProductList.length > 0 ? bmsProductList : undefined
+              }
+            });
+            if (data && !data.error) aiData = data;
+          } catch (e) {
+            console.error('AI analysis failed for', file.name, e);
+          }
+        }
+
+        const bmsProductId = aiData?.bms_product_id || null;
+        if (bmsProductId) linked++;
+
+        await supabase.from('company_media').insert({
+          company_id: companyId,
+          file_name: file.name,
+          file_path: fileName,
+          file_type: file.type,
+          file_size: file.size,
+          media_type: isImage ? 'image' : 'video',
+          description: aiData?.description || null,
+          tags: aiData?.tags ? (Array.isArray(aiData.tags) ? aiData.tags : []) : [],
+          uploaded_by: user.id,
+          category: aiData?.category || 'products',
+          bms_product_id: bmsProductId,
+        });
+
+        uploaded++;
+      } catch (e: any) {
+        console.error(`Upload failed for ${file.name}:`, e);
+      }
+
+      // Rate limit between AI calls
+      if (i < selectedFiles.length - 1) await new Promise(r => setTimeout(r, 500));
+    }
+
+    setBulkUploading(false);
+    setSelectedFiles([]);
+    toast({
+      title: "✨ Bulk Upload Complete",
+      description: `Uploaded ${uploaded}/${selectedFiles.length} files. ${linked} auto-linked to BMS.`,
+    });
+    loadMedia();
+  };
+
   const renderBmsDropdown = (value: string, onChange: (v: string) => void, disabled?: boolean) => (
     <div className="space-y-2">
       <Label className="flex items-center gap-2">
@@ -725,6 +939,75 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Bulk Actions Bar */}
+          <div className="flex flex-wrap gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Bulk Actions</p>
+              <p className="text-xs text-muted-foreground">Auto-analyze and link existing media, or upload multiple files at once</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkAutoLink}
+              disabled={bulkLinking || bmsProducts.length === 0}
+            >
+              {bulkLinking ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {bulkProgress.current}/{bulkProgress.total} ({bulkProgress.linked} linked)
+                </>
+              ) : (
+                <>
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  Auto-Link All to BMS
+                </>
+              )}
+            </Button>
+          </div>
+
+          {bulkLinking && (
+            <div className="space-y-2">
+              <Progress value={(bulkProgress.current / Math.max(bulkProgress.total, 1)) * 100} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center">
+                Analyzing image {bulkProgress.current} of {bulkProgress.total}... ({bulkProgress.linked} linked so far)
+              </p>
+            </div>
+          )}
+
+          {/* Bulk Upload Section */}
+          <div className="p-4 border border-dashed border-border rounded-lg space-y-3">
+            <Label className="text-sm font-medium">📦 Bulk Upload (multiple files)</Label>
+            <Input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={handleMultiFileSelect}
+              disabled={bulkUploading}
+            />
+            {selectedFiles.length > 0 && (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{selectedFiles.length} files selected</p>
+                <Button size="sm" onClick={handleBulkUpload} disabled={bulkUploading}>
+                  {bulkUploading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {bulkUploadProgress.current}/{bulkUploadProgress.total}
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload All (AI will auto-tag & link)
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+            {bulkUploading && (
+              <Progress value={(bulkUploadProgress.current / Math.max(bulkUploadProgress.total, 1)) * 100} className="h-2" />
+            )}
+          </div>
+
+          {/* Single Upload Form */}
           <div className="space-y-4">
             {compressing && (
               <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
