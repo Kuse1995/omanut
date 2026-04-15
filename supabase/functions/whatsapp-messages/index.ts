@@ -1889,7 +1889,7 @@ Key Guidelines:
    Customer sends MTN screenshot showing K250 → Context shows pending transaction "ABC's for Christians - ZMW 250"
    → Call: deliver_digital_product(product_name: "ABC's for Christians", reason: "Payment proof verified - K250 MTN transfer")
    → Product is automatically sent to customer via WhatsApp
-6. When customers ask for samples/photos/videos, IMMEDIATELY use send_media tool
+6. CRITICAL: NEVER invent or guess media URLs. ALWAYS call search_media first, then use the exact URLs it returns in send_media. When customers ask for samples/photos/videos, call search_media first then send_media with the returned URLs
 7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
    - Only provide detailed explanations when customer explicitly asks or for complex topics
@@ -2127,7 +2127,7 @@ ${supervisorRecommendation.recommendedResponse}
         type: "function",
         function: {
           name: "send_media",
-          description: "Send media files to customer via WhatsApp. Use when customer asks for samples, photos, videos, or examples.",
+          description: "Send media files to customer via WhatsApp. IMPORTANT: You MUST call search_media first to get valid URLs. Never fabricate or guess URLs. Use the exact URLs returned by search_media.",
           parameters: {
             type: "object",
             properties: {
@@ -2878,22 +2878,92 @@ Trust ONLY the information provided in this system prompt.
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] send_media called with:', JSON.stringify(args));
             
-            // Validate all URLs are from allowed sources
+            // Validate URLs - auto-recover hallucinated URLs by searching the library
             const allowedDomains = ['supabase.co'];
             const invalidUrls = args.media_urls.filter((url: string) => {
               try {
                 const urlObj = new URL(url);
                 return !allowedDomains.some(domain => urlObj.hostname.includes(domain));
               } catch {
-                return true; // Invalid URL format
+                return true;
               }
             });
             
             if (invalidUrls.length > 0) {
-              console.error('[BACKGROUND] Rejected invalid/fake URLs:', invalidUrls);
-              anyToolExecuted = true;
-              assistantReply = "Sorry, I can only share media from our official library. Let me know what type of samples you'd like to see.";
-              break;
+              console.warn('[BACKGROUND] Invalid URLs detected, auto-recovering via search:', invalidUrls);
+              // Auto-recovery: search the library using caption/category as query
+              const recoveryQuery = args.caption || args.category || 'product';
+              console.log(`[BACKGROUND] Auto-recovery search query: "${recoveryQuery}"`);
+              let recoveredUrls: string[] = [];
+              try {
+                // 1. Vector search
+                try {
+                  const expandedQuery = normalizeSearchQuery(recoveryQuery, company);
+                  const queryVec = await embedQuery(expandedQuery);
+                  const vectorStr = `[${queryVec.join(',')}]`;
+                  const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+                    query_embedding: vectorStr,
+                    match_company_id: company.id,
+                    match_threshold: 0.25,
+                    match_count: args.media_urls.length || 5,
+                  });
+                  if (!mediaErr && mediaResults && mediaResults.length > 0) {
+                    recoveredUrls = mediaResults.map((m: any) => 
+                      `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+                    );
+                    console.log(`[BACKGROUND] Auto-recovery vector search found ${recoveredUrls.length} results`);
+                  }
+                } catch (vecErr) {
+                  console.error('[BACKGROUND] Auto-recovery vector search failed:', vecErr);
+                }
+                // 2. Text fallback
+                if (recoveredUrls.length === 0) {
+                  const searchTerms = recoveryQuery.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                  if (searchTerms.length > 0) {
+                    const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
+                    const { data: textResults } = await supabase
+                      .from('company_media')
+                      .select('file_path')
+                      .eq('company_id', company.id)
+                      .or(ilikeClauses)
+                      .limit(args.media_urls.length || 5);
+                    if (textResults && textResults.length > 0) {
+                      recoveredUrls = textResults.map((m: any) => 
+                        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+                      );
+                      console.log(`[BACKGROUND] Auto-recovery text search found ${recoveredUrls.length} results`);
+                    }
+                  }
+                }
+                // 3. Recent media fallback
+                if (recoveredUrls.length === 0) {
+                  const { data: anyMedia } = await supabase
+                    .from('company_media')
+                    .select('file_path')
+                    .eq('company_id', company.id)
+                    .eq('media_type', 'image')
+                    .order('created_at', { ascending: false })
+                    .limit(args.media_urls.length || 5);
+                  if (anyMedia && anyMedia.length > 0) {
+                    recoveredUrls = anyMedia.map((m: any) => 
+                      `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+                    );
+                    console.log(`[BACKGROUND] Auto-recovery returned ${recoveredUrls.length} recent media`);
+                  }
+                }
+              } catch (recoveryErr) {
+                console.error('[BACKGROUND] Auto-recovery search failed:', recoveryErr);
+              }
+
+              if (recoveredUrls.length > 0) {
+                console.log(`[BACKGROUND] Replacing ${invalidUrls.length} hallucinated URLs with ${recoveredUrls.length} real library URLs`);
+                args.media_urls = recoveredUrls;
+              } else {
+                console.error('[BACKGROUND] Auto-recovery found nothing, rejecting');
+                anyToolExecuted = true;
+                assistantReply = "I tried to find matching media in our library but couldn't find anything right now. Let me know what type of samples you'd like to see and I'll search again.";
+                break;
+              }
             }
             
             const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
