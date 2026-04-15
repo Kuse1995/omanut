@@ -508,7 +508,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           tags: tags ? tags.split(',').map(t => t.trim()) : [],
           uploaded_by: user.id,
           thumbnail_url: thumbnailUrl,
-          category: selectedCategory
+          category: selectedCategory,
+          bms_product_id: (selectedBmsProductId && selectedBmsProductId !== 'none') ? selectedBmsProductId : null
         });
 
       if (dbError) {
