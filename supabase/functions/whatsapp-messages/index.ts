@@ -22,6 +22,231 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ── Shared WhatsApp number normalization ──
+function normalizeWhatsAppTo(phone: string): string {
+  const clean = phone.replace(/^whatsapp:/, '');
+  return clean.startsWith('+') ? `whatsapp:${clean}` : `whatsapp:+${clean}`;
+}
+function normalizeWhatsAppFrom(phone: string): string {
+  return phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`;
+}
+
+// ── Shared media URL signing ──
+async function signMediaUrls(rawUrls: string[], supabase: any): Promise<string[]> {
+  const signed: string[] = [];
+  for (const mediaUrl of rawUrls) {
+    if (mediaUrl.includes('/company-media/')) {
+      const urlParts = mediaUrl.split('/company-media/');
+      if (urlParts.length === 2) {
+        const filePath = decodeURIComponent(urlParts[1]);
+        const { data: signedData } = await supabase.storage
+          .from('company-media')
+          .createSignedUrl(filePath, 3600);
+        if (signedData?.signedUrl) {
+          signed.push(signedData.signedUrl);
+        } else {
+          console.error(`[SIGN] Failed to sign: ${filePath}`);
+        }
+      }
+    } else if (mediaUrl.startsWith('http')) {
+      // External URL – pass through
+      signed.push(mediaUrl);
+    }
+  }
+  return signed;
+}
+
+// ── Shared media library recovery (vector → text → recent) ──
+async function recoverMediaFromLibrary(
+  query: string,
+  companyId: string,
+  company: any,
+  limit: number,
+  supabase: any
+): Promise<string[]> {
+  let urls: string[] = [];
+  // 1. Vector search
+  try {
+    const expandedQuery = normalizeSearchQuery(query, company);
+    const queryVec = await embedQuery(expandedQuery);
+    const vectorStr = `[${queryVec.join(',')}]`;
+    const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+      query_embedding: vectorStr,
+      match_company_id: companyId,
+      match_threshold: 0.25,
+      match_count: limit,
+    });
+    if (!mediaErr && mediaResults?.length) {
+      urls = mediaResults.map((m: any) =>
+        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+      );
+      console.log(`[RECOVER] Vector search found ${urls.length} results`);
+    }
+  } catch (e) { console.error('[RECOVER] Vector search failed:', e); }
+
+  // 2. Text fallback
+  if (urls.length === 0) {
+    const terms = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+    if (terms.length > 0) {
+      const ilikeClauses = terms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
+      const { data: textResults } = await supabase
+        .from('company_media').select('file_path')
+        .eq('company_id', companyId).or(ilikeClauses).limit(limit);
+      if (textResults?.length) {
+        urls = textResults.map((m: any) =>
+          `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+        );
+        console.log(`[RECOVER] Text search found ${urls.length} results`);
+      }
+    }
+  }
+
+  // 3. Recent media fallback
+  if (urls.length === 0) {
+    const { data: anyMedia } = await supabase
+      .from('company_media').select('file_path')
+      .eq('company_id', companyId).eq('media_type', 'image')
+      .order('created_at', { ascending: false }).limit(limit);
+    if (anyMedia?.length) {
+      urls = anyMedia.map((m: any) =>
+        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+      );
+      console.log(`[RECOVER] Recent media fallback returned ${urls.length}`);
+    }
+  }
+  return urls;
+}
+
+// ── Validate URLs belong to allowed domains ──
+function findInvalidUrls(urls: string[]): string[] {
+  const allowedDomains = ['supabase.co'];
+  return urls.filter((url: string) => {
+    try { return !allowedDomains.some(d => new URL(url).hostname.includes(d)); }
+    catch { return true; }
+  });
+}
+
+// ── Shared Twilio media dispatch ──
+async function dispatchMediaToWhatsApp(opts: {
+  mediaUrls: string[];
+  caption?: string;
+  category?: string;
+  toPhone: string;
+  fromNumber: string;
+  companyId: string;
+  conversationId: string;
+  supabase: any;
+}): Promise<{ success: boolean; sent: number; total: number; message: string }> {
+  const { mediaUrls, caption, category, toPhone, fromNumber, companyId, conversationId, supabase } = opts;
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !fromNumber) {
+    return { success: false, sent: 0, total: mediaUrls.length, message: 'Media sending not configured.' };
+  }
+
+  const signedUrls = await signMediaUrls(mediaUrls, supabase);
+  if (signedUrls.length === 0) {
+    return { success: false, sent: 0, total: mediaUrls.length, message: 'Could not sign any media URLs.' };
+  }
+
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+  const from = normalizeWhatsAppFrom(fromNumber);
+  const to = normalizeWhatsAppTo(toPhone);
+  const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
+
+  let successCount = 0;
+  for (let i = 0; i < signedUrls.length; i++) {
+    const formData = new URLSearchParams();
+    formData.append('From', from);
+    formData.append('To', to);
+    formData.append('Body', i === 0 && caption ? caption : '');
+    formData.append('MediaUrl', signedUrls[i]);
+    formData.append('StatusCallback', statusCallbackUrl);
+
+    const resp = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+
+    if (resp.ok) {
+      successCount++;
+      const data = await resp.json();
+      try {
+        await supabase.from('media_delivery_status').insert({
+          company_id: companyId,
+          conversation_id: conversationId,
+          customer_phone: toPhone,
+          media_url: mediaUrls[i] || signedUrls[i],
+          twilio_message_sid: data.sid,
+          status: 'queued',
+          max_retries: 3,
+        });
+      } catch (_t) { /* silent */ }
+    } else {
+      const errBody = await resp.text();
+      console.error(`[DISPATCH] Twilio error media ${i + 1}/${signedUrls.length}: ${resp.status} ${errBody}`);
+    }
+  }
+
+  // Only record "[Sent ...]" marker if at least one succeeded
+  if (successCount > 0) {
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: `[Sent ${successCount}/${signedUrls.length} ${category || 'media'} file(s)]${caption ? ' - ' + caption : ''}`
+    });
+  }
+
+  return successCount > 0
+    ? { success: true, sent: successCount, total: signedUrls.length, message: `Sent ${successCount} media file(s).` }
+    : { success: false, sent: 0, total: signedUrls.length, message: 'All media sends failed.' };
+}
+
+// ── Unified send_media handler (validates, auto-recovers, dispatches) ──
+async function handleSendMedia(
+  args: { media_urls: string[]; caption?: string; category?: string },
+  company: any,
+  customerPhone: string,
+  conversationId: string,
+  supabase: any
+): Promise<{ result: any; textReply?: string }> {
+  const invalid = findInvalidUrls(args.media_urls || []);
+  let urls = args.media_urls || [];
+
+  if (invalid.length > 0) {
+    console.warn('[SEND-MEDIA] Invalid URLs detected, auto-recovering:', invalid);
+    const recoveryQuery = args.caption || args.category || 'product';
+    const recovered = await recoverMediaFromLibrary(recoveryQuery, company.id, company, urls.length || 5, supabase);
+    if (recovered.length > 0) {
+      urls = recovered;
+      console.log(`[SEND-MEDIA] Replaced ${invalid.length} bad URLs with ${recovered.length} real ones`);
+    } else {
+      return {
+        result: { success: false, sent: 0, total: 0, message: 'No matching media found in library.' },
+        textReply: "I tried to find matching media in our library but couldn't find anything right now. Let me know what you'd like to see and I'll search again."
+      };
+    }
+  }
+
+  const dispatchResult = await dispatchMediaToWhatsApp({
+    mediaUrls: urls,
+    caption: args.caption,
+    category: args.category,
+    toPhone: customerPhone,
+    fromNumber: company.whatsapp_number,
+    companyId: company.id,
+    conversationId,
+    supabase,
+  });
+
+  return { result: dispatchResult };
+}
+
 // ── Lightweight Query Expansion for Semantic Search ──
 const SLANG_MAP: Record<string, string> = {
   'u': 'you', 'ur': 'your', 'r': 'are', 'thx': 'thanks', 'thnx': 'thanks',
@@ -440,8 +665,8 @@ async function sendFallbackMessage(
   if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
     const formData = new URLSearchParams();
-    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
-    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
+    formData.append('To', normalizeWhatsAppTo(customerPhone));
     formData.append('Body', fallbackMsg);
     
     await fetch(twilioUrl, {
@@ -793,7 +1018,7 @@ async function sendFallbackToCustomer(
 
     const formData = new URLSearchParams();
     formData.append('From', fromNumber);
-    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('To', normalizeWhatsAppTo(customerPhone));
     formData.append('Body', fallbackMsg);
 
     await fetch(twilioUrl, {
@@ -1189,8 +1414,8 @@ async function _processAIResponseInner(
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
-          formData.append('To', `whatsapp:${customerPhone}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
+          formData.append('To', normalizeWhatsAppTo(customerPhone));
           formData.append('Body', thankYouMsg);
           await fetch(twilioUrl, {
             method: 'POST',
@@ -1317,7 +1542,7 @@ async function _processAIResponseInner(
           : `whatsapp:${company.whatsapp_number}`;
         const formData = new URLSearchParams();
         formData.append('From', fromNumber);
-        formData.append('To', `whatsapp:${customerPhone}`);
+        formData.append('To', normalizeWhatsAppTo(customerPhone));
         formData.append('Body', ackMessage);
 
         await fetch(twilioUrl, {
@@ -1470,7 +1695,7 @@ async function _processAIResponseInner(
             
             const formData = new URLSearchParams();
             formData.append('From', fromNumber);
-            formData.append('To', `whatsapp:${customerPhone}`);
+            formData.append('To', normalizeWhatsAppTo(customerPhone));
             formData.append('Body', clientNotificationMessage);
             
             const twilioResponse = await fetch(twilioUrl, {
@@ -2878,198 +3103,13 @@ Trust ONLY the information provided in this system prompt.
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] send_media called with:', JSON.stringify(args));
             
-            // Validate URLs - auto-recover hallucinated URLs by searching the library
-            const allowedDomains = ['supabase.co'];
-            const invalidUrls = args.media_urls.filter((url: string) => {
-              try {
-                const urlObj = new URL(url);
-                return !allowedDomains.some(domain => urlObj.hostname.includes(domain));
-              } catch {
-                return true;
-              }
-            });
-            
-            if (invalidUrls.length > 0) {
-              console.warn('[BACKGROUND] Invalid URLs detected, auto-recovering via search:', invalidUrls);
-              // Auto-recovery: search the library using caption/category as query
-              const recoveryQuery = args.caption || args.category || 'product';
-              console.log(`[BACKGROUND] Auto-recovery search query: "${recoveryQuery}"`);
-              let recoveredUrls: string[] = [];
-              try {
-                // 1. Vector search
-                try {
-                  const expandedQuery = normalizeSearchQuery(recoveryQuery, company);
-                  const queryVec = await embedQuery(expandedQuery);
-                  const vectorStr = `[${queryVec.join(',')}]`;
-                  const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
-                    query_embedding: vectorStr,
-                    match_company_id: company.id,
-                    match_threshold: 0.25,
-                    match_count: args.media_urls.length || 5,
-                  });
-                  if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                    recoveredUrls = mediaResults.map((m: any) => 
-                      `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
-                    );
-                    console.log(`[BACKGROUND] Auto-recovery vector search found ${recoveredUrls.length} results`);
-                  }
-                } catch (vecErr) {
-                  console.error('[BACKGROUND] Auto-recovery vector search failed:', vecErr);
-                }
-                // 2. Text fallback
-                if (recoveredUrls.length === 0) {
-                  const searchTerms = recoveryQuery.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-                  if (searchTerms.length > 0) {
-                    const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
-                    const { data: textResults } = await supabase
-                      .from('company_media')
-                      .select('file_path')
-                      .eq('company_id', company.id)
-                      .or(ilikeClauses)
-                      .limit(args.media_urls.length || 5);
-                    if (textResults && textResults.length > 0) {
-                      recoveredUrls = textResults.map((m: any) => 
-                        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
-                      );
-                      console.log(`[BACKGROUND] Auto-recovery text search found ${recoveredUrls.length} results`);
-                    }
-                  }
-                }
-                // 3. Recent media fallback
-                if (recoveredUrls.length === 0) {
-                  const { data: anyMedia } = await supabase
-                    .from('company_media')
-                    .select('file_path')
-                    .eq('company_id', company.id)
-                    .eq('media_type', 'image')
-                    .order('created_at', { ascending: false })
-                    .limit(args.media_urls.length || 5);
-                  if (anyMedia && anyMedia.length > 0) {
-                    recoveredUrls = anyMedia.map((m: any) => 
-                      `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
-                    );
-                    console.log(`[BACKGROUND] Auto-recovery returned ${recoveredUrls.length} recent media`);
-                  }
-                }
-              } catch (recoveryErr) {
-                console.error('[BACKGROUND] Auto-recovery search failed:', recoveryErr);
-              }
-
-              if (recoveredUrls.length > 0) {
-                console.log(`[BACKGROUND] Replacing ${invalidUrls.length} hallucinated URLs with ${recoveredUrls.length} real library URLs`);
-                args.media_urls = recoveredUrls;
-              } else {
-                console.error('[BACKGROUND] Auto-recovery found nothing, rejecting');
-                anyToolExecuted = true;
-                assistantReply = "I tried to find matching media in our library but couldn't find anything right now. Let me know what type of samples you'd like to see and I'll search again.";
-                break;
-              }
-            }
-            
-            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-            
-            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
-              try {
-                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-                const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
-                  ? company.whatsapp_number 
-                  : `whatsapp:${company.whatsapp_number}`;
-
-                // Generate signed URLs for media
-                console.log('[BACKGROUND] Processing media URLs:', args.media_urls);
-                const signedMediaUrls: string[] = [];
-                for (const mediaUrl of args.media_urls) {
-                  console.log(`[BACKGROUND] Processing media URL: ${mediaUrl}`);
-                  
-                  if (mediaUrl.includes('/company-media/')) {
-                    // Supabase storage URL - create signed URL
-                    const urlParts = mediaUrl.split('/company-media/');
-                    if (urlParts.length === 2) {
-                      const filePath = urlParts[1];
-                      console.log(`[BACKGROUND] Creating signed URL for file path: ${filePath}`);
-                      const { data: signedData } = await supabase.storage
-                        .from('company-media')
-                        .createSignedUrl(filePath, 3600);
-                      
-                      if (signedData?.signedUrl) {
-                        signedMediaUrls.push(signedData.signedUrl);
-                        console.log(`[BACKGROUND] Created signed URL successfully`);
-                      } else {
-                        console.error(`[BACKGROUND] Failed to create signed URL for: ${filePath}`);
-                      }
-                    }
-                  } else {
-                    // External URL - use directly
-                    signedMediaUrls.push(mediaUrl);
-                    console.log(`[BACKGROUND] Using external URL directly`);
-                  }
-                }
-                
-                console.log(`[BACKGROUND] Total media URLs to send: ${signedMediaUrls.length}`);
-
-                if (signedMediaUrls.length > 0) {
-                  let successCount = 0;
-                  
-                  for (let i = 0; i < signedMediaUrls.length; i++) {
-                    const mediaUrl = signedMediaUrls[i];
-                    console.log(`[BACKGROUND] Sending media ${i+1}/${signedMediaUrls.length}: ${mediaUrl}`);
-                    
-                    const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
-                    const formData = new URLSearchParams();
-                    formData.append('From', fromNumber);
-                    formData.append('To', `whatsapp:${customerPhone}`);
-                    formData.append('Body', i === 0 && args.caption ? args.caption : '');
-                    formData.append('MediaUrl', mediaUrl);
-                    formData.append('StatusCallback', statusCallbackUrl);
-
-                    const twilioResponse = await fetch(twilioUrl, {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                      },
-                      body: formData.toString(),
-                    });
-
-                    if (twilioResponse.ok) {
-                      successCount++;
-                      const twilioData = await twilioResponse.json();
-                      console.log(`[BACKGROUND] Media ${i+1} sent successfully, SID: ${twilioData.sid}`);
-                      // Track delivery status
-                      try {
-                        await supabase.from('media_delivery_status').insert({
-                          company_id: company.id,
-                          conversation_id: conversationId,
-                          customer_phone: customerPhone,
-                          media_url: args.media_urls[i] || mediaUrl,
-                          twilio_message_sid: twilioData.sid,
-                          status: 'queued',
-                          max_retries: 3,
-                        });
-                      } catch (_trackErr) { /* silent */ }
-                    } else {
-                      const errorText = await twilioResponse.text();
-                      console.error(`[BACKGROUND] Failed to send media ${i+1}:`, twilioResponse.status, errorText);
-                    }
-                  }
-
-                  await supabase
-                    .from('messages')
-                    .insert({
-                      conversation_id: conversationId,
-                      role: 'assistant',
-                      content: `[Sent ${signedMediaUrls.length} ${args.category} media file(s)]${args.caption ? ' - ' + args.caption : ''}`
-                    });
-
-                  if (successCount === signedMediaUrls.length) {
-                    anyToolExecuted = true;
-                    toolExecutionContext.push(`sent ${signedMediaUrls.length} ${args.category} media file(s)`);
-                    console.log('[BACKGROUND] All media sent successfully');
-                  }
-                }
-              } catch (error) {
-                console.error('[BACKGROUND] Media send error:', error);
+            const { result, textReply } = await handleSendMedia(args, company, customerPhone, conversationId, supabase);
+            anyToolExecuted = true;
+            if (textReply) {
+              assistantReply = textReply;
+            } else {
+              toolExecutionContext.push(`sent ${result.sent}/${result.total} ${args.category || 'media'} file(s)`);
+              if (!result.success) {
                 assistantReply = "I tried to send the media but encountered an error.";
               }
             }
@@ -3627,7 +3667,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
                     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
                     const formData = new URLSearchParams();
-                    formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+                    formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
                     formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
                     formData.append('Body', notifMsg);
                     await fetch(twilioUrl, { method: 'POST', headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`), 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
@@ -3912,6 +3952,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -3939,6 +3980,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                   console.log(`[SEARCH-MEDIA] Text fallback found ${results.length} results`);
@@ -3963,6 +4005,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                   console.log(`[SEARCH-MEDIA] Returned ${results.length} latest media as fallback`);
@@ -4525,98 +4568,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               } catch (_logErr) { /* silent */ }
             }
           } else if (fnName === 'send_media') {
-            // ===== ACTUAL MEDIA DISPATCH IN MULTI-ROUND LOOP =====
+            // ===== ACTUAL MEDIA DISPATCH IN MULTI-ROUND LOOP (unified) =====
             console.log(`[TOOL-LOOP-MEDIA] Round ${currentRound}: Executing send_media with ${args.media_urls?.length || 0} URLs`);
-            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-
-            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
-              try {
-                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-                const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
-                  ? company.whatsapp_number
-                  : `whatsapp:${company.whatsapp_number}`;
-                const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
-
-                const signedMediaUrls: string[] = [];
-                for (const mediaUrl of (args.media_urls || [])) {
-                  if (mediaUrl.includes('/company-media/')) {
-                    const urlParts = mediaUrl.split('/company-media/');
-                    if (urlParts.length === 2) {
-                      const filePath = urlParts[1];
-                      const { data: signedData } = await supabase.storage
-                        .from('company-media')
-                        .createSignedUrl(filePath, 3600);
-                      if (signedData?.signedUrl) {
-                        signedMediaUrls.push(signedData.signedUrl);
-                      } else {
-                        console.error(`[TOOL-LOOP-MEDIA] Failed to sign: ${filePath}`);
-                      }
-                    }
-                  } else {
-                    signedMediaUrls.push(mediaUrl);
-                  }
-                }
-
-                let successCount = 0;
-                for (let i = 0; i < signedMediaUrls.length; i++) {
-                  const formData = new URLSearchParams();
-                  formData.append('From', fromNumber);
-                  formData.append('To', `whatsapp:${customerPhone}`);
-                  formData.append('Body', i === 0 && args.caption ? args.caption : '');
-                  formData.append('MediaUrl', signedMediaUrls[i]);
-                  formData.append('StatusCallback', statusCallbackUrl);
-
-                  const twilioResp = await fetch(twilioUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-                      'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: formData.toString(),
-                  });
-
-                  if (twilioResp.ok) {
-                    successCount++;
-                    const twilioData = await twilioResp.json();
-                    // Track delivery
-                    try {
-                      await supabase.from('media_delivery_status').insert({
-                        company_id: company.id,
-                        conversation_id: conversationId,
-                        customer_phone: customerPhone,
-                        media_url: args.media_urls[i] || signedMediaUrls[i],
-                        twilio_message_sid: twilioData.sid,
-                        status: 'queued',
-                        max_retries: 3,
-                      });
-                    } catch (_trackErr) { /* silent */ }
-                  } else {
-                    const errText = await twilioResp.text();
-                    console.error(`[TOOL-LOOP-MEDIA] Twilio error for media ${i+1}:`, twilioResp.status, errText);
-                  }
-                }
-
-                await supabase.from('messages').insert({
-                  conversation_id: conversationId,
-                  role: 'assistant',
-                  content: `[Sent ${successCount}/${signedMediaUrls.length} ${args.category || 'media'} file(s)]${args.caption ? ' - ' + args.caption : ''}`
-                });
-
-                const mediaResult = successCount > 0
-                  ? { success: true, sent: successCount, total: signedMediaUrls.length, message: `Successfully sent ${successCount} media file(s) to the customer.` }
-                  : { success: false, sent: 0, total: signedMediaUrls.length, message: 'Failed to send media. The images could not be delivered right now.' };
-
-                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(mediaResult) });
-                toolExecutionContext.push(`[R${currentRound}] send_media: ${successCount}/${signedMediaUrls.length} sent`);
-                console.log(`[TOOL-LOOP-MEDIA] Sent ${successCount}/${signedMediaUrls.length} media files`);
-              } catch (mediaErr) {
-                console.error(`[TOOL-LOOP-MEDIA] Exception:`, mediaErr);
-                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, message: 'Failed to send media due to an error.' }) });
-              }
-            } else {
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, message: 'Media sending not configured for this company.' }) });
-            }
+            const { result: mediaResult, textReply: mediaTextReply } = await handleSendMedia(args, company, customerPhone, conversationId, supabase);
+            toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(mediaResult) });
+            toolExecutionContext.push(`[R${currentRound}] send_media: ${mediaResult.sent}/${mediaResult.total} sent`);
+            console.log(`[TOOL-LOOP-MEDIA] Result: ${mediaResult.sent}/${mediaResult.total}`);
           } else if (fnName === 'search_media') {
             // ===== ACTUAL SEARCH_MEDIA IN MULTI-ROUND LOOP =====
             console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}"`);
@@ -4636,6 +4593,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = mediaResults.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -4655,6 +4613,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = textResults.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                 }
@@ -4671,6 +4630,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = anyMedia.map((m: any) => ({
                     description: m.description || m.file_name, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                 }
@@ -4908,7 +4868,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
       const formData = new URLSearchParams();
       formData.append('From', fromNumber);
-      formData.append('To', `whatsapp:${customerPhone}`);
+      formData.append('To', normalizeWhatsAppTo(customerPhone));
       formData.append('Body', assistantReply);
 
       const twilioResponse = await fetch(twilioUrl, {
@@ -5277,7 +5237,7 @@ serve(async (req) => {
             
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const notifFormData = new URLSearchParams();
-            notifFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            notifFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             notifFormData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
             notifFormData.append('Body', bossMsg);
             
@@ -5384,7 +5344,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const twilioFormData = new URLSearchParams();
-          twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           twilioFormData.append('To', From);
           twilioFormData.append('Body', confirmMessage);
           
@@ -5414,7 +5374,7 @@ serve(async (req) => {
             
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', From);
             twilioFormData.append('Body', noConvsMessage);
             
@@ -5443,7 +5403,7 @@ serve(async (req) => {
           if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', From);
             twilioFormData.append('Body', menuMessage);
             
@@ -5506,7 +5466,7 @@ serve(async (req) => {
           if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const twilioFormData = new URLSearchParams();
-            twilioFormData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+            twilioFormData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
             twilioFormData.append('To', conversation.phone);
             twilioFormData.append('Body', Body);
             
@@ -5603,7 +5563,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
           formData.append('Body', confirmMsg);
           
@@ -5621,7 +5581,7 @@ serve(async (req) => {
           
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
-          formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
+          formData.append('From', normalizeWhatsAppFrom(company.whatsapp_number));
           formData.append('To', company.boss_phone.startsWith('whatsapp:') ? company.boss_phone : `whatsapp:${company.boss_phone}`);
           formData.append('Body', errorMsg);
           

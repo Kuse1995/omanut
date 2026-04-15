@@ -178,9 +178,7 @@ serve(async (req) => {
       
       const formData = new URLSearchParams();
       // Normalize From number
-      const fromNumber = conversation.companies.whatsapp_number.startsWith('whatsapp:') 
-        ? conversation.companies.whatsapp_number 
-        : `whatsapp:${conversation.companies.whatsapp_number}`;
+      const fromNumber = normalizeWhatsAppTo(conversation.companies.whatsapp_number);
       formData.append('From', fromNumber);
 
       // Normalize To number — ensure whatsapp: prefix
