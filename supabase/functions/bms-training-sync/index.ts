@@ -32,6 +32,7 @@ async function callBMS(
       headers: {
         "Content-Type": "application/json",
         "x-api-secret": connection.api_secret,
+        "Authorization": `Bearer ${connection.api_secret}`,
       },
       body: JSON.stringify(payload),
     });
