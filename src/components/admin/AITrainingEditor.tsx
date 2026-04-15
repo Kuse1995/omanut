@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { SmartConfigurePanel } from "./SmartConfigurePanel";
 import { AITrainingCoach } from "./AITrainingCoach";
+import { BmsSyncPanel } from "./BmsSyncPanel";
 
 interface Document {
   id: string;
