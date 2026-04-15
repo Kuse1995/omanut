@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, AlertTriangle, Shield, Clock, Zap, ShoppingCart, Database, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Trash2, AlertTriangle, Shield, Clock, Zap, ShoppingCart, Database, Loader2, CheckCircle, XCircle, Copy, Check, Eye, EyeOff } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
