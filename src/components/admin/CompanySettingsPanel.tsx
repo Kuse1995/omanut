@@ -440,18 +440,59 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const [handshakeFailed, setHandshakeFailed] = useState(false);
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const secretToUse = apiSecret || generateSecret();
       if (!bridgeUrl) throw new Error('Bridge URL is required');
-      if (bmsType === 'multi_tenant' && !tenantId) throw new Error('Tenant ID is required for multi-tenant');
+      // Only require tenant ID if handshake already failed (fallback mode)
+      if (bmsType === 'multi_tenant' && handshakeFailed && !tenantId) {
+        throw new Error('Tenant ID is required — ask your BMS admin for this ID');
+      }
+
+      const isNewConnection = !bmsConnection;
+
+      // For new multi-tenant connections, attempt auto-handshake
+      let resolvedTenantId = bmsType === 'multi_tenant' ? tenantId : null;
+      if (isNewConnection && bmsType === 'multi_tenant' && !tenantId) {
+        try {
+          const hsRes = await fetch(bridgeUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-secret': secretToUse,
+            },
+            body: JSON.stringify({
+              intent: 'register_omanut_link',
+              action: 'register_omanut_link',
+              omanut_tenant_id: companyId,
+              api_secret: secretToUse,
+            }),
+          });
+          const hsData = await hsRes.json().catch(() => ({}));
+          if (hsRes.ok && hsData.tenant_id) {
+            resolvedTenantId = hsData.tenant_id;
+            setTenantId(resolvedTenantId!);
+            toast.success('BMS handshake successful — Tenant ID linked automatically');
+          } else {
+            // Handshake not supported — show manual fallback
+            setHandshakeFailed(true);
+            throw new Error('BMS handshake not supported yet. Please enter the Tenant ID manually (ask your BMS admin).');
+          }
+        } catch (hsErr: any) {
+          if (hsErr.message?.includes('Tenant ID manually')) throw hsErr;
+          setHandshakeFailed(true);
+          throw new Error('Could not reach BMS for auto-handshake. Please enter the Tenant ID manually.');
+        }
+      }
 
       const payload = {
         company_id: companyId,
         bms_type: bmsType,
         bridge_url: bridgeUrl,
         api_secret: secretToUse,
-        tenant_id: bmsType === 'multi_tenant' ? tenantId : null,
+        tenant_id: resolvedTenantId,
         is_active: isActive,
       };
 
@@ -466,7 +507,6 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
           .from('bms_connections')
           .insert(payload);
         if (error) throw error;
-        // Show the generated secret once so user can copy it
         if (!apiSecret) {
           setJustCreatedSecret(secretToUse);
           setApiSecret(secretToUse);
@@ -633,15 +673,26 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
         )}
 
         {bmsType === 'multi_tenant' && (
-          <div className="space-y-2">
-            <Label className="text-xs">Tenant ID</Label>
-            <Input
-              value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
-              placeholder="company-tenant-id"
-              className="h-8 text-xs"
-            />
-          </div>
+          tenantId ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Tenant ID <span className="text-muted-foreground">(linked)</span></Label>
+              <Input
+                value={tenantId}
+                readOnly
+                className="h-8 text-xs bg-muted/50 font-mono"
+              />
+            </div>
+          ) : handshakeFailed ? (
+            <div className="space-y-2">
+              <Label className="text-xs">Tenant ID <span className="text-destructive">(manual — ask your BMS admin)</span></Label>
+              <Input
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                placeholder="Enter tenant ID from BMS admin"
+                className="h-8 text-xs"
+              />
+            </div>
+          ) : null
         )}
 
         <div className="flex items-center justify-between p-3 rounded-lg border border-border">
