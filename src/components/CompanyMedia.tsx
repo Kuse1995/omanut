@@ -85,6 +85,15 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [editAnalyzing, setEditAnalyzing] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
 
+  // Bulk auto-link state
+  const [bulkLinking, setBulkLinking] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, linked: 0 });
+
+  // Multi-file upload state
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState({ current: 0, total: 0 });
+
   useEffect(() => {
     const fetchBmsProducts = async () => {
       try {
