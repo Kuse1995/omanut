@@ -1,55 +1,37 @@
 
-<final-text>Do I know what the issue is? Yes. The main bug is in `supabase/functions/whatsapp-messages/index.ts`: the first `send_media` path exists, but in the multi-round tool loop all non-BMS tools are replaced with a fake generic success message instead of actually running. Since the AI is instructed to do `search_media` first and `send_media` after that, the image send usually happens in round 2, so WhatsApp gets the text reply (“Shared! You’ll see...”) but no actual attachment. There is also a secondary hardening issue: the “official library” URL validation is too brittle and can falsely reject valid storage URLs.</final-text>
 
-## Fix plan
+## Fix: AI Hallucinating Media URLs Instead of Using Library
 
-### 1) Repair the media tool flow
-Update `supabase/functions/whatsapp-messages/index.ts` to extract media handling into shared helpers and use the same real execution path in:
-- the initial tool-call pass
-- the later multi-round tool loop
+### Root Cause
+The AI skips `search_media` and jumps straight to `send_media` with **fabricated URLs** (e.g. `cdn.filestackcontent.com`). The domain validation correctly rejects them, but instead of recovering, it gives up with "Sorry, I can only share from our official library."
 
-Instead of this current behavior in later rounds:
-```text
-search_media -> send_media -> generic “tool executed” ack
+### Fix (2 changes, 1 file)
+
+**File: `supabase/functions/whatsapp-messages/index.ts`**
+
+#### 1. Auto-recovery: when `send_media` gets invalid URLs, internally run `search_media`
+Instead of rejecting and giving up at line ~2892, add a fallback that:
+- Extracts the caption/category from the `send_media` args as a search query
+- Runs the same search_media logic (vector → text → recent) internally
+- If results found, replaces the invalid URLs with real storage URLs and continues to Twilio dispatch
+- Only shows the "sorry" message if the internal search also finds nothing
+
+#### 2. Strengthen the tool description to prefer `search_media` first
+Update the `send_media` tool description (line 2130) to:
 ```
-it will become:
-```text
-search_media -> send_media -> actual Twilio media dispatch
+"Send media files to customer via WhatsApp. IMPORTANT: You MUST call search_media first to get valid URLs. Never fabricate or guess URLs."
 ```
 
-### 2) Add a reusable `sendMedia` helper
-In `supabase/functions/whatsapp-messages/index.ts`, create a helper that:
-- validates official-library URLs correctly
-- converts library URLs to signed storage URLs
-- sends media sequentially to WhatsApp
-- logs Twilio response bodies on failure
-- returns real success/failure data back into the tool result
-
-This keeps behavior consistent with the existing multi-image delivery rule.
-
-### 3) Harden official-library validation
-Replace the current hostname-only check (`supabase.co`) with validation based on the company media bucket/storage path so valid library URLs do not get rejected as “fake URLs”.
-
-### 4) Wire delivery tracking already present in the backend
-Reuse the existing backend pieces already in the project:
-- `media_delivery_status` table
-- `twilio-status-webhook`
-- `retry-failed-media`
-
-When media is sent from `whatsapp-messages`, store a delivery row and attach `StatusCallback` so we can see whether Twilio queued, delivered, failed, or returned an error code.
-
-### 5) Prevent false success copy
-Only let the assistant say media was shared if the send actually succeeded. If media send fails, return a truthful fallback like:
-```text
-I found the images, but I couldn’t deliver them right now.
+And add to the system prompt instructions (around line 1892):
 ```
-instead of pretending the images arrived.
+"CRITICAL: NEVER invent or guess media URLs. ALWAYS call search_media first, then use the exact URLs it returns in send_media."
+```
 
-## Files to update
-- `supabase/functions/whatsapp-messages/index.ts`
-- possibly `supabase/functions/send-whatsapp-message/index.ts` for parity/hardening if manual outbound media should use the same signed-URL + delivery-tracking logic
+### Expected behavior after fix
+- Customer asks "share the bread bin picture"
+- AI calls `send_media` with hallucinated URL → auto-fallback searches for "bread bin" in library → finds matching media → sends actual image via Twilio
+- No more "sorry, official library only" when the image actually exists in the library
 
-## Technical notes
-- No database migration is required; the delivery table and webhook already exist.
-- The cleanest implementation is to move the current first-round `search_media` / `send_media` logic into shared functions and call them from both execution phases.
-- After implementation, I’ll verify end-to-end by checking that a customer asks for samples, the attachment actually appears in WhatsApp, and backend delivery status shows queued/delivered instead of silent text-only replies.
+### Technical detail
+The auto-recovery search uses `args.caption || args.category` as the query, reusing the existing 3-tier search (vector → ilike text → recent). Found URLs go through the existing signed-URL generation + Twilio dispatch path.
+
