@@ -6,8 +6,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, Trash2, Image as ImageIcon, Video } from "lucide-react";
+import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2 } from "lucide-react";
+
+interface BmsProduct {
+  id?: string;
+  name?: string;
+  product_name?: string;
+  sku?: string;
+  price?: number;
+  selling_price?: number;
+}
 
 interface CompanyMediaProps {
   companyId: string;
