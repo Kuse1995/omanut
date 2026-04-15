@@ -88,20 +88,65 @@ serve(async (req) => {
     const cred = credRes.data;
     const mediaAssets = mediaRes.data || [];
 
+    // Parse BMS data from quick_reference_info
+    let bmsProducts = '';
+    let bmsStockAlerts = '';
+    let bmsSales = '';
+    const qri = company.quick_reference_info || '';
+    const bmsMatch = qri.match(/<!-- BMS_SYNC_START -->([\s\S]*?)<!-- BMS_SYNC_END -->/);
+    if (bmsMatch) {
+      const bmsBlock = bmsMatch[1];
+      const prodMatch = bmsBlock.match(/## Products & Pricing([\s\S]*?)(?=##|$)/);
+      const stockMatch = bmsBlock.match(/## Stock Alerts([\s\S]*?)(?=##|$)/);
+      const salesMatch = bmsBlock.match(/## Sales Overview([\s\S]*?)(?=##|$)/);
+      if (prodMatch) bmsProducts = prodMatch[1].trim();
+      if (stockMatch) bmsStockAlerts = stockMatch[1].trim();
+      if (salesMatch) bmsSales = salesMatch[1].trim();
+    }
+
+    // Choose content strategy based on available data
+    const hasBmsData = !!(bmsProducts || bmsStockAlerts || bmsSales);
+    const strategies = hasBmsData
+      ? [
+          bmsStockAlerts ? 'low_stock_urgency' : null,
+          bmsProducts ? 'product_spotlight' : null,
+          bmsSales ? 'bestseller_highlight' : null,
+        ].filter(Boolean) as string[]
+      : ['general_brand'];
+    const strategy = strategies[Math.floor(Math.random() * strategies.length)];
+
+    const strategyInstructions: Record<string, string> = {
+      product_spotlight: 'Pick ONE specific product from the list. Mention its name and price. Make it the hero of the post.',
+      low_stock_urgency: 'Focus on a LOW STOCK item. Create urgency — "Almost sold out!", "Only X left!", "Don\'t miss out!"',
+      bestseller_highlight: 'Highlight a top-selling product from the sales data. Use social proof — "Our customers\' favorite!", "Best seller!"',
+      general_brand: 'Create an engaging brand awareness post about the business and its services.',
+    };
+
+    // Build inventory context for the prompt
+    const inventoryContext = hasBmsData ? `
+AVAILABLE PRODUCTS:
+${bmsProducts || 'N/A'}
+
+${bmsStockAlerts ? `STOCK ALERTS:\n${bmsStockAlerts}\n` : ''}
+${bmsSales ? `SALES TRENDS:\n${bmsSales}\n` : ''}
+
+CONTENT STRATEGY: ${strategyInstructions[strategy]}
+` : '';
+
     // 2. Brainstorm caption using AI
     const captionPrompt = `You are a world-class social media manager for "${company.name}" (${company.business_type || 'business'}).
 
 Company info:
 - Services: ${company.services || 'N/A'}
 - Hours: ${company.hours || 'N/A'}
-- Quick reference: ${company.quick_reference_info || 'N/A'}
 ${ai?.system_instructions ? `- Brand voice: ${ai.system_instructions.substring(0, 500)}` : ''}
 ${imgSettings?.brand_tone ? `- Brand tone: ${imgSettings.brand_tone}` : ''}
-
+${inventoryContext}
 Create ONE highly engaging social media post caption for Facebook and Instagram. The caption should:
 - Be authentic and engaging, not generic
 - Include relevant emojis
 - Have a clear call-to-action
+${hasBmsData ? '- Reference a SPECIFIC product with its actual price\n- Create urgency for low-stock items if applicable' : ''}
 - Be between 100-300 characters
 - Feel natural, not AI-generated
 
