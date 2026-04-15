@@ -682,8 +682,27 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               disabled={analyzing}
             />
           </div>
-          
-          {uploading && uploadProgress > 0 && (
+
+          <div className="space-y-2">
+            <Label>5. Link to BMS Product (optional)</Label>
+            <Select value={selectedBmsProductId} onValueChange={setSelectedBmsProductId}>
+              <SelectTrigger>
+                <SelectValue placeholder={bmsProducts.length === 0 ? 'No BMS products found' : 'Select a BMS product'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— No link —</SelectItem>
+                {bmsProducts.map((p, i) => {
+                  const productId = p.id || p.sku || String(i);
+                  const productName = p.name || p.product_name || 'Unknown';
+                  return (
+                    <SelectItem key={productId} value={productId}>
+                      {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Uploading...</span>
