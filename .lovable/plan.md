@@ -1,28 +1,38 @@
 
 
-## Link Media Library to BMS Inventory
+## Enhance Product Identity Manager & Media Library with Smart BMS Integration
 
-### Idea
-Add a `bms_product_id` column to `company_media` so each uploaded image can be linked to a specific BMS product. When the AI needs to generate or send a product image, it matches by product ID instead of fuzzy text/embedding search — giving exact results.
-
-### How It Works
-
-1. **Database**: Add nullable `bms_product_id` (text) column to `company_media`
-2. **UI**: In the media upload/edit form, add a "Link to BMS Product" dropdown that fetches products from the BMS via the `bms-agent` function (`list_products` intent) and lets the admin pick which product this image represents
-3. **Image Generation**: When the AI needs a product image (in `whatsapp-image-gen`, `generate-business-image`), it first checks for media with a matching `bms_product_id` before falling back to embedding search — guaranteeing the right product photo is used
-4. **Auto-match on sync**: Optionally, during BMS training sync, attempt to auto-link unlinked media to products by comparing the AI-generated description/tags against product names
+### Problems
+1. **Product Identity "Add Product" dialog** (screenshot) has no way to suggest product names from BMS inventory — admin has to type manually
+2. **Media Library** BMS link dropdown exists but may show "No BMS products found" if the BMS connection isn't active for the company — needs better feedback
+3. **AI tagging on upload** only generates category/description/tags — it doesn't try to match uploaded images to known BMS products
+4. **No product name suggestion** from AI vision or BMS catalog when creating a Product Identity Profile
 
 ### Changes
 
 | Area | File(s) | Change |
 |------|---------|--------|
-| **Migration** | New migration | `ALTER TABLE company_media ADD COLUMN bms_product_id text` |
-| **UI** | `src/components/CompanyMedia.tsx` | Add a "Link to BMS Product" select dropdown in the upload form. Fetch products via `supabase.functions.invoke('bms-agent', { body: { action: 'list_products', params: { company_id } } })`. Save selected product ID to `bms_product_id`. Show linked product name on existing media cards. |
-| **Image Gen** | `supabase/functions/whatsapp-image-gen/index.ts` | Before embedding search, query `company_media` where `bms_product_id` matches the product from the conversation context. Use that image as the reference if found. |
-| **Sync (optional)** | `supabase/functions/bms-training-sync/index.ts` | After fetching products, attempt to match unlinked media descriptions to product names and auto-set `bms_product_id` |
+| **BMS product suggestions in Product Identity** | `src/components/admin/ProductIdentityManager.tsx` | Fetch BMS products on mount (same pattern as CompanyMedia). Add a "Suggested Products" dropdown/autocomplete above the Product Name input that lists BMS products. When admin picks one, auto-fill the name. If no BMS connection, allow manual entry as-is. |
+| **AI-suggested product name** | `supabase/functions/extract-product-identity/index.ts` | Extend the Gemini vision prompt to also return a `suggested_product_name` field. Pass available BMS product names into the prompt so AI can pick the closest match. Return this in the response so the UI can pre-fill. |
+| **Smarter AI tagging on upload** | `supabase/functions/analyze-media/index.ts` | Accept optional `bmsProducts` array in the request body. Add to the Gemini prompt: "If any of these known products match, include `bms_product_id` and `product_name` in your response." This enables auto-linking during upload. |
+| **Auto-link on upload** | `src/components/CompanyMedia.tsx` | Pass `bmsProducts` names/IDs to `analyze-media`. If AI returns a `bms_product_id` match, auto-select it in the BMS dropdown and show a toast. |
+| **BMS dropdown visibility fix** | `src/components/CompanyMedia.tsx` | If `bmsProducts` is empty, show a small info message "Connect to BMS to link products" instead of a disabled dropdown, so it's clear why no products appear. |
 
-### Result
-- Admins upload a product photo → pick "Coca-Cola 500ml" from BMS dropdown → image is permanently linked
-- Customer asks about Coca-Cola → AI pulls the exact linked photo instead of guessing from tags
-- No more cross-product contamination in image generation
+### Flow After Changes
+
+```text
+Admin uploads image → AI analyzes → returns category, tags, description
+                                   → also checks against BMS product list
+                                   → auto-suggests BMS product link if matched
+
+Admin creates Product Identity → sees BMS product dropdown
+                               → picks product or types custom name
+                               → AI vision extracts fingerprint + validates name
+```
+
+### Technical Details
+- BMS products fetched via `supabase.functions.invoke('bms-agent', { body: { action: 'list_products', params: { company_id } } })`
+- `analyze-media` gets an optional `bmsProductNames` param — a simple `{id, name}[]` array added to the prompt context
+- `extract-product-identity` prompt gets `Available BMS products: [list]` appended so it can suggest the best match
+- All changes are backward-compatible: if no BMS connection, everything works as before with manual entry
 
