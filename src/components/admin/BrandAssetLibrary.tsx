@@ -237,6 +237,11 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
                         >
                           <img src={getImageUrl(asset.file_path)} alt={asset.file_name} className="w-full h-full object-cover" />
                           <Badge variant="secondary" className="absolute top-1 left-1 text-[10px] capitalize bg-background/80">{asset.category}</Badge>
+                          {asset.bms_product_id && (
+                            <Badge variant="outline" className="absolute top-1 right-1 text-[10px] bg-background/80 gap-0.5">
+                              <Link2 className="h-2.5 w-2.5" />BMS
+                            </Badge>
+                          )}
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <Pencil className="h-5 w-5 text-white" />
                           </div>
@@ -275,6 +280,29 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="truncate">{editingAsset.file_name}</span>
                 <Badge variant="secondary" className="capitalize">{editingAsset.category}</Badge>
+                {editingAsset.bms_product_id && (
+                  <Badge variant="outline" className="gap-1"><Link2 className="h-3 w-3" />BMS Linked</Badge>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Link to BMS Product</label>
+                <Select value={editBmsProductId} onValueChange={setEditBmsProductId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={loadingBmsProducts ? 'Loading products…' : 'Select a BMS product (optional)'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— No link —</SelectItem>
+                    {bmsProducts.map((p, i) => {
+                      const productId = p.id || p.sku || String(i);
+                      const productName = p.name || p.product_name || 'Unknown';
+                      return (
+                        <SelectItem key={productId} value={productId}>
+                          {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Description</label>
