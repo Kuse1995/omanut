@@ -2945,11 +2945,13 @@ Trust ONLY the information provided in this system prompt.
                     const mediaUrl = signedMediaUrls[i];
                     console.log(`[BACKGROUND] Sending media ${i+1}/${signedMediaUrls.length}: ${mediaUrl}`);
                     
+                    const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
                     const formData = new URLSearchParams();
                     formData.append('From', fromNumber);
                     formData.append('To', `whatsapp:${customerPhone}`);
                     formData.append('Body', i === 0 && args.caption ? args.caption : '');
                     formData.append('MediaUrl', mediaUrl);
+                    formData.append('StatusCallback', statusCallbackUrl);
 
                     const twilioResponse = await fetch(twilioUrl, {
                       method: 'POST',
@@ -2962,7 +2964,20 @@ Trust ONLY the information provided in this system prompt.
 
                     if (twilioResponse.ok) {
                       successCount++;
-                      console.log(`[BACKGROUND] Media ${i+1} sent successfully`);
+                      const twilioData = await twilioResponse.json();
+                      console.log(`[BACKGROUND] Media ${i+1} sent successfully, SID: ${twilioData.sid}`);
+                      // Track delivery status
+                      try {
+                        await supabase.from('media_delivery_status').insert({
+                          company_id: company.id,
+                          conversation_id: conversationId,
+                          customer_phone: customerPhone,
+                          media_url: args.media_urls[i] || mediaUrl,
+                          twilio_message_sid: twilioData.sid,
+                          status: 'queued',
+                          max_retries: 3,
+                        });
+                      } catch (_trackErr) { /* silent */ }
                     } else {
                       const errorText = await twilioResponse.text();
                       console.error(`[BACKGROUND] Failed to send media ${i+1}:`, twilioResponse.status, errorText);
@@ -4439,8 +4454,203 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 });
               } catch (_logErr) { /* silent */ }
             }
+          } else if (fnName === 'send_media') {
+            // ===== ACTUAL MEDIA DISPATCH IN MULTI-ROUND LOOP =====
+            console.log(`[TOOL-LOOP-MEDIA] Round ${currentRound}: Executing send_media with ${args.media_urls?.length || 0} URLs`);
+            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+
+            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
+              try {
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
+                  ? company.whatsapp_number
+                  : `whatsapp:${company.whatsapp_number}`;
+                const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
+
+                const signedMediaUrls: string[] = [];
+                for (const mediaUrl of (args.media_urls || [])) {
+                  if (mediaUrl.includes('/company-media/')) {
+                    const urlParts = mediaUrl.split('/company-media/');
+                    if (urlParts.length === 2) {
+                      const filePath = urlParts[1];
+                      const { data: signedData } = await supabase.storage
+                        .from('company-media')
+                        .createSignedUrl(filePath, 3600);
+                      if (signedData?.signedUrl) {
+                        signedMediaUrls.push(signedData.signedUrl);
+                      } else {
+                        console.error(`[TOOL-LOOP-MEDIA] Failed to sign: ${filePath}`);
+                      }
+                    }
+                  } else {
+                    signedMediaUrls.push(mediaUrl);
+                  }
+                }
+
+                let successCount = 0;
+                for (let i = 0; i < signedMediaUrls.length; i++) {
+                  const formData = new URLSearchParams();
+                  formData.append('From', fromNumber);
+                  formData.append('To', `whatsapp:${customerPhone}`);
+                  formData.append('Body', i === 0 && args.caption ? args.caption : '');
+                  formData.append('MediaUrl', signedMediaUrls[i]);
+                  formData.append('StatusCallback', statusCallbackUrl);
+
+                  const twilioResp = await fetch(twilioUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: formData.toString(),
+                  });
+
+                  if (twilioResp.ok) {
+                    successCount++;
+                    const twilioData = await twilioResp.json();
+                    // Track delivery
+                    try {
+                      await supabase.from('media_delivery_status').insert({
+                        company_id: company.id,
+                        conversation_id: conversationId,
+                        customer_phone: customerPhone,
+                        media_url: args.media_urls[i] || signedMediaUrls[i],
+                        twilio_message_sid: twilioData.sid,
+                        status: 'queued',
+                        max_retries: 3,
+                      });
+                    } catch (_trackErr) { /* silent */ }
+                  } else {
+                    const errText = await twilioResp.text();
+                    console.error(`[TOOL-LOOP-MEDIA] Twilio error for media ${i+1}:`, twilioResp.status, errText);
+                  }
+                }
+
+                await supabase.from('messages').insert({
+                  conversation_id: conversationId,
+                  role: 'assistant',
+                  content: `[Sent ${successCount}/${signedMediaUrls.length} ${args.category || 'media'} file(s)]${args.caption ? ' - ' + args.caption : ''}`
+                });
+
+                const mediaResult = successCount > 0
+                  ? { success: true, sent: successCount, total: signedMediaUrls.length, message: `Successfully sent ${successCount} media file(s) to the customer.` }
+                  : { success: false, sent: 0, total: signedMediaUrls.length, message: 'Failed to send media. The images could not be delivered right now.' };
+
+                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(mediaResult) });
+                toolExecutionContext.push(`[R${currentRound}] send_media: ${successCount}/${signedMediaUrls.length} sent`);
+                console.log(`[TOOL-LOOP-MEDIA] Sent ${successCount}/${signedMediaUrls.length} media files`);
+              } catch (mediaErr) {
+                console.error(`[TOOL-LOOP-MEDIA] Exception:`, mediaErr);
+                toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, message: 'Failed to send media due to an error.' }) });
+              }
+            } else {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, message: 'Media sending not configured for this company.' }) });
+            }
+          } else if (fnName === 'search_media') {
+            // ===== ACTUAL SEARCH_MEDIA IN MULTI-ROUND LOOP =====
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}"`);
+            try {
+              let results: any[] = [];
+              try {
+                const expandedQuery = normalizeSearchQuery(args.query, company);
+                const queryVec = await embedQuery(expandedQuery);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: args.count || 5,
+                });
+                if (!mediaErr && mediaResults && mediaResults.length > 0) {
+                  results = mediaResults.map((m: any) => ({
+                    description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: m.similarity,
+                  }));
+                }
+              } catch (vecErr) {
+                console.error('[TOOL-LOOP-SEARCH] Vector search failed:', vecErr);
+              }
+              if (results.length === 0) {
+                const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
+                const { data: textResults } = await supabase
+                  .from('company_media')
+                  .select('description, category, file_path, media_type, tags, file_name')
+                  .eq('company_id', company.id)
+                  .or(ilikeClauses)
+                  .limit(args.count || 5);
+                if (textResults && textResults.length > 0) {
+                  results = textResults.map((m: any) => ({
+                    description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: 0.5,
+                  }));
+                }
+              }
+              if (results.length === 0) {
+                const { data: anyMedia } = await supabase
+                  .from('company_media')
+                  .select('description, category, file_path, media_type, tags, file_name')
+                  .eq('company_id', company.id)
+                  .eq('media_type', 'image')
+                  .order('created_at', { ascending: false })
+                  .limit(args.count || 5);
+                if (anyMedia && anyMedia.length > 0) {
+                  results = anyMedia.map((m: any) => ({
+                    description: m.description || m.file_name, category: m.category, media_type: m.media_type, tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: 0.3,
+                  }));
+                }
+              }
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Use send_media with the URLs above.' : 'No matching media found.' })
+              });
+              toolExecutionContext.push(`[R${currentRound}] search_media found ${results.length} results`);
+            } catch (searchErr) {
+              console.error('[TOOL-LOOP-SEARCH] Error:', searchErr);
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Media search failed' }) });
+            }
+          } else if (fnName === 'search_knowledge') {
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_knowledge`);
+            try {
+              const queryVec = await embedQuery(args.query);
+              const vectorStr = `[${queryVec.join(',')}]`;
+              const { data: docResults, error: docErr } = await supabase.rpc('match_documents', {
+                query_embedding: vectorStr, match_company_id: company.id, match_threshold: 0.25, match_count: 3,
+              });
+              let results: any[] = [];
+              if (!docErr && docResults && docResults.length > 0) {
+                results = docResults.map((d: any) => ({ filename: d.filename, content: d.parsed_content?.substring(0, 800) || '', similarity: d.similarity }));
+              }
+              let quickRef = '';
+              if (results.length === 0 && company.quick_reference_info) quickRef = company.quick_reference_info;
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: true, documents: results, quick_reference: quickRef || undefined, message: results.length > 0 ? 'Found relevant knowledge base content.' : (quickRef ? 'No document matches but quick reference info available.' : 'No matching knowledge base content found.') })
+              });
+              toolExecutionContext.push(`[R${currentRound}] search_knowledge found ${results.length} documents`);
+            } catch (error) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Knowledge search failed' }) });
+            }
+          } else if (fnName === 'notify_boss') {
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`);
+            try {
+              await supabase.from('boss_conversations').insert({
+                company_id: company.id, message_from: 'ai_agent',
+                message_content: `[${args.notification_type}] ${args.summary}\n${args.details || ''}`,
+              });
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: 'Boss notified successfully' }) });
+              toolExecutionContext.push(`[R${currentRound}] notify_boss: ${args.notification_type}`);
+            } catch (err) {
+              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Notification failed' }) });
+            }
           } else {
-            // For non-BMS tools in subsequent rounds (search_media, etc.), provide generic acknowledgment
+            // Fallback for any other non-BMS tools
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Generic execution for ${fnName}`);
             toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: `Tool ${fnName} executed in round ${currentRound}` }) });
           }
           anyToolExecuted = true;
