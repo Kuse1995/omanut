@@ -1893,6 +1893,12 @@ You represent a DIGITAL PRODUCTS business. Follow these rules:
 - Deliver products immediately after payment verification`;
     }
 
+    // Product availability handling
+    instructions += `
+
+=== PRODUCT AVAILABILITY RULES ===
+If a product is not found in BMS inventory, catalog, or media library, tell the customer it's not currently available and offer alternatives or suggest similar items you DO have. Do NOT create a support ticket for product availability questions — just answer directly.`;
+
     // Add date/time and business info
     instructions += `
 
@@ -2279,7 +2285,7 @@ ${supervisorRecommendation.recommendedResponse}
     // Select model based on complexity - flash for complex (tool-calling), flash-lite for simple
     const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
-    const maxTokens = messageComplexity === 'simple' ? Math.min(350, configuredMaxTokens) : Math.min(1024, configuredMaxTokens);
+    const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
     const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
@@ -2439,7 +2445,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
         type: "function",
         function: {
           name: "create_support_ticket",
-          description: "Creates a support ticket when a customer reports an issue or needs human assistance. ALWAYS collect the customer's name and a clear description of their issue BEFORE calling this tool. Classify the issue category and priority based on the conversation.",
+          description: "Creates a support ticket ONLY when a customer explicitly requests human assistance, reports a genuine problem/complaint, or needs help that the AI truly cannot provide. NEVER create tickets for: product availability questions (just say it's not in stock), pricing inquiries, general questions, or anything the AI can answer directly. ALWAYS collect the customer's name and a clear description of their issue BEFORE calling this tool.",
           parameters: {
             type: "object",
             properties: {
@@ -4452,7 +4458,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           model: selectedModel,
           messages: sanitizeMessages(currentMessages),
           temperature: 1.0,
-          max_tokens: Math.min(1024, maxTokens),
+          max_tokens: maxTokens,
           tools: filteredTools,
           tool_choice: "auto",
           signal: roundController.signal,
