@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { Upload, Trash2, ImagePlus, Loader2, Package, Palette, Building2, FolderOpen, Pencil, RotateCw } from 'lucide-react';
+import { Upload, Trash2, ImagePlus, Loader2, Package, Palette, Building2, FolderOpen, Pencil, RotateCw, Link2 } from 'lucide-react';
 import { Database } from '@/integrations/supabase/types';
 
 type MediaCategory = Database['public']['Enums']['media_category'];
@@ -24,6 +24,16 @@ interface BrandAsset {
   tags?: string[] | null;
   category?: string;
   created_at: string;
+  bms_product_id?: string | null;
+}
+
+interface BmsProduct {
+  id?: string;
+  name?: string;
+  product_name?: string;
+  sku?: string;
+  price?: number;
+  selling_price?: number;
 }
 
 interface BrandAssetLibraryProps {
@@ -50,8 +60,33 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
   const [editingAsset, setEditingAsset] = useState<BrandAsset | null>(null);
   const [editDescription, setEditDescription] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [editBmsProductId, setEditBmsProductId] = useState('');
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
+
+  // BMS products state
+  const [bmsProducts, setBmsProducts] = useState<BmsProduct[]>([]);
+  const [loadingBmsProducts, setLoadingBmsProducts] = useState(false);
+
+  // Load BMS products once
+  useEffect(() => {
+    const fetchBmsProducts = async () => {
+      setLoadingBmsProducts(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('bms-agent', {
+          body: { action: 'list_products', params: { company_id: companyId } }
+        });
+        if (!error && data?.success && Array.isArray(data.data)) {
+          setBmsProducts(data.data);
+        }
+      } catch (e) {
+        console.log('BMS products not available:', e);
+      } finally {
+        setLoadingBmsProducts(false);
+      }
+    };
+    fetchBmsProducts();
+  }, [companyId]);
 
   const getImageUrl = (filePath: string) => {
     const { data } = supabase.storage.from('company-media').getPublicUrl(filePath);
@@ -62,6 +97,7 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
     setEditingAsset(asset);
     setEditDescription(asset.description || '');
     setEditTags(asset.tags?.join(', ') || '');
+    setEditBmsProductId(asset.bms_product_id || '');
   };
 
   const handleSave = async () => {
@@ -70,7 +106,7 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
     const tagsArray = editTags.split(',').map(t => t.trim()).filter(Boolean);
     const { error } = await supabase
       .from('company_media')
-      .update({ description: editDescription, tags: tagsArray })
+      .update({ description: editDescription, tags: tagsArray, bms_product_id: editBmsProductId || null } as any)
       .eq('id', editingAsset.id);
     setSaving(false);
     if (error) { toast.error('Save failed: ' + error.message); return; }
