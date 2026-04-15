@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2, Pencil, Sparkles, Save } from "lucide-react";
+import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2, Pencil, Sparkles, Save, Wand2 } from "lucide-react";
 
 interface BmsProduct {
   id?: string;
