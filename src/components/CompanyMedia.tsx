@@ -528,6 +528,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       setTags("");
       setSelectedCategory('other');
       setAiSuggested(false);
+      setSelectedBmsProductId('');
       setSelectedFile(null);
       setUploadProgress(0);
       loadMedia();
