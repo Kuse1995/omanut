@@ -1008,6 +1008,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           </div>
 
           {/* Single Upload Form */}
+          <div className="space-y-4">
+            {compressing && (
               <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
