@@ -163,6 +163,40 @@ Deno.serve(async (req) => {
       ? `[Last synced from BMS: ${syncDate}]\n\n${sections.join("\n\n")}`
       : "";
 
+    // AUTO-LINK: Try to match unlinked media to BMS products by description/tags
+    let autoLinked = 0;
+    if (productsRes.success && Array.isArray(productsRes.data) && productsRes.data.length > 0) {
+      const { data: unlinkdMedia } = await supabase
+        .from('company_media')
+        .select('id, description, tags, file_name')
+        .eq('company_id', company_id)
+        .is('bms_product_id', null)
+        .eq('category', 'products')
+        .limit(50);
+
+      if (unlinkdMedia && unlinkdMedia.length > 0) {
+        for (const media of unlinkdMedia) {
+          const searchText = [media.description || '', media.file_name || '', ...(media.tags || [])].join(' ').toLowerCase();
+          for (const product of productsRes.data) {
+            const productName = (product.name || product.product_name || '').toLowerCase();
+            const productId = product.id || product.sku;
+            if (productName && productId && searchText.includes(productName)) {
+              await supabase
+                .from('company_media')
+                .update({ bms_product_id: String(productId) })
+                .eq('id', media.id);
+              autoLinked++;
+              console.log(`[BMS-TRAINING-SYNC] Auto-linked media "${media.file_name}" → BMS product "${productName}"`);
+              break;
+            }
+          }
+        }
+        if (autoLinked > 0) {
+          console.log(`[BMS-TRAINING-SYNC] Auto-linked ${autoLinked} media assets to BMS products`);
+        }
+      }
+    }
+
     return respond({
       success: true,
       formatted_text: formattedText,
@@ -170,6 +204,7 @@ Deno.serve(async (req) => {
         products: products.count,
         stock_alerts: stockAlerts.count,
         has_sales: !!salesSummary,
+        auto_linked_media: autoLinked,
       },
       raw_errors: {
         products: productsRes.success ? null : productsRes.error,

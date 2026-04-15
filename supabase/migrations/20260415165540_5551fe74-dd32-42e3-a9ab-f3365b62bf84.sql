@@ -1,0 +1,1 @@
+ALTER TABLE public.company_media ADD COLUMN bms_product_id text;

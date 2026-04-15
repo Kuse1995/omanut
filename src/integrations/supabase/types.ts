@@ -1234,6 +1234,7 @@ export type Database = {
       }
       company_media: {
         Row: {
+          bms_product_id: string | null
           category: Database["public"]["Enums"]["media_category"]
           company_id: string
           created_at: string
@@ -1251,6 +1252,7 @@ export type Database = {
           uploaded_by: string | null
         }
         Insert: {
+          bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
           company_id: string
           created_at?: string
@@ -1268,6 +1270,7 @@ export type Database = {
           uploaded_by?: string | null
         }
         Update: {
+          bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
           company_id?: string
           created_at?: string

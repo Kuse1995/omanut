@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { Upload, Trash2, ImagePlus, Loader2, Package, Palette, Building2, FolderOpen, Pencil, RotateCw } from 'lucide-react';
+import { Upload, Trash2, ImagePlus, Loader2, Package, Palette, Building2, FolderOpen, Pencil, RotateCw, Link2 } from 'lucide-react';
 import { Database } from '@/integrations/supabase/types';
 
 type MediaCategory = Database['public']['Enums']['media_category'];
@@ -24,6 +24,16 @@ interface BrandAsset {
   tags?: string[] | null;
   category?: string;
   created_at: string;
+  bms_product_id?: string | null;
+}
+
+interface BmsProduct {
+  id?: string;
+  name?: string;
+  product_name?: string;
+  sku?: string;
+  price?: number;
+  selling_price?: number;
 }
 
 interface BrandAssetLibraryProps {
@@ -50,8 +60,33 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
   const [editingAsset, setEditingAsset] = useState<BrandAsset | null>(null);
   const [editDescription, setEditDescription] = useState('');
   const [editTags, setEditTags] = useState('');
+  const [editBmsProductId, setEditBmsProductId] = useState('');
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
+
+  // BMS products state
+  const [bmsProducts, setBmsProducts] = useState<BmsProduct[]>([]);
+  const [loadingBmsProducts, setLoadingBmsProducts] = useState(false);
+
+  // Load BMS products once
+  useEffect(() => {
+    const fetchBmsProducts = async () => {
+      setLoadingBmsProducts(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('bms-agent', {
+          body: { action: 'list_products', params: { company_id: companyId } }
+        });
+        if (!error && data?.success && Array.isArray(data.data)) {
+          setBmsProducts(data.data);
+        }
+      } catch (e) {
+        console.log('BMS products not available:', e);
+      } finally {
+        setLoadingBmsProducts(false);
+      }
+    };
+    fetchBmsProducts();
+  }, [companyId]);
 
   const getImageUrl = (filePath: string) => {
     const { data } = supabase.storage.from('company-media').getPublicUrl(filePath);
@@ -62,6 +97,7 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
     setEditingAsset(asset);
     setEditDescription(asset.description || '');
     setEditTags(asset.tags?.join(', ') || '');
+    setEditBmsProductId(asset.bms_product_id || '');
   };
 
   const handleSave = async () => {
@@ -70,7 +106,7 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
     const tagsArray = editTags.split(',').map(t => t.trim()).filter(Boolean);
     const { error } = await supabase
       .from('company_media')
-      .update({ description: editDescription, tags: tagsArray })
+      .update({ description: editDescription, tags: tagsArray, bms_product_id: (editBmsProductId && editBmsProductId !== 'none') ? editBmsProductId : null } as any)
       .eq('id', editingAsset.id);
     setSaving(false);
     if (error) { toast.error('Save failed: ' + error.message); return; }
@@ -201,6 +237,11 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
                         >
                           <img src={getImageUrl(asset.file_path)} alt={asset.file_name} className="w-full h-full object-cover" />
                           <Badge variant="secondary" className="absolute top-1 left-1 text-[10px] capitalize bg-background/80">{asset.category}</Badge>
+                          {asset.bms_product_id && (
+                            <Badge variant="outline" className="absolute top-1 right-1 text-[10px] bg-background/80 gap-0.5">
+                              <Link2 className="h-2.5 w-2.5" />BMS
+                            </Badge>
+                          )}
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <Pencil className="h-5 w-5 text-white" />
                           </div>
@@ -239,6 +280,29 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="truncate">{editingAsset.file_name}</span>
                 <Badge variant="secondary" className="capitalize">{editingAsset.category}</Badge>
+                {editingAsset.bms_product_id && (
+                  <Badge variant="outline" className="gap-1"><Link2 className="h-3 w-3" />BMS Linked</Badge>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Link to BMS Product</label>
+                <Select value={editBmsProductId} onValueChange={setEditBmsProductId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={loadingBmsProducts ? 'Loading products…' : 'Select a BMS product (optional)'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— No link —</SelectItem>
+                    {bmsProducts.map((p, i) => {
+                      const productId = p.id || p.sku || String(i);
+                      const productName = p.name || p.product_name || 'Unknown';
+                      return (
+                        <SelectItem key={productId} value={productId}>
+                          {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Description</label>
