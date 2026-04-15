@@ -25,6 +25,7 @@ async function callBMS(
       action: intent,
       intent,
       tenant_id: connection.tenant_id,
+      omanut_tenant_id: company_id || null,
       ...restParams,
     };
 
