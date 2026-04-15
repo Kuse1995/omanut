@@ -1,48 +1,45 @@
 
 
-## BMS Data Sync for AI Training
+## Enhance Auto-Content Creator with BMS Intelligence
 
-### What This Does
+### Current State
+- `auto-content-creator` already loads `quick_reference_info` (which now contains BMS-synced products, stock alerts, sales data)
+- But it dumps it as a raw blob: `Quick reference: ${company.quick_reference_info}` — the AI doesn't know to use specific products or stock levels for content ideas
 
-Adds a "Sync from BMS" button in the AI Training tab. When clicked, it calls the BMS to pull all accessible business data (products, stock levels, categories, pricing), formats it into structured text, and presents it for review before saving to the Knowledge Base.
+### What to Change
 
-### Flow
+**Single file: `supabase/functions/auto-content-creator/index.ts`**
+
+#### 1. Parse BMS sections from quick_reference_info
+Extract the `<!-- BMS_SYNC_START -->` / `<!-- BMS_SYNC_END -->` block and parse it into structured sections (products, stock alerts, sales) so the prompt can reference them specifically.
+
+#### 2. Upgrade the caption prompt with product-aware instructions
+Replace the generic "Quick reference" line with structured context:
 
 ```text
-User clicks "Sync from BMS"
-  → New edge function calls BMS actions: list_products, low_stock_alerts, get_sales_summary
-  → Formats results into structured KB text
-  → Returns preview to the UI
-  → User reviews, edits if needed, confirms
-  → Appended/merged into quick_reference_info (Knowledge Base)
+AVAILABLE PRODUCTS:
+- Product A: K150 (In Stock)
+- Product B: K200 (Low Stock - only 3 left!)
+
+SALES TRENDS:
+- Top seller: Product A (45 sold this week)
+
+Create a post that:
+- Features a SPECIFIC product from the list above
+- If any items are low stock, create urgency ("Almost sold out!")
+- Reference actual prices
+- Tie to current sales trends when possible
 ```
 
-### Files to Change
+#### 3. Add content variety by rotating strategies
+To avoid repetitive posts, add a random strategy selector:
+- **Product spotlight** — feature one specific product with price
+- **Low stock urgency** — "Almost gone!" for low-stock items  
+- **Bestseller highlight** — promote top-selling products
+- **General brand** — fallback when no BMS data exists
 
-| File | Change |
-|------|--------|
-| New: `supabase/functions/bms-training-sync/index.ts` | Edge function that calls BMS via `callBMS()` for `list_products`, `low_stock_alerts`, and `get_sales_summary`, then formats results into structured KB text |
-| `src/components/admin/AITrainingEditor.tsx` | Add "Sync from BMS" button + preview dialog. Shows formatted data, lets user edit before confirming merge into Knowledge Base |
+This is ~25 lines changed in the caption prompt section (lines 91-108). No new files, no migrations.
 
-### Edge Function Logic
-
-1. Load BMS connection for the company
-2. Call 3 BMS actions in parallel: `list_products`, `low_stock_alerts`, `get_sales_summary`
-3. Format into sections: `## Products & Pricing`, `## Stock Alerts`, `## Sales Overview`
-4. Return the formatted text + raw counts for the UI to display
-
-### UI Addition
-
-In `AITrainingEditor.tsx`, next to the existing Knowledge Base card:
-- "Sync from BMS" button (only visible when company has a BMS connection)
-- Clicking opens a dialog showing the formatted preview
-- User can edit the text in the dialog
-- "Apply to Knowledge Base" appends/replaces the BMS section in `quick_reference_info`
-- Badge shows last sync timestamp
-
-### Technical Details
-
-- BMS connection check: query `bms_connections` for the company on component load to show/hide the button
-- The synced data is clearly delimited with `<!-- BMS_SYNC_START -->` / `<!-- BMS_SYNC_END -->` markers so re-syncing replaces only the BMS section
-- Edge function reuses `loadBmsConnection` from `_shared/bms-connection.ts` and the same `callBMS` pattern from `bms-agent`
+### Result
+Instead of generic posts like "Visit us today! 🎉", the AI generates inventory-aware content like "Our Classic Leather Bag (K350) is almost sold out — only 2 left! Grab yours before they're gone 👜🔥"
 
