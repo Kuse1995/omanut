@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { SmartConfigurePanel } from "./SmartConfigurePanel";
 import { AITrainingCoach } from "./AITrainingCoach";
+import { BmsSyncPanel } from "./BmsSyncPanel";
 
 interface Document {
   id: string;
@@ -128,6 +129,15 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
 
       {/* Smart Configure */}
       <SmartConfigurePanel companyId={companyId} onConfigApplied={() => fetchData(true)} />
+
+      {/* BMS Data Sync */}
+      <BmsSyncPanel
+        companyId={companyId}
+        quickReferenceInfo={quickReferenceInfo}
+        onApply={(newText) => {
+          setQuickReferenceInfo(newText);
+        }}
+      />
 
       {/* Quick Reference Editor */}
       <Card>
