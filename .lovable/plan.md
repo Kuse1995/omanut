@@ -1,45 +1,38 @@
 
 
-## Enhance Auto-Content Creator with BMS Intelligence
+## Simplify BMS Connection Setup
 
-### Current State
-- `auto-content-creator` already loads `quick_reference_info` (which now contains BMS-synced products, stock alerts, sales data)
-- But it dumps it as a raw blob: `Quick reference: ${company.quick_reference_info}` — the AI doesn't know to use specific products or stock levels for content ideas
+### Problem
+The current BMS Integration card on the Omanut side requires manual entry of the API Secret (which lives on the BMS platform admin) and doesn't show the callback URL that the BMS side needs. Users have to copy-paste between two dashboards with no guidance.
 
-### What to Change
+### Changes
 
-**Single file: `supabase/functions/auto-content-creator/index.ts`**
-
-#### 1. Parse BMS sections from quick_reference_info
-Extract the `<!-- BMS_SYNC_START -->` / `<!-- BMS_SYNC_END -->` block and parse it into structured sections (products, stock alerts, sales) so the prompt can reference them specifically.
-
-#### 2. Upgrade the caption prompt with product-aware instructions
-Replace the generic "Quick reference" line with structured context:
-
-```text
-AVAILABLE PRODUCTS:
-- Product A: K150 (In Stock)
-- Product B: K200 (Low Stock - only 3 left!)
-
-SALES TRENDS:
-- Top seller: Product A (45 sold this week)
-
-Create a post that:
-- Features a SPECIFIC product from the list above
-- If any items are low stock, create urgency ("Almost sold out!")
-- Reference actual prices
-- Tie to current sales trends when possible
+#### 1. Auto-generate and display the Callback URL
+Show a read-only field with a copy button containing the callback URL that the BMS side needs:
 ```
+https://dzheddvoiauevcayifev.supabase.co/functions/v1/bms-callback
+```
+This removes guesswork — the admin just copies it into the BMS config.
 
-#### 3. Add content variety by rotating strategies
-To avoid repetitive posts, add a random strategy selector:
-- **Product spotlight** — feature one specific product with price
-- **Low stock urgency** — "Almost gone!" for low-stock items  
-- **Bestseller highlight** — promote top-selling products
-- **General brand** — fallback when no BMS data exists
+#### 2. Auto-generate API Secret on first save
+Instead of requiring the user to manually enter a matching secret, generate a random secret automatically when creating a new BMS connection. Display it once (like the API Keys section does) so the user can copy it into the BMS platform admin's config for that tenant. On subsequent loads, show it masked with a "reveal" toggle.
 
-This is ~25 lines changed in the caption prompt section (lines 91-108). No new files, no migrations.
+#### 3. Pre-fill Bridge URL default
+Default the Bridge URL to `https://pkiajhllkihkuchbwrgz.supabase.co/functions/v1/bms-api-bridge` (the known Omanut BMS bridge) so users don't have to type it.
+
+#### 4. Add a "Quick Connect" flow for non-technical users
+Add a simplified mode: user clicks "Connect to BMS", system auto-generates the secret and pre-fills the bridge URL. Shows two things to copy to the BMS side:
+1. The generated API Secret
+2. The Callback URL
+
+### File Changes
+
+| File | Change |
+|------|--------|
+| `src/components/admin/CompanySettingsPanel.tsx` | Update `BmsIntegrationCard`: add callback URL display with copy button, auto-generate secret on new connections, pre-fill bridge URL default, add reveal/copy for existing secret |
+
+Single file, ~40 lines changed in the BMS card component. No migration needed — no schema changes.
 
 ### Result
-Instead of generic posts like "Visit us today! 🎉", the AI generates inventory-aware content like "Our Classic Leather Bag (K350) is almost sold out — only 2 left! Grab yours before they're gone 👜🔥"
+Setting up a BMS connection becomes: click "Save" → copy the auto-generated secret and callback URL → paste them into the BMS platform admin. No manual secret coordination needed.
 
