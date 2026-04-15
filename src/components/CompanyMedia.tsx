@@ -70,6 +70,26 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [compressionProgress, setCompressionProgress] = useState(0);
   const { toast } = useToast();
 
+  // BMS products state
+  const [bmsProducts, setBmsProducts] = useState<BmsProduct[]>([]);
+  const [selectedBmsProductId, setSelectedBmsProductId] = useState('');
+
+  useEffect(() => {
+    const fetchBmsProducts = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('bms-agent', {
+          body: { action: 'list_products', params: { company_id: companyId } }
+        });
+        if (!error && data?.success && Array.isArray(data.data)) {
+          setBmsProducts(data.data);
+        }
+      } catch (e) {
+        console.log('BMS products not available:', e);
+      }
+    };
+    fetchBmsProducts();
+  }, [companyId]);
+
   useEffect(() => {
     loadMedia();
   }, [companyId]);
