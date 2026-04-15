@@ -299,13 +299,20 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         .eq('id', companyId)
         .single();
 
+      // Build BMS product list for AI matching
+      const bmsProductList = bmsProducts.map(p => ({
+        id: p.id || p.sku || p.product_name || p.name,
+        name: p.product_name || p.name || p.sku || 'Unknown'
+      }));
+
       // Call AI analysis edge function
       const { data, error } = await supabase.functions.invoke('analyze-media', {
         body: {
           imageDataUrl,
           fileName: file.name,
           fileType: file.type,
-          businessType: company?.business_type || 'business'
+          businessType: company?.business_type || 'business',
+          bmsProducts: bmsProductList.length > 0 ? bmsProductList : undefined
         }
       });
 
@@ -316,11 +323,22 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         setDescription(data.description);
         setTags(Array.isArray(data.tags) ? data.tags.join(', ') : data.tags);
         setAiSuggested(true);
-        
-        toast({
-          title: "AI Suggestions Ready",
-          description: "Review and edit the suggestions before uploading",
-        });
+
+        // Auto-link if AI matched a BMS product
+        if (data.bms_product_id) {
+          setSelectedBmsProductId(data.bms_product_id);
+          toast({
+            title: "AI Matched BMS Product",
+            description: `Linked to "${data.matched_product_name || data.bms_product_id}"`,
+          });
+        } else {
+          toast({
+            title: "AI Suggestions Ready",
+            description: data.suggested_product_name 
+              ? `Suggested product: "${data.suggested_product_name}". Review before uploading.`
+              : "Review and edit the suggestions before uploading",
+          });
+        }
       } else if (data?.fallback) {
         setSelectedCategory(data.fallback.category as MediaCategory);
         setDescription(data.fallback.description);
@@ -686,24 +704,36 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>5. Link to BMS Product (optional)</Label>
-            <Select value={selectedBmsProductId} onValueChange={setSelectedBmsProductId}>
-              <SelectTrigger>
-                <SelectValue placeholder={bmsProducts.length === 0 ? 'No BMS products found' : 'Select a BMS product'} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— No link —</SelectItem>
-                {bmsProducts.map((p, i) => {
-                  const productId = p.id || p.sku || String(i);
-                  const productName = p.name || p.product_name || 'Unknown';
-                  return (
-                    <SelectItem key={productId} value={productId}>
-                      {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+            <Label className="flex items-center gap-2">
+              <Link2 className="h-3.5 w-3.5" />
+              5. Link to BMS Product (optional)
+              {selectedBmsProductId && selectedBmsProductId !== 'none' && aiSuggested && (
+                <span className="text-xs text-primary">✨ AI matched</span>
+              )}
+            </Label>
+            {bmsProducts.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-2 border border-dashed rounded-md">
+                No BMS connection found. Connect to a BMS to link products to media.
+              </p>
+            ) : (
+              <Select value={selectedBmsProductId} onValueChange={setSelectedBmsProductId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a BMS product..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— No link —</SelectItem>
+                  {bmsProducts.map((p, i) => {
+                    const productId = p.id || p.sku || String(i);
+                    const productName = p.name || p.product_name || 'Unknown';
+                    return (
+                      <SelectItem key={productId} value={productId}>
+                        {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {uploading && uploadProgress > 0 && (

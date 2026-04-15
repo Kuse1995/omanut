@@ -18,7 +18,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     );
 
-    const { imageUrl, mediaId, companyId, productName } = await req.json();
+    const { imageUrl, mediaId, companyId, productName, bmsProductNames } = await req.json();
 
     if (!imageUrl || !companyId || !productName) {
       return new Response(JSON.stringify({ error: 'imageUrl, companyId, and productName are required' }), {
@@ -72,8 +72,9 @@ Respond with RAW JSON only. No markdown, no code fences.
   "logo_description": "detailed logo description",
   "packaging_type": "bottle|box|can|pouch|tube|jar|other",
   "surface_finish": "matte|glossy|textured|metallic",
-  "size_impression": "small|medium|large|extra-large"
-}`;
+  "size_impression": "small|medium|large|extra-large",
+  "suggested_product_name": "best matching product name from the available list, or your best guess based on visible text"
+}${Array.isArray(bmsProductNames) && bmsProductNames.length > 0 ? `\n\nAvailable BMS products to match against: ${JSON.stringify(bmsProductNames)}` : ''}`;
 
     const response = await geminiChat({
       model: 'glm-4.7',
