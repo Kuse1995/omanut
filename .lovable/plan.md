@@ -1,47 +1,58 @@
 
 
-## Problem: AI Sends "Technical Difficulties" Instead of Actually Helping
+## Aligning Omanut with BMS Tenant Linking
 
-The AI catches errors during processing and sends a hardcoded "I apologize, but I'm experiencing some technical difficulties" message to the customer (line 4120). This counts as a "response sent" so the watchdog never fires. The customer gets a useless message and no follow-up.
+### Current State
 
-The root issue is **no retry strategy** — when the AI call fails (API error, timeout, tool crash), it immediately gives up and sends a dead-end message.
+On the Omanut side:
+- `bms_connections` table stores `tenant_id` (the BMS tenant's ID) per company
+- `bms-callback/index.ts` receives callbacks and resolves company via `tenant_id` lookup
+- `bms-agent/index.ts` sends `tenant_id` in outgoing requests to the BMS bridge
 
-## Solution: Retry-First Error Recovery
+The BMS project is adding `omanut_tenant_id` to their `bms_integration_configs` table and will include it in every callback payload. This creates a two-way link: BMS knows which Omanut company to target, and Omanut knows which BMS tenant to query.
 
-### Change 1: Retry with simpler configuration before giving up
+### What Needs to Change on This Side
 
-In the catch block at line 4117, instead of immediately setting `assistantReply` to "technical difficulties":
+**Nothing breaks** — the current `tenant_id`-based lookup in `bms-callback` still works. But we should align to take advantage of the new field for better routing and validation.
 
-1. **Retry with fallback model** (`glm-4.7`) and no tools (remove tool_calls to eliminate tool-related crashes)
-2. **Retry with truncated context** — only last 3 messages + system prompt (in case context length caused the failure)
-3. **Only if both retries fail**, use the company's configured `fallbackMessage` (from `company_ai_overrides`) instead of the hardcoded generic text
+### Changes
+
+#### 1. Update `bms-callback/index.ts` — Accept `omanut_tenant_id` for routing
+
+The BMS will now send `omanut_tenant_id` (which equals a `company_id` on this side) in the callback payload. Use it as a **primary routing key** when present, falling back to the existing `tenant_id` lookup.
 
 ```text
-Error occurs
-  → Retry 1: fallback model, no tools, same context
-    → Retry 2: fallback model, no tools, truncated context (last 3 msgs)
-      → Final: send company's configured fallback message + notify boss
+Incoming callback with omanut_tenant_id:
+  → Direct match: company_id = omanut_tenant_id (skip DB lookup)
+  → Still validate api_secret against bms_connections for that company
+
+Incoming callback without omanut_tenant_id:
+  → Existing tenant_id lookup (no change)
 ```
 
-### Change 2: Replace hardcoded error message with company fallback
+This is ~10 lines added to the authentication block (lines 34-56).
 
-The `fallbackMessage` variable is already loaded from `company_ai_overrides` at line 2060 but never used in the catch block. Replace the hardcoded text at line 4120 with this configurable message.
+#### 2. Update `bms-agent/index.ts` — Send `omanut_tenant_id` in outgoing requests
 
-### Change 3: Log the original error before retrying
+When calling the BMS bridge, include the Omanut company_id as `omanut_tenant_id` in the payload so the BMS can store/verify the mapping.
 
-Before retrying, log the original error to `ai_error_logs` with type `ai_call_failed` so you can monitor what's causing failures.
+```text
+Current payload: { action, intent, tenant_id, ...params }
+New payload:     { action, intent, tenant_id, omanut_tenant_id: companyId, ...params }
+```
 
----
+This is a 1-line addition in the `callBMS` function (line 28).
 
-## Files to Change
+#### 3. Update `_shared/bms-connection.ts` — No schema change needed
+
+The `bms_connections` table already has `tenant_id` (BMS side) and `company_id` (Omanut side). The `omanut_tenant_id` on the BMS side maps to `company_id` here — no new column needed on this side.
+
+### Files to Change
 
 | File | Change |
 |------|--------|
-| `whatsapp-messages/index.ts` | Replace catch block at line 4117 with retry logic (retry with simpler model + no tools, then truncated context, then configured fallback message) |
+| `supabase/functions/bms-callback/index.ts` | Accept `omanut_tenant_id` from payload as direct company routing key; validate secret against `bms_connections` for that company |
+| `supabase/functions/bms-agent/index.ts` | Add `omanut_tenant_id: companyId` to outgoing BMS payloads |
 
-This is ~30 lines replacing ~4 lines in a single catch block. No new files, no migrations needed.
-
-## Technical Detail
-
-The retry approach strips tools because tool-calling is the most common failure mode (malformed tool calls, tool execution crashes). A no-tools retry with a simple model gives the AI the best chance of generating a useful conversational response even when the full pipeline fails.
+No migration needed. This is a ~15-line change across 2 files.
 
