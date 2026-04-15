@@ -3952,6 +3952,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -3979,6 +3980,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                   console.log(`[SEARCH-MEDIA] Text fallback found ${results.length} results`);
@@ -4003,6 +4005,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     media_type: m.media_type,
                     tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                   console.log(`[SEARCH-MEDIA] Returned ${results.length} latest media as fallback`);
@@ -4590,6 +4593,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = mediaResults.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -4609,6 +4613,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = textResults.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                 }
@@ -4625,6 +4630,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   results = anyMedia.map((m: any) => ({
                     description: m.description || m.file_name, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                 }
