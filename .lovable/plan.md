@@ -1,38 +1,38 @@
 
 
-## Enhance Product Identity Manager & Media Library with Smart BMS Integration
+## Make BMS Linking Visible + AI Vision Auto-Match in Media Library
 
-### Problems
-1. **Product Identity "Add Product" dialog** (screenshot) has no way to suggest product names from BMS inventory — admin has to type manually
-2. **Media Library** BMS link dropdown exists but may show "No BMS products found" if the BMS connection isn't active for the company — needs better feedback
-3. **AI tagging on upload** only generates category/description/tags — it doesn't try to match uploaded images to known BMS products
-4. **No product name suggestion** from AI vision or BMS catalog when creating a Product Identity Profile
+### Problem
+The "Link to BMS Product" dropdown exists but is buried at step 5 in the upload form — below the fold. Existing media items have no way to edit or link to BMS. The AI analyzer returns match suggestions but there's no edit dialog to act on them for already-uploaded items.
 
 ### Changes
 
-| Area | File(s) | Change |
-|------|---------|--------|
-| **BMS product suggestions in Product Identity** | `src/components/admin/ProductIdentityManager.tsx` | Fetch BMS products on mount (same pattern as CompanyMedia). Add a "Suggested Products" dropdown/autocomplete above the Product Name input that lists BMS products. When admin picks one, auto-fill the name. If no BMS connection, allow manual entry as-is. |
-| **AI-suggested product name** | `supabase/functions/extract-product-identity/index.ts` | Extend the Gemini vision prompt to also return a `suggested_product_name` field. Pass available BMS product names into the prompt so AI can pick the closest match. Return this in the response so the UI can pre-fill. |
-| **Smarter AI tagging on upload** | `supabase/functions/analyze-media/index.ts` | Accept optional `bmsProducts` array in the request body. Add to the Gemini prompt: "If any of these known products match, include `bms_product_id` and `product_name` in your response." This enables auto-linking during upload. |
-| **Auto-link on upload** | `src/components/CompanyMedia.tsx` | Pass `bmsProducts` names/IDs to `analyze-media`. If AI returns a `bms_product_id` match, auto-select it in the BMS dropdown and show a toast. |
-| **BMS dropdown visibility fix** | `src/components/CompanyMedia.tsx` | If `bmsProducts` is empty, show a small info message "Connect to BMS to link products" instead of a disabled dropdown, so it's clear why no products appear. |
+| Area | File | Change |
+|------|------|--------|
+| **Edit dialog for existing media** | `CompanyMedia.tsx` | Add a Dialog that opens when clicking any media card. Shows: image preview, BMS product dropdown, description (editable), tags (editable), category selector, and a "Re-analyze with AI" button. Save updates via `supabase.from('company_media').update(...)`. |
+| **AI re-analyze button** | `CompanyMedia.tsx` | In the edit dialog, a "🔍 AI Analyze" button calls `analyze-media` with `bmsProducts` context. Auto-fills description, tags, category, and auto-selects BMS product if matched. |
+| **Visual hover indicator** | `CompanyMedia.tsx` | Add a semi-transparent overlay with pencil/edit icon on hover for each media card, signaling they're clickable. |
+| **Upload form: move BMS dropdown higher** | `CompanyMedia.tsx` | Move the BMS product dropdown from step 5 to step 2 (right after file selection), so it's always visible without scrolling. |
+| **AI vision auto-link on upload** | `CompanyMedia.tsx` | After `analyze-media` returns a `bms_product_id` match, auto-select it AND show a prominent toast with the matched product name. Already partially implemented — just needs the toast to be more visible. |
+| **Edge function: vision match improvement** | `analyze-media/index.ts` | Already updated. No further changes needed — it accepts `bmsProducts` and returns match data. |
 
-### Flow After Changes
+### Edit Dialog Flow
 
 ```text
-Admin uploads image → AI analyzes → returns category, tags, description
-                                   → also checks against BMS product list
-                                   → auto-suggests BMS product link if matched
-
-Admin creates Product Identity → sees BMS product dropdown
-                               → picks product or types custom name
-                               → AI vision extracts fingerprint + validates name
+Click media card → Dialog opens
+  → Image preview at top
+  → BMS Product dropdown (pre-selected if already linked)
+  → Description textarea (editable)
+  → Tags input (editable)
+  → Category selector
+  → [Re-analyze with AI] button → calls analyze-media → updates all fields
+  → [Save] button → updates company_media row
+  → [Cancel] button
 ```
 
 ### Technical Details
-- BMS products fetched via `supabase.functions.invoke('bms-agent', { body: { action: 'list_products', params: { company_id } } })`
-- `analyze-media` gets an optional `bmsProductNames` param — a simple `{id, name}[]` array added to the prompt context
-- `extract-product-identity` prompt gets `Available BMS products: [list]` appended so it can suggest the best match
-- All changes are backward-compatible: if no BMS connection, everything works as before with manual entry
+- Edit dialog reuses existing `bmsProducts` state (already fetched on mount)
+- Save uses `supabase.from('company_media').update({ description, tags, category, bms_product_id }).eq('id', mediaId)`
+- Re-analyze calls `supabase.functions.invoke('analyze-media', { body: { imageDataUrl, fileName, fileType, businessType, bmsProducts } })` — requires fetching the image URL from signed URL
+- Media cards get `cursor-pointer` and hover overlay with `Pencil` icon from lucide-react
 
