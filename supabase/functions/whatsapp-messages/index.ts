@@ -666,7 +666,7 @@ async function sendFallbackMessage(
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
     const formData = new URLSearchParams();
     formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
-    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('To', normalizeWhatsAppTo(customerPhone));
     formData.append('Body', fallbackMsg);
     
     await fetch(twilioUrl, {
@@ -1018,7 +1018,7 @@ async function sendFallbackToCustomer(
 
     const formData = new URLSearchParams();
     formData.append('From', fromNumber);
-    formData.append('To', `whatsapp:${customerPhone}`);
+    formData.append('To', normalizeWhatsAppTo(customerPhone));
     formData.append('Body', fallbackMsg);
 
     await fetch(twilioUrl, {
@@ -1415,7 +1415,7 @@ async function _processAIResponseInner(
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
           formData.append('From', company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`);
-          formData.append('To', `whatsapp:${customerPhone}`);
+          formData.append('To', normalizeWhatsAppTo(customerPhone));
           formData.append('Body', thankYouMsg);
           await fetch(twilioUrl, {
             method: 'POST',
@@ -1542,7 +1542,7 @@ async function _processAIResponseInner(
           : `whatsapp:${company.whatsapp_number}`;
         const formData = new URLSearchParams();
         formData.append('From', fromNumber);
-        formData.append('To', `whatsapp:${customerPhone}`);
+        formData.append('To', normalizeWhatsAppTo(customerPhone));
         formData.append('Body', ackMessage);
 
         await fetch(twilioUrl, {
@@ -1695,7 +1695,7 @@ async function _processAIResponseInner(
             
             const formData = new URLSearchParams();
             formData.append('From', fromNumber);
-            formData.append('To', `whatsapp:${customerPhone}`);
+            formData.append('To', normalizeWhatsAppTo(customerPhone));
             formData.append('Body', clientNotificationMessage);
             
             const twilioResponse = await fetch(twilioUrl, {
@@ -4868,7 +4868,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
       const formData = new URLSearchParams();
       formData.append('From', fromNumber);
-      formData.append('To', `whatsapp:${customerPhone}`);
+      formData.append('To', normalizeWhatsAppTo(customerPhone));
       formData.append('Body', assistantReply);
 
       const twilioResponse = await fetch(twilioUrl, {
