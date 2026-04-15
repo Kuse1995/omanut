@@ -1,58 +1,48 @@
 
 
-## Aligning Omanut with BMS Tenant Linking
+## BMS Data Sync for AI Training
 
-### Current State
+### What This Does
 
-On the Omanut side:
-- `bms_connections` table stores `tenant_id` (the BMS tenant's ID) per company
-- `bms-callback/index.ts` receives callbacks and resolves company via `tenant_id` lookup
-- `bms-agent/index.ts` sends `tenant_id` in outgoing requests to the BMS bridge
+Adds a "Sync from BMS" button in the AI Training tab. When clicked, it calls the BMS to pull all accessible business data (products, stock levels, categories, pricing), formats it into structured text, and presents it for review before saving to the Knowledge Base.
 
-The BMS project is adding `omanut_tenant_id` to their `bms_integration_configs` table and will include it in every callback payload. This creates a two-way link: BMS knows which Omanut company to target, and Omanut knows which BMS tenant to query.
-
-### What Needs to Change on This Side
-
-**Nothing breaks** — the current `tenant_id`-based lookup in `bms-callback` still works. But we should align to take advantage of the new field for better routing and validation.
-
-### Changes
-
-#### 1. Update `bms-callback/index.ts` — Accept `omanut_tenant_id` for routing
-
-The BMS will now send `omanut_tenant_id` (which equals a `company_id` on this side) in the callback payload. Use it as a **primary routing key** when present, falling back to the existing `tenant_id` lookup.
+### Flow
 
 ```text
-Incoming callback with omanut_tenant_id:
-  → Direct match: company_id = omanut_tenant_id (skip DB lookup)
-  → Still validate api_secret against bms_connections for that company
-
-Incoming callback without omanut_tenant_id:
-  → Existing tenant_id lookup (no change)
+User clicks "Sync from BMS"
+  → New edge function calls BMS actions: list_products, low_stock_alerts, get_sales_summary
+  → Formats results into structured KB text
+  → Returns preview to the UI
+  → User reviews, edits if needed, confirms
+  → Appended/merged into quick_reference_info (Knowledge Base)
 ```
-
-This is ~10 lines added to the authentication block (lines 34-56).
-
-#### 2. Update `bms-agent/index.ts` — Send `omanut_tenant_id` in outgoing requests
-
-When calling the BMS bridge, include the Omanut company_id as `omanut_tenant_id` in the payload so the BMS can store/verify the mapping.
-
-```text
-Current payload: { action, intent, tenant_id, ...params }
-New payload:     { action, intent, tenant_id, omanut_tenant_id: companyId, ...params }
-```
-
-This is a 1-line addition in the `callBMS` function (line 28).
-
-#### 3. Update `_shared/bms-connection.ts` — No schema change needed
-
-The `bms_connections` table already has `tenant_id` (BMS side) and `company_id` (Omanut side). The `omanut_tenant_id` on the BMS side maps to `company_id` here — no new column needed on this side.
 
 ### Files to Change
 
 | File | Change |
 |------|--------|
-| `supabase/functions/bms-callback/index.ts` | Accept `omanut_tenant_id` from payload as direct company routing key; validate secret against `bms_connections` for that company |
-| `supabase/functions/bms-agent/index.ts` | Add `omanut_tenant_id: companyId` to outgoing BMS payloads |
+| New: `supabase/functions/bms-training-sync/index.ts` | Edge function that calls BMS via `callBMS()` for `list_products`, `low_stock_alerts`, and `get_sales_summary`, then formats results into structured KB text |
+| `src/components/admin/AITrainingEditor.tsx` | Add "Sync from BMS" button + preview dialog. Shows formatted data, lets user edit before confirming merge into Knowledge Base |
 
-No migration needed. This is a ~15-line change across 2 files.
+### Edge Function Logic
+
+1. Load BMS connection for the company
+2. Call 3 BMS actions in parallel: `list_products`, `low_stock_alerts`, `get_sales_summary`
+3. Format into sections: `## Products & Pricing`, `## Stock Alerts`, `## Sales Overview`
+4. Return the formatted text + raw counts for the UI to display
+
+### UI Addition
+
+In `AITrainingEditor.tsx`, next to the existing Knowledge Base card:
+- "Sync from BMS" button (only visible when company has a BMS connection)
+- Clicking opens a dialog showing the formatted preview
+- User can edit the text in the dialog
+- "Apply to Knowledge Base" appends/replaces the BMS section in `quick_reference_info`
+- Badge shows last sync timestamp
+
+### Technical Details
+
+- BMS connection check: query `bms_connections` for the company on component load to show/hide the button
+- The synced data is clearly delimited with `<!-- BMS_SYNC_START -->` / `<!-- BMS_SYNC_END -->` markers so re-syncing replaces only the BMS section
+- Edge function reuses `loadBmsConnection` from `_shared/bms-connection.ts` and the same `callBMS` pattern from `bms-agent`
 
