@@ -790,11 +790,20 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                       <Video className="h-12 w-12 text-muted-foreground" />
                     </div>
                   )}
-                  <div className="p-2 space-y-1">
-                    <p className="text-sm font-medium truncate">{item.file_name}</p>
+                   <div className="p-2 space-y-1">
+                    <div className="flex items-center gap-1">
+                      <p className="text-sm font-medium truncate flex-1">{item.file_name}</p>
+                      {item.bms_product_id && (
+                        <Badge variant="outline" className="text-[10px] gap-0.5 shrink-0">
+                          <Link2 className="h-2.5 w-2.5" />BMS
+                        </Badge>
+                      )}
+                    </div>
                     {item.description && (
                       <p className="text-xs text-muted-foreground line-clamp-2">
                         {item.description}
+                      </p>
+                    )}
                       </p>
                     )}
                     {item.tags && item.tags.length > 0 && (
