@@ -7,6 +7,58 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function extractBmsFields(raw: string): { bms_product_id?: string; matched_product_name?: string } {
+  const result: { bms_product_id?: string; matched_product_name?: string } = {};
+  const idMatch = raw.match(/"bms_product_id"\s*:\s*"([^"]+)"/);
+  if (idMatch) result.bms_product_id = idMatch[1];
+  const nameMatch = raw.match(/"matched_product_name"\s*:\s*"([^"]+)"/);
+  if (nameMatch) result.matched_product_name = nameMatch[1];
+  return result;
+}
+
+function robustJsonParse(raw: string): any {
+  // Strip markdown code fences
+  let cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  // Try direct parse
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch (_e) {
+      // Try repairing truncated JSON
+      let attempt = jsonMatch[0];
+      // Close open strings
+      const quoteCount = (attempt.match(/"/g) || []).length;
+      if (quoteCount % 2 !== 0) attempt += '"';
+      // Close open arrays
+      const openBrackets = (attempt.match(/\[/g) || []).length - (attempt.match(/\]/g) || []).length;
+      for (let i = 0; i < openBrackets; i++) attempt += ']';
+      // Close open objects
+      const openBraces = (attempt.match(/\{/g) || []).length - (attempt.match(/\}/g) || []).length;
+      for (let i = 0; i < openBraces; i++) attempt += '}';
+      try {
+        return JSON.parse(attempt);
+      } catch (_e2) {
+        // fall through
+      }
+    }
+  }
+
+  // Last resort: extract individual fields via regex
+  const partial: any = {};
+  const catMatch = cleaned.match(/"category"\s*:\s*"([^"]+)"/);
+  if (catMatch) partial.category = catMatch[1];
+  const descMatch = cleaned.match(/"description"\s*:\s*"([^"]+)"/);
+  if (descMatch) partial.description = descMatch[1];
+  const bms = extractBmsFields(cleaned);
+  if (bms.bms_product_id) partial.bms_product_id = bms.bms_product_id;
+  if (bms.matched_product_name) partial.matched_product_name = bms.matched_product_name;
+
+  if (Object.keys(partial).length > 0) return partial;
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -34,7 +86,7 @@ Your task is to suggest:
 3. Relevant tags (3-5 comma-separated keywords)
 4. A suggested product name based on visible labels, text, or visual cues${bmsContext}
 
-Return your response as JSON with this exact structure:
+Return your response as a valid JSON object (no markdown, no code fences) with this exact structure:
 {
   "category": "one of the categories",
   "description": "brief description",
@@ -44,7 +96,7 @@ Return your response as JSON with this exact structure:
   "matched_product_name": "matched BMS product name or null"
 }`;
 
-    const userPrompt = `Analyze this image from a ${businessType || 'business'} and suggest the appropriate category, description, and tags.`;
+    const userPrompt = `Analyze this image from a ${businessType || 'business'} and suggest the appropriate category, description, and tags. Respond with ONLY the JSON object, no extra text.`;
 
     // Call Gemini AI with vision
     const response = await geminiChat({
@@ -60,7 +112,7 @@ Return your response as JSON with this exact structure:
         }
       ],
       temperature: 0.3,
-      max_tokens: 500
+      max_tokens: 1024
     });
 
     if (!response.ok) {
@@ -84,25 +136,25 @@ Return your response as JSON with this exact structure:
 
     console.log('AI response:', aiResponse);
 
-    // Parse the JSON response
-    let suggestions;
-    try {
-      // Try to extract JSON from the response
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        suggestions = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('No JSON found in response');
-      }
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', parseError);
-      // Fallback to default suggestions
+    // Parse the JSON response with robust handling
+    let suggestions = robustJsonParse(aiResponse);
+
+    if (!suggestions) {
+      console.error('Failed to parse AI response, using fallback');
+      // Still try to extract BMS fields from raw text
+      const bmsFields = extractBmsFields(aiResponse);
       suggestions = {
         category: 'other',
         description: 'Media file',
-        tags: ['general']
+        tags: ['general'],
+        ...bmsFields
       };
     }
+
+    // Ensure required fields exist
+    if (!suggestions.category) suggestions.category = 'other';
+    if (!suggestions.description) suggestions.description = 'Media file';
+    if (!suggestions.tags || !Array.isArray(suggestions.tags)) suggestions.tags = ['general'];
 
     return new Response(JSON.stringify(suggestions), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
