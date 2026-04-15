@@ -26,6 +26,7 @@ interface CompanyMediaProps {
 
 interface Media {
   id: string;
+  bms_product_id: string | null;
   file_name: string;
   file_path: string;
   file_type: string;
