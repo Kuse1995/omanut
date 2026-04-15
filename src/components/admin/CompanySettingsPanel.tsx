@@ -383,17 +383,30 @@ function SLARow({ priority, responseTime, resolutionTime, escalationTime, onSave
   );
 }
 
+const DEFAULT_BRIDGE_URL = 'https://pkiajhllkihkuchbwrgz.supabase.co/functions/v1/bms-api-bridge';
+const CALLBACK_URL = `https://dzheddvoiauevcayifev.supabase.co/functions/v1/bms-callback`;
+
+function generateSecret(length = 32): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const arr = new Uint8Array(length);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => chars[b % chars.length]).join('');
+}
+
 // BMS Integration Card
 function BmsIntegrationCard({ companyId }: { companyId: string }) {
   const queryClient = useQueryClient();
   const [bmsType, setBmsType] = useState<'single_tenant' | 'multi_tenant'>('multi_tenant');
-  const [bridgeUrl, setBridgeUrl] = useState('');
+  const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
   const [apiSecret, setApiSecret] = useState('');
   const [tenantId, setTenantId] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'success' | 'error' | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [justCreatedSecret, setJustCreatedSecret] = useState<string | null>(null);
 
   const { data: bmsConnection, isLoading } = useQuery({
     queryKey: ['bms-connection', companyId],
@@ -416,19 +429,28 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
       setApiSecret(bmsConnection.api_secret);
       setTenantId(bmsConnection.tenant_id || '');
       setIsActive(bmsConnection.is_active);
+      setJustCreatedSecret(null);
     }
   }, [bmsConnection]);
 
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    toast.success('Copied to clipboard');
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!bridgeUrl || !apiSecret) throw new Error('Bridge URL and API Secret are required');
+      const secretToUse = apiSecret || generateSecret();
+      if (!bridgeUrl) throw new Error('Bridge URL is required');
       if (bmsType === 'multi_tenant' && !tenantId) throw new Error('Tenant ID is required for multi-tenant');
 
       const payload = {
         company_id: companyId,
         bms_type: bmsType,
         bridge_url: bridgeUrl,
-        api_secret: apiSecret,
+        api_secret: secretToUse,
         tenant_id: bmsType === 'multi_tenant' ? tenantId : null,
         is_active: isActive,
       };
@@ -444,6 +466,11 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
           .from('bms_connections')
           .insert(payload);
         if (error) throw error;
+        // Show the generated secret once so user can copy it
+        if (!apiSecret) {
+          setJustCreatedSecret(secretToUse);
+          setApiSecret(secretToUse);
+        }
       }
     },
     onSuccess: () => {
@@ -453,7 +480,6 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     onError: (err: any) => toast.error(err.message),
   });
 
-
   const handleTest = async () => {
     setTesting(true);
     setTestResult(null);
@@ -462,9 +488,7 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
       const { data, error } = await supabase.functions.invoke('bms-agent', {
         body: { action: 'health_check', params: { company_id: companyId } },
       });
-
       if (error) throw error;
-
       if (data?.success) {
         setTestResult('success');
         toast.success('BMS connected successfully');
@@ -503,6 +527,26 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Callback URL — always visible, read-only */}
+        <div className="space-y-2">
+          <Label className="text-xs">Callback URL <span className="text-muted-foreground">(copy to BMS)</span></Label>
+          <div className="flex gap-1.5">
+            <Input
+              value={CALLBACK_URL}
+              readOnly
+              className="h-8 text-xs bg-muted/50 font-mono"
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => copyToClipboard(CALLBACK_URL, 'callback')}
+            >
+              {copiedField === 'callback' ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <Label className="text-xs">BMS Type</Label>
           <Select value={bmsType} onValueChange={(v) => setBmsType(v as any)}>
@@ -521,21 +565,72 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
           <Input
             value={bridgeUrl}
             onChange={(e) => setBridgeUrl(e.target.value)}
-            placeholder="https://your-bms.example.com/api"
+            placeholder={DEFAULT_BRIDGE_URL}
             className="h-8 text-xs"
           />
         </div>
 
+        {/* API Secret with reveal/copy */}
         <div className="space-y-2">
-          <Label className="text-xs">API Secret</Label>
-          <Input
-            type="password"
-            value={apiSecret}
-            onChange={(e) => setApiSecret(e.target.value)}
-            placeholder="••••••••"
-            className="h-8 text-xs"
-          />
+          <Label className="text-xs">
+            API Secret
+            {!bmsConnection && !apiSecret && (
+              <span className="text-muted-foreground ml-1">(auto-generated on save)</span>
+            )}
+          </Label>
+          <div className="flex gap-1.5">
+            <Input
+              type={showSecret ? 'text' : 'password'}
+              value={apiSecret}
+              onChange={(e) => setApiSecret(e.target.value)}
+              placeholder={bmsConnection ? '••••••••' : 'Leave blank to auto-generate'}
+              className="h-8 text-xs"
+            />
+            {apiSecret && (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => setShowSecret(!showSecret)}
+                >
+                  {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => copyToClipboard(apiSecret, 'secret')}
+                >
+                  {copiedField === 'secret' ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Show generated secret banner once */}
+        {justCreatedSecret && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2">
+            <p className="text-xs font-medium">🔑 API Secret generated — copy it now!</p>
+            <p className="text-xs text-muted-foreground">
+              Paste this secret into your BMS Platform Admin's tenant config. It won't be shown in full again.
+            </p>
+            <div className="flex gap-1.5">
+              <code className="flex-1 bg-muted p-2 rounded text-xs break-all select-all font-mono">
+                {justCreatedSecret}
+              </code>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 shrink-0"
+                onClick={() => copyToClipboard(justCreatedSecret, 'newSecret')}
+              >
+                {copiedField === 'newSecret' ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {bmsType === 'multi_tenant' && (
           <div className="space-y-2">
@@ -564,7 +659,7 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
           >
-            {saveMutation.isPending ? 'Saving...' : bmsConnection ? 'Update Connection' : 'Save Connection'}
+            {saveMutation.isPending ? 'Saving...' : bmsConnection ? 'Update Connection' : 'Connect to BMS'}
           </Button>
           <Button
             size="sm"
