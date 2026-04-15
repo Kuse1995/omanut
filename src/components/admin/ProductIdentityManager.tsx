@@ -27,6 +27,7 @@ import {
   Tag,
   ShieldCheck,
   Ban,
+  Link2,
 } from 'lucide-react';
 
 interface ColorEntry {
@@ -87,8 +88,24 @@ export const ProductIdentityManager = () => {
   // Edit exclusion state
   const [editExclusion, setEditExclusion] = useState('');
 
+  // BMS products state
+  const [bmsProducts, setBmsProducts] = useState<{ id: string; name: string }[]>([]);
+
   useEffect(() => {
-    if (selectedCompany) loadData();
+    if (selectedCompany) {
+      loadData();
+      // Fetch BMS products
+      supabase.functions.invoke('bms-agent', {
+        body: { action: 'list_products', params: { company_id: selectedCompany.id } }
+      }).then(({ data, error }) => {
+        if (!error && data?.success && Array.isArray(data.data)) {
+          setBmsProducts(data.data.map((p: any) => ({
+            id: p.id || p.sku || p.product_name || p.name,
+            name: p.product_name || p.name || p.sku || 'Unknown'
+          })));
+        }
+      }).catch(() => {});
+    }
   }, [selectedCompany]);
 
   const loadData = async () => {
@@ -680,6 +697,28 @@ export const ProductIdentityManager = () => {
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* BMS Product Suggestions */}
+            {bmsProducts.length > 0 && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Link2 className="h-3.5 w-3.5" />
+                  Suggest from BMS Inventory
+                </Label>
+                <Select onValueChange={(val) => setNewProductName(val)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pick a BMS product..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bmsProducts.map(p => (
+                      <SelectItem key={p.id} value={p.name}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Product Name</Label>
               <Input

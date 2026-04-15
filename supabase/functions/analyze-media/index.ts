@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { imageDataUrl, fileName, fileType, businessType } = await req.json();
+    const { imageDataUrl, fileName, fileType, businessType, bmsProducts } = await req.json();
 
     if (!imageDataUrl) {
       throw new Error('Image data is required');
@@ -21,18 +21,27 @@ serve(async (req) => {
 
     console.log('Analyzing media with AI:', fileName, fileType);
 
+    // Build BMS context if available
+    const bmsContext = Array.isArray(bmsProducts) && bmsProducts.length > 0
+      ? `\n\nKnown BMS inventory products:\n${bmsProducts.map((p: any) => `- ID: "${p.id}", Name: "${p.name}"`).join('\n')}\n\nIf the image clearly matches one of these products, include "bms_product_id" (the matching product ID) and "matched_product_name" in your response.`
+      : '';
+
     // Prepare the prompt based on business type
     const systemPrompt = `You are an AI assistant that analyzes images for a ${businessType || 'business'}.
 Your task is to suggest:
 1. The most appropriate category from: menu, interior, exterior, logo, products, promotional, staff, events, facilities, other
 2. A concise description (1-2 sentences) of what the image shows
 3. Relevant tags (3-5 comma-separated keywords)
+4. A suggested product name based on visible labels, text, or visual cues${bmsContext}
 
 Return your response as JSON with this exact structure:
 {
   "category": "one of the categories",
   "description": "brief description",
-  "tags": ["tag1", "tag2", "tag3"]
+  "tags": ["tag1", "tag2", "tag3"],
+  "suggested_product_name": "name if identifiable or null",
+  "bms_product_id": "matched BMS product ID or null",
+  "matched_product_name": "matched BMS product name or null"
 }`;
 
     const userPrompt = `Analyze this image from a ${businessType || 'business'} and suggest the appropriate category, description, and tags.`;
