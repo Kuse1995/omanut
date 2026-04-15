@@ -1,37 +1,28 @@
 
 
-## Fix: AI Hallucinating Media URLs Instead of Using Library
+## Fix: Bulk Auto-Link Returns 0 Because AI Responses Are Truncated
 
 ### Root Cause
-The AI skips `search_media` and jumps straight to `send_media` with **fabricated URLs** (e.g. `cdn.filestackcontent.com`). The domain validation correctly rejects them, but instead of recovering, it gives up with "Sorry, I can only share from our official library."
+The `analyze-media` edge function sets `max_tokens: 500`, which is too small when BMS product lists are included in the prompt. The AI's JSON response gets cut off mid-way, the regex parser finds an incomplete `{` without a closing `}`, throws "No JSON found in response", and falls back to a generic response with no `bms_product_id`. Every single call is failing — visible in the logs as repeated parse errors.
 
-### Fix (2 changes, 1 file)
+### Fix (1 file: `supabase/functions/analyze-media/index.ts`)
 
-**File: `supabase/functions/whatsapp-messages/index.ts`**
+1. **Increase `max_tokens` from 500 to 1024** — enough for the full JSON response including BMS matching fields.
 
-#### 1. Auto-recovery: when `send_media` gets invalid URLs, internally run `search_media`
-Instead of rejecting and giving up at line ~2892, add a fallback that:
-- Extracts the caption/category from the `send_media` args as a search query
-- Runs the same search_media logic (vector → text → recent) internally
-- If results found, replaces the invalid URLs with real storage URLs and continues to Twilio dispatch
-- Only shows the "sorry" message if the internal search also finds nothing
+2. **Fix JSON parsing to handle markdown fences and truncation**:
+   - Strip `` ```json ``` `` wrappers before regex matching
+   - If the closing `}` is missing (truncated), attempt to repair by closing open strings/arrays/objects
+   - As a last-resort partial parse: extract individual fields with targeted regexes (`"bms_product_id"\s*:\s*"([^"]+)"`)
 
-#### 2. Strengthen the tool description to prefer `search_media` first
-Update the `send_media` tool description (line 2130) to:
-```
-"Send media files to customer via WhatsApp. IMPORTANT: You MUST call search_media first to get valid URLs. Never fabricate or guess URLs."
-```
+3. **Add `bms_product_id` extraction to the fallback path** — even if full JSON parsing fails, try to extract any `bms_product_id` the AI mentioned before truncation, so partial matches aren't lost.
 
-And add to the system prompt instructions (around line 1892):
-```
-"CRITICAL: NEVER invent or guess media URLs. ALWAYS call search_media first, then use the exact URLs it returns in send_media."
-```
+4. **Add `response_format: { type: "json_object" }` to the Gemini call** if supported by the gateway, to eliminate markdown wrapping entirely.
 
-### Expected behavior after fix
-- Customer asks "share the bread bin picture"
-- AI calls `send_media` with hallucinated URL → auto-fallback searches for "bread bin" in library → finds matching media → sends actual image via Twilio
-- No more "sorry, official library only" when the image actually exists in the library
+### Expected Result
+After deployment, running "Auto-Link All to BMS" will successfully parse AI responses and match images to BMS products. The 31 currently unlinked ANZ media items should get linked where matches exist.
 
-### Technical detail
-The auto-recovery search uses `args.caption || args.category` as the query, reusing the existing 3-tier search (vector → ilike text → recent). Found URLs go through the existing signed-URL generation + Twilio dispatch path.
+### Technical Detail
+- Single file change: `supabase/functions/analyze-media/index.ts`
+- No database migration needed
+- Deploy via edge function deployment
 
