@@ -939,8 +939,75 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-4">
-            {compressing && (
+          {/* Bulk Actions Bar */}
+          <div className="flex flex-wrap gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Bulk Actions</p>
+              <p className="text-xs text-muted-foreground">Auto-analyze and link existing media, or upload multiple files at once</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBulkAutoLink}
+              disabled={bulkLinking || bmsProducts.length === 0}
+            >
+              {bulkLinking ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {bulkProgress.current}/{bulkProgress.total} ({bulkProgress.linked} linked)
+                </>
+              ) : (
+                <>
+                  <Wand2 className="mr-2 h-4 w-4" />
+                  Auto-Link All to BMS
+                </>
+              )}
+            </Button>
+          </div>
+
+          {bulkLinking && (
+            <div className="space-y-2">
+              <Progress value={(bulkProgress.current / Math.max(bulkProgress.total, 1)) * 100} className="h-2" />
+              <p className="text-xs text-muted-foreground text-center">
+                Analyzing image {bulkProgress.current} of {bulkProgress.total}... ({bulkProgress.linked} linked so far)
+              </p>
+            </div>
+          )}
+
+          {/* Bulk Upload Section */}
+          <div className="p-4 border border-dashed border-border rounded-lg space-y-3">
+            <Label className="text-sm font-medium">📦 Bulk Upload (multiple files)</Label>
+            <Input
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={handleMultiFileSelect}
+              disabled={bulkUploading}
+            />
+            {selectedFiles.length > 0 && (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{selectedFiles.length} files selected</p>
+                <Button size="sm" onClick={handleBulkUpload} disabled={bulkUploading}>
+                  {bulkUploading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {bulkUploadProgress.current}/{bulkUploadProgress.total}
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Upload All (AI will auto-tag & link)
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+            {bulkUploading && (
+              <Progress value={(bulkUploadProgress.current / Math.max(bulkUploadProgress.total, 1)) * 100} className="h-2" />
+            )}
+          </div>
+
+          {/* Single Upload Form */}
               <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
