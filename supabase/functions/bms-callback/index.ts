@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
     );
 
     const body = await req.json();
-    const { event, company_id: payloadCompanyId, tenant_id: payloadTenantId, data } = body;
+    const { event, company_id: payloadCompanyId, tenant_id: payloadTenantId, omanut_tenant_id: omanutTenantId, data } = body;
     // Accept secret from x-api-secret header (preferred) or Authorization: Bearer header (legacy)
     const customSecret = req.headers.get("x-api-secret");
     const authHeader = req.headers.get("Authorization");
@@ -34,7 +34,21 @@ Deno.serve(async (req) => {
     // --- Authentication: resolve company and validate secret ---
     let resolvedCompanyId: string | null = payloadCompanyId || null;
 
-    if (payloadTenantId) {
+    if (omanutTenantId) {
+      // Direct routing: omanut_tenant_id IS the company_id on this side
+      resolvedCompanyId = omanutTenantId;
+      // Still validate secret against bms_connections for this company
+      const { data: conn } = await supabase
+        .from("bms_connections")
+        .select("api_secret")
+        .eq("company_id", omanutTenantId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!conn || !incomingSecret || incomingSecret !== conn.api_secret) {
+        console.error("[BMS-CALLBACK] Invalid secret for omanut_tenant_id:", omanutTenantId);
+        return respond({ success: false, error: "Unauthorized" }, 401);
+      }
+    } else if (payloadTenantId) {
       // Multi-tenant path: look up by tenant_id
       const lookup = await lookupCompanyByTenantId(supabase, payloadTenantId);
       if (!lookup) {
