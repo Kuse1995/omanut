@@ -1013,6 +1013,53 @@ async function selectProductImageForPrompt(
 ): Promise<{ product: ProductImage | null; bmsImageUrls: string[] }> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 
+  // PRIORITY 1: Check for media directly linked to a BMS product via bms_product_id
+  // First, try to identify a BMS product from the prompt
+  let bmsImageUrls: string[] = [];
+  let bmsProductId: string | null = null;
+  
+  try {
+    const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list_products', params: { company_id: companyId, search: prompt } }),
+    });
+    if (bmsRes.ok) {
+      const bmsData = await bmsRes.json();
+      if (bmsData.success) {
+        const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
+        // Get the best matching BMS product ID
+        if (items.length > 0) {
+          bmsProductId = items[0].id || items[0].sku || null;
+        }
+        for (const item of items) {
+          if (item.image_url) bmsImageUrls.push(item.image_url);
+          if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
+        }
+        bmsImageUrls = [...new Set(bmsImageUrls)];
+      }
+    }
+  } catch (e) {
+    console.log('[PRODUCT-SELECT] BMS lookup skipped:', e);
+  }
+
+  // If we found a BMS product ID, check for directly linked media first
+  if (bmsProductId) {
+    const { data: linkedMedia } = await supabase
+      .from('company_media')
+      .select('id, file_path, file_name, description, tags')
+      .eq('company_id', companyId)
+      .eq('bms_product_id', bmsProductId)
+      .eq('media_type', 'image')
+      .limit(1);
+    
+    if (linkedMedia && linkedMedia.length > 0) {
+      console.log(`[PRODUCT-SELECT] EXACT BMS MATCH via bms_product_id "${bmsProductId}": ${linkedMedia[0].file_name}`);
+      return { product: linkedMedia[0] as ProductImage, bmsImageUrls };
+    }
+  }
+
+  // PRIORITY 2: Fall back to vision-based product matching
   const { data: productImages, error } = await supabase
     .from('company_media')
     .select('id, file_path, file_name, description, tags')
@@ -1020,42 +1067,18 @@ async function selectProductImageForPrompt(
     .eq('category', 'products')
     .eq('media_type', 'image')
     .order('created_at', { ascending: false });
-  
-  // Track BMS image URLs for later use as reference anchors
-  let bmsImageUrls: string[] = [];
 
   if (error || !productImages || productImages.length === 0) {
-    console.log('[PRODUCT-SELECT] No product images in company_media, checking BMS only');
-    // Still try BMS for image URLs even without company_media products
-    try {
-      const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list_products', params: { company_id: companyId, search: prompt } }),
-      });
-      if (bmsRes.ok) {
-        const bmsData = await bmsRes.json();
-        if (bmsData.success) {
-          const items = Array.isArray(bmsData.data) ? bmsData.data : [bmsData.data];
-          for (const item of items) {
-            if (item.image_url) bmsImageUrls.push(item.image_url);
-            if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
-          }
-          bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
-          if (bmsImageUrls.length > 0) {
-            console.log(`[PRODUCT-SELECT] Found ${bmsImageUrls.length} BMS product images (no company_media)`);
-          }
-        }
-      }
-    } catch (e) {
-      console.log('[PRODUCT-SELECT] BMS-only lookup skipped:', e);
+    console.log('[PRODUCT-SELECT] No product images in company_media');
+    if (bmsImageUrls.length > 0) {
+      console.log(`[PRODUCT-SELECT] Found ${bmsImageUrls.length} BMS product images (no company_media)`);
     }
     return { product: null, bmsImageUrls };
   }
   
   console.log(`[PRODUCT-SELECT] Found ${productImages.length} product images, using multimodal vision selection`);
 
-  // Cross-reference with BMS inventory via centralized bms-agent
+  // Cross-reference with BMS inventory for context (BMS lookup already done above)
   let bmsContext = '';
   try {
     const bmsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
@@ -1070,19 +1093,10 @@ async function selectProductImageForPrompt(
         bmsContext = items.map((item: any) =>
           `BMS Match: "${item.name || item.product_name}" (SKU: ${item.sku || 'N/A'}, Stock: ${item.current_stock ?? 'N/A'}${item.image_urls?.length ? `, Images: ${item.image_urls.length}` : ''})`
         ).join('\n');
-        // Extract BMS image URLs as authoritative product references
-        for (const item of items) {
-          if (item.image_url) bmsImageUrls.push(item.image_url);
-          if (item.image_urls?.length) bmsImageUrls.push(...item.image_urls);
-        }
-        bmsImageUrls = [...new Set(bmsImageUrls)]; // deduplicate
-        if (bmsImageUrls.length > 0) {
-          console.log(`[PRODUCT-SELECT] Extracted ${bmsImageUrls.length} BMS product image URLs`);
-        }
       }
     }
   } catch (e) {
-    console.log('[PRODUCT-SELECT] BMS lookup skipped:', e);
+    console.log('[PRODUCT-SELECT] BMS context lookup skipped:', e);
   }
 
   // Pre-filter to top 10 candidates

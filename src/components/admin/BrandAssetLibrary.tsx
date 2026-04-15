@@ -106,7 +106,7 @@ export const BrandAssetLibrary = ({ companyId, assets, onAssetsChange }: BrandAs
     const tagsArray = editTags.split(',').map(t => t.trim()).filter(Boolean);
     const { error } = await supabase
       .from('company_media')
-      .update({ description: editDescription, tags: tagsArray, bms_product_id: editBmsProductId || null } as any)
+      .update({ description: editDescription, tags: tagsArray, bms_product_id: (editBmsProductId && editBmsProductId !== 'none') ? editBmsProductId : null } as any)
       .eq('id', editingAsset.id);
     setSaving(false);
     if (error) { toast.error('Save failed: ' + error.message); return; }
