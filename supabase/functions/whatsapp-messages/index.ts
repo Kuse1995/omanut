@@ -3806,27 +3806,84 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[SEARCH-MEDIA] Query:', args.query);
             try {
-              const expandedQuery = normalizeSearchQuery(args.query, company);
-              const queryVec = await embedQuery(expandedQuery);
-              const vectorStr = `[${queryVec.join(',')}]`;
-              const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
-                query_embedding: vectorStr,
-                match_company_id: company.id,
-                match_threshold: 0.25,
-                match_count: args.count || 5,
-              });
-
               let results: any[] = [];
-              if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                results = mediaResults.map((m: any) => ({
-                  description: m.description,
-                  category: m.category,
-                  media_type: m.media_type,
-                  tags: m.tags,
-                  url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                  similarity: m.similarity,
-                }));
+
+              // 1. Try semantic vector search first
+              try {
+                const expandedQuery = normalizeSearchQuery(args.query, company);
+                const queryVec = await embedQuery(expandedQuery);
+                const vectorStr = `[${queryVec.join(',')}]`;
+                const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+                  query_embedding: vectorStr,
+                  match_company_id: company.id,
+                  match_threshold: 0.25,
+                  match_count: args.count || 5,
+                });
+
+                if (!mediaErr && mediaResults && mediaResults.length > 0) {
+                  results = mediaResults.map((m: any) => ({
+                    description: m.description,
+                    category: m.category,
+                    media_type: m.media_type,
+                    tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: m.similarity,
+                  }));
+                }
+              } catch (vecErr) {
+                console.error('[SEARCH-MEDIA] Vector search failed, falling back to text:', vecErr);
               }
+
+              // 2. Fallback: text-based search if vector returned nothing
+              if (results.length === 0) {
+                console.log('[SEARCH-MEDIA] Vector search returned 0, trying text fallback');
+                const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+                const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
+                
+                const { data: textResults } = await supabase
+                  .from('company_media')
+                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .eq('company_id', company.id)
+                  .or(ilikeClauses)
+                  .limit(args.count || 5);
+
+                if (textResults && textResults.length > 0) {
+                  results = textResults.map((m: any) => ({
+                    description: m.description,
+                    category: m.category,
+                    media_type: m.media_type,
+                    tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: 0.5,
+                  }));
+                  console.log(`[SEARCH-MEDIA] Text fallback found ${results.length} results`);
+                }
+              }
+
+              // 3. Last resort: return ANY media from this company's library
+              if (results.length === 0) {
+                console.log('[SEARCH-MEDIA] No text matches, returning latest media from library');
+                const { data: anyMedia } = await supabase
+                  .from('company_media')
+                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .eq('company_id', company.id)
+                  .eq('media_type', 'image')
+                  .order('created_at', { ascending: false })
+                  .limit(args.count || 5);
+
+                if (anyMedia && anyMedia.length > 0) {
+                  results = anyMedia.map((m: any) => ({
+                    description: m.description || m.file_name,
+                    category: m.category,
+                    media_type: m.media_type,
+                    tags: m.tags,
+                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
+                    similarity: 0.3,
+                  }));
+                  console.log(`[SEARCH-MEDIA] Returned ${results.length} latest media as fallback`);
+                }
+              }
+
               anyToolExecuted = true;
               toolExecutionContext.push(`search_media found ${results.length} results for "${args.query}"`);
               toolResults.push({
