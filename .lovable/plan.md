@@ -1,34 +1,18 @@
 
 
-## Remove Redundant Tenant ID Entry — Auto-Handshake Between BMS and Omanut
+## Fix BMS Training Sync Authorization
 
 ### Problem
-Both sides are asking admins to manually copy-paste IDs that each system already knows:
-- **Omanut side**: Asks for the BMS "Tenant ID" (manual entry)
-- **BMS side**: Asks for the "Omanut Tenant ID" (manual entry)
-
-This is redundant. The Omanut `company_id` IS the `omanut_tenant_id` the BMS needs, and the BMS already knows its own `tenant_id`.
-
-### Solution: Auto-Handshake on "Connect"
-
-When the admin clicks "Connect to BMS" on the Omanut side:
-1. Auto-generate the API secret (already done)
-2. Send a **registration handshake** to the BMS bridge that includes `omanut_tenant_id: companyId` and the shared secret
-3. The BMS responds with its own `tenant_id`
-4. Both sides are now linked — no manual ID entry needed
+The `bms-training-sync` edge function sends the API secret as `x-api-secret` header only, but the BMS bridge requires `Authorization: Bearer <api_secret>`. The `bms-agent` function already sends both headers correctly — `bms-training-sync` just needs the same fix.
 
 ### Changes
 
 | File | Change |
 |------|--------|
-| `src/components/admin/CompanySettingsPanel.tsx` | Remove the manual "Tenant ID" input field. On save (for new connections), call a handshake endpoint on the BMS bridge that sends `{ intent: "register_omanut_link", omanut_tenant_id: companyId, api_secret: secret }`. If the BMS returns a `tenant_id`, store it automatically. For existing connections, keep showing the tenant ID as read-only info. |
-| `supabase/functions/bms-agent/index.ts` | Add a `register_omanut_link` intent that sends the company's ID and secret to the BMS bridge, expecting `tenant_id` back in the response. |
+| `supabase/functions/bms-training-sync/index.ts` | Add `"Authorization": \`Bearer ${connection.api_secret}\`` to the headers in the `callBMS` function (line 33), matching the pattern used in `bms-agent/index.ts` |
 
-### Fallback
-If the BMS bridge doesn't support the handshake yet (returns error/404), fall back to the current behavior: show the Tenant ID field for manual entry, with a note saying "Ask your BMS admin for this ID." This way it works today and improves as the BMS side adds the handshake endpoint.
+One line added. Deploy the function afterward.
 
 ### Result
-- Admin clicks "Connect to BMS" → secret auto-generated, IDs exchanged automatically
-- No copy-pasting tenant IDs between dashboards
-- Backward compatible with BMS instances that haven't added the handshake endpoint yet
+"Sync from BMS" will authenticate correctly against the BMS bridge, pulling products, stock alerts, and sales data successfully.
 
