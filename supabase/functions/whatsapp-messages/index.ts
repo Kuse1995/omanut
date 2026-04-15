@@ -2945,11 +2945,13 @@ Trust ONLY the information provided in this system prompt.
                     const mediaUrl = signedMediaUrls[i];
                     console.log(`[BACKGROUND] Sending media ${i+1}/${signedMediaUrls.length}: ${mediaUrl}`);
                     
+                    const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
                     const formData = new URLSearchParams();
                     formData.append('From', fromNumber);
                     formData.append('To', `whatsapp:${customerPhone}`);
                     formData.append('Body', i === 0 && args.caption ? args.caption : '');
                     formData.append('MediaUrl', mediaUrl);
+                    formData.append('StatusCallback', statusCallbackUrl);
 
                     const twilioResponse = await fetch(twilioUrl, {
                       method: 'POST',
@@ -2962,7 +2964,20 @@ Trust ONLY the information provided in this system prompt.
 
                     if (twilioResponse.ok) {
                       successCount++;
-                      console.log(`[BACKGROUND] Media ${i+1} sent successfully`);
+                      const twilioData = await twilioResponse.json();
+                      console.log(`[BACKGROUND] Media ${i+1} sent successfully, SID: ${twilioData.sid}`);
+                      // Track delivery status
+                      try {
+                        await supabase.from('media_delivery_status').insert({
+                          company_id: company.id,
+                          conversation_id: conversationId,
+                          customer_phone: customerPhone,
+                          media_url: args.media_urls[i] || mediaUrl,
+                          twilio_message_sid: twilioData.sid,
+                          status: 'queued',
+                          max_retries: 3,
+                        });
+                      } catch (_trackErr) { /* silent */ }
                     } else {
                       const errorText = await twilioResponse.text();
                       console.error(`[BACKGROUND] Failed to send media ${i+1}:`, twilioResponse.status, errorText);
