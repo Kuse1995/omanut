@@ -8,8 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2 } from "lucide-react";
+import { Loader2, Upload, Trash2, Image as ImageIcon, Video, Link2, Pencil, Sparkles, Save } from "lucide-react";
 
 interface BmsProduct {
   id?: string;
@@ -74,6 +75,16 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const [bmsProducts, setBmsProducts] = useState<BmsProduct[]>([]);
   const [selectedBmsProductId, setSelectedBmsProductId] = useState('');
 
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingMedia, setEditingMedia] = useState<Media | null>(null);
+  const [editDescription, setEditDescription] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editCategory, setEditCategory] = useState<MediaCategory>('other');
+  const [editBmsProductId, setEditBmsProductId] = useState('');
+  const [editAnalyzing, setEditAnalyzing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+
   useEffect(() => {
     const fetchBmsProducts = async () => {
       try {
@@ -104,17 +115,15 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
 
       if (error) throw error;
       
-      // Generate signed URLs for all media
       const mediaWithUrls = await Promise.all(
         (data || []).map(async (item) => {
           try {
             const { data: signedData } = await supabase.storage
               .from('company-media')
-              .createSignedUrl(item.file_path, 3600); // 1 hour expiry
+              .createSignedUrl(item.file_path, 3600);
             
             let signedThumbUrl = undefined;
             if (item.thumbnail_url && item.media_type === 'video') {
-              // Extract path from thumbnail URL if it's a full URL
               const thumbPath = item.thumbnail_url.includes('company-media/') 
                 ? item.thumbnail_url.split('company-media/')[1] 
                 : item.file_path.replace(/\.[^/.]+$/, '_thumb.jpg');
@@ -157,7 +166,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       video.muted = true;
       
       video.onloadedmetadata = () => {
-        video.currentTime = 1; // Capture frame at 1 second
+        video.currentTime = 1;
       };
       
       video.onseeked = () => {
@@ -206,7 +215,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       }
 
       video.onloadedmetadata = () => {
-        // Reduce resolution if video is large
         const maxDimension = 1280;
         const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
         
@@ -214,12 +222,11 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         canvas.height = video.videoHeight * scale;
         
         const chunks: BlobPart[] = [];
-        const stream = canvas.captureStream(30); // 30 fps
+        const stream = canvas.captureStream(30);
         
-        // Use lower bitrate for compression
         const mediaRecorder = new MediaRecorder(stream, {
           mimeType: 'video/webm;codecs=vp9',
-          videoBitsPerSecond: 1000000 // 1 Mbps
+          videoBitsPerSecond: 1000000
         });
         
         mediaRecorder.ondataavailable = (e) => {
@@ -252,7 +259,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           }
           
           video.currentTime = currentTime;
-          currentTime += 1/30; // Advance by frame duration
+          currentTime += 1/30;
           
           const progress = Math.min(95, (currentTime / duration) * 100);
           setCompressionProgress(Math.round(progress));
@@ -272,7 +279,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           reject(new Error('Video loading error'));
         };
         
-        // Start the process
         video.currentTime = 0;
       };
       
@@ -284,7 +290,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
   const analyzeMediaWithAI = async (file: File) => {
     setAnalyzing(true);
     try {
-      // Convert file to base64 data URL
       const reader = new FileReader();
       const imageDataUrl = await new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
@@ -292,20 +297,17 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         reader.readAsDataURL(file);
       });
 
-      // Get company data for context
       const { data: company } = await supabase
         .from('companies')
         .select('business_type')
         .eq('id', companyId)
         .single();
 
-      // Build BMS product list for AI matching
       const bmsProductList = bmsProducts.map(p => ({
         id: p.id || p.sku || p.product_name || p.name,
         name: p.product_name || p.name || p.sku || 'Unknown'
       }));
 
-      // Call AI analysis edge function
       const { data, error } = await supabase.functions.invoke('analyze-media', {
         body: {
           imageDataUrl,
@@ -324,11 +326,10 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         setTags(Array.isArray(data.tags) ? data.tags.join(', ') : data.tags);
         setAiSuggested(true);
 
-        // Auto-link if AI matched a BMS product
         if (data.bms_product_id) {
           setSelectedBmsProductId(data.bms_product_id);
           toast({
-            title: "AI Matched BMS Product",
+            title: "✨ AI Matched BMS Product",
             description: `Linked to "${data.matched_product_name || data.bms_product_id}"`,
           });
         } else {
@@ -360,7 +361,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const maxSize = 150 * 1024 * 1024; // 150MB
+    const maxSize = 150 * 1024 * 1024;
     if (file.size > maxSize) {
       toast({
         title: "File too large",
@@ -384,7 +385,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       return;
     }
 
-    // Check if video needs compression (over 50MB)
     if (isVideo && file.size > 50 * 1024 * 1024) {
       try {
         setCompressing(true);
@@ -418,10 +418,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         setCompressionProgress(0);
       }
     } else {
-      // Store the file for later upload
       setSelectedFile(file);
-
-      // Analyze with AI for images
       if (isImage) {
         await analyzeMediaWithAI(file);
       }
@@ -446,29 +443,20 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     setUploadProgress(0);
 
     try {
-      console.log('Starting upload for company:', companyId);
-      
-      // Simulate progress for better UX
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => {
-          if (prev >= 90) return prev; // Stop at 90% until actual upload completes
+          if (prev >= 90) return prev;
           return prev + 10;
         });
       }, 300);
       
-      // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
-        console.error('User error:', userError);
         throw new Error('You must be logged in to upload media');
       }
-      
-      console.log('User authenticated:', user.id);
 
       const fileExt = file.name.split('.').pop();
       const fileName = `${companyId}/${selectedCategory}/${Date.now()}.${fileExt}`;
-      
-      console.log('Uploading file:', fileName);
 
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('company-media')
@@ -477,19 +465,12 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
       clearInterval(progressInterval);
       setUploadProgress(100);
 
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        throw uploadError;
-      }
-      
-      console.log('File uploaded successfully:', uploadData);
+      if (uploadError) throw uploadError;
 
       let thumbnailUrl = null;
       
-      // Generate and upload thumbnail for videos
       if (isVideo) {
         try {
-          console.log('Generating video thumbnail...');
           const thumbnailBlob = await generateVideoThumbnail(file);
           const thumbnailFileName = `${companyId}/${selectedCategory}/${Date.now()}_thumb.jpg`;
           
@@ -497,22 +478,17 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
             .from('company-media')
             .upload(thumbnailFileName, thumbnailBlob);
 
-          if (thumbUploadError) {
-            console.error('Thumbnail upload error:', thumbUploadError);
-          } else {
+          if (!thumbUploadError) {
             const { data: thumbData } = supabase.storage
               .from('company-media')
               .getPublicUrl(thumbnailFileName);
             thumbnailUrl = thumbData.publicUrl;
-            console.log('Thumbnail uploaded successfully');
           }
         } catch (thumbError) {
           console.error('Failed to generate thumbnail:', thumbError);
-          // Continue without thumbnail
         }
       }
 
-      console.log('Inserting into database...');
       const { error: dbError } = await supabase
         .from('company_media')
         .insert({
@@ -530,12 +506,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
           bms_product_id: (selectedBmsProductId && selectedBmsProductId !== 'none') ? selectedBmsProductId : null
         });
 
-      if (dbError) {
-        console.error('Database error:', dbError);
-        throw dbError;
-      }
-      
-      console.log('Media record created successfully');
+      if (dbError) throw dbError;
 
       toast({
         title: "Success",
@@ -581,6 +552,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         description: "Media deleted successfully",
       });
 
+      setEditDialogOpen(false);
+      setEditingMedia(null);
       loadMedia();
     } catch (error: any) {
       toast({
@@ -591,6 +564,118 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     }
   };
 
+  const openEditDialog = (item: Media) => {
+    setEditingMedia(item);
+    setEditDescription(item.description || '');
+    setEditTags(item.tags ? item.tags.join(', ') : '');
+    setEditCategory((item.category || 'other') as MediaCategory);
+    setEditBmsProductId(item.bms_product_id || '');
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editingMedia) return;
+    setEditSaving(true);
+    try {
+      const { error } = await supabase
+        .from('company_media')
+        .update({
+          description: editDescription || null,
+          tags: editTags ? editTags.split(',').map(t => t.trim()) : [],
+          category: editCategory,
+          bms_product_id: (editBmsProductId && editBmsProductId !== 'none') ? editBmsProductId : null,
+        })
+        .eq('id', editingMedia.id);
+
+      if (error) throw error;
+
+      // Try to re-index for AI search
+      try {
+        await supabase.functions.invoke('index-brand-asset', {
+          body: { media_id: editingMedia.id, company_id: companyId }
+        });
+      } catch (e) {
+        console.log('Re-index skipped:', e);
+      }
+
+      toast({ title: "Saved", description: "Media details updated" });
+      setEditDialogOpen(false);
+      setEditingMedia(null);
+      loadMedia();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleEditReanalyze = async () => {
+    if (!editingMedia?.signed_url) {
+      toast({ title: "Error", description: "No image URL available for analysis", variant: "destructive" });
+      return;
+    }
+    setEditAnalyzing(true);
+    try {
+      // Fetch the image and convert to data URL
+      const response = await fetch(editingMedia.signed_url);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      const imageDataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const { data: company } = await supabase
+        .from('companies')
+        .select('business_type')
+        .eq('id', companyId)
+        .single();
+
+      const bmsProductList = bmsProducts.map(p => ({
+        id: p.id || p.sku || p.product_name || p.name,
+        name: p.product_name || p.name || p.sku || 'Unknown'
+      }));
+
+      const { data, error } = await supabase.functions.invoke('analyze-media', {
+        body: {
+          imageDataUrl,
+          fileName: editingMedia.file_name,
+          fileType: editingMedia.file_type,
+          businessType: company?.business_type || 'business',
+          bmsProducts: bmsProductList.length > 0 ? bmsProductList : undefined
+        }
+      });
+
+      if (error) throw error;
+
+      if (data && !data.error) {
+        setEditCategory(data.category as MediaCategory);
+        setEditDescription(data.description || '');
+        setEditTags(Array.isArray(data.tags) ? data.tags.join(', ') : (data.tags || ''));
+
+        if (data.bms_product_id) {
+          setEditBmsProductId(data.bms_product_id);
+          toast({
+            title: "✨ AI Matched BMS Product",
+            description: `Matched to "${data.matched_product_name || data.bms_product_id}"`,
+          });
+        } else {
+          toast({
+            title: "AI Analysis Complete",
+            description: data.suggested_product_name
+              ? `Suggested product: "${data.suggested_product_name}"`
+              : "Tags and description updated — review before saving",
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error('Re-analyze error:', error);
+      toast({ title: "AI Analysis Failed", description: error.message, variant: "destructive" });
+    } finally {
+      setEditAnalyzing(false);
+    }
+  };
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
@@ -598,273 +683,393 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  const renderBmsDropdown = (value: string, onChange: (v: string) => void, disabled?: boolean) => (
+    <div className="space-y-2">
+      <Label className="flex items-center gap-2">
+        <Link2 className="h-3.5 w-3.5" />
+        Link to BMS Product
+      </Label>
+      {bmsProducts.length === 0 ? (
+        <p className="text-sm text-muted-foreground p-2 border border-dashed rounded-md">
+          No BMS connection found. Connect to a BMS to link products to media.
+        </p>
+      ) : (
+        <Select value={value} onValueChange={onChange} disabled={disabled}>
+          <SelectTrigger>
+            <SelectValue placeholder="Select a BMS product..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">— No link —</SelectItem>
+            {bmsProducts.map((p, i) => {
+              const productId = p.id || p.sku || String(i);
+              const productName = p.name || p.product_name || 'Unknown';
+              return (
+                <SelectItem key={productId} value={productId}>
+                  {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Media Library</CardTitle>
-        <CardDescription>
-          Upload images and videos that the AI can send to customers
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-4">
-          {compressing && (
-            <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
-              <div className="flex items-center gap-2">
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Media Library</CardTitle>
+          <CardDescription>
+            Upload images and videos that the AI can send to customers. Click any media card to edit details or link to BMS.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            {compressing && (
+              <div className="space-y-2 p-4 bg-primary/10 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-sm font-medium">Compressing video...</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Progress value={compressionProgress} className="h-2 flex-1" />
+                  <span className="text-sm font-medium min-w-[3ch] text-right">{compressionProgress}%</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  This may take a minute. Optimizing for faster upload and storage efficiency.
+                </p>
+              </div>
+            )}
+            
+            {analyzing && (
+              <div className="flex items-center gap-2 p-4 bg-primary/10 rounded-lg">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium">Compressing video...</span>
+                <span className="text-sm">AI is analyzing your media...</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Progress value={compressionProgress} className="h-2 flex-1" />
-                <span className="text-sm font-medium min-w-[3ch] text-right">{compressionProgress}%</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                This may take a minute. Optimizing for faster upload and storage efficiency.
-              </p>
-            </div>
-          )}
-          
-          {analyzing && (
-            <div className="flex items-center gap-2 p-4 bg-primary/10 rounded-lg">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">AI is analyzing your media...</span>
-            </div>
-          )}
-          
-          {aiSuggested && (
-            <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-              <span className="text-sm text-green-700 dark:text-green-300">
-                ✨ AI suggestions applied - review and edit as needed
-              </span>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label htmlFor="file-select">
-              1. Select Image or Video
-              <span className="ml-2 text-xs text-muted-foreground">(AI will analyze it)</span>
-            </Label>
-            <Input
-              id="file-select"
-              type="file"
-              accept="image/*,video/*"
-              onChange={handleFileSelect}
-              disabled={analyzing || uploading || compressing}
-            />
-            <p className="text-sm text-muted-foreground">
-              Maximum file size: 150MB • Videos over 50MB will be compressed automatically
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="category">
-              2. Media Category
-              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
-            </Label>
-            <select
-              id="category"
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value as MediaCategory)}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={analyzing}
-            >
-              {MEDIA_CATEGORIES.map(cat => (
-                <option key={cat.value} value={cat.value}>
-                  {cat.label} - {cat.description}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="description">
-              3. Description (optional)
-              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
-            </Label>
-            <Textarea
-              id="description"
-              placeholder="Describe what this media shows..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={analyzing}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="tags">
-              4. Tags (comma-separated, optional)
-              {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
-            </Label>
-            <Input
-              id="tags"
-              placeholder="menu, food, interior, pool..."
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              disabled={analyzing}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Link2 className="h-3.5 w-3.5" />
-              5. Link to BMS Product (optional)
-              {selectedBmsProductId && selectedBmsProductId !== 'none' && aiSuggested && (
-                <span className="text-xs text-primary">✨ AI matched</span>
-              )}
-            </Label>
-            {bmsProducts.length === 0 ? (
-              <p className="text-sm text-muted-foreground p-2 border border-dashed rounded-md">
-                No BMS connection found. Connect to a BMS to link products to media.
-              </p>
-            ) : (
-              <Select value={selectedBmsProductId} onValueChange={setSelectedBmsProductId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a BMS product..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— No link —</SelectItem>
-                  {bmsProducts.map((p, i) => {
-                    const productId = p.id || p.sku || String(i);
-                    const productName = p.name || p.product_name || 'Unknown';
-                    return (
-                      <SelectItem key={productId} value={productId}>
-                        {productName}{p.sku ? ` (${p.sku})` : ''}{p.price || p.selling_price ? ` — ${p.price || p.selling_price}` : ''}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
             )}
-          </div>
+            
+            {aiSuggested && (
+              <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                <span className="text-sm text-green-700 dark:text-green-300">
+                  ✨ AI suggestions applied - review and edit as needed
+                </span>
+              </div>
+            )}
 
-          {uploading && uploadProgress > 0 && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Uploading...</span>
-                <span className="font-medium">{uploadProgress}%</span>
-              </div>
-              <Progress value={uploadProgress} className="h-2" />
+              <Label htmlFor="file-select">
+                1. Select Image or Video
+                <span className="ml-2 text-xs text-muted-foreground">(AI will analyze it)</span>
+              </Label>
+              <Input
+                id="file-select"
+                type="file"
+                accept="image/*,video/*"
+                onChange={handleFileSelect}
+                disabled={analyzing || uploading || compressing}
+              />
+              <p className="text-sm text-muted-foreground">
+                Maximum file size: 150MB • Videos over 50MB will be compressed automatically
+              </p>
             </div>
-          )}
-          
-          <Button
-            onClick={handleFileUpload}
-            disabled={analyzing || uploading || compressing || !selectedFile}
-            className="w-full"
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>
-                <Upload className="mr-2 h-4 w-4" />
-                6. Upload Media
-              </>
-            )}
-          </Button>
-          
-          {!analyzing && !aiSuggested && (
-            <p className="text-xs text-muted-foreground text-center">
-              Select a file to get AI-powered suggestions
-            </p>
-          )}
-        </div>
 
-        <div className="space-y-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
+            {renderBmsDropdown(selectedBmsProductId, setSelectedBmsProductId, analyzing)}
+            {selectedBmsProductId && selectedBmsProductId !== 'none' && aiSuggested && (
+              <p className="text-xs text-primary">✨ AI matched this product</p>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="category">
+                3. Media Category
+                {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+              </Label>
+              <select
+                id="category"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value as MediaCategory)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={analyzing}
+              >
+                {MEDIA_CATEGORIES.map(cat => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label} - {cat.description}
+                  </option>
+                ))}
+              </select>
             </div>
-          ) : media.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Upload className="h-12 w-12 mx-auto mb-2 opacity-50" />
-              <p>No media uploaded yet</p>
+            
+            <div className="space-y-2">
+              <Label htmlFor="description">
+                4. Description (optional)
+                {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+              </Label>
+              <Textarea
+                id="description"
+                placeholder="Describe what this media shows..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={analyzing}
+              />
             </div>
-          ) : (
-            <div className="space-y-6">
-              {MEDIA_CATEGORIES.map(category => {
-                const categoryMedia = media.filter(m => m.category === category.value);
-                if (categoryMedia.length === 0) return null;
-                
-                return (
-                  <div key={category.value} className="space-y-3">
-                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                      <span>{category.label}</span>
-                      <span className="text-sm text-muted-foreground font-normal">
-                        ({categoryMedia.length} {categoryMedia.length === 1 ? 'file' : 'files'})
-                      </span>
-                    </h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {categoryMedia.map((item) => (
-                <div key={item.id} className="relative group border rounded-lg overflow-hidden">
-                  {item.media_type === 'image' ? (
-                    <img
-                      src={item.signed_url || ''}
-                      alt={item.file_name}
-                      className="w-full h-40 object-cover"
-                    />
-                  ) : item.signed_thumb_url ? (
-                    <div className="relative w-full h-40">
-                      <img
-                        src={item.signed_thumb_url}
-                        alt={item.file_name}
-                        className="w-full h-40 object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                        <Video className="h-8 w-8 text-white" />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-40 bg-muted flex items-center justify-center">
-                      <Video className="h-12 w-12 text-muted-foreground" />
-                    </div>
-                  )}
-                   <div className="p-2 space-y-1">
-                    <div className="flex items-center gap-1">
-                      <p className="text-sm font-medium truncate flex-1">{item.file_name}</p>
-                      {item.bms_product_id && (
-                        <Badge variant="outline" className="text-[10px] gap-0.5 shrink-0">
-                          <Link2 className="h-2.5 w-2.5" />BMS
-                        </Badge>
-                      )}
-                    </div>
-                    {item.description && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {item.description}
-                      </p>
-                    )}
-                    {item.tags && item.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {item.tags.map((tag, idx) => (
-                          <span key={idx} className="text-xs bg-secondary px-2 py-0.5 rounded">
-                            {tag}
-                          </span>
+            <div className="space-y-2">
+              <Label htmlFor="tags">
+                5. Tags (comma-separated, optional)
+                {aiSuggested && <span className="ml-2 text-xs text-primary">✨ AI suggested</span>}
+              </Label>
+              <Input
+                id="tags"
+                placeholder="menu, food, interior, pool..."
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                disabled={analyzing}
+              />
+            </div>
+
+            {uploading && uploadProgress > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Uploading...</span>
+                  <span className="font-medium">{uploadProgress}%</span>
+                </div>
+                <Progress value={uploadProgress} className="h-2" />
+              </div>
+            )}
+            
+            <Button
+              onClick={handleFileUpload}
+              disabled={analyzing || uploading || compressing || !selectedFile}
+              className="w-full"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  6. Upload Media
+                </>
+              )}
+            </Button>
+            
+            {!analyzing && !aiSuggested && (
+              <p className="text-xs text-muted-foreground text-center">
+                Select a file to get AI-powered suggestions
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin" />
+              </div>
+            ) : media.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Upload className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No media uploaded yet</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {MEDIA_CATEGORIES.map(category => {
+                  const categoryMedia = media.filter(m => m.category === category.value);
+                  if (categoryMedia.length === 0) return null;
+                  
+                  return (
+                    <div key={category.value} className="space-y-3">
+                      <h3 className="text-lg font-semibold flex items-center gap-2">
+                        <span>{category.label}</span>
+                        <span className="text-sm text-muted-foreground font-normal">
+                          ({categoryMedia.length} {categoryMedia.length === 1 ? 'file' : 'files'})
+                        </span>
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {categoryMedia.map((item) => (
+                          <div
+                            key={item.id}
+                            className="relative group border rounded-lg overflow-hidden cursor-pointer transition-shadow hover:shadow-md"
+                            onClick={() => openEditDialog(item)}
+                          >
+                            {/* Hover overlay with pencil icon */}
+                            <div className="absolute inset-0 z-10 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center pointer-events-none">
+                              <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-background/90 rounded-full p-2 shadow-lg">
+                                <Pencil className="h-4 w-4 text-foreground" />
+                              </div>
+                            </div>
+
+                            {item.media_type === 'image' ? (
+                              <img
+                                src={item.signed_url || ''}
+                                alt={item.file_name}
+                                className="w-full h-40 object-cover"
+                              />
+                            ) : item.signed_thumb_url ? (
+                              <div className="relative w-full h-40">
+                                <img
+                                  src={item.signed_thumb_url}
+                                  alt={item.file_name}
+                                  className="w-full h-40 object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                                  <Video className="h-8 w-8 text-white" />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-full h-40 bg-muted flex items-center justify-center">
+                                <Video className="h-12 w-12 text-muted-foreground" />
+                              </div>
+                            )}
+                            <div className="p-2 space-y-1">
+                              <div className="flex items-center gap-1">
+                                <p className="text-sm font-medium truncate flex-1">{item.file_name}</p>
+                                {item.bms_product_id && (
+                                  <Badge variant="outline" className="text-[10px] gap-0.5 shrink-0">
+                                    <Link2 className="h-2.5 w-2.5" />BMS
+                                  </Badge>
+                                )}
+                              </div>
+                              {item.description && (
+                                <p className="text-xs text-muted-foreground line-clamp-2">
+                                  {item.description}
+                                </p>
+                              )}
+                              {item.tags && item.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {item.tags.map((tag, idx) => (
+                                    <span key={idx} className="text-xs bg-secondary px-2 py-0.5 rounded">
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                {formatFileSize(item.file_size)}
+                              </p>
+                            </div>
+                          </div>
                         ))}
                       </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      {formatFileSize(item.file_size)}
-                    </p>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => handleDelete(item)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-                      ))}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit Media Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4" />
+              Edit Media Details
+            </DialogTitle>
+          </DialogHeader>
+
+          {editingMedia && (
+            <div className="space-y-4">
+              {/* Image preview */}
+              {editingMedia.media_type === 'image' && editingMedia.signed_url && (
+                <img
+                  src={editingMedia.signed_url}
+                  alt={editingMedia.file_name}
+                  className="w-full max-h-48 object-contain rounded-md bg-muted"
+                />
+              )}
+              <p className="text-sm text-muted-foreground">{editingMedia.file_name} • {formatFileSize(editingMedia.file_size)}</p>
+
+              {/* BMS Product dropdown */}
+              {renderBmsDropdown(editBmsProductId, setEditBmsProductId, editAnalyzing)}
+
+              {/* Category */}
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <select
+                  value={editCategory}
+                  onChange={(e) => setEditCategory(e.target.value as MediaCategory)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  disabled={editAnalyzing}
+                >
+                  {MEDIA_CATEGORIES.map(cat => (
+                    <option key={cat.value} value={cat.value}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Describe this media..."
+                  disabled={editAnalyzing}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="space-y-2">
+                <Label>Tags (comma-separated)</Label>
+                <Input
+                  value={editTags}
+                  onChange={(e) => setEditTags(e.target.value)}
+                  placeholder="tag1, tag2, tag3..."
+                  disabled={editAnalyzing}
+                />
+              </div>
+
+              {/* AI Re-analyze button */}
+              {editingMedia.media_type === 'image' && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleEditReanalyze}
+                  disabled={editAnalyzing}
+                >
+                  {editAnalyzing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Re-analyze with AI
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           )}
-        </div>
-      </CardContent>
-    </Card>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => editingMedia && handleDelete(editingMedia)}
+              className="sm:mr-auto"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={editSaving}>
+              {editSaving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
