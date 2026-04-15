@@ -1,28 +1,44 @@
 
+Goal: make AI image sending reliable again in WhatsApp.
 
-## Fix: Bulk Auto-Link Returns 0 Because AI Responses Are Truncated
+What I found
+- `supabase/functions/whatsapp-messages/index.ts` has two separate `send_media` paths. The first/background path has invalid-URL recovery, but the later multi-round tool-loop path does not. So later-round AI sends can still fail even after the earlier fix.
+- Both paths build the Twilio `To` number as `whatsapp:${customerPhone}` instead of using a shared normalizer. Project memory already warns that inconsistent WhatsApp prefixing can trigger Twilio 400 errors.
+- Media signing is still brittle: current logic mostly depends on URLs containing `/company-media/`. If the tool passes a different storage representation, the function can end up with 0 signed URLs and no real media delivery.
 
-### Root Cause
-The `analyze-media` edge function sets `max_tokens: 500`, which is too small when BMS product lists are included in the prompt. The AI's JSON response gets cut off mid-way, the regex parser finds an incomplete `{` without a closing `}`, throws "No JSON found in response", and falls back to a generic response with no `bms_product_id`. Every single call is failing — visible in the logs as repeated parse errors.
+Implementation
+1. Create shared media-send helpers inside `supabase/functions/whatsapp-messages/index.ts`
+   - `normalizeWhatsAppTo/From`
+   - `resolveMediaRefs` to accept public URLs, signed URLs, and storage file paths
+   - `recoverMediaFromLibrary` using the existing vector -> text -> recent fallback
+   - `dispatchMediaToWhatsApp` to sign URLs, send sequentially, attach `StatusCallback`, and return structured success/failure
 
-### Fix (1 file: `supabase/functions/analyze-media/index.ts`)
+2. Replace both `send_media` branches to use the same helper
+   - the initial/background tool-call branch
+   - the multi-round tool-loop branch  
+   This removes the current mismatch so auto-recovery, signing, normalization, and error handling all work the same way.
 
-1. **Increase `max_tokens` from 500 to 1024** — enough for the full JSON response including BMS matching fields.
+3. Harden the tool contract
+   - Keep the “never invent URLs” instruction
+   - Make `search_media` return canonical `file_path` alongside `url`
+   - Let `send_media` accept canonical storage refs and prefer them over guessed URLs  
+   This reduces dependence on fragile URL parsing.
 
-2. **Fix JSON parsing to handle markdown fences and truncation**:
-   - Strip `` ```json ``` `` wrappers before regex matching
-   - If the closing `}` is missing (truncated), attempt to repair by closing open strings/arrays/objects
-   - As a last-resort partial parse: extract individual fields with targeted regexes (`"bms_product_id"\s*:\s*"([^"]+)"`)
+4. Make failure handling truthful
+   - Only store/send “[Sent …]” assistant markers when at least one Twilio media request succeeds
+   - Return explicit failure results when zero files were signed or zero sends succeeded
+   - Keep `media_delivery_status` inserts only for real queued sends, with better Twilio error-body logging for rejected requests
 
-3. **Add `bms_product_id` extraction to the fallback path** — even if full JSON parsing fails, try to extract any `bms_product_id` the AI mentioned before truncation, so partial matches aren't lost.
+5. Parity hardening
+   - Reuse the same phone normalization approach in `supabase/functions/send-whatsapp-message/index.ts` so manual sends and AI sends behave consistently
 
-4. **Add `response_format: { type: "json_object" }` to the Gemini call** if supported by the gateway, to eliminate markdown wrapping entirely.
+Validation after approval
+- Trigger a real WhatsApp request like “send me the product pics”
+- Confirm the customer receives an actual image attachment, not only text
+- Confirm `media_delivery_status` moves through `queued`/`delivered`
+- If Twilio still rejects, inspect the improved error logs to identify the exact rejection reason
 
-### Expected Result
-After deployment, running "Auto-Link All to BMS" will successfully parse AI responses and match images to BMS products. The 31 currently unlinked ANZ media items should get linked where matches exist.
-
-### Technical Detail
-- Single file change: `supabase/functions/analyze-media/index.ts`
-- No database migration needed
-- Deploy via edge function deployment
-
+Technical details
+- Main file: `supabase/functions/whatsapp-messages/index.ts`
+- Secondary parity file: `supabase/functions/send-whatsapp-message/index.ts`
+- No database migration required
