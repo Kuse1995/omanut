@@ -22,6 +22,231 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ── Shared WhatsApp number normalization ──
+function normalizeWhatsAppTo(phone: string): string {
+  const clean = phone.replace(/^whatsapp:/, '');
+  return clean.startsWith('+') ? `whatsapp:${clean}` : `whatsapp:+${clean}`;
+}
+function normalizeWhatsAppFrom(phone: string): string {
+  return phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`;
+}
+
+// ── Shared media URL signing ──
+async function signMediaUrls(rawUrls: string[], supabase: any): Promise<string[]> {
+  const signed: string[] = [];
+  for (const mediaUrl of rawUrls) {
+    if (mediaUrl.includes('/company-media/')) {
+      const urlParts = mediaUrl.split('/company-media/');
+      if (urlParts.length === 2) {
+        const filePath = decodeURIComponent(urlParts[1]);
+        const { data: signedData } = await supabase.storage
+          .from('company-media')
+          .createSignedUrl(filePath, 3600);
+        if (signedData?.signedUrl) {
+          signed.push(signedData.signedUrl);
+        } else {
+          console.error(`[SIGN] Failed to sign: ${filePath}`);
+        }
+      }
+    } else if (mediaUrl.startsWith('http')) {
+      // External URL – pass through
+      signed.push(mediaUrl);
+    }
+  }
+  return signed;
+}
+
+// ── Shared media library recovery (vector → text → recent) ──
+async function recoverMediaFromLibrary(
+  query: string,
+  companyId: string,
+  company: any,
+  limit: number,
+  supabase: any
+): Promise<string[]> {
+  let urls: string[] = [];
+  // 1. Vector search
+  try {
+    const expandedQuery = normalizeSearchQuery(query, company);
+    const queryVec = await embedQuery(expandedQuery);
+    const vectorStr = `[${queryVec.join(',')}]`;
+    const { data: mediaResults, error: mediaErr } = await supabase.rpc('match_media', {
+      query_embedding: vectorStr,
+      match_company_id: companyId,
+      match_threshold: 0.25,
+      match_count: limit,
+    });
+    if (!mediaErr && mediaResults?.length) {
+      urls = mediaResults.map((m: any) =>
+        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+      );
+      console.log(`[RECOVER] Vector search found ${urls.length} results`);
+    }
+  } catch (e) { console.error('[RECOVER] Vector search failed:', e); }
+
+  // 2. Text fallback
+  if (urls.length === 0) {
+    const terms = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+    if (terms.length > 0) {
+      const ilikeClauses = terms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
+      const { data: textResults } = await supabase
+        .from('company_media').select('file_path')
+        .eq('company_id', companyId).or(ilikeClauses).limit(limit);
+      if (textResults?.length) {
+        urls = textResults.map((m: any) =>
+          `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+        );
+        console.log(`[RECOVER] Text search found ${urls.length} results`);
+      }
+    }
+  }
+
+  // 3. Recent media fallback
+  if (urls.length === 0) {
+    const { data: anyMedia } = await supabase
+      .from('company_media').select('file_path')
+      .eq('company_id', companyId).eq('media_type', 'image')
+      .order('created_at', { ascending: false }).limit(limit);
+    if (anyMedia?.length) {
+      urls = anyMedia.map((m: any) =>
+        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+      );
+      console.log(`[RECOVER] Recent media fallback returned ${urls.length}`);
+    }
+  }
+  return urls;
+}
+
+// ── Validate URLs belong to allowed domains ──
+function findInvalidUrls(urls: string[]): string[] {
+  const allowedDomains = ['supabase.co'];
+  return urls.filter((url: string) => {
+    try { return !allowedDomains.some(d => new URL(url).hostname.includes(d)); }
+    catch { return true; }
+  });
+}
+
+// ── Shared Twilio media dispatch ──
+async function dispatchMediaToWhatsApp(opts: {
+  mediaUrls: string[];
+  caption?: string;
+  category?: string;
+  toPhone: string;
+  fromNumber: string;
+  companyId: string;
+  conversationId: string;
+  supabase: any;
+}): Promise<{ success: boolean; sent: number; total: number; message: string }> {
+  const { mediaUrls, caption, category, toPhone, fromNumber, companyId, conversationId, supabase } = opts;
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !fromNumber) {
+    return { success: false, sent: 0, total: mediaUrls.length, message: 'Media sending not configured.' };
+  }
+
+  const signedUrls = await signMediaUrls(mediaUrls, supabase);
+  if (signedUrls.length === 0) {
+    return { success: false, sent: 0, total: mediaUrls.length, message: 'Could not sign any media URLs.' };
+  }
+
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+  const from = normalizeWhatsAppFrom(fromNumber);
+  const to = normalizeWhatsAppTo(toPhone);
+  const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-webhook`;
+
+  let successCount = 0;
+  for (let i = 0; i < signedUrls.length; i++) {
+    const formData = new URLSearchParams();
+    formData.append('From', from);
+    formData.append('To', to);
+    formData.append('Body', i === 0 && caption ? caption : '');
+    formData.append('MediaUrl', signedUrls[i]);
+    formData.append('StatusCallback', statusCallbackUrl);
+
+    const resp = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData.toString(),
+    });
+
+    if (resp.ok) {
+      successCount++;
+      const data = await resp.json();
+      try {
+        await supabase.from('media_delivery_status').insert({
+          company_id: companyId,
+          conversation_id: conversationId,
+          customer_phone: toPhone,
+          media_url: mediaUrls[i] || signedUrls[i],
+          twilio_message_sid: data.sid,
+          status: 'queued',
+          max_retries: 3,
+        });
+      } catch (_t) { /* silent */ }
+    } else {
+      const errBody = await resp.text();
+      console.error(`[DISPATCH] Twilio error media ${i + 1}/${signedUrls.length}: ${resp.status} ${errBody}`);
+    }
+  }
+
+  // Only record "[Sent ...]" marker if at least one succeeded
+  if (successCount > 0) {
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: `[Sent ${successCount}/${signedUrls.length} ${category || 'media'} file(s)]${caption ? ' - ' + caption : ''}`
+    });
+  }
+
+  return successCount > 0
+    ? { success: true, sent: successCount, total: signedUrls.length, message: `Sent ${successCount} media file(s).` }
+    : { success: false, sent: 0, total: signedUrls.length, message: 'All media sends failed.' };
+}
+
+// ── Unified send_media handler (validates, auto-recovers, dispatches) ──
+async function handleSendMedia(
+  args: { media_urls: string[]; caption?: string; category?: string },
+  company: any,
+  customerPhone: string,
+  conversationId: string,
+  supabase: any
+): Promise<{ result: any; textReply?: string }> {
+  const invalid = findInvalidUrls(args.media_urls || []);
+  let urls = args.media_urls || [];
+
+  if (invalid.length > 0) {
+    console.warn('[SEND-MEDIA] Invalid URLs detected, auto-recovering:', invalid);
+    const recoveryQuery = args.caption || args.category || 'product';
+    const recovered = await recoverMediaFromLibrary(recoveryQuery, company.id, company, urls.length || 5, supabase);
+    if (recovered.length > 0) {
+      urls = recovered;
+      console.log(`[SEND-MEDIA] Replaced ${invalid.length} bad URLs with ${recovered.length} real ones`);
+    } else {
+      return {
+        result: { success: false, sent: 0, total: 0, message: 'No matching media found in library.' },
+        textReply: "I tried to find matching media in our library but couldn't find anything right now. Let me know what you'd like to see and I'll search again."
+      };
+    }
+  }
+
+  const dispatchResult = await dispatchMediaToWhatsApp({
+    mediaUrls: urls,
+    caption: args.caption,
+    category: args.category,
+    toPhone: customerPhone,
+    fromNumber: company.whatsapp_number,
+    companyId: company.id,
+    conversationId,
+    supabase,
+  });
+
+  return { result: dispatchResult };
+}
+
 // ── Lightweight Query Expansion for Semantic Search ──
 const SLANG_MAP: Record<string, string> = {
   'u': 'you', 'ur': 'your', 'r': 'are', 'thx': 'thanks', 'thnx': 'thanks',
