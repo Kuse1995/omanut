@@ -130,6 +130,15 @@ export const AITrainingEditor = ({ companyId }: AITrainingEditorProps) => {
       {/* Smart Configure */}
       <SmartConfigurePanel companyId={companyId} onConfigApplied={() => fetchData(true)} />
 
+      {/* BMS Data Sync */}
+      <BmsSyncPanel
+        companyId={companyId}
+        quickReferenceInfo={quickReferenceInfo}
+        onApply={(newText) => {
+          setQuickReferenceInfo(newText);
+        }}
+      />
+
       {/* Quick Reference Editor */}
       <Card>
         <CardHeader>
