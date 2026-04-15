@@ -804,8 +804,6 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
                         {item.description}
                       </p>
                     )}
-                      </p>
-                    )}
                     {item.tags && item.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {item.tags.map((tag, idx) => (
