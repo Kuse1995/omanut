@@ -727,7 +727,7 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
             ) : (
               <>
                 <Upload className="mr-2 h-4 w-4" />
-                5. Upload Media
+                6. Upload Media
               </>
             )}
           </Button>
