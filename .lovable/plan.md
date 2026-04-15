@@ -1,38 +1,34 @@
 
 
-## Simplify BMS Connection Setup
+## Remove Redundant Tenant ID Entry — Auto-Handshake Between BMS and Omanut
 
 ### Problem
-The current BMS Integration card on the Omanut side requires manual entry of the API Secret (which lives on the BMS platform admin) and doesn't show the callback URL that the BMS side needs. Users have to copy-paste between two dashboards with no guidance.
+Both sides are asking admins to manually copy-paste IDs that each system already knows:
+- **Omanut side**: Asks for the BMS "Tenant ID" (manual entry)
+- **BMS side**: Asks for the "Omanut Tenant ID" (manual entry)
+
+This is redundant. The Omanut `company_id` IS the `omanut_tenant_id` the BMS needs, and the BMS already knows its own `tenant_id`.
+
+### Solution: Auto-Handshake on "Connect"
+
+When the admin clicks "Connect to BMS" on the Omanut side:
+1. Auto-generate the API secret (already done)
+2. Send a **registration handshake** to the BMS bridge that includes `omanut_tenant_id: companyId` and the shared secret
+3. The BMS responds with its own `tenant_id`
+4. Both sides are now linked — no manual ID entry needed
 
 ### Changes
 
-#### 1. Auto-generate and display the Callback URL
-Show a read-only field with a copy button containing the callback URL that the BMS side needs:
-```
-https://dzheddvoiauevcayifev.supabase.co/functions/v1/bms-callback
-```
-This removes guesswork — the admin just copies it into the BMS config.
-
-#### 2. Auto-generate API Secret on first save
-Instead of requiring the user to manually enter a matching secret, generate a random secret automatically when creating a new BMS connection. Display it once (like the API Keys section does) so the user can copy it into the BMS platform admin's config for that tenant. On subsequent loads, show it masked with a "reveal" toggle.
-
-#### 3. Pre-fill Bridge URL default
-Default the Bridge URL to `https://pkiajhllkihkuchbwrgz.supabase.co/functions/v1/bms-api-bridge` (the known Omanut BMS bridge) so users don't have to type it.
-
-#### 4. Add a "Quick Connect" flow for non-technical users
-Add a simplified mode: user clicks "Connect to BMS", system auto-generates the secret and pre-fills the bridge URL. Shows two things to copy to the BMS side:
-1. The generated API Secret
-2. The Callback URL
-
-### File Changes
-
 | File | Change |
 |------|--------|
-| `src/components/admin/CompanySettingsPanel.tsx` | Update `BmsIntegrationCard`: add callback URL display with copy button, auto-generate secret on new connections, pre-fill bridge URL default, add reveal/copy for existing secret |
+| `src/components/admin/CompanySettingsPanel.tsx` | Remove the manual "Tenant ID" input field. On save (for new connections), call a handshake endpoint on the BMS bridge that sends `{ intent: "register_omanut_link", omanut_tenant_id: companyId, api_secret: secret }`. If the BMS returns a `tenant_id`, store it automatically. For existing connections, keep showing the tenant ID as read-only info. |
+| `supabase/functions/bms-agent/index.ts` | Add a `register_omanut_link` intent that sends the company's ID and secret to the BMS bridge, expecting `tenant_id` back in the response. |
 
-Single file, ~40 lines changed in the BMS card component. No migration needed — no schema changes.
+### Fallback
+If the BMS bridge doesn't support the handshake yet (returns error/404), fall back to the current behavior: show the Tenant ID field for manual entry, with a note saying "Ask your BMS admin for this ID." This way it works today and improves as the BMS side adds the handshake endpoint.
 
 ### Result
-Setting up a BMS connection becomes: click "Save" → copy the auto-generated secret and callback URL → paste them into the BMS platform admin. No manual secret coordination needed.
+- Admin clicks "Connect to BMS" → secret auto-generated, IDs exchanged automatically
+- No copy-pasting tenant IDs between dashboards
+- Backward compatible with BMS instances that haven't added the handshake endpoint yet
 
