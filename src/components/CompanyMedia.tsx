@@ -703,6 +703,8 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {uploading && uploadProgress > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Uploading...</span>
