@@ -4203,23 +4203,38 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   const pName = (p.name || p.product_name || '').toLowerCase();
                   return pName.includes(searchName) || searchName.includes(pName);
                 });
-                if (!found && stockData.length > 0) {
+                if (!found) {
                   console.log(`[BMS-FALLBACK] check_stock didn't find "${args.product_name}" in ${stockData.length} results, trying list_products`);
                   try {
                     const catalogRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                       method: 'POST',
                       headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id } }),
+                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id, search: args.product_name } }),
                     });
                     const catalogData = await catalogRes.json();
                     const allProducts = Array.isArray(catalogData?.data) ? catalogData.data : [];
+                    // Smart matching: split search into words and require all words to appear
+                    const searchWords = searchName.split(/\s+/).filter((w: string) => w.length > 1);
                     const matched = allProducts.filter((p: any) => {
                       const pName = (p.name || p.product_name || '').toLowerCase();
+                      if (searchWords.length > 1) {
+                        return searchWords.every((word: string) => pName.includes(word));
+                      }
                       return pName.includes(searchName) || searchName.includes(pName);
                     });
                     if (matched.length > 0) {
-                      console.log(`[BMS-FALLBACK] Found ${matched.length} matching product(s) in full catalog`);
-                      bmsResult = { success: true, data: matched };
+                      const stockSummary = matched.map((p: any) => {
+                        const stock = p.current_stock ?? p.stock ?? 0;
+                        const price = p.unit_price ?? p.price ?? '';
+                        const inStock = stock > 0 ? `${stock} in stock` : 'OUT OF STOCK';
+                        return `${p.name || p.product_name} - ${inStock}${price ? ` at K${price}` : ''}`;
+                      }).join(', ');
+                      console.log(`[BMS-FALLBACK] Found ${matched.length} matching product(s) in full catalog: ${stockSummary}`);
+                      bmsResult = { 
+                        success: true, 
+                        data: matched,
+                        message: `Found ${matched.length} matching product(s): ${stockSummary}`
+                      };
                     } else {
                       console.log(`[BMS-FALLBACK] Product "${args.product_name}" not found in full catalog (${allProducts.length} products)`);
                       bmsResult = { success: true, data: [], message: `Product "${args.product_name}" not found in inventory. Available products: ${allProducts.slice(0, 20).map((p: any) => p.name).join(', ')}` };
