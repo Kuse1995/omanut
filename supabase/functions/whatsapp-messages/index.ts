@@ -4184,7 +4184,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             bmsParams.company_id = company.id;
 
             try {
-              const bmsResult = await bmsCallWithAck(
+              let bmsResult = await bmsCallWithAck(
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
@@ -4194,6 +4194,42 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 customerPhone,
                 company.whatsapp_number || ''
               );
+
+              // ── check_stock fallback: if product not found in results, search full catalog via list_products ──
+              if (bmsToolName === 'check_stock' && bmsResult && args.product_name && args.product_name !== 'all') {
+                const searchName = (args.product_name || '').toLowerCase();
+                const stockData = Array.isArray(bmsResult.data) ? bmsResult.data : (Array.isArray(bmsResult) ? bmsResult : []);
+                const found = stockData.some((p: any) => {
+                  const pName = (p.name || p.product_name || '').toLowerCase();
+                  return pName.includes(searchName) || searchName.includes(pName);
+                });
+                if (!found && stockData.length > 0) {
+                  console.log(`[BMS-FALLBACK] check_stock didn't find "${args.product_name}" in ${stockData.length} results, trying list_products`);
+                  try {
+                    const catalogRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
+                      method: 'POST',
+                      headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id } }),
+                    });
+                    const catalogData = await catalogRes.json();
+                    const allProducts = Array.isArray(catalogData?.data) ? catalogData.data : [];
+                    const matched = allProducts.filter((p: any) => {
+                      const pName = (p.name || p.product_name || '').toLowerCase();
+                      return pName.includes(searchName) || searchName.includes(pName);
+                    });
+                    if (matched.length > 0) {
+                      console.log(`[BMS-FALLBACK] Found ${matched.length} matching product(s) in full catalog`);
+                      bmsResult = { success: true, data: matched };
+                    } else {
+                      console.log(`[BMS-FALLBACK] Product "${args.product_name}" not found in full catalog (${allProducts.length} products)`);
+                      bmsResult = { success: true, data: [], message: `Product "${args.product_name}" not found in inventory. Available products: ${allProducts.slice(0, 20).map((p: any) => p.name).join(', ')}` };
+                    }
+                  } catch (fallbackErr) {
+                    console.error(`[BMS-FALLBACK] list_products fallback failed:`, fallbackErr);
+                  }
+                }
+              }
+
               anyToolExecuted = true;
               toolExecutionContext.push(`BMS ${bmsToolName} executed`);
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify(bmsResult) });
