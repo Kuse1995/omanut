@@ -107,14 +107,14 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 }
 
 /**
- * Call AI with automatic fallback chain: primary model → DeepSeek → Lovable Gateway.
+ * Call AI with automatic fallback chain: primary model → GLM → DeepSeek.
  * Only for text/chat completions (not image gen). Returns the first successful response.
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
   const fallbackChain = [
     options.model,
+    'glm-4.7',
     'deepseek-chat',
-    'google/gemini-2.5-flash',
   ];
 
   // Deduplicate

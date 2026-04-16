@@ -2280,10 +2280,9 @@ ${supervisorRecommendation.recommendedResponse}
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
     const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
-    const fallbackModel = 'glm-4.7';
     
-    // Select model based on complexity - flash for complex (tool-calling), flash-lite for simple
-    const selectedModel = messageComplexity === 'simple' ? fallbackModel : primaryModel;
+    // Select model based on complexity
+    const selectedModel = messageComplexity === 'simple' ? 'glm-4.7' : primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
@@ -2859,7 +2858,7 @@ Trust ONLY the information provided in this system prompt.
     let aiData: any = null; // Store AI response for tool loop
 
     try {
-      const response = await geminiChat({
+      const response = await geminiChatWithFallback({
         model: selectedModel,
         messages: sanitizeMessages(messages),
         temperature,
