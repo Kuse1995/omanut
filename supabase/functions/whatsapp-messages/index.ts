@@ -295,22 +295,31 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
     /how much|price|cost|hours|location|address|phone|email/i,
     /^what (is|are) (your|the)/i,
     /^(can i|do you|are you)/i,
+    /what.*payment|payment.*method|cash only|how.*pay|accept.*payment/i,
+    /what.*invoice|what.*receipt|what.*quotation/i,
   ];
   
   const complexTriggers = [
     /book|reserve|reservation|appointment|schedule/i,
-    /pay|payment|invoice|receipt|transaction|quotation|quote|estimate|proforma/i,
+    /make.*payment|pay for|process.*payment|pay.*order|pay.*bill/i,
+    /generate.*invoice|create.*quotation|create.*estimate|create.*proforma/i,
     /complain|problem|issue|wrong|disappointed|unhappy|frustrated/i,
-    /why|how does|explain|tell me about|describe/i,
     /urgent|asap|immediately|emergency/i,
-    /order|variant|color|colour|size|track|cancel|history/i,
-    /expense|payable|receivable|contact|inquiry|enquiry/i,
+    /cancel.*order|track.*order|return.*order/i,
+    /expense|payable|receivable/i,
   ];
   
   const lowerMsg = message.toLowerCase().trim();
   
+  // Question-detection override: informational questions should not be escalated
+  const isQuestion = /^(what|how|do|does|are|is|can|which|where|when|why)\b/i.test(lowerMsg);
+  
   // Check complex first (higher priority)
   if (complexTriggers.some(pattern => pattern.test(lowerMsg))) {
+    // If it's clearly a question (not an action request), downgrade to simple
+    if (isQuestion && !/complain|problem|issue|wrong|disappointed|unhappy|frustrated|urgent|asap|emergency/i.test(lowerMsg)) {
+      return 'simple';
+    }
     return 'complex';
   }
   
