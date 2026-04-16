@@ -2858,7 +2858,7 @@ Trust ONLY the information provided in this system prompt.
     let aiData: any = null; // Store AI response for tool loop
 
     try {
-      const response = await geminiChat({
+      const response = await geminiChatWithFallback({
         model: selectedModel,
         messages: sanitizeMessages(messages),
         temperature,
