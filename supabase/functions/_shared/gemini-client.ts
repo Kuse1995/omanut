@@ -1,15 +1,26 @@
 /**
  * Shared AI client for all edge functions.
- * Text/tool-calling models route through Zhipu (GLM) or Gemini based on model prefix.
+ * Text/tool-calling models route through Zhipu (GLM), Gemini, DeepSeek, or Lovable AI Gateway based on model prefix.
  * Image/video generation always uses Gemini/OpenAI native APIs.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
+const LOVABLE_GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai)\//, '');
+}
+
+/** Determine provider from model name */
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini' {
+  const normalized = normalizeModel(model);
+  if (normalized.startsWith('glm-')) return 'zhipu';
+  if (normalized.startsWith('deepseek')) return 'deepseek';
+  if (normalized.startsWith('gemini-') || normalized.startsWith('gpt-')) return 'lovable';
+  return 'gemini';
 }
 
 export interface GeminiChatOptions {
@@ -26,24 +37,49 @@ export interface GeminiChatOptions {
 
 /**
  * Call AI API for text/tool-calling models.
- * Routes GLM models to Zhipu, everything else to Gemini.
+ * Routes GLM → Zhipu, DeepSeek → DeepSeek API, google/openai prefixed → Lovable Gateway, else Gemini direct.
  */
 export async function geminiChat(options: GeminiChatOptions): Promise<Response> {
+  const provider = getProvider(options.model);
   const normalizedModel = normalizeModel(options.model);
-  const isZhipu = normalizedModel.startsWith('glm-');
 
-  const apiKey = isZhipu
-    ? Deno.env.get('ZHIPU_API_KEY')
-    : Deno.env.get('GEMINI_API_KEY');
+  let apiUrl: string;
+  let apiKey: string | undefined;
+  let modelToSend = normalizedModel;
 
-  if (!apiKey) {
-    throw new Error(isZhipu ? 'ZHIPU_API_KEY is not configured' : 'GEMINI_API_KEY is not configured');
+  switch (provider) {
+    case 'zhipu':
+      apiUrl = ZHIPU_OPENAI_URL;
+      apiKey = Deno.env.get('ZHIPU_API_KEY');
+      if (!apiKey) throw new Error('ZHIPU_API_KEY is not configured');
+      break;
+    case 'deepseek':
+      apiUrl = DEEPSEEK_OPENAI_URL;
+      apiKey = Deno.env.get('DEEPSEEK_API_KEY');
+      if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured');
+      break;
+    case 'lovable':
+      apiUrl = LOVABLE_GATEWAY_URL;
+      apiKey = Deno.env.get('LOVABLE_API_KEY');
+      if (!apiKey) {
+        // Fall back to direct Gemini if no Lovable key
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        if (!apiKey) throw new Error('No API key available (LOVABLE_API_KEY or GEMINI_API_KEY)');
+      } else {
+        // Lovable gateway needs the full prefixed model name
+        modelToSend = options.model.includes('/') ? options.model : `google/${normalizedModel}`;
+      }
+      break;
+    default:
+      apiUrl = GEMINI_OPENAI_URL;
+      apiKey = Deno.env.get('GEMINI_API_KEY');
+      if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+      break;
   }
 
-  const apiUrl = isZhipu ? ZHIPU_OPENAI_URL : GEMINI_OPENAI_URL;
-
   const body: any = {
-    model: normalizedModel,
+    model: modelToSend,
     messages: options.messages,
   };
 
@@ -51,7 +87,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
   if (options.tools) body.tools = options.tools;
   if (options.tool_choice) body.tool_choice = options.tool_choice;
-  if (!isZhipu && options.modalities) body.modalities = options.modalities;
+  if (provider !== 'zhipu' && provider !== 'deepseek' && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
 
   const fetchOptions: RequestInit = {
@@ -68,6 +104,47 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
   }
 
   return fetch(apiUrl, fetchOptions);
+}
+
+/**
+ * Call AI with automatic fallback chain: primary model → DeepSeek → Lovable Gateway.
+ * Only for text/chat completions (not image gen). Returns the first successful response.
+ */
+export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
+  const fallbackChain = [
+    options.model,
+    'deepseek-chat',
+    'google/gemini-2.5-flash',
+  ];
+
+  // Deduplicate
+  const seen = new Set<string>();
+  const chain = fallbackChain.filter(m => {
+    const key = normalizeModel(m);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    try {
+      console.log(`[AI-FALLBACK] Trying model ${i + 1}/${chain.length}: ${model}`);
+      const response = await geminiChat({ ...options, model });
+      if (response.ok) {
+        console.log(`[AI-FALLBACK] Success with model: ${model}`);
+        return response;
+      }
+      const errText = await response.text();
+      console.warn(`[AI-FALLBACK] Model ${model} failed (${response.status}): ${errText.substring(0, 200)}`);
+    } catch (err) {
+      console.warn(`[AI-FALLBACK] Model ${model} threw:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  // All failed — return last attempt so caller gets an error response
+  console.error('[AI-FALLBACK] All models in fallback chain failed');
+  throw new Error('All AI models in fallback chain failed');
 }
 
 /**

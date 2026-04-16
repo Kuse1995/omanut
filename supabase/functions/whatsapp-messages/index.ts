@@ -4323,16 +4323,16 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         });
       } catch (logErr) { console.error('[ERROR-LOG] Failed to log error:', logErr); }
 
-      // --- Retry 1: fallback model, NO tools, same context ---
-      console.log('[RETRY-1] Attempting fallback model with no tools...');
+      // --- Retry 1: fallback chain (DeepSeek → Lovable Gateway), NO tools, same context ---
+      console.log('[RETRY-1] Attempting fallback chain with no tools...');
       try {
         const retry1Controller = new AbortController();
         const retry1Timeout = setTimeout(() => retry1Controller.abort(), 30000);
-        const retry1Response = await geminiChat({
-          model: 'glm-4.7',
+        const retry1Response = await geminiChatWithFallback({
+          model: 'deepseek-chat',
           messages: sanitizeMessages(messages),
           temperature: 1.0,
-          max_tokens: 1024,
+          max_tokens: maxTokens,
           signal: retry1Controller.signal,
         });
         clearTimeout(retry1Timeout);
@@ -4340,7 +4340,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           const retry1Data = await retry1Response.json();
           const retry1Reply = retry1Data.choices?.[0]?.message?.content;
           if (retry1Reply) {
-            console.log('[RETRY-1] Success — got response from fallback model');
+            console.log('[RETRY-1] Success — got response from fallback chain');
             assistantReply = retry1Reply;
           }
         }
@@ -4348,7 +4348,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         console.error('[RETRY-1] Failed:', retry1Err instanceof Error ? retry1Err.message : retry1Err);
       }
 
-      // --- Retry 2: fallback model, NO tools, truncated context (last 3 msgs) ---
+      // --- Retry 2: fallback chain, NO tools, truncated context (last 3 msgs) ---
       if (!assistantReply) {
         console.log('[RETRY-2] Attempting with truncated context (last 3 messages)...');
         try {
@@ -4358,8 +4358,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
           const retry2Controller = new AbortController();
           const retry2Timeout = setTimeout(() => retry2Controller.abort(), 30000);
-          const retry2Response = await geminiChat({
-            model: 'glm-4.7',
+          const retry2Response = await geminiChatWithFallback({
+            model: 'deepseek-chat',
             messages: sanitizeMessages(truncatedMessages),
             temperature: 1.0,
             max_tokens: 512,
