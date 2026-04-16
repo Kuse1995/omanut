@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiChatWithFallback } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 
 /** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
