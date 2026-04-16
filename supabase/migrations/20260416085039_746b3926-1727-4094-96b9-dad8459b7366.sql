@@ -1,0 +1,1 @@
+UPDATE company_ai_overrides SET response_timeout_seconds = 60 WHERE company_id = '74ec87e8-a075-45b7-af75-e7503d683818';
