@@ -902,6 +902,134 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── notify_boss ──
+  // Fires a WhatsApp alert to the company's configured boss phone(s) via send-boss-notification.
+  // Use this when a hot lead picks a plan, a customer escalates, or anything urgent the human owner must see.
+  server.tool("notify_boss", {
+    description: "Send a WhatsApp alert to the company's boss/owner. Use for hot leads, complaints, VIP info, or anything that needs human attention. Returns the boss phone numbers that were notified.",
+    inputSchema: z.object({
+      notification_type: z.enum([
+        "interested_client",
+        "high_value_opportunity",
+        "customer_complaint",
+        "vip_client_info",
+        "action_required",
+      ]).optional().describe("Type of alert. Defaults to 'interested_client'."),
+      customer_name: z.string().optional().describe("Customer's name if known"),
+      customer_phone: z.string().optional().describe("Customer's phone number"),
+      summary: z.string().describe("What the boss needs to know — short, action-oriented"),
+      priority: z.enum(["low", "medium", "high"]).optional().describe("Priority level (used for action_required)"),
+      media_url: z.string().optional().describe("Optional image/video URL to attach to the alert"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
+
+      const type = params.notification_type || "interested_client";
+
+      // Shape `data` per the switch in send-boss-notification/index.ts
+      let data: Record<string, any> = {
+        customer_name: params.customer_name,
+        customer_phone: params.customer_phone,
+      };
+      switch (type) {
+        case "interested_client":
+          data.phone = params.customer_phone;
+          data.information = params.summary;
+          break;
+        case "high_value_opportunity":
+          data.opportunity_type = "hot_lead";
+          data.details = params.summary;
+          break;
+        case "customer_complaint":
+          data.issue_summary = params.summary;
+          break;
+        case "vip_client_info":
+          data.info_type = "general";
+          data.information = params.summary;
+          break;
+        case "action_required":
+          data.action_type = "follow_up";
+          data.priority = params.priority || "medium";
+          data.description = params.summary;
+          break;
+      }
+
+      // List boss phones up-front so we can echo them back to OpenClaw.
+      const { data: bossRows } = await supabase
+        .from("company_boss_phones")
+        .select("phone, label, is_primary")
+        .eq("company_id", companyId);
+
+      const result = await callEdgeFunction("send-boss-notification", {
+        companyId,
+        notificationType: type,
+        data,
+        mediaUrl: params.media_url,
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: result?.success !== false,
+            notification_type: type,
+            boss_phones_notified: (bossRows || []).map((r: any) => ({
+              phone: r.phone,
+              label: r.label,
+              is_primary: r.is_primary,
+            })),
+            edge_response: result,
+          }, null, 2),
+        }],
+      };
+    },
+  });
+
+  // ── send_media ──
+  // Dedicated media-send path. Wraps send-whatsapp-message so OpenClaw can ship a video/image
+  // (e.g. a demo clip) into a customer's WhatsApp thread without juggling the message tool.
+  server.tool("send_media", {
+    description: "Send a video or image to a customer's WhatsApp conversation. Provide either conversation_id or customer_phone. Caption is optional but recommended.",
+    inputSchema: z.object({
+      conversation_id: z.string().optional().describe("Conversation UUID (preferred if known)"),
+      customer_phone: z.string().optional().describe("Customer phone number — used if conversation_id not provided"),
+      media_url: z.string().describe("Public HTTPS URL of the image or video to send"),
+      caption: z.string().optional().describe("Optional caption text shown alongside the media"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
+
+      if (!params.conversation_id && !params.customer_phone) {
+        throw new Error("Provide either conversation_id or customer_phone.");
+      }
+
+      const body: Record<string, any> = {
+        company_id: companyId,
+        message: params.caption || "",
+        media_url: params.media_url,
+      };
+      if (params.conversation_id) body.conversationId = params.conversation_id;
+      if (params.customer_phone) body.phone = params.customer_phone;
+
+      const result = await callEdgeFunction("send-whatsapp-message", body);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: result?.success !== false,
+            conversation_id: params.conversation_id || null,
+            customer_phone: params.customer_phone || null,
+            media_url: params.media_url,
+            edge_response: result,
+          }, null, 2),
+        }],
+      };
+    },
+  });
+
   // ── list_product_identity_profiles ──
   server.tool("list_product_identity_profiles", {
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
