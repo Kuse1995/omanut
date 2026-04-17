@@ -49,22 +49,25 @@ interface ApiKey {
 
 const MCP_URL = 'https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server';
 
-function buildSkillJson(plainKey: string, scope: 'company' | 'admin', label: string) {
+function serverNameFor(scope: 'company' | 'admin', label: string) {
+  if (scope === 'admin') return 'omanut-ai-admin';
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24).replace(/^-+|-+$/g, '') || 'company';
+  return `omanut-ai-${slug}`;
+}
+
+function buildMcpConfig(plainKey: string, scope: 'company' | 'admin', label: string) {
+  const name = serverNameFor(scope, label);
   return {
-    skill: {
-      name: scope === 'admin' ? `omanut-ai-admin` : `omanut-ai-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
-      description:
-        scope === 'admin'
-          ? 'Omanut admin training key — drive AI training, testing, and refinement across all your companies. Start each session with list_my_companies then set_active_company.'
-          : `Omanut company key for ${label}. Pinned to a single company.`,
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', 'mcp-remote', MCP_URL, '--header', `x-api-key:${plainKey}`],
+    mcpServers: {
+      [name]: {
+        command: 'npx',
+        args: ['-y', 'mcp-remote', MCP_URL, '--header', `x-api-key:${plainKey}`],
+      },
     },
   };
 }
 
-function downloadSkillFile(filename: string, content: object) {
+function downloadJsonFile(filename: string, content: object) {
   const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -204,11 +207,19 @@ export const ApiKeysSection = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadIssuedSkill = () => {
-    const skill = buildSkillJson(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
-    const filename = newKeyScopeIssued === 'admin' ? 'omanut-ai-admin.json' : `omanut-ai-${newKeyLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'company'}.json`;
-    downloadSkillFile(filename, skill);
-    toast.success('Skill file downloaded');
+  const downloadIssuedConfig = () => {
+    const cfg = buildMcpConfig(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
+    const filename = `${serverNameFor(newKeyScopeIssued, newKeyLabel)}.mcp.json`;
+    downloadJsonFile(filename, cfg);
+    toast.success('MCP server config downloaded');
+  };
+
+  const downloadTemplateForRow = (k: ApiKey) => {
+    const scope = (k.scope ?? 'company') as 'company' | 'admin';
+    const cfg = buildMcpConfig('YOUR_API_KEY_HERE', scope, k.name);
+    const filename = `${serverNameFor(scope, k.name)}.template.mcp.json`;
+    downloadJsonFile(filename, cfg);
+    toast.success('Template downloaded — paste your saved API key into the args');
   };
 
   const renderKeyTable = (
@@ -225,7 +236,7 @@ export const ApiKeysSection = () => {
             <TableHead>Status</TableHead>
             <TableHead>Last Used</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[80px]" />
+            <TableHead className="w-[110px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -263,17 +274,28 @@ export const ApiKeysSection = () => {
                 {formatDistanceToNow(new Date(k.created_at), { addSuffix: true })}
               </TableCell>
               <TableCell>
-                {k.is_active && (
+                <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => { setRevokeKeyId(k.id); setRevokeKeyScope(scope); }}
-                    title="Revoke key"
+                    className="h-7 w-7"
+                    onClick={() => downloadTemplateForRow(k)}
+                    title="Download MCP server config template"
                   >
-                    <Ban className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5" />
                   </Button>
-                )}
+                  {k.is_active && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      onClick={() => { setRevokeKeyId(k.id); setRevokeKeyScope(scope); }}
+                      title="Revoke key"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -403,11 +425,11 @@ export const ApiKeysSection = () => {
 
       {/* Show Key Dialog (one-time) */}
       <Dialog open={showKeyDialog} onOpenChange={(open) => { if (!open) setShowKeyDialog(false); }}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Your API Key</DialogTitle>
             <DialogDescription>
-              Copy this key now. You won't be able to see it again. Or download a ready-to-use OpenClaw skill file with the key pre-filled.
+              Copy this key now — you won't be able to see it again. Then download the MCP server config to register it with OpenClaw (or any MCP client).
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -415,13 +437,22 @@ export const ApiKeysSection = () => {
               {newPlaintextKey}
             </code>
             <Button variant="outline" size="icon" onClick={copyToClipboard} title="Copy key">
-              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+              {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
             </Button>
           </div>
-          <Button variant="outline" onClick={downloadIssuedSkill} className="gap-1.5 w-full">
+          <Button variant="default" onClick={downloadIssuedConfig} className="gap-1.5 w-full">
             <Download className="h-4 w-4" />
-            Download OpenClaw skill file
+            Download MCP server config
           </Button>
+          <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
+            <p className="text-xs font-medium">How to install in OpenClaw</p>
+            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
+              <li>Open OpenClaw → MCP servers settings (or your <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code>).</li>
+              <li>Paste the downloaded JSON (merge under <code className="bg-muted px-1 rounded">mcpServers</code>).</li>
+              <li>Restart the connection. Tell OpenClaw: <em>"use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} MCP server"</em>.</li>
+              <li>This is <strong>not</strong> a ClawHub skill — don't run <code className="bg-muted px-1 rounded">clawhub install</code>.</li>
+            </ol>
+          </div>
           <DialogFooter>
             <Button onClick={() => setShowKeyDialog(false)}>Done</Button>
           </DialogFooter>
