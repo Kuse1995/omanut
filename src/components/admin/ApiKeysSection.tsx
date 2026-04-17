@@ -249,6 +249,9 @@ export const ApiKeysSection = () => {
   const [revokeKeyScope, setRevokeKeyScope] = useState<'company' | 'admin'>('company');
   const [revoking, setRevoking] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [testingKeyId, setTestingKeyId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<any | null>(null);
+  const [showTestDialog, setShowTestDialog] = useState(false);
 
   // Detect admin role
   useEffect(() => {
@@ -376,9 +379,26 @@ export const ApiKeysSection = () => {
       const blob = await buildSkillZip('YOUR_API_KEY_HERE', scope, k.name);
       const filename = `${serverNameFor(scope, k.name)}.template.zip`;
       downloadBlob(filename, blob);
-      toast.success('Template skill downloaded — paste your saved API key into mcp.json');
+      toast.info('Template downloaded — paste your saved API key into mcp.json before installing. (The full key is only shown once at creation.)');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to build template');
+    }
+  };
+
+  const testKey = async (k: ApiKey) => {
+    setTestingKeyId(k.id);
+    setTestResult(null);
+    try {
+      const body: any = { action: 'verify', key_id: k.id };
+      if ((k.scope ?? 'company') === 'company' && k.company_id) body.company_id = k.company_id;
+      const { data, error } = await supabase.functions.invoke('manage-api-keys', { body });
+      if (error) throw error;
+      setTestResult(data);
+      setShowTestDialog(true);
+    } catch (e: any) {
+      toast.error(e?.message || 'Test failed');
+    } finally {
+      setTestingKeyId(null);
     }
   };
 
