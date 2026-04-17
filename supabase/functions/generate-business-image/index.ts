@@ -69,12 +69,13 @@ serve(async (req) => {
       .eq('id', userData.company_id)
       .single();
 
-    // Enhance prompt with business context
+    // Enhance prompt with business context (fall back to style_description if context is null)
     let enhancedPrompt = prompt;
-    if (settings.business_context) {
-      enhancedPrompt = `${settings.business_context}. ${prompt}`;
+    const contextText = settings.business_context || settings.style_description;
+    if (contextText) {
+      enhancedPrompt = `${contextText}. ${prompt}`;
     }
-    if (settings.style_description) {
+    if (settings.style_description && settings.business_context) {
       enhancedPrompt += `. Style: ${settings.style_description}`;
     }
     enhancedPrompt += `. Ultra high resolution, professional ${company?.business_type || 'business'} image.`;

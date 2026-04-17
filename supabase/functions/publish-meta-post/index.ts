@@ -166,8 +166,10 @@ serve(async (req) => {
 
         const fbResult = await fbResponse.json();
         if (!fbResponse.ok) {
-          errors.push(`Facebook: ${fbResult.error?.message || 'API error'}`);
-          console.error('Facebook publish error:', fbResult);
+          const e = fbResult.error || {};
+          const detail = `${e.message || 'API error'}${e.error_subcode ? ` [subcode ${e.error_subcode}]` : ''}${e.error_user_msg ? ` — ${e.error_user_msg}` : ''}${e.fbtrace_id ? ` (fbtrace ${e.fbtrace_id})` : ''}`;
+          errors.push(`Facebook: ${detail}`);
+          console.error('Facebook publish error (full payload):', JSON.stringify(fbResult, null, 2));
         } else {
           results.facebook = fbResult;
           console.log(`Post ${post_id} published on Facebook. ID: ${fbResult.id}`);
@@ -213,7 +215,10 @@ serve(async (req) => {
 
           const containerResult = await containerRes.json();
           if (!containerRes.ok) {
-            errors.push(`Instagram container: ${containerResult.error?.message || 'API error'}`);
+            const e = containerResult.error || {};
+            const detail = `${e.message || 'API error'}${e.error_subcode ? ` [subcode ${e.error_subcode}]` : ''}${e.error_user_msg ? ` — ${e.error_user_msg}` : ''}${e.fbtrace_id ? ` (fbtrace ${e.fbtrace_id})` : ''}`;
+            errors.push(`Instagram container: ${detail}`);
+            console.error('IG container error (full payload):', JSON.stringify(containerResult, null, 2));
           } else {
             const creationId = containerResult.id;
             console.log(`IG media container created: ${creationId} (type: ${isVideo ? 'REELS' : 'IMAGE'})`);
@@ -253,7 +258,10 @@ serve(async (req) => {
 
               const publishResult = await publishRes.json();
               if (!publishRes.ok) {
-                errors.push(`Instagram publish: ${publishResult.error?.message || 'API error'}`);
+                const e = publishResult.error || {};
+                const detail = `${e.message || 'API error'}${e.error_subcode ? ` [subcode ${e.error_subcode}]` : ''}${e.error_user_msg ? ` — ${e.error_user_msg}` : ''}${e.fbtrace_id ? ` (fbtrace ${e.fbtrace_id})` : ''}`;
+                errors.push(`Instagram publish: ${detail}`);
+                console.error('IG publish error (full payload):', JSON.stringify(publishResult, null, 2));
               } else {
                 results.instagram = publishResult;
                 console.log(`Post ${post_id} published on Instagram as ${isVideo ? 'Reel' : 'image'}. ID: ${publishResult.id}`);
