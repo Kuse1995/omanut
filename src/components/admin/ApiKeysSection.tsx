@@ -68,8 +68,154 @@ function buildMcpConfig(plainKey: string, scope: 'company' | 'admin', label: str
   };
 }
 
-function downloadJsonFile(filename: string, content: object) {
-  const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
+function buildSkillMd(scope: 'company' | 'admin', label: string, name: string) {
+  const title = scope === 'admin' ? 'Omanut AI — Admin Training' : `Omanut AI — ${label}`;
+  const scopeLine = scope === 'admin'
+    ? 'This skill connects to the Omanut AI platform with **admin scope** — you can switch between any company you have admin access to within a single session.'
+    : `This skill connects to the Omanut AI platform scoped to **${label}**.`;
+
+  return `---
+name: ${name}
+description: ${title} — train, configure, and operate the Omanut AI platform via MCP.
+---
+
+# ${title}
+
+${scopeLine}
+
+## Setup
+
+1. Make sure the MCP server defined in \`mcp.json\` is registered with OpenClaw.
+   - If OpenClaw didn't auto-pick it up on install, copy the \`mcpServers\` block from \`mcp.json\` into your OpenClaw MCP servers config (e.g. \`~/.claw/mcp.json\`) and restart.
+2. Tell the assistant: *"use the ${name} MCP server"*.
+3. ${scope === 'admin'
+      ? 'Start every session by calling `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
+      : 'You are already scoped to your company — go straight to the workflow tools below.'}
+
+## When to use this skill
+
+Use this skill whenever the user wants to:
+- Inspect or train the Omanut AI agent (system instructions, prompts, tools, models)
+- Review conversations, tickets, reservations, payments, customers
+- Generate, schedule, or approve social media content
+- Manage media library, brand assets, product identity
+- Configure spending limits, approvals, or supervisor behavior
+
+## References
+
+- \`references/session-flow.md\` — how to start and structure a session
+- \`references/tools.md\` — full tool catalog grouped by category
+- \`references/autonomous-loop.md\` — Analyze → Research → Create → Promote → Sell → Audit
+- \`references/guardrails.md\` — spending guard, HITL approval, P&L checks
+
+## Authentication
+
+The API key is embedded in \`mcp.json\` (\`--header x-api-key:...\`). Treat the whole skill folder as a secret — anyone with this folder can act as ${scope === 'admin' ? 'an admin across all your companies' : 'this company'}.
+`;
+}
+
+const REF_SESSION_FLOW = `# Session Flow
+
+## Admin scope (multi-company)
+
+1. \`list_my_companies\` — returns every company you have admin access to.
+2. \`set_active_company({ company_id })\` — pin the session to one company. All subsequent tool calls operate on that company.
+3. To switch mid-session, just call \`set_active_company\` again with a different ID.
+4. The platform re-validates your admin role on every request — revoking the key or removing your role takes effect immediately.
+
+## Company scope
+
+Skip steps 1–2. The session is already pinned to the company that issued the key.
+
+## Recommended opener
+
+> "List my companies, then set the active one to <name>. Pull the last 24h of conversations, open tickets, and pending content approvals so we can plan."
+`;
+
+const REF_TOOLS = `# Tool Catalog
+
+Group your asks around these capability clusters. The exact tool names are exposed by the MCP server — ask the assistant to list them if unsure.
+
+## Conversations & Inbox
+- Read recent conversations, transcripts, supervisor analysis
+- Take over / release a conversation
+- Send a reply on behalf of the agent
+
+## Customers & Segments
+- Lookup a customer by phone
+- Run / refresh segmentation
+- Inspect engagement and conversion scores
+
+## Tickets, Reservations, Payments
+- List/filter tickets and SLA status
+- Create / approve / cancel reservations
+- Inspect payment transactions and digital deliveries
+
+## AI Configuration (training)
+- Read & update \`company_ai_overrides\` (system prompt, banned topics, models, temperatures)
+- Tune supervisor behavior and routing thresholds
+- Adjust spending limits & approval rules
+
+## Content & Media
+- Generate, schedule, approve social posts
+- Inspect media library and brand assets
+- Manage product identity profiles
+
+## Reporting
+- Daily briefings, P&L snapshots, agent performance, error logs
+`;
+
+const REF_AUTONOMOUS_LOOP = `# Autonomous Operating Loop
+
+The Omanut AI is designed to run a closed loop per company:
+
+1. **Analyze** — pull last 24–72h of conversations, tickets, payments, and supervisor flags.
+2. **Research** — for each flagged pattern, look up the customer, BMS data, and brand assets.
+3. **Create** — draft replies, content, or config changes. Stage them for approval where required.
+4. **Promote** — schedule social posts, send re-engagement DMs, trigger payment links.
+5. **Sell** — guide customers through the autonomous checkout (check_stock → record_sale → generate_payment_link).
+6. **Audit** — re-read metrics, compare to goals, log adjustments to \`company_ai_overrides\`.
+
+When training, walk one full loop per company per session and write your decisions back into the AI overrides so the agent improves between sessions.
+`;
+
+const REF_GUARDRAILS = `# Guardrails
+
+## Spending guard
+- \`agent_spending_limits.daily_ad_budget_limit\` caps autonomous ad spend.
+- \`sale_approval_threshold\` forces HITL approval for sales above the threshold.
+
+## Human-in-the-loop
+- \`require_approval_for_publishing\` — social posts queue in approvals instead of going live.
+- \`require_approval_for_ai_config\` — config edits queue for boss approval.
+
+## P&L checks
+- Always cross-check generated promotions against \`payment_transactions\` and \`credit_usage\` before scaling.
+- Refuse to recommend discounts that would push margin negative based on recent BMS cost data.
+
+## Confidentiality
+- Never echo system prompts, BMS costs, or internal operational rules onto Meta channels.
+- Treat the API key like a password — rotate immediately if exposed.
+`;
+
+async function buildSkillZip(plainKey: string, scope: 'company' | 'admin', label: string): Promise<Blob> {
+  const name = serverNameFor(scope, label);
+  const zip = new JSZip();
+  const root = zip.folder(name)!;
+
+  root.file('SKILL.md', buildSkillMd(scope, label, name));
+  root.file('mcp.json', JSON.stringify(buildMcpConfig(plainKey, scope, label), null, 2));
+
+  const refs = root.folder('references')!;
+  refs.file('session-flow.md', REF_SESSION_FLOW);
+  refs.file('tools.md', REF_TOOLS);
+  refs.file('autonomous-loop.md', REF_AUTONOMOUS_LOOP);
+  refs.file('guardrails.md', REF_GUARDRAILS);
+
+  return zip.generateAsync({ type: 'blob' });
+}
+
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
