@@ -209,8 +209,82 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "verify") {
+      if (!key_id) {
+        return new Response(JSON.stringify({ error: "key_id is required" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: keyRow, error: keyErr } = await supabase
+        .from("company_api_keys")
+        .select("id, key_prefix, name, scope, company_id, is_active, expires_at, last_used_at, created_by")
+        .eq("id", key_id)
+        .maybeSingle();
+      if (keyErr) throw keyErr;
+      if (!keyRow) {
+        return new Response(JSON.stringify({ error: "Key not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Permission check: caller must be admin OR a manager/owner of the key's company
+      let allowed = isAdmin;
+      if (!allowed && keyRow.company_id) {
+        const { data: roleRow } = await supabase
+          .from("company_users")
+          .select("role")
+          .eq("user_id", userId)
+          .eq("company_id", keyRow.company_id)
+          .maybeSingle();
+        allowed = roleRow?.role === "owner" || roleRow?.role === "manager";
+      }
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "Forbidden" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Compute expected visibility
+      let visible_company_count = 0;
+      let creator_still_admin = true;
+      if (keyRow.scope === "admin") {
+        const [{ count }, { data: roleRow }] = await Promise.all([
+          supabase.from("companies").select("id", { count: "exact", head: true }),
+          supabase.from("user_roles").select("role").eq("user_id", keyRow.created_by).eq("role", "admin").maybeSingle(),
+        ]);
+        visible_company_count = count || 0;
+        creator_still_admin = !!roleRow;
+      } else {
+        visible_company_count = keyRow.company_id ? 1 : 0;
+      }
+
+      let company_name: string | null = null;
+      if (keyRow.company_id) {
+        const { data: c } = await supabase.from("companies").select("name").eq("id", keyRow.company_id).maybeSingle();
+        company_name = c?.name || null;
+      }
+
+      const expired = !!(keyRow.expires_at && new Date(keyRow.expires_at) < new Date());
+      const usable = keyRow.is_active && !expired && (keyRow.scope !== "admin" || creator_still_admin);
+
+      return new Response(JSON.stringify({
+        key_id: keyRow.id,
+        key_prefix: keyRow.key_prefix,
+        name: keyRow.name,
+        scope: keyRow.scope,
+        company_id: keyRow.company_id,
+        company_name,
+        is_active: keyRow.is_active,
+        expired,
+        creator_still_admin,
+        usable,
+        visible_company_count,
+        last_used_at: keyRow.last_used_at,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     return new Response(
-      JSON.stringify({ error: "Invalid action. Use: create, list, revoke" }),
+      JSON.stringify({ error: "Invalid action. Use: create, list, revoke, verify" }),
       {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
