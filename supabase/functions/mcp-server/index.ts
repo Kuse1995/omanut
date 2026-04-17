@@ -127,16 +127,6 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.1.0",
-    schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
-  });
-
-  // Resolve which company this tool call should target.
-  // Priority: per-call company_id > session-active (admin only) > key default.
-  // For company-scoped keys, the per-call arg is ignored to preserve tenant isolation.
-function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
-  const server = new McpServer({
-    name: "omanut-ai",
     version: "1.2.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
