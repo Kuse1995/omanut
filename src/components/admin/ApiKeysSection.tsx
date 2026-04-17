@@ -207,11 +207,19 @@ export const ApiKeysSection = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadIssuedSkill = () => {
-    const skill = buildSkillJson(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
-    const filename = newKeyScopeIssued === 'admin' ? 'omanut-ai-admin.json' : `omanut-ai-${newKeyLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'company'}.json`;
-    downloadSkillFile(filename, skill);
-    toast.success('Skill file downloaded');
+  const downloadIssuedConfig = () => {
+    const cfg = buildMcpConfig(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
+    const filename = `${serverNameFor(newKeyScopeIssued, newKeyLabel)}.mcp.json`;
+    downloadJsonFile(filename, cfg);
+    toast.success('MCP server config downloaded');
+  };
+
+  const downloadTemplateForRow = (k: ApiKey) => {
+    const scope = (k.scope ?? 'company') as 'company' | 'admin';
+    const cfg = buildMcpConfig('YOUR_API_KEY_HERE', scope, k.name);
+    const filename = `${serverNameFor(scope, k.name)}.template.mcp.json`;
+    downloadJsonFile(filename, cfg);
+    toast.success('Template downloaded — paste your saved API key into the args');
   };
 
   const renderKeyTable = (
