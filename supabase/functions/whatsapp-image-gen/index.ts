@@ -253,6 +253,32 @@ async function referenceCuratorAgent(
     referenceContext += `⚠️ HARD GEOMETRY LOCK: This product's label layout, color hex codes, logo placement, and packaging form factor are IMMUTABLE. Treat this reference as pixel-accurate ground truth — not a creative suggestion.\n`;
   }
 
+  // 1b. Operator-saved reference_asset_ids (highest manual priority — wins over auto-curated logos/promo)
+  const { data: settingsRefs } = await supabase
+    .from('image_generation_settings')
+    .select('reference_asset_ids')
+    .eq('company_id', companyId)
+    .maybeSingle();
+  const savedIds: string[] = Array.isArray(settingsRefs?.reference_asset_ids) ? settingsRefs!.reference_asset_ids : [];
+  if (savedIds.length > 0) {
+    const { data: savedMedia } = await supabase
+      .from('company_media')
+      .select('id, file_path, file_name, description')
+      .eq('company_id', companyId)
+      .in('id', savedIds);
+    if (savedMedia && savedMedia.length > 0) {
+      const byId = new Map(savedMedia.map((m: any) => [m.id, m]));
+      for (const id of savedIds) {
+        const m: any = byId.get(id);
+        if (!m) continue;
+        const url = getMediaPublicUrl(supabaseUrl, m.file_path);
+        if (!referenceUrls.includes(url)) referenceUrls.push(url);
+      }
+      referenceContext += `OPERATOR-PINNED REFERENCES: ${savedMedia.map((m: any) => m.description || m.file_name).join('; ')}\n`;
+      console.log(`[REF-CURATOR] Pinned ${savedMedia.length} operator-saved reference assets`);
+    }
+  }
+
   // 2. Fetch logo assets
   const { data: logos } = await supabase
     .from('company_media')
