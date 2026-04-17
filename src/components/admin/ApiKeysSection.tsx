@@ -236,7 +236,7 @@ export const ApiKeysSection = () => {
             <TableHead>Status</TableHead>
             <TableHead>Last Used</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[80px]" />
+            <TableHead className="w-[110px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
