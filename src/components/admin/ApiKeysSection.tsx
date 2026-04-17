@@ -414,11 +414,11 @@ export const ApiKeysSection = () => {
 
       {/* Show Key Dialog (one-time) */}
       <Dialog open={showKeyDialog} onOpenChange={(open) => { if (!open) setShowKeyDialog(false); }}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Your API Key</DialogTitle>
             <DialogDescription>
-              Copy this key now. You won't be able to see it again. Or download a ready-to-use OpenClaw skill file with the key pre-filled.
+              Copy this key now — you won't be able to see it again. Then download the MCP server config to register it with OpenClaw (or any MCP client).
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -426,13 +426,22 @@ export const ApiKeysSection = () => {
               {newPlaintextKey}
             </code>
             <Button variant="outline" size="icon" onClick={copyToClipboard} title="Copy key">
-              {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+              {copied ? <Check className="h-4 w-4 text-primary" /> : <Copy className="h-4 w-4" />}
             </Button>
           </div>
-          <Button variant="outline" onClick={downloadIssuedSkill} className="gap-1.5 w-full">
+          <Button variant="default" onClick={downloadIssuedConfig} className="gap-1.5 w-full">
             <Download className="h-4 w-4" />
-            Download OpenClaw skill file
+            Download MCP server config
           </Button>
+          <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
+            <p className="text-xs font-medium">How to install in OpenClaw</p>
+            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
+              <li>Open OpenClaw → MCP servers settings (or your <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code>).</li>
+              <li>Paste the downloaded JSON (merge under <code className="bg-muted px-1 rounded">mcpServers</code>).</li>
+              <li>Restart the connection. Tell OpenClaw: <em>"use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} MCP server"</em>.</li>
+              <li>This is <strong>not</strong> a ClawHub skill — don't run <code className="bg-muted px-1 rounded">clawhub install</code>.</li>
+            </ol>
+          </div>
           <DialogFooter>
             <Button onClick={() => setShowKeyDialog(false)}>Done</Button>
           </DialogFooter>
