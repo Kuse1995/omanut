@@ -20,6 +20,8 @@ async function hashKey(key: string): Promise<string> {
 
 type AuthContext = {
   keyId: string;
+  keyPrefix: string;
+  keyName: string | null;
   scope: "company" | "admin";
   defaultCompanyId: string | null; // null for admin scope
   createdBy: string;
@@ -45,7 +47,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 
   const { data: keyRecord, error } = await supabase
     .from("company_api_keys")
-    .select("id, company_id, is_active, expires_at, scope, created_by")
+    .select("id, company_id, is_active, expires_at, scope, created_by, name, key_prefix")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
@@ -91,6 +93,8 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 
   return {
     keyId: keyRecord.id,
+    keyPrefix: keyRecord.key_prefix || keyPrefix,
+    keyName: keyRecord.name || null,
     scope,
     defaultCompanyId: keyRecord.company_id,
     createdBy: keyRecord.created_by,
@@ -137,13 +141,57 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // SESSION / COMPANY-SWITCHING TOOLS (admin keys only useful here)
   // ═══════════════════════════════════════════════════════════
 
+  server.tool("who_am_i", {
+    description: "Debug: report which API key is currently authenticated, its scope, and the active company. ALWAYS call this first when setting up the connection — verify the key prefix matches the key you intended to install before running any other tools.",
+    inputSchema: z.object({}),
+    handler: async () => {
+      const active = adminSessionActiveCompany.get(sessionId) || null;
+      let activeName: string | null = null;
+      if (active) {
+        const { data } = await supabase.from("companies").select("name").eq("id", active).maybeSingle();
+        activeName = data?.name || null;
+      }
+      let defaultName: string | null = null;
+      if (auth.defaultCompanyId) {
+        const { data } = await supabase.from("companies").select("name").eq("id", auth.defaultCompanyId).maybeSingle();
+        defaultName = data?.name || null;
+      }
+      let companyCount: number | null = null;
+      if (auth.scope === "admin") {
+        const { count } = await supabase.from("companies").select("id", { count: "exact", head: true });
+        companyCount = count || 0;
+      } else {
+        companyCount = 1;
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        key_prefix: auth.keyPrefix,
+        key_name: auth.keyName,
+        scope: auth.scope,
+        default_company_id: auth.defaultCompanyId,
+        default_company_name: defaultName,
+        active_company_id: active,
+        active_company_name: activeName,
+        visible_company_count: companyCount,
+        session_id: sessionId,
+        server_version: "1.1.0",
+      }, null, 2) }] };
+    },
+  });
+
   server.tool("list_my_companies", {
     description: "List all companies you can train. For admin keys this returns every company; for company keys it returns only the pinned company. Use this first, then call set_active_company.",
     inputSchema: z.object({}),
     handler: async () => {
       if (auth.scope === "company") {
         const { data } = await supabase.from("companies").select("id, name, business_type").eq("id", auth.defaultCompanyId).maybeSingle();
-        return { content: [{ type: "text" as const, text: JSON.stringify({ companies: data ? [data] : [], scope: "company" }, null, 2) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          key_prefix: auth.keyPrefix,
+          scope: "company",
+          default_company_id: auth.defaultCompanyId,
+          active_company_id: auth.defaultCompanyId,
+          company_count: data ? 1 : 0,
+          companies: data ? [data] : [],
+        }, null, 2) }] };
       }
       const { data, error } = await supabase
         .from("companies")
@@ -151,7 +199,14 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .order("name", { ascending: true });
       if (error) throw error;
       const active = adminSessionActiveCompany.get(sessionId) || null;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ scope: "admin", active_company_id: active, companies: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        key_prefix: auth.keyPrefix,
+        scope: "admin",
+        default_company_id: null,
+        active_company_id: active,
+        company_count: data?.length || 0,
+        companies: data,
+      }, null, 2) }] };
     },
   });
 

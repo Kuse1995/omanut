@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Key, Plus, Copy, Check, Ban, AlertTriangle, Loader2, Download, Shield } from 'lucide-react';
+import { Key, Plus, Copy, Check, Ban, AlertTriangle, Loader2, Download, Shield, Activity } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import JSZip from 'jszip';
 
@@ -83,14 +83,19 @@ description: ${title} — train, configure, and operate the Omanut AI platform v
 
 ${scopeLine}
 
-## Setup
+## Setup — DO THIS FIRST
 
 1. Make sure the MCP server defined in \`mcp.json\` is registered with OpenClaw.
-   - If OpenClaw didn't auto-pick it up on install, copy the \`mcpServers\` block from \`mcp.json\` into your OpenClaw MCP servers config (e.g. \`~/.claw/mcp.json\`) and restart.
-2. Tell the assistant: *"use the ${name} MCP server"*.
+   - **Remove any older Omanut MCP entries from \`~/.claw/mcp.json\` first** (they will collide and OpenClaw may keep using the old key).
+   - Copy the \`mcpServers\` block from this skill's \`mcp.json\` into \`~/.claw/mcp.json\` and **fully restart** OpenClaw (not just reload).
+2. **VERIFY THE CONNECTION BEFORE ANYTHING ELSE.** Tell the assistant:
+   > *"Use the ${name} MCP server. Call \`who_am_i\` and show me the key_prefix and scope."*
+   - The \`key_prefix\` returned MUST match the prefix of the key embedded in this skill's \`mcp.json\`.
+   - If it doesn't match, OpenClaw is using a stale config — fix \`~/.claw/mcp.json\` and restart again.
+   - The \`scope\` MUST be \`${scope}\`. If it isn't, you installed the wrong skill.
 3. ${scope === 'admin'
-      ? 'Start every session by calling `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
-      : 'You are already scoped to your company — go straight to the workflow tools below.'}
+      ? 'Once verified, call `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
+      : 'Once verified, you are already scoped to your company — go straight to the workflow tools below.'}
 
 ## When to use this skill
 
@@ -244,6 +249,9 @@ export const ApiKeysSection = () => {
   const [revokeKeyScope, setRevokeKeyScope] = useState<'company' | 'admin'>('company');
   const [revoking, setRevoking] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [testingKeyId, setTestingKeyId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<any | null>(null);
+  const [showTestDialog, setShowTestDialog] = useState(false);
 
   // Detect admin role
   useEffect(() => {
@@ -371,9 +379,26 @@ export const ApiKeysSection = () => {
       const blob = await buildSkillZip('YOUR_API_KEY_HERE', scope, k.name);
       const filename = `${serverNameFor(scope, k.name)}.template.zip`;
       downloadBlob(filename, blob);
-      toast.success('Template skill downloaded — paste your saved API key into mcp.json');
+      toast.info('Template downloaded — paste your saved API key into mcp.json before installing. (The full key is only shown once at creation.)');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to build template');
+    }
+  };
+
+  const testKey = async (k: ApiKey) => {
+    setTestingKeyId(k.id);
+    setTestResult(null);
+    try {
+      const body: any = { action: 'verify', key_id: k.id };
+      if ((k.scope ?? 'company') === 'company' && k.company_id) body.company_id = k.company_id;
+      const { data, error } = await supabase.functions.invoke('manage-api-keys', { body });
+      if (error) throw error;
+      setTestResult(data);
+      setShowTestDialog(true);
+    } catch (e: any) {
+      toast.error(e?.message || 'Test failed');
+    } finally {
+      setTestingKeyId(null);
     }
   };
 
@@ -391,7 +416,7 @@ export const ApiKeysSection = () => {
             <TableHead>Status</TableHead>
             <TableHead>Last Used</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[110px]" />
+            <TableHead className="w-[150px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -434,8 +459,20 @@ export const ApiKeysSection = () => {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
+                    onClick={() => testKey(k)}
+                    disabled={testingKeyId === k.id}
+                    title="Test connection — verify scope & visibility"
+                  >
+                    {testingKeyId === k.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Activity className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => downloadTemplateForRow(k)}
-                    title="Download MCP server config template"
+                    title="Download MCP config template (you'll need to paste your saved key into mcp.json)"
                   >
                     <Download className="h-3.5 w-3.5" />
                   </Button>
@@ -582,9 +619,9 @@ export const ApiKeysSection = () => {
       <Dialog open={showKeyDialog} onOpenChange={(open) => { if (!open) setShowKeyDialog(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Your API Key</DialogTitle>
+            <DialogTitle>Your API Key — shown only once</DialogTitle>
             <DialogDescription>
-              Copy this key now — you won't be able to see it again. Then download the OpenClaw skill package (a zipped folder with <code className="bg-muted px-1 rounded">SKILL.md</code> + <code className="bg-muted px-1 rounded">mcp.json</code> + references).
+              Copy this key now — you won't be able to see it again. The skill ZIP below has the key <strong>pre-embedded</strong>; the per-row download in the table only produces a <em>template</em> with a placeholder.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -597,19 +634,75 @@ export const ApiKeysSection = () => {
           </div>
           <Button variant="default" onClick={downloadIssuedConfig} className="gap-1.5 w-full">
             <Download className="h-4 w-4" />
-            Download OpenClaw skill (.zip)
+            Download OpenClaw skill (.zip) — key embedded
           </Button>
           <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
             <p className="text-xs font-medium">How to install in OpenClaw</p>
             <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
+              <li><strong>Remove any older Omanut MCP entries</strong> from <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code> first — stale entries will keep using the old key.</li>
               <li>Unzip the file into your OpenClaw skills folder (e.g. <code className="bg-muted px-1 rounded">~/.claw/skills/</code>).</li>
-              <li>Restart OpenClaw — it auto-discovers the skill on launch.</li>
-              <li>Tell OpenClaw: <em>"use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} skill"</em>.</li>
+              <li>Copy the <code className="bg-muted px-1 rounded">mcpServers</code> block from the skill's <code className="bg-muted px-1 rounded">mcp.json</code> into <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code>.</li>
+              <li><strong>Fully restart</strong> OpenClaw (not just reload).</li>
+              <li>First message: <em>"Use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} MCP server. Call <code className="bg-muted px-0.5 rounded">who_am_i</code> and confirm the key prefix and scope match."</em></li>
               <li>Do <strong>not</strong> run <code className="bg-muted px-1 rounded">clawhub install</code> — this is a local skill, not a published one.</li>
             </ol>
           </div>
           <DialogFooter>
             <Button onClick={() => setShowKeyDialog(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Test Connection Result */}
+      <Dialog open={showTestDialog} onOpenChange={(open) => { if (!open) setShowTestDialog(false); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Key Verification</DialogTitle>
+            <DialogDescription>
+              This is what the server sees for this key. If OpenClaw reports something different, it's using a stale config.
+            </DialogDescription>
+          </DialogHeader>
+          {testResult && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Key prefix</span>
+                <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{testResult.key_prefix}…</code>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Scope</span>
+                <Badge variant="outline" className={testResult.scope === 'admin' ? 'border-primary/50 text-primary' : ''}>
+                  {testResult.scope === 'admin' ? 'Admin — All Companies' : 'Company'}
+                </Badge>
+              </div>
+              {testResult.company_name && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Pinned company</span>
+                  <span className="font-medium">{testResult.company_name}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Expected company visibility</span>
+                <span className="font-medium">{testResult.visible_company_count}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Status</span>
+                {testResult.usable ? (
+                  <Badge variant="default">Usable</Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    {!testResult.is_active ? 'Revoked' : testResult.expired ? 'Expired' : !testResult.creator_still_admin ? 'Creator lost admin role' : 'Disabled'}
+                  </Badge>
+                )}
+              </div>
+              {testResult.scope === 'admin' && (
+                <div className="rounded-md border bg-muted/40 p-2 mt-3 text-xs text-muted-foreground">
+                  In OpenClaw, run <code className="bg-muted px-1 rounded">who_am_i</code> and verify the returned <code className="bg-muted px-1 rounded">key_prefix</code> matches <code className="bg-muted px-1 rounded">{testResult.key_prefix}</code>. If it doesn't, OpenClaw is using a different (likely stale) key.
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setShowTestDialog(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
