@@ -354,19 +354,27 @@ export const ApiKeysSection = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const downloadIssuedConfig = () => {
-    const cfg = buildMcpConfig(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
-    const filename = `${serverNameFor(newKeyScopeIssued, newKeyLabel)}.mcp.json`;
-    downloadJsonFile(filename, cfg);
-    toast.success('MCP server config downloaded');
+  const downloadIssuedConfig = async () => {
+    try {
+      const blob = await buildSkillZip(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
+      const filename = `${serverNameFor(newKeyScopeIssued, newKeyLabel)}.zip`;
+      downloadBlob(filename, blob);
+      toast.success('OpenClaw skill package downloaded');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to build skill package');
+    }
   };
 
-  const downloadTemplateForRow = (k: ApiKey) => {
-    const scope = (k.scope ?? 'company') as 'company' | 'admin';
-    const cfg = buildMcpConfig('YOUR_API_KEY_HERE', scope, k.name);
-    const filename = `${serverNameFor(scope, k.name)}.template.mcp.json`;
-    downloadJsonFile(filename, cfg);
-    toast.success('Template downloaded — paste your saved API key into the args');
+  const downloadTemplateForRow = async (k: ApiKey) => {
+    try {
+      const scope = (k.scope ?? 'company') as 'company' | 'admin';
+      const blob = await buildSkillZip('YOUR_API_KEY_HERE', scope, k.name);
+      const filename = `${serverNameFor(scope, k.name)}.template.zip`;
+      downloadBlob(filename, blob);
+      toast.success('Template skill downloaded — paste your saved API key into mcp.json');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to build template');
+    }
   };
 
   const renderKeyTable = (
