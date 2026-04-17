@@ -153,6 +153,23 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     if (!c) throw new Error(`Company not found: ${companyId}`);
   }
 
+  // Gate for any tool that lets OpenClaw act AS a human inside a customer conversation
+  // (sending messages, taking over chats). Companies must explicitly opt in.
+  async function requireOpenClawEnabled(companyId: string): Promise<void> {
+    const { data, error } = await supabase
+      .from("companies")
+      .select("openclaw_takeover_enabled, name")
+      .eq("id", companyId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data?.openclaw_takeover_enabled) {
+      throw new Error(
+        `OpenClaw takeover is disabled for ${data?.name || "this company"}. ` +
+        `An operator must enable it in Company Settings → OpenClaw Agent before this tool can run.`
+      );
+    }
+  }
+
   // Wrap server.tool so handler errors become structured tool results (isError: true)
   // instead of bubbling up as JSON-RPC -32603 Internal Error. OpenClaw can then read the message.
   const originalTool = server.tool.bind(server);
@@ -438,6 +455,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
       const body: any = { company_id: companyId, message: params.message, media_url: params.media_url };
       if (params.conversation_id) body.conversationId = params.conversation_id;
@@ -909,7 +927,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       text: z.string().describe("Message text"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      await resolveCompanyId(params?.company_id); // gate
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -922,7 +941,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       text: z.string().describe("Message text"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      await resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },

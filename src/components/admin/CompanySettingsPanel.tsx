@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, AlertTriangle, Shield, Clock, Zap, ShoppingCart, Database, Loader2, CheckCircle, XCircle, Copy, Check, Eye, EyeOff } from 'lucide-react';
+import { Trash2, AlertTriangle, Shield, Clock, Zap, ShoppingCart, Database, Loader2, CheckCircle, XCircle, Copy, Check, Eye, EyeOff, Bot } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
@@ -26,6 +26,7 @@ import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import CompanyForm from '@/components/CompanyForm';
 import { ApiKeysSection } from '@/components/admin/ApiKeysSection';
+import { OpenClawAgentCard } from '@/components/admin/OpenClawAgentCard';
 
 const SERVICE_MODES = [
   { value: 'autonomous', label: 'Autonomous', description: 'AI resolves everything automatically' },
@@ -236,6 +237,13 @@ export const CompanySettingsPanel = () => {
               </div>
             </CardContent>
           </Card>
+
+          {/* OpenClaw Agent toggle */}
+          <OpenClawAgentCard
+            companyId={selectedCompany.id}
+            enabled={(selectedCompany as any).openclaw_takeover_enabled ?? false}
+            onChanged={refreshCompanies}
+          />
 
           {/* SLA Configuration */}
           <Card>

@@ -761,6 +761,7 @@ export type Database = {
           meta_phone_number_id: string | null
           metadata: Json | null
           name: string
+          openclaw_takeover_enabled: boolean
           payment_instructions: string | null
           payment_number_airtel: string | null
           payment_number_mtn: string | null
@@ -800,6 +801,7 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name: string
+          openclaw_takeover_enabled?: boolean
           payment_instructions?: string | null
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
@@ -839,6 +841,7 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name?: string
+          openclaw_takeover_enabled?: boolean
           payment_instructions?: string | null
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
