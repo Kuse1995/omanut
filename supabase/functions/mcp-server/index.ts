@@ -945,6 +945,50 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // Helper: insert a scheduled_posts row (status=approved, now) and invoke publish-meta-post
+  async function adhocPublish(params: {
+    companyId: string;
+    targetPlatform: "facebook" | "instagram" | "both";
+    caption: string;
+    image_url?: string | null;
+    video_url?: string | null;
+  }) {
+    // Look up the company's Meta page_id
+    const { data: cred, error: credErr } = await supabase
+      .from("meta_credentials")
+      .select("page_id")
+      .eq("company_id", params.companyId)
+      .limit(1)
+      .maybeSingle();
+
+    if (credErr || !cred?.page_id) {
+      throw new Error("No Meta credentials configured for this company. Connect Facebook/Instagram first.");
+    }
+
+    const { data: post, error: insErr } = await supabase
+      .from("scheduled_posts")
+      .insert({
+        company_id: params.companyId,
+        page_id: cred.page_id,
+        content: params.caption,
+        image_url: params.image_url || null,
+        video_url: params.video_url || null,
+        target_platform: params.targetPlatform,
+        scheduled_time: new Date().toISOString(),
+        status: "approved",
+        created_by: "00000000-0000-0000-0000-000000000000",
+      })
+      .select()
+      .single();
+
+    if (insErr || !post) {
+      throw new Error(`Failed to create scheduled post: ${insErr?.message || "unknown"}`);
+    }
+
+    const result = await callEdgeFunction("publish-meta-post", { post_id: post.id });
+    return { scheduled_post_id: post.id, ...result };
+  }
+
   server.tool("publish_facebook_post", {
     description: "Publish a post immediately to the company's Facebook Page.",
     inputSchema: z.object({
@@ -954,12 +998,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      const result = await callEdgeFunction("publish-meta-post", {
-        company_id: companyId,
-        platform: "facebook",
+      const result = await adhocPublish({
+        companyId,
+        targetPlatform: "facebook",
         caption: params.caption,
-        image_url: params.image_url || null,
-        video_url: params.video_url || null,
+        image_url: params.image_url,
+        video_url: params.video_url,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -974,12 +1018,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      const result = await callEdgeFunction("publish-meta-post", {
-        company_id: companyId,
-        platform: "instagram",
+      const result = await adhocPublish({
+        companyId,
+        targetPlatform: "instagram",
         caption: params.caption,
         image_url: params.image_url,
-        video_url: params.video_url || null,
+        video_url: params.video_url,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
