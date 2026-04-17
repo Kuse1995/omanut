@@ -619,9 +619,9 @@ export const ApiKeysSection = () => {
       <Dialog open={showKeyDialog} onOpenChange={(open) => { if (!open) setShowKeyDialog(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Your API Key</DialogTitle>
+            <DialogTitle>Your API Key — shown only once</DialogTitle>
             <DialogDescription>
-              Copy this key now — you won't be able to see it again. Then download the OpenClaw skill package (a zipped folder with <code className="bg-muted px-1 rounded">SKILL.md</code> + <code className="bg-muted px-1 rounded">mcp.json</code> + references).
+              Copy this key now — you won't be able to see it again. The skill ZIP below has the key <strong>pre-embedded</strong>; the per-row download in the table only produces a <em>template</em> with a placeholder.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -634,14 +634,16 @@ export const ApiKeysSection = () => {
           </div>
           <Button variant="default" onClick={downloadIssuedConfig} className="gap-1.5 w-full">
             <Download className="h-4 w-4" />
-            Download OpenClaw skill (.zip)
+            Download OpenClaw skill (.zip) — key embedded
           </Button>
           <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
             <p className="text-xs font-medium">How to install in OpenClaw</p>
             <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
+              <li><strong>Remove any older Omanut MCP entries</strong> from <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code> first — stale entries will keep using the old key.</li>
               <li>Unzip the file into your OpenClaw skills folder (e.g. <code className="bg-muted px-1 rounded">~/.claw/skills/</code>).</li>
-              <li>Restart OpenClaw — it auto-discovers the skill on launch.</li>
-              <li>Tell OpenClaw: <em>"use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} skill"</em>.</li>
+              <li>Copy the <code className="bg-muted px-1 rounded">mcpServers</code> block from the skill's <code className="bg-muted px-1 rounded">mcp.json</code> into <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code>.</li>
+              <li><strong>Fully restart</strong> OpenClaw (not just reload).</li>
+              <li>First message: <em>"Use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} MCP server. Call <code className="bg-muted px-0.5 rounded">who_am_i</code> and confirm the key prefix and scope match."</em></li>
               <li>Do <strong>not</strong> run <code className="bg-muted px-1 rounded">clawhub install</code> — this is a local skill, not a published one.</li>
             </ol>
           </div>
