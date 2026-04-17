@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Key, Plus, Copy, Check, Ban, AlertTriangle, Loader2, Download, Shield } from 'lucide-react';
+import { Key, Plus, Copy, Check, Ban, AlertTriangle, Loader2, Download, Shield, Activity } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import JSZip from 'jszip';
 
@@ -83,14 +83,19 @@ description: ${title} — train, configure, and operate the Omanut AI platform v
 
 ${scopeLine}
 
-## Setup
+## Setup — DO THIS FIRST
 
 1. Make sure the MCP server defined in \`mcp.json\` is registered with OpenClaw.
-   - If OpenClaw didn't auto-pick it up on install, copy the \`mcpServers\` block from \`mcp.json\` into your OpenClaw MCP servers config (e.g. \`~/.claw/mcp.json\`) and restart.
-2. Tell the assistant: *"use the ${name} MCP server"*.
+   - **Remove any older Omanut MCP entries from \`~/.claw/mcp.json\` first** (they will collide and OpenClaw may keep using the old key).
+   - Copy the \`mcpServers\` block from this skill's \`mcp.json\` into \`~/.claw/mcp.json\` and **fully restart** OpenClaw (not just reload).
+2. **VERIFY THE CONNECTION BEFORE ANYTHING ELSE.** Tell the assistant:
+   > *"Use the ${name} MCP server. Call \`who_am_i\` and show me the key_prefix and scope."*
+   - The \`key_prefix\` returned MUST match the prefix of the key embedded in this skill's \`mcp.json\`.
+   - If it doesn't match, OpenClaw is using a stale config — fix \`~/.claw/mcp.json\` and restart again.
+   - The \`scope\` MUST be \`${scope}\`. If it isn't, you installed the wrong skill.
 3. ${scope === 'admin'
-      ? 'Start every session by calling `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
-      : 'You are already scoped to your company — go straight to the workflow tools below.'}
+      ? 'Once verified, call `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
+      : 'Once verified, you are already scoped to your company — go straight to the workflow tools below.'}
 
 ## When to use this skill
 
