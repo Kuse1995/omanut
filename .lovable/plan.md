@@ -1,51 +1,76 @@
 
 
-## Fix: BMS `check_stock` Returns Wrong Data — AI Says "Not in Stock" for Available Products
+The user wants a single OpenClaw connection where they can verbally switch between companies during a training session. This means:
+- One admin-scoped API key (not per-company)
+- Tools accept an optional `company_id` parameter
+- A `set_active_company` / `list_my_companies` pattern so OpenClaw can hold context within a session
+- Admin role gate so only authorized users can issue these keys
 
-### Root Cause (Confirmed via Live API Testing)
+Keeping it tight.
 
-The BMS bridge (`pkiajhllkihkuchbwrgz.supabase.co/functions/v1/bms-api-bridge`) **completely ignores the `product_name` parameter** on `check_stock`. It always returns the same 10 items regardless of what product you ask about. Blue pans, blue dinner set — none appear in those 10 items.
+---
 
-The fallback code added previously (line 4198-4231) calls `list_products` when the product isn't found. `list_products` DOES return blue pans with `current_stock: 4`. However, the test messages (09:05-09:07 UTC) were sent **before** the fallback was deployed, so the AI only saw the 10 random items from check_stock, didn't find blue pans, and concluded they're out of stock.
+## Plan: OpenClaw — Train Multiple Companies in One Session
 
-### Current Fallback Gaps
+### Goal
+One OpenClaw setup. Say "switch to ANZ" → all subsequent tool calls target ANZ. Say "now do E Library" → switches. No file edits, no restart.
 
-Even with the fallback deployed, there are issues:
+### How It Works
 
-1. **`list_products` only returns ~15 items** — if inventory grows, products could still be missed
-2. **No `current_stock` emphasis** — the fallback returns raw data but doesn't explicitly tell the AI "this product IS in stock with X units"
-3. **Condition `stockData.length > 0`** — if check_stock returns an empty array, fallback doesn't trigger
-4. **Single-word product matches are too loose** — "pan" could match "Bamboo canister S (Moosa)" via partial match bugs
+1. **Admin-scoped API key** (new) — tied to your admin user, not a single company. Can target any company you have access to.
+2. **Two new MCP tools** for company switching:
+   - `list_my_companies` — returns all companies you can train
+   - `set_active_company` — sets the working company for the rest of the session (OpenClaw remembers it via tool result)
+3. **All existing tools** accept an optional `company_id` arg. If omitted, they use the last company you set. If you used a normal (per-company) key, this arg is ignored — backward compatible.
 
-### Fix (in `whatsapp-messages/index.ts`)
+### Typical Session
+```
+You: "List my companies"
+OpenClaw → list_my_companies → [ANZ, E Library, Omanut Tech, ...]
 
-**1. Always fallback to `list_products` when check_stock doesn't find the target product**
+You: "Let's train ANZ. Show recent conversations and AI errors."
+OpenClaw → set_active_company(ANZ) → list_conversations → list_ai_errors
 
-Remove the `stockData.length > 0` guard — always try list_products if the product isn't in check_stock results, even if check_stock returned empty.
+You: "Lower temperature to 0.4 and add a rule about stock checks."
+OpenClaw → update_ai_config (auto-scoped to ANZ)
 
-**2. Increase list_products limit and pass search param**
-
-Instead of fetching the full unfiltered catalog, pass `product_name` as a search hint to `list_products` so the BMS bridge can filter (if it supports it), and increase the local filter to handle larger inventories.
-
-**3. Add explicit stock status to the fallback response**
-
-When the fallback finds matched products, format the result to clearly state stock availability:
-```typescript
-bmsResult = { 
-  success: true, 
-  data: matched,
-  message: `Found ${matched.length} matching product(s): ${matched.map(p => `${p.name} - ${p.current_stock} in stock at K${p.unit_price}`).join(', ')}`
-};
+You: "Good. Now switch to E Library and do the same review."
+OpenClaw → set_active_company(E Library) → list_conversations → ...
 ```
 
-**4. Fix the empty-array edge case**
+### Changes
 
-Change condition from `if (!found && stockData.length > 0)` to `if (!found)` so the fallback always fires when the product wasn't found.
+**Database** (migration)
+- Add `scope` column to `company_api_keys` (`'company'` default, or `'admin'`).
+- Allow `company_id` to be NULL when `scope = 'admin'`.
+- Admin keys gated by `has_role(creator, 'admin')` at issue time and re-checked on every request.
 
-### Files Changed
-- `supabase/functions/whatsapp-messages/index.ts` — fix check_stock fallback logic
+**`mcp-server/index.ts`**
+- On auth: resolve key → if `admin` scope, verify creator still has admin role; else fall back to current per-company behavior.
+- Add `list_my_companies` and `set_active_company` tools.
+- Every existing tool: accept optional `company_id`; resolve effective company = `tool arg ?? session active ?? key's company_id`; reject if missing.
+- Tenant isolation per call is unchanged — admin scope just lets one key target many companies, RLS still enforced via resolved `company_id`.
 
-### Expected Results
-- "Do you have blue pans?" → AI checks stock → fallback finds them in catalog → "Yes, Blue pans 24cm (4 in stock, K450) and Blue pans 28cm (4 in stock, K550)"
-- "Is the blue dinner set available?" → Same flow → "Yes, 5 in stock at K1,200"
+**`manage-api-keys/index.ts`**
+- Accept `scope: 'admin' | 'company'` on create. Reject `'admin'` if caller lacks `admin` role.
+
+**`ApiKeysSection.tsx`** (Settings → API Keys)
+- New **"Generate Admin Training Key"** button (only visible to admins).
+- Show scope badge ("Company" / "Admin — All Companies") in the table.
+- Add a **"Download OpenClaw skill"** button next to each key — produces a ready-to-paste `omanut-ai.json` with the key pre-filled.
+
+**`openclaw-skill.json`** (template the download generates from)
+- Document the new `company_id` arg on every tool.
+- Add `list_my_companies` + `set_active_company` to `tools_overview`.
+- Add a workflow note: "Start every session with `list_my_companies` then `set_active_company` before any other tool."
+
+### Out of Scope (later, if you want them)
+- Training-mode flag on keys (tag test data, exclude from analytics, skip credit deduction).
+- Cross-company comparison dashboards (e.g. "AI quality across all my companies this week").
+- Bulk apply: "use this prompt change across these 5 companies."
+
+### Security Notes
+- Admin keys re-validate the creator's `admin` role on every request — revoking the role immediately disables the key.
+- Tenant isolation (`company_id` filtering + RLS) unchanged. Admin scope = ability to *target* any company per call, not bypass policies.
+- Key plaintext shown once at creation, same as today.
 
