@@ -26,6 +26,7 @@ import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import CompanyForm from '@/components/CompanyForm';
 import { ApiKeysSection } from '@/components/admin/ApiKeysSection';
+import { OpenClawAgentCard } from '@/components/admin/OpenClawAgentCard';
 
 const SERVICE_MODES = [
   { value: 'autonomous', label: 'Autonomous', description: 'AI resolves everything automatically' },
