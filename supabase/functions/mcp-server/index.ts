@@ -799,6 +799,109 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── list_product_media ──
+  // Lets OpenClaw browse the company's media library so it can pick reference IDs
+  // (instead of guessing or smuggling URLs into style_description).
+  server.tool("list_product_media", {
+    description: "List images from the company media library so you can pick reference IDs for image generation. Filter by category (products / logos / promotional / other) and/or search term. Returns id, public_url, file_name, description, bms_product_id, category.",
+    inputSchema: z.object({
+      category: z.string().optional().describe("Filter: products, logos, promotional, other"),
+      search: z.string().optional().describe("Substring match on file_name or description"),
+      limit: z.number().optional().describe("Max results (default 30)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      let query = supabase
+        .from("company_media")
+        .select("id, file_name, file_path, description, tags, bms_product_id, category, media_type, created_at")
+        .eq("company_id", companyId)
+        .eq("media_type", "image")
+        .order("created_at", { ascending: false })
+        .limit(params?.limit || 30);
+      if (params?.category) query = query.eq("category", params.category);
+      if (params?.search) {
+        const term = `%${params.search}%`;
+        query = query.or(`file_name.ilike.${term},description.ilike.${term}`);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      const enriched = (data || []).map((m: any) => ({
+        id: m.id,
+        file_name: m.file_name,
+        description: m.description,
+        category: m.category,
+        bms_product_id: m.bms_product_id,
+        tags: m.tags,
+        public_url: `${supabaseUrl}/storage/v1/object/public/company-media/${m.file_path}`,
+        created_at: m.created_at,
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ media: enriched, count: enriched.length }, null, 2) }] };
+    },
+  });
+
+  // ── set_image_reference_assets ──
+  // Writes image_generation_settings.reference_asset_ids properly (the existing
+  // update_image_generation_settings only exposes text fields — that's why OpenClaw
+  // was smuggling URLs into style_description).
+  server.tool("set_image_reference_assets", {
+    description: "Pin specific company_media items as visual anchors for ALL future AI-generated images (1–4 IDs recommended). These are passed directly to the image model so generations look like the real products. Pass an empty array to clear.",
+    inputSchema: z.object({
+      media_ids: z.array(z.string()).describe("UUIDs from list_product_media. Up to 4 are used."),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const ids: string[] = Array.isArray(params?.media_ids) ? params.media_ids.slice(0, 4) : [];
+
+      // Validate ownership
+      if (ids.length > 0) {
+        const { data: owned } = await supabase
+          .from("company_media")
+          .select("id")
+          .eq("company_id", companyId)
+          .in("id", ids);
+        const ownedIds = new Set((owned || []).map((m: any) => m.id));
+        const bad = ids.filter(id => !ownedIds.has(id));
+        if (bad.length > 0) {
+          throw new Error(`These media IDs are not in this company's library: ${bad.join(", ")}`);
+        }
+      }
+
+      const { data, error } = await supabase
+        .from("image_generation_settings")
+        .upsert({ company_id: companyId, reference_asset_ids: ids }, { onConflict: "company_id" })
+        .select("company_id, reference_asset_ids")
+        .single();
+      if (error) throw error;
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", reference_asset_ids: data.reference_asset_ids }, null, 2) }] };
+    },
+  });
+
+  // ── generate_business_image ──
+  // On-demand product-anchored image generation. Gated by the OpenClaw safety switch
+  // so a disabled company can't have OpenClaw spend image-gen credits on its behalf.
+  server.tool("generate_business_image", {
+    description: "Generate a brand-on, product-anchored image. Uses the company's saved reference_asset_ids by default, or pass explicit reference_media_ids to override. Returns the image URL plus the references that were actually fed to the model so you can self-evaluate.",
+    inputSchema: z.object({
+      prompt: z.string().describe("What to generate (the model also receives business context + style_description)"),
+      reference_media_ids: z.array(z.string()).optional().describe("Override: company_media UUIDs to use as visual anchors. Up to 4."),
+      auto_select_products: z.boolean().optional().describe("If no references resolved, auto-pull recent product photos + logo. Default true."),
+      conversation_id: z.string().optional().describe("Optional conversation UUID to link the generated image to."),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
+      const result = await callEdgeFunction("generate-business-image", {
+        company_id: companyId,
+        prompt: params.prompt,
+        reference_image_ids: params.reference_media_ids,
+        auto_select_products: params.auto_select_products !== false,
+        conversationId: params.conversation_id,
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
   // ── list_product_identity_profiles ──
   server.tool("list_product_identity_profiles", {
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
