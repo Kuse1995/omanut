@@ -56,7 +56,7 @@ export const ImageGenerationSettings = ({ companyId }: ImageGenerationSettingsPr
           .select('id, file_name, file_path, description, category')
           .eq('company_id', companyId)
           .eq('media_type', 'image')
-          .in('category', ['products', 'logos', 'promotional'])
+          .in('category', ['products', 'logo', 'promotional'])
           .order('created_at', { ascending: false })
           .limit(60),
       ]);

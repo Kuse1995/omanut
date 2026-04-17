@@ -152,7 +152,7 @@ serve(async (req) => {
         supabase.from('company_media')
           .select('id, file_path, file_name')
           .eq('company_id', companyId)
-          .eq('category', 'logos')
+          .eq('category', 'logo')
           .eq('media_type', 'image')
           .order('created_at', { ascending: false })
           .limit(1),
