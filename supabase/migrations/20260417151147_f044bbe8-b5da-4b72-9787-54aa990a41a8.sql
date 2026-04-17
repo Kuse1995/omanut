@@ -1,0 +1,1 @@
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS openclaw_takeover_enabled boolean NOT NULL DEFAULT false;
