@@ -27,9 +27,32 @@ type AuthContext = {
   createdBy: string;
 };
 
-// In-memory session store: maps mcp-session-id -> active company for admin keys
-// (Lives for the duration of the edge function instance; refreshed by set_active_company)
-const adminSessionActiveCompany = new Map<string, string>();
+// Persistent session store backed by public.mcp_active_company table.
+// Survives edge function cold starts. Keyed by (api_key_id, session_id).
+async function getActiveCompany(supabase: any, keyId: string, sessionId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("mcp_active_company")
+    .select("company_id")
+    .eq("api_key_id", keyId)
+    .eq("session_id", sessionId)
+    .maybeSingle();
+  if (data?.company_id) return data.company_id;
+  // Fallback: any recent session for this key (handles mcp-remote rotating session ids)
+  const { data: fallback } = await supabase
+    .from("mcp_active_company")
+    .select("company_id")
+    .eq("api_key_id", keyId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return fallback?.company_id || null;
+}
+
+async function setActiveCompany(supabase: any, keyId: string, sessionId: string, companyId: string): Promise<void> {
+  await supabase
+    .from("mcp_active_company")
+    .upsert({ api_key_id: keyId, session_id: sessionId, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: "api_key_id,session_id" });
+}
 
 async function authenticateApiKey(req: Request, supabase: any): Promise<AuthContext | Response> {
   const rawApiKey = req.headers.get("x-api-key");
