@@ -49,22 +49,25 @@ interface ApiKey {
 
 const MCP_URL = 'https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server';
 
-function buildSkillJson(plainKey: string, scope: 'company' | 'admin', label: string) {
+function serverNameFor(scope: 'company' | 'admin', label: string) {
+  if (scope === 'admin') return 'omanut-ai-admin';
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24).replace(/^-+|-+$/g, '') || 'company';
+  return `omanut-ai-${slug}`;
+}
+
+function buildMcpConfig(plainKey: string, scope: 'company' | 'admin', label: string) {
+  const name = serverNameFor(scope, label);
   return {
-    skill: {
-      name: scope === 'admin' ? `omanut-ai-admin` : `omanut-ai-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24)}`,
-      description:
-        scope === 'admin'
-          ? 'Omanut admin training key — drive AI training, testing, and refinement across all your companies. Start each session with list_my_companies then set_active_company.'
-          : `Omanut company key for ${label}. Pinned to a single company.`,
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', 'mcp-remote', MCP_URL, '--header', `x-api-key:${plainKey}`],
+    mcpServers: {
+      [name]: {
+        command: 'npx',
+        args: ['-y', 'mcp-remote', MCP_URL, '--header', `x-api-key:${plainKey}`],
+      },
     },
   };
 }
 
-function downloadSkillFile(filename: string, content: object) {
+function downloadJsonFile(filename: string, content: object) {
   const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
