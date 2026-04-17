@@ -1967,6 +1967,35 @@ export type Database = {
           },
         ]
       }
+      mcp_active_company: {
+        Row: {
+          api_key_id: string
+          company_id: string
+          session_id: string
+          updated_at: string
+        }
+        Insert: {
+          api_key_id: string
+          company_id: string
+          session_id: string
+          updated_at?: string
+        }
+        Update: {
+          api_key_id?: string
+          company_id?: string
+          session_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_active_company_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_delivery_status: {
         Row: {
           company_id: string
