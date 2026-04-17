@@ -291,7 +291,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       status: z.string().optional().describe("Filter by status: active, ended"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const limit = params?.limit || 50;
       let query = supabase
         .from("conversations")
@@ -313,7 +313,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       conversation_id: z.string().describe("UUID of the conversation"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: conv, error: convErr } = await supabase
         .from("conversations")
         .select("*")
@@ -338,7 +338,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       days: z.number().optional().describe("Period in days (default 30)"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const days = params?.days || 30;
       const since = new Date();
       since.setDate(since.getDate() - days);
@@ -369,7 +369,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       limit: z.number().optional().describe("Max results (default 100)"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("customer_segments")
         .select("*")
@@ -390,7 +390,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       priority: z.string().optional(),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase.from("support_tickets").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(params?.limit || 50);
       if (params?.status) query = query.eq("status", params.status);
       if (params?.priority) query = query.eq("priority", params.priority);
@@ -411,7 +411,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       priority: z.enum(["low", "medium", "high", "critical"]).optional(),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase.from("support_tickets").insert({
         company_id: companyId,
         ticket_number: "",
@@ -437,7 +437,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       media_url: z.string().optional().describe("Optional media URL"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
       const body: any = { company_id: companyId, message: params.message, media_url: params.media_url };
       if (params.conversation_id) body.conversationId = params.conversation_id;
@@ -457,7 +457,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Get AI configuration and overrides: model, temperature, system prompt, tools, supervisor settings.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_ai_overrides")
         .select("*")
@@ -477,7 +477,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       status: z.string().optional().describe("Filter: new, reviewed, fixed"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase
         .from("ai_error_logs")
         .select("*")
@@ -497,7 +497,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "List company media assets (images, videos, documents).",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_media")
         .select("id, file_name, file_path, media_type, category, description, tags")
@@ -514,7 +514,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       limit: z.number().optional(),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
@@ -531,7 +531,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "List active payment products.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("payment_products")
         .select("*")
@@ -547,7 +547,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Get company profile and settings.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase.from("companies").select("*").eq("id", companyId).single();
       if (error) throw error;
       return { content: [{ type: "text" as const, text: JSON.stringify({ company: data }, null, 2) }] };
@@ -562,7 +562,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       limit: z.number().optional(),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_documents")
         .select("id, filename, file_type, parsed_content, created_at")
@@ -582,7 +582,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       content: z.string().describe("Document text content"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: existing } = await supabase
         .from("company_documents")
         .select("id")
@@ -627,7 +627,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       platform: z.string().optional().describe("Filter: facebook, instagram, both"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase
         .from("scheduled_posts")
         .select("*")
@@ -652,7 +652,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       rejection_reason: z.string().optional().describe("Reason for rejection (if rejecting)"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const updates: any = {
         status: params.action === "approve" ? "approved" : "rejected",
         updated_at: new Date().toISOString(),
@@ -682,7 +682,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: cred } = await supabase
         .from("meta_credentials")
         .select("page_id")
@@ -724,7 +724,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       status: z.string().optional().describe("Filter: draft, approved, rejected"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase
         .from("generated_images")
         .select("id, prompt, image_url, status, brand_assets_used, generation_params, created_at, approved_at, rejected_at, rejection_reason")
@@ -743,7 +743,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Read the company's image generation config: style, tone, brand colors, visual guidelines, best posting times.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("image_generation_settings")
         .select("*")
@@ -764,7 +764,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       brand_colors: z.string().optional().describe("Brand color palette description"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const updates: any = {};
       if (params.style_description) updates.style_description = params.style_description;
       if (params.brand_tone) updates.brand_tone = params.brand_tone;
@@ -786,7 +786,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("product_identity_profiles")
         .select("*")
@@ -806,7 +806,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       verbatim_labels: z.array(z.string()).optional().describe("Verbatim text labels on packaging"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const updates: any = {};
       if (params.exclusion_keywords) updates.exclusion_keywords = params.exclusion_keywords;
       if (params.hex_colors) updates.hex_colors = params.hex_colors;
@@ -831,7 +831,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       status: z.string().optional().describe("Filter: pending, processing, completed, failed"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase
         .from("video_generation_jobs")
         .select("*")
@@ -890,7 +890,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       description: tool.description,
       inputSchema: tool.schema.merge(companyOverride),
       handler: async (params: any) => {
-        const companyId = resolveCompanyId(params?.company_id);
+        const companyId = await resolveCompanyId(params?.company_id);
         const { company_id: _ignored, ...bmsParams } = params || {};
         const result = await callBmsViaEdge(tool.intent, companyId, bmsParams);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
@@ -909,7 +909,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       text: z.string().describe("Message text"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      resolveCompanyId(params?.company_id); // gate
+      await resolveCompanyId(params?.company_id); // gate
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -922,7 +922,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       text: z.string().describe("Message text"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      resolveCompanyId(params?.company_id);
+      await resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -935,7 +935,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       message: z.string().describe("Reply text"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("send-facebook-comment-reply", {
         comment_id: params.comment_id,
         message: params.message,
@@ -953,7 +953,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       video_url: z.string().optional().describe("Video URL to attach"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
         platform: "facebook",
@@ -973,7 +973,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       video_url: z.string().optional().describe("Video URL for Reels"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
         platform: "instagram",
@@ -1001,7 +1001,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       max_tokens: z.number().optional(),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const updates: any = { updated_at: new Date().toISOString() };
       for (const key of ["primary_model", "primary_temperature", "system_instructions", "enabled_tools", "response_length", "fallback_message", "max_tokens"]) {
         if (params[key] !== undefined) updates[key] = params[key];
@@ -1024,7 +1024,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       status: z.string().optional().describe("Filter: completed, pending, failed"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       let query = supabase
         .from("payment_transactions")
         .select("*")
@@ -1042,7 +1042,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Read current agent routing, strategy settings, and content scheduling preferences.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const [aiRes, agentRes] = await Promise.all([
         supabase.from("company_ai_overrides").select("routing_enabled, routing_model, routing_confidence_threshold, enabled_tools, service_mode, supervisor_enabled").eq("company_id", companyId).maybeSingle(),
         supabase.from("agent_settings").select("*").eq("company_id", companyId).maybeSingle(),
@@ -1059,7 +1059,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Check if the agent is within daily spending limits. MUST be called before any spend action.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: limits } = await supabase
         .from("agent_spending_limits")
         .select("*")
@@ -1100,7 +1100,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       action_params: z.any().optional().describe("Parameters of the proposed action"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: request, error: insertErr } = await supabase
         .from("agent_approval_requests")
         .insert({
@@ -1131,7 +1131,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Check company financial health: credit balance + BMS P&L. Returns mode: 'expansion' if profitable, 'cost_cutting' if in the red.",
     inputSchema: companyOverride,
     handler: async (params: any) => {
-      const companyId = resolveCompanyId(params?.company_id);
+      const companyId = await resolveCompanyId(params?.company_id);
       const { data: company } = await supabase.from("companies").select("credit_balance, name").eq("id", companyId).single();
 
       let bmsHealth: any = null;
