@@ -20,6 +20,8 @@ async function hashKey(key: string): Promise<string> {
 
 type AuthContext = {
   keyId: string;
+  keyPrefix: string;
+  keyName: string | null;
   scope: "company" | "admin";
   defaultCompanyId: string | null; // null for admin scope
   createdBy: string;
@@ -45,7 +47,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 
   const { data: keyRecord, error } = await supabase
     .from("company_api_keys")
-    .select("id, company_id, is_active, expires_at, scope, created_by")
+    .select("id, company_id, is_active, expires_at, scope, created_by, name, key_prefix")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
@@ -91,6 +93,8 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 
   return {
     keyId: keyRecord.id,
+    keyPrefix: keyRecord.key_prefix || keyPrefix,
+    keyName: keyRecord.name || null,
     scope,
     defaultCompanyId: keyRecord.company_id,
     createdBy: keyRecord.created_by,
