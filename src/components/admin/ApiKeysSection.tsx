@@ -274,17 +274,28 @@ export const ApiKeysSection = () => {
                 {formatDistanceToNow(new Date(k.created_at), { addSuffix: true })}
               </TableCell>
               <TableCell>
-                {k.is_active && (
+                <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => { setRevokeKeyId(k.id); setRevokeKeyScope(scope); }}
-                    title="Revoke key"
+                    className="h-7 w-7"
+                    onClick={() => downloadTemplateForRow(k)}
+                    title="Download MCP server config template"
                   >
-                    <Ban className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5" />
                   </Button>
-                )}
+                  {k.is_active && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      onClick={() => { setRevokeKeyId(k.id); setRevokeKeyScope(scope); }}
+                      title="Revoke key"
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
