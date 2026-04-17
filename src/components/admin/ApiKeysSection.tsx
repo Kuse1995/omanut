@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Key, Plus, Copy, Check, Ban, AlertTriangle, Loader2, Download, Shield } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import JSZip from 'jszip';
 
 interface ApiKey {
   id: string;
