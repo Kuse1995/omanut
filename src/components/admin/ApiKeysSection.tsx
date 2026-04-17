@@ -653,6 +653,60 @@ export const ApiKeysSection = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Test Connection Result */}
+      <Dialog open={showTestDialog} onOpenChange={(open) => { if (!open) setShowTestDialog(false); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Key Verification</DialogTitle>
+            <DialogDescription>
+              This is what the server sees for this key. If OpenClaw reports something different, it's using a stale config.
+            </DialogDescription>
+          </DialogHeader>
+          {testResult && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Key prefix</span>
+                <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{testResult.key_prefix}…</code>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Scope</span>
+                <Badge variant="outline" className={testResult.scope === 'admin' ? 'border-primary/50 text-primary' : ''}>
+                  {testResult.scope === 'admin' ? 'Admin — All Companies' : 'Company'}
+                </Badge>
+              </div>
+              {testResult.company_name && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Pinned company</span>
+                  <span className="font-medium">{testResult.company_name}</span>
+                </div>
+              )}
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Expected company visibility</span>
+                <span className="font-medium">{testResult.visible_company_count}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">Status</span>
+                {testResult.usable ? (
+                  <Badge variant="default">Usable</Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    {!testResult.is_active ? 'Revoked' : testResult.expired ? 'Expired' : !testResult.creator_still_admin ? 'Creator lost admin role' : 'Disabled'}
+                  </Badge>
+                )}
+              </div>
+              {testResult.scope === 'admin' && (
+                <div className="rounded-md border bg-muted/40 p-2 mt-3 text-xs text-muted-foreground">
+                  In OpenClaw, run <code className="bg-muted px-1 rounded">who_am_i</code> and verify the returned <code className="bg-muted px-1 rounded">key_prefix</code> matches <code className="bg-muted px-1 rounded">{testResult.key_prefix}</code>. If it doesn't, OpenClaw is using a different (likely stale) key.
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setShowTestDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Revoke Confirmation */}
       <AlertDialog open={!!revokeKeyId} onOpenChange={(open) => { if (!open) setRevokeKeyId(null); }}>
         <AlertDialogContent>
