@@ -1046,7 +1046,7 @@ export type Database = {
       }
       company_api_keys: {
         Row: {
-          company_id: string
+          company_id: string | null
           created_at: string
           created_by: string
           expires_at: string | null
@@ -1056,10 +1056,11 @@ export type Database = {
           key_prefix: string
           last_used_at: string | null
           name: string
+          scope: string
           scopes: string[]
         }
         Insert: {
-          company_id: string
+          company_id?: string | null
           created_at?: string
           created_by: string
           expires_at?: string | null
@@ -1069,10 +1070,11 @@ export type Database = {
           key_prefix: string
           last_used_at?: string | null
           name?: string
+          scope?: string
           scopes?: string[]
         }
         Update: {
-          company_id?: string
+          company_id?: string | null
           created_at?: string
           created_by?: string
           expires_at?: string | null
@@ -1082,6 +1084,7 @@ export type Database = {
           key_prefix?: string
           last_used_at?: string | null
           name?: string
+          scope?: string
           scopes?: string[]
         }
         Relationships: [
