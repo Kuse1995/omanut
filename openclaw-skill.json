@@ -1,7 +1,7 @@
 {
   "skill": {
     "name": "omanut-ai",
-    "description": "Autonomous Company-in-a-Box — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, brand alignment, BMS operations (sales, invoices, stock, payments), Meta platform publishing (Facebook, Instagram), and safety guardrails (budget ceilings, HITL approval, P&L checks).",
+    "description": "Autonomous Company-in-a-Box — manage conversations, customers, tickets, media, analytics, AI training, content scheduling, image/video generation, brand alignment, BMS operations (sales, invoices, stock, payments), Meta platform publishing (Facebook, Instagram), and safety guardrails (budget ceilings, HITL approval, P&L checks). Supports multi-company training with admin-scoped keys.",
     "transport": "stdio",
     "command": "npx",
     "args": [
@@ -12,81 +12,102 @@
       "x-api-key:YOUR_API_KEY_HERE"
     ]
   },
+  "session_workflow": {
+    "description": "ALWAYS start a session with these two tools when using an admin-scoped key:",
+    "steps": [
+      "1. Call list_my_companies to see every company you can train.",
+      "2. Call set_active_company with the chosen company_id. All later tool calls (without an explicit company_id) target this company.",
+      "3. To switch mid-session: call set_active_company again with a different company_id.",
+      "4. Optional: pass company_id directly on any tool call to override the active company for that single call.",
+      "Company-scoped keys (legacy): the company_id arg is ignored; the key is pinned to one company."
+    ]
+  },
   "tools_overview": {
+    "session_control": {
+      "list_my_companies": "List every company you can train (admin keys) or the single pinned company (company keys). Returns name, id, business_type, current active_company_id.",
+      "set_active_company": "Set the active company for the rest of this session. Required at the start of every admin-key session before calling other tools."
+    },
     "conversations": {
-      "list_conversations": "List recent customer conversations with filters",
-      "get_conversation": "Get full conversation with all messages for analysis",
-      "send_message": "Send WhatsApp message to a customer"
+      "list_conversations": "List recent customer conversations with filters. Accepts optional company_id.",
+      "get_conversation": "Get full conversation with all messages for analysis.",
+      "send_message": "Send WhatsApp message to a customer."
     },
     "analytics": {
-      "get_analytics": "Business metrics: conversations, revenue, reservations",
-      "list_customers": "Customer segments with engagement and conversion scores",
-      "list_payment_transactions": "Payment history and status for revenue tracking"
+      "get_analytics": "Business metrics: conversations, revenue, reservations.",
+      "list_customers": "Customer segments with engagement and conversion scores.",
+      "list_payment_transactions": "Payment history and status for revenue tracking."
     },
     "ai_quality": {
-      "get_ai_config": "Current AI model, temperature, prompt, and tool settings",
-      "list_ai_errors": "AI error logs — hallucinations, misroutes, quality issues",
-      "update_ai_config": "Self-tune: change model, temperature, system prompt, enabled tools",
-      "get_agent_strategy": "Read agent routing, strategy, and content scheduling preferences"
+      "get_ai_config": "Current AI model, temperature, prompt, and tool settings.",
+      "list_ai_errors": "AI error logs — hallucinations, misroutes, quality issues.",
+      "update_ai_config": "Self-tune: change model, temperature, system prompt, enabled tools.",
+      "get_agent_strategy": "Read agent routing, strategy, and content scheduling preferences."
     },
     "knowledge": {
-      "search_knowledge_base": "Search company documents by keyword",
-      "update_knowledge_base": "Add or update knowledge base documents"
+      "search_knowledge_base": "Search company documents by keyword.",
+      "update_knowledge_base": "Add or update knowledge base documents."
     },
     "content_scheduling": {
-      "list_scheduled_posts": "List posts by status: pending_approval, approved, published, failed",
-      "review_scheduled_post": "Approve, reject, or edit a scheduled post — content approval agent",
-      "create_scheduled_post": "Create a new post with caption, image, platform, and timing"
+      "list_scheduled_posts": "List posts by status: pending_approval, approved, published, failed.",
+      "review_scheduled_post": "Approve, reject, or edit a scheduled post — content approval agent.",
+      "create_scheduled_post": "Create a new post with caption, image, platform, and timing."
     },
     "image_generation": {
-      "list_generated_images": "Audit AI-generated images: prompts, approval status, brand assets used",
-      "get_image_generation_settings": "Read style, tone, brand colors, visual guidelines",
-      "update_image_generation_settings": "Tune style/tone/colors to fix brand drift"
+      "list_generated_images": "Audit AI-generated images: prompts, approval status, brand assets used.",
+      "get_image_generation_settings": "Read style, tone, brand colors, visual guidelines.",
+      "update_image_generation_settings": "Tune style/tone/colors to fix brand drift."
     },
     "brand_identity": {
-      "list_product_identity_profiles": "Audit product fingerprints: hex colors, labels, exclusion keywords",
-      "update_product_identity_profile": "Fix brand alignment: edit exclusions, colors, labels"
+      "list_product_identity_profiles": "Audit product fingerprints: hex colors, labels, exclusion keywords.",
+      "update_product_identity_profile": "Fix brand alignment: edit exclusions, colors, labels."
     },
     "video_generation": {
-      "list_video_jobs": "Monitor video jobs: status, provider, aspect ratio, failures"
+      "list_video_jobs": "Monitor video jobs: status, provider, aspect ratio, failures."
     },
     "bms_operations": {
-      "bms_check_stock": "Check product stock levels in the business management system",
-      "bms_record_sale": "Record a completed sale transaction",
-      "bms_create_invoice": "Generate an invoice for a customer",
-      "bms_send_receipt": "Send receipt to customer",
-      "bms_generate_payment_link": "Create a Lenco payment link for checkout",
-      "bms_get_sales_summary": "Revenue and sales summary report",
-      "bms_list_products": "List all products from the BMS catalog",
-      "bms_low_stock_alerts": "Get items below reorder threshold",
-      "bms_who_owes": "Outstanding customer debts",
-      "bms_profit_loss_report": "Profit & loss financial report",
-      "bms_create_order": "Create a new order",
-      "bms_get_order_status": "Track order fulfillment status"
+      "bms_check_stock": "Check product stock levels in the business management system.",
+      "bms_record_sale": "Record a completed sale transaction.",
+      "bms_create_invoice": "Generate an invoice for a customer.",
+      "bms_send_receipt": "Send receipt to customer.",
+      "bms_generate_payment_link": "Create a Lenco payment link for checkout.",
+      "bms_get_sales_summary": "Revenue and sales summary report.",
+      "bms_list_products": "List all products from the BMS catalog.",
+      "bms_low_stock_alerts": "Get items below reorder threshold.",
+      "bms_who_owes": "Outstanding customer debts.",
+      "bms_profit_loss_report": "Profit & loss financial report.",
+      "bms_create_order": "Create a new order.",
+      "bms_get_order_status": "Track order fulfillment status."
     },
     "meta_platform": {
-      "send_facebook_message": "Send a Facebook Messenger DM to a customer",
-      "send_instagram_message": "Send an Instagram DM to a customer",
-      "reply_facebook_comment": "Reply to a Facebook or Instagram comment",
-      "publish_facebook_post": "Publish immediately to the company's Facebook Page",
-      "publish_instagram_post": "Publish immediately to the company's Instagram account"
+      "send_facebook_message": "Send a Facebook Messenger DM to a customer.",
+      "send_instagram_message": "Send an Instagram DM to a customer.",
+      "reply_facebook_comment": "Reply to a Facebook or Instagram comment.",
+      "publish_facebook_post": "Publish immediately to the company's Facebook Page.",
+      "publish_instagram_post": "Publish immediately to the company's Instagram account."
     },
     "safety_guardrails": {
-      "get_spending_guard": "Check daily budget ceiling — MUST call before any spend action",
-      "request_approval": "Human-in-the-Loop: send WhatsApp approval request to owner before high-risk actions",
-      "get_financial_health": "P&L sanity check — returns 'expansion' or 'cost_cutting' mode"
+      "get_spending_guard": "Check daily budget ceiling — MUST call before any spend action.",
+      "request_approval": "Human-in-the-Loop: send WhatsApp approval request to owner before high-risk actions.",
+      "get_financial_health": "P&L sanity check — returns 'expansion' or 'cost_cutting' mode."
     },
     "operations": {
-      "list_tickets": "List support tickets",
-      "create_ticket": "Create a new support ticket",
-      "list_reservations": "List reservations/bookings",
-      "list_products": "List active payment products",
-      "list_media": "List company media assets",
-      "get_company_info": "Company profile and settings"
+      "list_tickets": "List support tickets.",
+      "create_ticket": "Create a new support ticket.",
+      "list_reservations": "List reservations/bookings.",
+      "list_products": "List active payment products.",
+      "list_media": "List company media assets.",
+      "get_company_info": "Company profile and settings."
+    }
+  },
+  "company_id_argument": {
+    "description": "Every tool accepts an optional company_id (UUID) parameter.",
+    "behavior": {
+      "admin_key": "If omitted, falls back to the company set via set_active_company. If neither is set, the call errors. Pass it to override the active company for one call.",
+      "company_key": "Ignored — the key is permanently scoped to one company."
     }
   },
   "autonomous_loop": {
-    "description": "The agent can run a recursive Analyze → Research → Create → Promote → Sell → Audit loop autonomously.",
+    "description": "The agent can run a recursive Analyze → Research → Create → Promote → Sell → Audit loop autonomously per company.",
     "phases": {
       "analyze": ["get_analytics", "get_ai_config", "get_financial_health"],
       "research": ["search_knowledge_base", "list_customers", "bms_list_products"],
@@ -102,11 +123,11 @@
     }
   },
   "setup_instructions": [
-    "1. Generate an API key in the Omanut dashboard (Settings → API Keys)",
-    "2. Replace YOUR_API_KEY_HERE in the args array with your key",
+    "1. Generate an API key in the Omanut dashboard (Settings → API Keys). For multi-company training, generate an Admin Training Key (admins only).",
+    "2. Replace YOUR_API_KEY_HERE in the args array with your key.",
     "3. Save this file to ~/.openclaw/skills/omanut-ai.json",
-    "4. Make sure Node.js (v18+) is installed (needed for npx)",
-    "5. Restart OpenClaw — first launch takes a few seconds as mcp-remote downloads",
-    "6. Test with: 'List my recent conversations'"
+    "4. Make sure Node.js (v18+) is installed (needed for npx).",
+    "5. Restart OpenClaw — first launch takes a few seconds as mcp-remote downloads.",
+    "6. Test: 'List my companies' → 'Switch to <company name>' → 'Show recent conversations'."
   ]
 }

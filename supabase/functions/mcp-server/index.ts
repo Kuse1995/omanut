@@ -18,7 +18,18 @@ async function hashKey(key: string): Promise<string> {
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function authenticateApiKey(req: Request, supabase: any): Promise<{ companyId: string } | Response> {
+type AuthContext = {
+  keyId: string;
+  scope: "company" | "admin";
+  defaultCompanyId: string | null; // null for admin scope
+  createdBy: string;
+};
+
+// In-memory session store: maps mcp-session-id -> active company for admin keys
+// (Lives for the duration of the edge function instance; refreshed by set_active_company)
+const adminSessionActiveCompany = new Map<string, string>();
+
+async function authenticateApiKey(req: Request, supabase: any): Promise<AuthContext | Response> {
   const rawApiKey = req.headers.get("x-api-key");
   if (!rawApiKey) {
     return new Response(JSON.stringify({ error: "Missing x-api-key header" }), {
@@ -26,7 +37,6 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<{ compan
     });
   }
 
-  // Trim whitespace/newlines that mcp-remote bridge might add
   const apiKey = rawApiKey.trim();
   const keyPrefix = apiKey.substring(0, 12);
   const keyHash = await hashKey(apiKey);
@@ -35,22 +45,19 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<{ compan
 
   const { data: keyRecord, error } = await supabase
     .from("company_api_keys")
-    .select("id, company_id, is_active, expires_at")
+    .select("id, company_id, is_active, expires_at, scope, created_by")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
-  if (error) {
-    console.error("[MCP-AUTH] DB query error:", error.message);
-  }
+  if (error) console.error("[MCP-AUTH] DB query error:", error.message);
 
   if (!keyRecord) {
-    console.warn(`[MCP-AUTH] No key found for prefix ${keyPrefix} hash ${keyHash.substring(0, 16)}...`);
+    console.warn(`[MCP-AUTH] No key found for prefix ${keyPrefix}`);
     return new Response(JSON.stringify({ error: "Invalid API key" }), {
       status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
   if (!keyRecord.is_active) {
-    console.warn(`[MCP-AUTH] Key ${keyPrefix} is inactive`);
     return new Response(JSON.stringify({ error: "API key revoked" }), {
       status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -61,19 +68,111 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<{ compan
     });
   }
 
-  console.log(`[MCP-AUTH] Authenticated company: ${keyRecord.company_id}`);
-  // fire-and-forget last_used_at update
+  const scope = (keyRecord.scope || "company") as "company" | "admin";
+
+  // Re-validate admin role on every request for admin-scoped keys
+  if (scope === "admin") {
+    const { data: roleRow } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", keyRecord.created_by)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (!roleRow) {
+      console.warn(`[MCP-AUTH] Admin key ${keyPrefix}: creator no longer has admin role`);
+      return new Response(JSON.stringify({ error: "API key disabled: creator no longer has admin role" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  console.log(`[MCP-AUTH] Authenticated key ${keyPrefix} scope=${scope} default_company=${keyRecord.company_id || "<admin>"}`);
   supabase.from("company_api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", keyRecord.id).then(() => {});
 
-  return { companyId: keyRecord.company_id };
+  return {
+    keyId: keyRecord.id,
+    scope,
+    defaultCompanyId: keyRecord.company_id,
+    createdBy: keyRecord.created_by,
+  };
 }
 
-function createMcpServer(supabase: any, companyId: string): McpServer {
+function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.0.0",
+    version: "1.1.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
+
+  // Resolve which company this tool call should target.
+  // Priority: per-call company_id > session-active (admin only) > key default.
+  // For company-scoped keys, the per-call arg is ignored to preserve tenant isolation.
+  function resolveCompanyId(perCallCompanyId?: string): string {
+    if (auth.scope === "company") {
+      // Company keys are pinned — ignore any client override.
+      if (!auth.defaultCompanyId) {
+        throw new Error("Company-scoped key has no company_id (configuration error)");
+      }
+      return auth.defaultCompanyId;
+    }
+    // Admin scope
+    const explicit = perCallCompanyId?.trim();
+    if (explicit) return explicit;
+    const active = adminSessionActiveCompany.get(sessionId);
+    if (active) return active;
+    throw new Error("No active company set. Call list_my_companies, then set_active_company first, or pass company_id in this tool call.");
+  }
+
+  // Verify admin caller actually has access to this company (admin role grants access to all)
+  // Currently admin role implies access to everything — simple gate. If you later want
+  // restricted admin keys, scope this further.
+  async function requireCompanyAccess(companyId: string): Promise<void> {
+    if (auth.scope === "company") return; // already pinned
+    // Admin role = access to all companies. Validate company exists.
+    const { data: c } = await supabase.from("companies").select("id").eq("id", companyId).maybeSingle();
+    if (!c) throw new Error(`Company not found: ${companyId}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // SESSION / COMPANY-SWITCHING TOOLS (admin keys only useful here)
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool("list_my_companies", {
+    description: "List all companies you can train. For admin keys this returns every company; for company keys it returns only the pinned company. Use this first, then call set_active_company.",
+    inputSchema: z.object({}),
+    handler: async () => {
+      if (auth.scope === "company") {
+        const { data } = await supabase.from("companies").select("id, name, business_type").eq("id", auth.defaultCompanyId).maybeSingle();
+        return { content: [{ type: "text" as const, text: JSON.stringify({ companies: data ? [data] : [], scope: "company" }, null, 2) }] };
+      }
+      const { data, error } = await supabase
+        .from("companies")
+        .select("id, name, business_type, created_at")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      const active = adminSessionActiveCompany.get(sessionId) || null;
+      return { content: [{ type: "text" as const, text: JSON.stringify({ scope: "admin", active_company_id: active, companies: data }, null, 2) }] };
+    },
+  });
+
+  server.tool("set_active_company", {
+    description: "Set the active company for the rest of this session. After calling this, all subsequent tool calls (without an explicit company_id) target this company. Only meaningful for admin-scoped keys.",
+    inputSchema: z.object({
+      company_id: z.string().describe("UUID of the company to switch to"),
+    }),
+    handler: async (params: any) => {
+      if (auth.scope === "company") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, note: "Company-scoped key is already pinned; switching is a no-op.", active_company_id: auth.defaultCompanyId }, null, 2) }] };
+      }
+      await requireCompanyAccess(params.company_id);
+      adminSessionActiveCompany.set(sessionId, params.company_id);
+      const { data: c } = await supabase.from("companies").select("id, name").eq("id", params.company_id).maybeSingle();
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, active_company_id: params.company_id, company_name: c?.name || null, message: `All subsequent tool calls will target ${c?.name || params.company_id}.` }, null, 2) }] };
+    },
+  });
+
+  // Helper for tool schemas: optional per-call company_id override
+  const companyOverride = z.object({ company_id: z.string().optional().describe("Optional: target a specific company (admin keys only). If omitted, uses set_active_company or the key's default.") });
 
   // ── list_conversations ──
   server.tool("list_conversations", {
@@ -81,8 +180,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
       status: z.string().optional().describe("Filter by status: active, ended"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const limit = params?.limit || 50;
       let query = supabase
         .from("conversations")
@@ -93,7 +193,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       if (params?.status) query = query.eq("status", params.status);
       const { data, error } = await query;
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ conversations: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, conversations: data }, null, 2) }] };
     },
   });
 
@@ -102,8 +202,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     description: "Get full conversation details and all messages for analysis.",
     inputSchema: z.object({
       conversation_id: z.string().describe("UUID of the conversation"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: conv, error: convErr } = await supabase
         .from("conversations")
         .select("*")
@@ -126,8 +227,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     description: "Get business analytics: conversation count, revenue, reservations over a period.",
     inputSchema: z.object({
       days: z.number().optional().describe("Period in days (default 30)"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const days = params?.days || 30;
       const since = new Date();
       since.setDate(since.getDate() - days);
@@ -140,6 +242,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       const totalRevenue = (payRes.data || []).reduce((sum: number, t: any) => sum + Number(t.amount), 0);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
+          company_id: companyId,
           period_days: days,
           total_conversations: convRes.count || 0,
           total_reservations: resRes.count || 0,
@@ -155,8 +258,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     description: "List customer segments with engagement scores, interests, and conversion potential.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 100)"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("customer_segments")
         .select("*")
@@ -175,8 +279,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       limit: z.number().optional(),
       status: z.string().optional(),
       priority: z.string().optional(),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase.from("support_tickets").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(params?.limit || 50);
       if (params?.status) query = query.eq("status", params.status);
       if (params?.priority) query = query.eq("priority", params.priority);
@@ -195,8 +300,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       issue_summary: z.string(),
       issue_category: z.string().optional(),
       priority: z.enum(["low", "medium", "high", "critical"]).optional(),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase.from("support_tickets").insert({
         company_id: companyId,
         ticket_number: "",
@@ -220,8 +326,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       conversation_id: z.string().optional().describe("Conversation ID to send message to (preferred)"),
       message: z.string().describe("Message text"),
       media_url: z.string().optional().describe("Optional media URL"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
       const body: any = { company_id: companyId, message: params.message, media_url: params.media_url };
       if (params.conversation_id) body.conversationId = params.conversation_id;
@@ -239,15 +346,16 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── get_ai_config ──
   server.tool("get_ai_config", {
     description: "Get AI configuration and overrides: model, temperature, system prompt, tools, supervisor settings.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_ai_overrides")
         .select("*")
         .eq("company_id", companyId)
         .maybeSingle();
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ai_config: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, ai_config: data }, null, 2) }] };
     },
   });
 
@@ -258,8 +366,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       limit: z.number().optional().describe("Max results (default 50)"),
       severity: z.string().optional().describe("Filter: low, medium, high, critical"),
       status: z.string().optional().describe("Filter: new, reviewed, fixed"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase
         .from("ai_error_logs")
         .select("*")
@@ -277,8 +386,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── list_media ──
   server.tool("list_media", {
     description: "List company media assets (images, videos, documents).",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_media")
         .select("id, file_name, file_path, media_type, category, description, tags")
@@ -293,8 +403,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     description: "List reservations/bookings.",
     inputSchema: z.object({
       limit: z.number().optional(),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
@@ -309,8 +420,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── list_products ──
   server.tool("list_products", {
     description: "List active payment products.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("payment_products")
         .select("*")
@@ -324,8 +436,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── get_company_info ──
   server.tool("get_company_info", {
     description: "Get company profile and settings.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase.from("companies").select("*").eq("id", companyId).single();
       if (error) throw error;
       return { content: [{ type: "text" as const, text: JSON.stringify({ company: data }, null, 2) }] };
@@ -338,8 +451,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       query: z.string().describe("Search keyword"),
       limit: z.number().optional(),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("company_documents")
         .select("id, filename, file_type, parsed_content, created_at")
@@ -357,8 +471,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       filename: z.string().describe("Document filename (used as key)"),
       content: z.string().describe("Document text content"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: existing } = await supabase
         .from("company_documents")
         .select("id")
@@ -401,8 +516,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       limit: z.number().optional().describe("Max results (default 50)"),
       status: z.string().optional().describe("Filter: pending_approval, approved, published, failed"),
       platform: z.string().optional().describe("Filter: facebook, instagram, both"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase
         .from("scheduled_posts")
         .select("*")
@@ -425,8 +541,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       action: z.enum(["approve", "reject"]).describe("Approve or reject"),
       updated_caption: z.string().optional().describe("Optional: new caption text"),
       rejection_reason: z.string().optional().describe("Reason for rejection (if rejecting)"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const updates: any = {
         status: params.action === "approve" ? "approved" : "rejected",
         updated_at: new Date().toISOString(),
@@ -454,9 +571,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       video_url: z.string().optional().describe("Video URL for the post (reels)"),
       platform: z.enum(["facebook", "instagram", "both"]).describe("Target platform"),
       scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
-      // Fetch page_id from meta_credentials (required NOT NULL column)
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: cred } = await supabase
         .from("meta_credentials")
         .select("page_id")
@@ -496,8 +613,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
       status: z.string().optional().describe("Filter: draft, approved, rejected"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase
         .from("generated_images")
         .select("id, prompt, image_url, status, brand_assets_used, generation_params, created_at, approved_at, rejected_at, rejection_reason")
@@ -514,8 +632,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── get_image_generation_settings ──
   server.tool("get_image_generation_settings", {
     description: "Read the company's image generation config: style, tone, brand colors, visual guidelines, best posting times.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("image_generation_settings")
         .select("*")
@@ -534,8 +653,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       brand_tone: z.string().optional().describe("Brand tone of voice"),
       visual_guidelines: z.string().optional().describe("Visual guidelines text"),
       brand_colors: z.string().optional().describe("Brand color palette description"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const updates: any = {};
       if (params.style_description) updates.style_description = params.style_description;
       if (params.brand_tone) updates.brand_tone = params.brand_tone;
@@ -555,8 +675,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // ── list_product_identity_profiles ──
   server.tool("list_product_identity_profiles", {
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data, error } = await supabase
         .from("product_identity_profiles")
         .select("*")
@@ -574,8 +695,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       exclusion_keywords: z.array(z.string()).optional().describe("Keywords to exclude from generation"),
       hex_colors: z.array(z.string()).optional().describe("Brand hex colors"),
       verbatim_labels: z.array(z.string()).optional().describe("Verbatim text labels on packaging"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const updates: any = {};
       if (params.exclusion_keywords) updates.exclusion_keywords = params.exclusion_keywords;
       if (params.hex_colors) updates.hex_colors = params.hex_colors;
@@ -598,8 +720,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 30)"),
       status: z.string().optional().describe("Filter: pending, processing, completed, failed"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase
         .from("video_generation_jobs")
         .select("*")
@@ -617,7 +740,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   // BMS PROXY TOOLS — route through bms-agent edge function
   // ═══════════════════════════════════════════════════════════
 
-  async function callBmsViaEdge(intent: string, params: Record<string, any> = {}) {
+  async function callBmsViaEdge(intent: string, companyId: string, params: Record<string, any> = {}) {
     const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bms-agent`;
     const res = await fetch(url, {
       method: "POST",
@@ -638,7 +761,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   }
 
   // BMS tools
-  const bmsToolDefs: Array<{ name: string; intent: string; description: string; schema: z.ZodType }> = [
+  const bmsToolDefs: Array<{ name: string; intent: string; description: string; schema: z.ZodObject<any> }> = [
     { name: "bms_check_stock", intent: "check_stock", description: "Check product stock levels in the BMS.", schema: z.object({ product_name: z.string().optional() }) },
     { name: "bms_record_sale", intent: "record_sale", description: "Record a completed sale transaction in the BMS.", schema: z.object({ product_name: z.string(), quantity: z.number(), customer_phone: z.string().optional(), amount: z.number().optional() }) },
     { name: "bms_create_invoice", intent: "create_invoice", description: "Generate an invoice for a customer.", schema: z.object({ customer_name: z.string(), customer_phone: z.string().optional(), items: z.array(z.any()) }) },
@@ -656,9 +779,11 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
   for (const tool of bmsToolDefs) {
     server.tool(tool.name, {
       description: tool.description,
-      inputSchema: tool.schema,
+      inputSchema: tool.schema.merge(companyOverride),
       handler: async (params: any) => {
-        const result = await callBmsViaEdge(tool.intent, params || {});
+        const companyId = resolveCompanyId(params?.company_id);
+        const { company_id: _ignored, ...bmsParams } = params || {};
+        const result = await callBmsViaEdge(tool.intent, companyId, bmsParams);
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
     });
@@ -673,8 +798,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       conversation_id: z.string().describe("Conversation UUID (must be a Messenger conversation)"),
       text: z.string().describe("Message text"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      resolveCompanyId(params?.company_id); // gate
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -685,8 +811,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       conversation_id: z.string().describe("Conversation UUID (must be an IG DM conversation)"),
       text: z.string().describe("Message text"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -697,13 +824,13 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       comment_id: z.string().describe("The Meta comment ID to reply to"),
       message: z.string().describe("Reply text"),
-      company_id_override: z.string().optional().describe("Optional company ID override"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("send-facebook-comment-reply", {
         comment_id: params.comment_id,
         message: params.message,
-        company_id: params.company_id_override || companyId,
+        company_id: companyId,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -715,8 +842,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().optional().describe("Image URL to attach"),
       video_url: z.string().optional().describe("Video URL to attach"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
         platform: "facebook",
@@ -734,8 +862,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().describe("Image URL (required for IG)"),
       video_url: z.string().optional().describe("Video URL for Reels"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const result = await callEdgeFunction("publish-meta-post", {
         company_id: companyId,
         platform: "instagram",
@@ -761,8 +890,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       response_length: z.enum(["short", "medium", "long"]).optional(),
       fallback_message: z.string().optional(),
       max_tokens: z.number().optional(),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const updates: any = { updated_at: new Date().toISOString() };
       for (const key of ["primary_model", "primary_temperature", "system_instructions", "enabled_tools", "response_length", "fallback_message", "max_tokens"]) {
         if (params[key] !== undefined) updates[key] = params[key];
@@ -774,7 +904,7 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", config: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", company_id: companyId, config: data }, null, 2) }] };
     },
   });
 
@@ -783,8 +913,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
       status: z.string().optional().describe("Filter: completed, pending, failed"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       let query = supabase
         .from("payment_transactions")
         .select("*")
@@ -800,8 +931,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
 
   server.tool("get_agent_strategy", {
     description: "Read current agent routing, strategy settings, and content scheduling preferences.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const [aiRes, agentRes] = await Promise.all([
         supabase.from("company_ai_overrides").select("routing_enabled, routing_model, routing_confidence_threshold, enabled_tools, service_mode, supervisor_enabled").eq("company_id", companyId).maybeSingle(),
         supabase.from("agent_settings").select("*").eq("company_id", companyId).maybeSingle(),
@@ -816,8 +948,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
 
   server.tool("get_spending_guard", {
     description: "Check if the agent is within daily spending limits. MUST be called before any spend action.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: limits } = await supabase
         .from("agent_spending_limits")
         .select("*")
@@ -856,8 +989,9 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
       action_type: z.string().describe("Type: sale, ai_config_change, publish, expense"),
       action_summary: z.string().describe("Human-readable summary of what you want to do"),
       action_params: z.any().optional().describe("Parameters of the proposed action"),
-    }),
+    }).merge(companyOverride),
     handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: request, error: insertErr } = await supabase
         .from("agent_approval_requests")
         .insert({
@@ -886,13 +1020,14 @@ function createMcpServer(supabase: any, companyId: string): McpServer {
 
   server.tool("get_financial_health", {
     description: "Check company financial health: credit balance + BMS P&L. Returns mode: 'expansion' if profitable, 'cost_cutting' if in the red.",
-    inputSchema: z.object({}),
-    handler: async () => {
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = resolveCompanyId(params?.company_id);
       const { data: company } = await supabase.from("companies").select("credit_balance, name").eq("id", companyId).single();
-      
+
       let bmsHealth: any = null;
       try {
-        bmsHealth = await callBmsViaEdge("profit_loss_report", {});
+        bmsHealth = await callBmsViaEdge("profit_loss_report", companyId, {});
       } catch (_e) {
         // BMS may not be connected
       }
@@ -935,7 +1070,10 @@ app.all("/*", async (c) => {
   const authResult = await authenticateApiKey(c.req.raw, supabase);
   if (authResult instanceof Response) return authResult;
 
-  const mcpServer = createMcpServer(supabase, authResult.companyId);
+  // Use mcp-session-id (or fall back to key id) to scope active-company switching
+  const sessionId = c.req.raw.headers.get("mcp-session-id") || `key:${authResult.keyId}`;
+
+  const mcpServer = createMcpServer(supabase, authResult, sessionId);
   const transport = new StreamableHttpTransport();
   const httpHandler = transport.bind(mcpServer);
   return await httpHandler(c.req.raw);
