@@ -134,31 +134,64 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // Resolve which company this tool call should target.
   // Priority: per-call company_id > session-active (admin only) > key default.
   // For company-scoped keys, the per-call arg is ignored to preserve tenant isolation.
-  function resolveCompanyId(perCallCompanyId?: string): string {
+function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
+  const server = new McpServer({
+    name: "omanut-ai",
+    version: "1.2.0",
+    schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
+  });
+
+  // Resolve which company this tool call should target.
+  // Priority: per-call company_id > session-active (admin only, DB-backed) > key default.
+  async function resolveCompanyId(perCallCompanyId?: string): Promise<string> {
     if (auth.scope === "company") {
-      // Company keys are pinned — ignore any client override.
       if (!auth.defaultCompanyId) {
         throw new Error("Company-scoped key has no company_id (configuration error)");
       }
       return auth.defaultCompanyId;
     }
-    // Admin scope
     const explicit = perCallCompanyId?.trim();
     if (explicit) return explicit;
-    const active = adminSessionActiveCompany.get(sessionId);
+    const active = await getActiveCompany(supabase, auth.keyId, sessionId);
     if (active) return active;
-    throw new Error("No active company set. Call list_my_companies, then set_active_company first, or pass company_id in this tool call.");
+    throw new Error("NO_ACTIVE_COMPANY: Call list_my_companies, then set_active_company first, or pass company_id in this tool call.");
   }
 
-  // Verify admin caller actually has access to this company (admin role grants access to all)
-  // Currently admin role implies access to everything — simple gate. If you later want
-  // restricted admin keys, scope this further.
   async function requireCompanyAccess(companyId: string): Promise<void> {
-    if (auth.scope === "company") return; // already pinned
-    // Admin role = access to all companies. Validate company exists.
+    if (auth.scope === "company") return;
     const { data: c } = await supabase.from("companies").select("id").eq("id", companyId).maybeSingle();
     if (!c) throw new Error(`Company not found: ${companyId}`);
   }
+
+  // Wrap server.tool so handler errors become structured tool results (isError: true)
+  // instead of bubbling up as JSON-RPC -32603 Internal Error. OpenClaw can then read the message.
+  const originalTool = server.tool.bind(server);
+  (server as any).tool = (name: string, def: any) => {
+    const userHandler = def.handler;
+    def.handler = async (params: any, ctx: any) => {
+      try {
+        return await userHandler(params, ctx);
+      } catch (err: any) {
+        const raw = err?.message || String(err);
+        const isNoActive = raw.startsWith("NO_ACTIVE_COMPANY");
+        const errMsg = isNoActive ? raw.replace("NO_ACTIVE_COMPANY: ", "") : raw;
+        const hint = isNoActive
+          ? "Run list_my_companies to see available companies, then set_active_company { company_id: '...' }."
+          : "Check tool arguments and try again. Use who_am_i to verify your connection.";
+        console.error(`[MCP-TOOL-ERR] tool=${name} key=${auth.keyPrefix} session=${sessionId} msg=${raw}`);
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: JSON.stringify({
+            ok: false,
+            tool: name,
+            error: errMsg,
+            hint,
+          }, null, 2) }],
+        };
+      }
+    };
+    return originalTool(name, def);
+  };
 
   // ═══════════════════════════════════════════════════════════
   // SESSION / COMPANY-SWITCHING TOOLS (admin keys only useful here)
@@ -168,7 +201,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Debug: report which API key is currently authenticated, its scope, and the active company. ALWAYS call this first when setting up the connection — verify the key prefix matches the key you intended to install before running any other tools.",
     inputSchema: z.object({}),
     handler: async () => {
-      const active = adminSessionActiveCompany.get(sessionId) || null;
+      const active = await getActiveCompany(supabase, auth.keyId, sessionId);
       let activeName: string | null = null;
       if (active) {
         const { data } = await supabase.from("companies").select("name").eq("id", active).maybeSingle();
@@ -186,6 +219,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       } else {
         companyCount = 1;
       }
+      const next_step = auth.scope === "admin" && !active
+        ? "Call list_my_companies, then set_active_company { company_id: '...' } before using other tools."
+        : "Connection ready. Proceed with tool calls.";
       return { content: [{ type: "text" as const, text: JSON.stringify({
         key_prefix: auth.keyPrefix,
         key_name: auth.keyName,
@@ -196,7 +232,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         active_company_name: activeName,
         visible_company_count: companyCount,
         session_id: sessionId,
-        server_version: "1.1.0",
+        server_version: "1.2.0",
+        next_step,
       }, null, 2) }] };
     },
   });
@@ -214,6 +251,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           active_company_id: auth.defaultCompanyId,
           company_count: data ? 1 : 0,
           companies: data ? [data] : [],
+          next_step: "Company is already pinned. Proceed with any tool.",
         }, null, 2) }] };
       }
       const { data, error } = await supabase
@@ -221,7 +259,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .select("id, name, business_type, created_at")
         .order("name", { ascending: true });
       if (error) throw error;
-      const active = adminSessionActiveCompany.get(sessionId) || null;
+      const active = await getActiveCompany(supabase, auth.keyId, sessionId);
       return { content: [{ type: "text" as const, text: JSON.stringify({
         key_prefix: auth.keyPrefix,
         scope: "admin",
@@ -229,12 +267,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         active_company_id: active,
         company_count: data?.length || 0,
         companies: data,
+        next_step: active
+          ? `Active company already set. Call set_active_company again to switch, or proceed.`
+          : "Call set_active_company { company_id: '<one of the ids above>' } before any company-specific tool.",
       }, null, 2) }] };
     },
   });
 
   server.tool("set_active_company", {
-    description: "Set the active company for the rest of this session. After calling this, all subsequent tool calls (without an explicit company_id) target this company. Only meaningful for admin-scoped keys.",
+    description: "Set the active company for the rest of this session. After calling this, all subsequent tool calls (without an explicit company_id) target this company. Persisted across requests. Only meaningful for admin-scoped keys.",
     inputSchema: z.object({
       company_id: z.string().describe("UUID of the company to switch to"),
     }),
@@ -243,9 +284,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, note: "Company-scoped key is already pinned; switching is a no-op.", active_company_id: auth.defaultCompanyId }, null, 2) }] };
       }
       await requireCompanyAccess(params.company_id);
-      adminSessionActiveCompany.set(sessionId, params.company_id);
+      await setActiveCompany(supabase, auth.keyId, sessionId, params.company_id);
       const { data: c } = await supabase.from("companies").select("id, name").eq("id", params.company_id).maybeSingle();
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, active_company_id: params.company_id, company_name: c?.name || null, message: `All subsequent tool calls will target ${c?.name || params.company_id}.` }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, active_company_id: params.company_id, company_name: c?.name || null, message: `All subsequent tool calls will target ${c?.name || params.company_id}.`, next_step: "Proceed with any company-specific tool." }, null, 2) }] };
     },
   });
 
