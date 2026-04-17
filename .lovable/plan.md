@@ -1,57 +1,51 @@
 
 
-## Goal
+## What's actually going on
 
-Fix two real bugs OpenClaw uncovered while pitching to PAUL:
+OpenClaw's audit is **misleading you**. Here are the facts from the codebase:
 
-1. The AI promises to "alert the boss" / "escalate hot leads" but the `notify_boss` tool isn't actually implemented in the MCP server, so calls return "Method not found".
-2. Same for `send_media` — listed in `enabled_tools`, but no MCP handler exists, so video/image sends from OpenClaw silently fail.
+### `notify_boss` and `send_media` ARE implemented
 
-## Investigation needed before plan is final
+They are registered in `supabase/functions/mcp-server/index.ts` at lines 908 and 992 (we shipped them two turns ago and they were deployed). OpenClaw is reporting "Method not found" because **its tool list is stale** — most MCP clients cache the `tools/list` result for a session and don't re-fetch after a server redeploy.
 
-Before writing code I need to confirm three things in `supabase/functions/mcp-server/index.ts`:
+**Fix**: disconnect and reconnect the OpenClaw MCP integration in ChatGPT/Claude (or run the MCP `tools/list` call again). No code change needed.
 
-- Whether `notify_boss` and `send_media` are referenced anywhere (definitions vs. just listed in `enabled_tools`).
-- The existing tool registration pattern (so the new tools match the gating + auth flow we just used for `generate_business_image`).
-- Whether `send-boss-notification` already covers everything `notify_boss` should do (it does — see context: it handles boss phone resolution, Twilio dispatch, and `boss_conversations` logging).
+OpenClaw also gave us hand-written code to "drop in" that uses `boss_whatsapp` and a `whatsapp_credentials` table — neither exists in our schema. We use `company_boss_phones` + Twilio (per the `getBossPhones` shared helper). That code would not work here. Ignore it.
 
-Files I'll read in implementation mode: `supabase/functions/mcp-server/index.ts`, `supabase/functions/send-boss-notification/index.ts`, and the `messaging-conversation-resolution` memory + `send-whatsapp-message` function for the media path.
+### `lookup_product`, `get_date_info`, `check_availability` are NOT MCP tools by design
 
-## Plan
+They live in `whatsapp-messages/index.ts` as inline tools for the **automated WhatsApp AI**, not the MCP server. OpenClaw should not be calling them — they're scoped to WhatsApp customer chats where the AI also has access to the live conversation, BMS catalog, and reservation tables.
 
-### 1. Implement `notify_boss` MCP tool
+If we want OpenClaw to do the same lookups, we expose them as **new MCP wrappers**, not by claiming the existing ones are broken. (We already have `bms_list_products`, `list_reservations`, etc. — those cover most of it.)
 
-Wraps the existing `send-boss-notification` edge function so OpenClaw can fire boss alerts directly.
+### `bms_generate_payment_link` "Unauthorized"
 
-- Args: `notification_type` (enum from existing function: `interested_client`, `high_value_opportunity`, `customer_complaint`, `vip_client_info`, `action_required`, default `interested_client`), `customer_name`, `customer_phone`, `summary` (free text), optional `priority` (`low`/`medium`/`high`), optional `media_url`.
-- Gated by the OpenClaw outbound-actions toggle (`requireOpenClawEnabled`).
-- Resolves the active company from MCP session context, then invokes `send-boss-notification` with the right `data` shape per type.
-- Returns: `{ success, boss_phones_notified: [...], notification_type }` so OpenClaw can confirm Abraham received it.
+This isn't an MCP-auth issue. The MCP tool calls the BMS bridge with `BMS_API_SECRET`, and BMS itself enforces RBAC (per the `bms-role-based-access` memory). The active company's BMS user role likely doesn't have `generate_payment_link` permission. To confirm I'd pull recent BMS bridge logs.
 
-### 2. Implement `send_media` MCP tool
+## Proposed plan
 
-Lets OpenClaw send a video/image into a customer WhatsApp conversation (the missing piece behind the failed video sends).
+Three small, independent things — pick any subset:
 
-- Args: `conversation_id` OR `customer_phone` (one required), `media_url` (required), optional `caption`.
-- Gated by the OpenClaw outbound-actions toggle.
-- Internally calls `send-whatsapp-message` (which already auto-resolves/creates the conversation and applies the `whatsapp:` prefix logic from the `twilio-media-message-normalization` memory) with `mediaUrl` + `body`.
-- Logs the outbound message into `messages` so it shows up in the inbox like any other reply.
-- Returns: `{ success, message_sid, conversation_id }`.
+### A. Verify the MCP tools really are live (no code change)
+Hit the deployed MCP endpoint with a `tools/list` call and confirm `notify_boss` and `send_media` are in the response. If yes → the problem is OpenClaw's cache and you reconnect the integration. If no → we redeploy `mcp-server`.
 
-### 3. Sanity check on advertised tools
+### B. Add the 3 missing MCP wrappers (only if you want OpenClaw to do these)
+- `lookup_product` — wraps existing BMS `lookup_product` intent (we already proxy other BMS intents).
+- `get_date_info` — pure utility, returns today/tomorrow/weekend dates in `Africa/Lusaka`.
+- `check_availability` — queries `reservations` for a given date/time and returns conflicts.
 
-Walk the `enabled_tools` list in the AI config / system prompt against the actual MCP tool registry. If any other tool is advertised but missing, surface it in the response so we can decide whether to build or remove it. (No code change yet — just a list.)
+All three gated by company context (no `requireOpenClawEnabled` needed — they're read-only).
 
-## Files to edit
+### C. Investigate `bms_generate_payment_link` Unauthorized
+Pull the last few `mcp-server` + BMS bridge logs for that tool, identify whether it's the BMS role check or a missing `BMS_API_SECRET` for that company, and either grant the role on the BMS side or fix the auth header.
 
-- `supabase/functions/mcp-server/index.ts` — register `notify_boss` and `send_media` tools, both gated by `requireOpenClawEnabled`.
+## Recommendation
 
-No DB changes. No new edge functions — both new tools call existing ones (`send-boss-notification`, `send-whatsapp-message`).
+Do **A first** (30 seconds, no code). It's almost certainly the whole problem for `notify_boss` / `send_media` — OpenClaw is gaslighting you with a cached tool list. Then decide on B and C based on what you actually need OpenClaw to do.
 
-## Verification
+## Files that would change
 
-1. In OpenClaw: `set_active_company` → ANZ.
-2. `notify_boss { notification_type: "high_value_opportunity", customer_name: "PAUL", customer_phone: "+260…", summary: "Picked Pro plan, ready to onboard" }` → Abraham gets the WhatsApp alert; response lists his number under `boss_phones_notified`.
-3. `send_media { customer_phone: "+260…", media_url: "https://…/demo.mp4", caption: "Quick demo for you" }` → customer receives the video on WhatsApp; the message appears in the conversation thread in the admin inbox.
-4. Re-run with the OpenClaw outbound-actions toggle off → both tools return the standard `OpenClaw outbound actions are disabled` error instead of executing.
+- **A**: none.
+- **B**: `supabase/functions/mcp-server/index.ts` only (3 new `server.tool(...)` blocks following the same pattern as the existing tools).
+- **C**: probably `supabase/functions/mcp-server/index.ts` BMS proxy block, plus a config check on the BMS side — depends on what the logs show.
 
