@@ -416,7 +416,7 @@ export const ApiKeysSection = () => {
             <TableHead>Status</TableHead>
             <TableHead>Last Used</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[110px]" />
+            <TableHead className="w-[150px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -459,8 +459,20 @@ export const ApiKeysSection = () => {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
+                    onClick={() => testKey(k)}
+                    disabled={testingKeyId === k.id}
+                    title="Test connection — verify scope & visibility"
+                  >
+                    {testingKeyId === k.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <Activity className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => downloadTemplateForRow(k)}
-                    title="Download MCP server config template"
+                    title="Download MCP config template (you'll need to paste your saved key into mcp.json)"
                   >
                     <Download className="h-3.5 w-3.5" />
                   </Button>
