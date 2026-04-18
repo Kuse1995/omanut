@@ -957,7 +957,13 @@ async function sendBossHandoffNotification(
   customerName: string,
   summary: string,
   supabase: any,
-  handedOffBy: string = 'unknown'
+  handedOffBy: string = 'unknown',
+  handoffContext?: {
+    askingAbout?: string;
+    stage?: string;
+    triggerReason?: string;
+    collectedInfo?: Record<string, string>;
+  }
 ) {
   const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -984,13 +990,33 @@ async function sendBossHandoffNotification(
   const agentLabel = handedOffBy === 'support_agent' ? 'Support Agent' : 
                     handedOffBy === 'sales_agent' ? 'Sales Agent' : 
                     handedOffBy === 'supervisor_router' ? 'Supervisor (Payment/Critical)' : 
+                    handedOffBy === 'hybrid_trigger' ? 'Hybrid Mode (auto-handoff)' :
+                    handedOffBy === 'human_first' ? 'Human-First Mode' :
                     'System';
+
+  // Build structured context block if provided
+  let contextBlock = '';
+  if (handoffContext) {
+    const lines: string[] = [];
+    if (handoffContext.stage) lines.push(`Stage: ${handoffContext.stage}`);
+    if (handoffContext.triggerReason) lines.push(`Trigger: ${handoffContext.triggerReason}`);
+    if (handoffContext.askingAbout) lines.push(`Asking about: ${handoffContext.askingAbout.substring(0, 200)}`);
+    if (handoffContext.collectedInfo && Object.keys(handoffContext.collectedInfo).length > 0) {
+      const infoLines = Object.entries(handoffContext.collectedInfo)
+        .map(([k, v]) => `  • ${k}: ${v}`)
+        .join('\n');
+      lines.push(`Collected so far:\n${infoLines}`);
+    }
+    if (lines.length > 0) {
+      contextBlock = `\n\n${lines.join('\n')}`;
+    }
+  }
 
   const message = `🔔 ACTION REQUIRED
 
 Client Name: ${customerName}
 Client Number: ${displayPhone}
-Handed off by: ${agentLabel}
+Handed off by: ${agentLabel}${contextBlock}
 
 Summary:
 ${summary}
