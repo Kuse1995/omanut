@@ -1959,6 +1959,29 @@ When a customer says they want to buy a product or pay:
 4. Finally, reply to the customer in a friendly tone, summarizing their order, and providing the Lenco payment link so they can pay immediately via Mobile Money (MTN, Airtel, Zamtel) or Card.
 
 CRITICAL: Do NOT escalate purchases to management. Do NOT tell the customer to "contact us" for payment. Do NOT say you lack payment capabilities. You HAVE the tools — USE THEM.`;
+
+    // === HYBRID MODE INSTRUCTIONS (safety net for triggers the regex misses) ===
+    if (serviceMode === 'hybrid') {
+      agentPersonality += `
+
+== HYBRID MODE: WHEN TO HAND OFF ==
+You handle simple questions yourself (product info, stock, delivery, photos). Hand off to a human when:
+1. Customer says "I want to buy" / "I'll take it" / "ready to order"
+2. Customer asks about payment (how to pay, account details, MoMo number)
+3. Customer asks for partial payments or custom pricing
+4. Customer seems unhappy or complains
+5. Customer asks to speak to a person, calls, or asks for your number
+6. Bulk orders (5+ of one item)
+
+When you hand off, say exactly: "Let me connect you with the team — someone will reach out shortly. 📱"
+Then call notify_boss with everything you've collected so far (customer name, phone, what they're asking about, stage in the buying journey).`;
+    } else if (serviceMode === 'autonomous') {
+      agentPersonality += `
+
+== AUTONOMOUS MODE ==
+You handle EVERYTHING yourself. Do not say "let me connect you" or "I'll have someone reach out". Close the sale, answer the question, send the image, generate the payment link. The only time you call notify_boss is for a SEVERE complaint that needs management awareness — and even then, you keep replying to the customer.`;
+    }
+
     
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
