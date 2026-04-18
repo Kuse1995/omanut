@@ -1030,6 +1030,287 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ═══════════════════════════════════════════════════════════
+  // DIAGNOSTIC / SELF-TRAINING TOOLS — read-only, company-scoped
+  // Lets OpenClaw inspect why the AI failed without round-tripping
+  // through Lovable. All gated by active company; no system prompts
+  // or wholesale costs are ever returned (confidentiality memory).
+  // ═══════════════════════════════════════════════════════════
+
+  // ── get_conversation_trace ──
+  // Full message-by-message trace with tool calls + errors. System
+  // role messages are stripped so internal prompts never leak out.
+  server.tool("get_conversation_trace", {
+    description: "Get the full message-by-message trace of a conversation, including tool calls, tool results, and any errors recorded in message_metadata. Use this to diagnose WHY the AI gave a bad answer on a specific turn. System-role messages are stripped for confidentiality.",
+    inputSchema: z.object({
+      conversation_id: z.string().describe("UUID of the conversation to inspect"),
+      limit: z.number().optional().describe("Max messages to return, newest first (default 20, max 100)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      // Verify the conversation belongs to this company before exposing anything
+      const { data: convo, error: convoErr } = await supabase
+        .from("conversations")
+        .select("id, company_id, phone, customer_name, status, active_agent, started_at, last_message_at")
+        .eq("id", params.conversation_id)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (convoErr) throw convoErr;
+      if (!convo) {
+        throw new Error(`Conversation ${params.conversation_id} not found in active company.`);
+      }
+
+      const limit = Math.min(Math.max(params?.limit || 20, 1), 100);
+      const { data: rows, error } = await supabase
+        .from("messages")
+        .select("id, role, content, created_at, message_metadata")
+        .eq("conversation_id", params.conversation_id)
+        .neq("role", "system") // never expose system prompts
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+
+      const messages = (rows || []).reverse().map((m: any) => {
+        const meta = m.message_metadata || {};
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          created_at: m.created_at,
+          tool_calls: meta.tool_calls || meta.toolCalls || null,
+          tool_results: meta.tool_results || meta.toolResults || null,
+          error: meta.error || meta.error_message || null,
+          model: meta.model || null,
+        };
+      });
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        conversation: convo,
+        message_count: messages.length,
+        messages,
+      }, null, 2) }] };
+    },
+  });
+
+  // ── get_ai_errors ──
+  // Reads ai_error_logs for the active company, with optional search/since filters.
+  server.tool("get_ai_errors", {
+    description: "List recent AI failures for this company from ai_error_logs: error type, severity, original message, AI response, detected flags, and quality score. Use to spot recurring failure patterns.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results, newest first (default 20, max 100)"),
+      since: z.string().optional().describe("ISO timestamp — only return errors created after this time"),
+      search: z.string().optional().describe("Case-insensitive substring filter against original_message + ai_response"),
+      severity: z.string().optional().describe("Filter: low, medium, high, critical"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const limit = Math.min(Math.max(params?.limit || 20, 1), 100);
+      let q = supabase
+        .from("ai_error_logs")
+        .select("id, conversation_id, error_type, severity, original_message, ai_response, expected_response, status, quality_score, confidence_score, detected_flags, auto_flagged, created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (params?.since) q = q.gte("created_at", params.since);
+      if (params?.severity) q = q.eq("severity", params.severity);
+      if (params?.search) {
+        const s = params.search.replace(/[%,]/g, "");
+        q = q.or(`original_message.ilike.%${s}%,ai_response.ilike.%${s}%`);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        count: (data || []).length,
+        errors: data,
+      }, null, 2) }] };
+    },
+  });
+
+  // ── get_ai_override_summary ──
+  // Returns metadata about the company_ai_overrides row WITHOUT the raw
+  // system_instructions / agent prompts. Confidentiality memory: never leak prompts.
+  server.tool("get_ai_override_summary", {
+    description: "Get a SAFE summary of this company's AI configuration overrides: which fields are set, prompt lengths, banned topics, voice style, models, enabled tools. Raw system prompts are NEVER returned (confidentiality). Use get_ai_config for non-sensitive operational fields.",
+    inputSchema: companyOverride,
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { data, error } = await supabase
+        .from("company_ai_overrides")
+        .select("system_instructions, banned_topics, qa_style, service_mode, voice_style, voice_model, primary_model, primary_temperature, max_tokens, response_length, enabled_tools, supervisor_enabled, sales_agent_prompt, support_agent_prompt, boss_agent_prompt, fallback_message, updated_at")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ has_override: false }, null, 2) }] };
+      }
+
+      const lenOrZero = (v: any) => (typeof v === "string" ? v.length : 0);
+      const summary = {
+        has_override: true,
+        system_instructions: { has_value: !!data.system_instructions, length: lenOrZero(data.system_instructions) },
+        sales_agent_prompt:  { has_value: !!data.sales_agent_prompt,  length: lenOrZero(data.sales_agent_prompt) },
+        support_agent_prompt:{ has_value: !!data.support_agent_prompt,length: lenOrZero(data.support_agent_prompt) },
+        boss_agent_prompt:   { has_value: !!data.boss_agent_prompt,   length: lenOrZero(data.boss_agent_prompt) },
+        // Non-sensitive operational fields are safe to expose verbatim
+        banned_topics: data.banned_topics,
+        qa_style: data.qa_style,
+        service_mode: data.service_mode,
+        voice_style: data.voice_style,
+        voice_model: data.voice_model,
+        primary_model: data.primary_model,
+        primary_temperature: data.primary_temperature,
+        max_tokens: data.max_tokens,
+        response_length: data.response_length,
+        enabled_tools: data.enabled_tools,
+        supervisor_enabled: data.supervisor_enabled,
+        fallback_message: data.fallback_message,
+        updated_at: data.updated_at,
+      };
+      return { content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }] };
+    },
+  });
+
+  // ── get_boss_notification_history ──
+  // Lets OpenClaw verify what was actually sent to Abraham via notify_boss.
+  server.tool("get_boss_notification_history", {
+    description: "List the most recent boss/owner notifications sent for this company (via notify_boss or other paths). Returns message content and any boss reply, so you can confirm an alert really went out.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results, newest first (default 10, max 50)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const limit = Math.min(Math.max(params?.limit || 10, 1), 50);
+      const { data, error } = await supabase
+        .from("boss_conversations")
+        .select("id, message_from, message_content, response, tool_context, created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        count: (data || []).length,
+        notifications: data,
+      }, null, 2) }] };
+    },
+  });
+
+  // ── get_function_logs ──
+  // Honest implementation: raw Supabase Edge runtime logs require the
+  // Management API personal access token, which the MCP service-role key
+  // does NOT have. Instead we surface the most actionable signal we DO
+  // have: ai_error_logs filtered by function context, and recent failed
+  // messages. Tool description tells OpenClaw exactly what it gets.
+  const FUNCTION_ALLOWLIST = new Set([
+    "whatsapp-messages",
+    "mcp-server",
+    "supervisor-agent",
+    "boss-chat",
+    "meta-webhook",
+    "send-boss-notification",
+    "send-whatsapp-message",
+    "generate-business-image",
+    "bms-agent",
+  ]);
+  server.tool("get_function_logs", {
+    description: "Get diagnostic signal for a deployed edge function. NOTE: raw runtime logs require Lovable; this tool returns the actionable equivalent — recent ai_error_logs whose error_type or detected_flags reference the function, plus recent messages with errors in their metadata. Whitelisted functions only.",
+    inputSchema: z.object({
+      function_name: z.string().describe("Edge function name. Allowed: " + Array.from(FUNCTION_ALLOWLIST).join(", ")),
+      search: z.string().optional().describe("Optional substring to filter on (matches error_type, ai_response, original_message)"),
+      limit: z.number().optional().describe("Max results, newest first (default 30, max 100)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const fn = String(params.function_name || "").trim();
+      if (!FUNCTION_ALLOWLIST.has(fn)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          error: "function not in allowlist",
+          allowed: Array.from(FUNCTION_ALLOWLIST),
+        }, null, 2) }] };
+      }
+      const limit = Math.min(Math.max(params?.limit || 30, 1), 100);
+      const search = (params?.search || "").toString().replace(/[%,]/g, "");
+
+      // 1) ai_error_logs that mention the function in detected_flags or error_type
+      let errQ = supabase
+        .from("ai_error_logs")
+        .select("id, conversation_id, error_type, severity, original_message, ai_response, detected_flags, created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      // Postgrest array contains
+      const filters = [`error_type.ilike.%${fn}%`, `detected_flags.cs.{${fn}}`];
+      if (search) filters.push(`original_message.ilike.%${search}%`, `ai_response.ilike.%${search}%`);
+      errQ = errQ.or(filters.join(","));
+      const { data: errors } = await errQ;
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        function_name: fn,
+        note: "Raw runtime logs are not exposed via MCP. These are AI error logs scoped to this function for the active company.",
+        error_count: (errors || []).length,
+        errors,
+      }, null, 2) }] };
+    },
+  });
+
+  // ── read_function_source ──
+  // Reads edge function source from the deployed bundle. Whitelisted only.
+  // Truncates large files. Lets OpenClaw understand tool internals before
+  // calling them, instead of guessing from the schema.
+  server.tool("read_function_source", {
+    description: "Read the source code of a deployed edge function (whitelisted). Returns text. Truncates at max_bytes. Use this to understand what a tool actually does before calling it.",
+    inputSchema: z.object({
+      function_name: z.string().describe("Edge function name. Allowed: " + Array.from(FUNCTION_ALLOWLIST).join(", ")),
+      max_bytes: z.number().optional().describe("Truncation limit in bytes (default 20000, max 100000)"),
+    }),
+    handler: async (params: any) => {
+      const fn = String(params.function_name || "").trim();
+      if (!FUNCTION_ALLOWLIST.has(fn)) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          error: "function not in allowlist",
+          allowed: Array.from(FUNCTION_ALLOWLIST),
+        }, null, 2) }] };
+      }
+      const cap = Math.min(Math.max(params?.max_bytes || 20000, 1000), 100000);
+      // Edge function bundles deploy with the source path preserved relative
+      // to the running function. Try a few well-known locations.
+      const candidates = [
+        `/home/deno/functions/${fn}/index.ts`,
+        `./${fn}/index.ts`,
+        `../${fn}/index.ts`,
+        `/tmp/functions/${fn}/index.ts`,
+      ];
+      let source: string | null = null;
+      let foundPath: string | null = null;
+      let lastErr: string | null = null;
+      for (const p of candidates) {
+        try {
+          source = await Deno.readTextFile(p);
+          foundPath = p;
+          break;
+        } catch (e) {
+          lastErr = (e as Error).message;
+        }
+      }
+      if (source === null) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          error: "source not readable from runtime bundle",
+          function_name: fn,
+          tried: candidates,
+          last_error: lastErr,
+          hint: "Use a GitHub read-only token in OpenClaw's integration settings to read source via the repo instead.",
+        }, null, 2) }] };
+      }
+      const truncated = source.length > cap;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        function_name: fn,
+        path: foundPath,
+        bytes: source.length,
+        truncated,
+        source: truncated ? source.slice(0, cap) + `\n\n/* …truncated, ${source.length - cap} more bytes. Increase max_bytes (max 100000). */` : source,
+      }, null, 2) }] };
+    },
+  });
+
   // ── list_product_identity_profiles ──
   server.tool("list_product_identity_profiles", {
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
