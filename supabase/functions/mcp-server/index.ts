@@ -1073,6 +1073,82 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── unpause_conversation ──
+  // Release a conversation from human/OpenClaw takeover so the AI resumes.
+  // Mirrors the "Release all" admin button but scoped to a single conversation,
+  // with strict (conversation, company) binding to prevent cross-tenant unpause.
+  server.tool("unpause_conversation", {
+    description: "Resume the AI on a paused conversation. Clears human_takeover, is_paused_for_human, takeover_at, takeover_by and sets active_agent back to 'sales'. Useful when a conversation got stuck in human queue. Verifies the conversation belongs to the active company before unpausing.",
+    inputSchema: z.object({
+      conversation_id: z.string().describe("UUID of the conversation to resume"),
+      active_agent: z.string().optional().describe("Agent to route back to (default: 'sales'). Use 'support' or 'boss' if the chat is owner/management."),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      await requireOpenClawEnabled(companyId);
+
+      // Strict binding: conversation must belong to the active company.
+      const { data: convo, error: convoErr } = await supabase
+        .from("conversations")
+        .select("id, company_id, is_paused_for_human, human_takeover, active_agent, phone, customer_name")
+        .eq("id", params.conversation_id)
+        .eq("company_id", companyId)
+        .maybeSingle();
+
+      if (convoErr) throw new Error(`Lookup failed: ${convoErr.message}`);
+      if (!convo) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              code: "CROSS_TENANT_DENIED",
+              message: "Conversation does not belong to the active company. Refusing to unpause.",
+            }, null, 2),
+          }],
+        };
+      }
+
+      const nextAgent = params.active_agent || "sales";
+
+      const { error: updateErr } = await supabase
+        .from("conversations")
+        .update({
+          is_paused_for_human: false,
+          human_takeover: false,
+          takeover_at: null,
+          takeover_by: null,
+          active_agent: nextAgent,
+        })
+        .eq("id", params.conversation_id)
+        .eq("company_id", companyId);
+
+      if (updateErr) throw new Error(`Unpause failed: ${updateErr.message}`);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            ok: true,
+            conversation_id: convo.id,
+            customer: convo.customer_name || convo.phone,
+            previous: {
+              is_paused_for_human: convo.is_paused_for_human,
+              human_takeover: convo.human_takeover,
+              active_agent: convo.active_agent,
+            },
+            now: {
+              is_paused_for_human: false,
+              human_takeover: false,
+              active_agent: nextAgent,
+            },
+            message: "AI resumed on this conversation. Next inbound message will get an AI response.",
+          }, null, 2),
+        }],
+      };
+    },
+  });
+
   // ═══════════════════════════════════════════════════════════
   // DIAGNOSTIC / SELF-TRAINING TOOLS — read-only, company-scoped
   // Lets OpenClaw inspect why the AI failed without round-tripping
