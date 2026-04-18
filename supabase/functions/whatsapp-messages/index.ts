@@ -333,6 +333,71 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   return 'complex';
 }
 
+// ============= HYBRID-MODE HANDOFF TRIGGER DETECTOR =============
+// Returns { triggered, reason, stage } based on the spec's 6 hand-off triggers.
+type HybridStage = 'browsing' | 'interested' | 'ready_to_buy' | 'complaint' | 'bulk' | 'human_request' | 'payment';
+function detectHybridHandoffTrigger(userMessage: string): { triggered: boolean; reason: string; stage: HybridStage } {
+  const msg = (userMessage || '').toLowerCase();
+
+  // 1. Buy intent
+  if (/\b(i\s*want\s+to\s+buy|i'?ll?\s+take\s+(it|that|this|the)|ready\s+to\s+(pay|order|buy|purchase)|let'?s\s+do\s+it|i\s*want\s+to\s+(order|purchase)|i\s*will\s+(buy|take|order))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer expressed buy intent', stage: 'ready_to_buy' };
+  }
+
+  // 2. Payment talk
+  if (/\b(payment|pay\s+(now|by|with|via)|momo|account\s+(number|details)|how\s+do\s+i\s+pay|where\s+do\s+i\s+pay|how\s+can\s+i\s+pay|send\s+(your|me)\s+(account|payment|momo))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer asking about payment details', stage: 'payment' };
+  }
+
+  // 3. Partial / custom pricing
+  if (/\b(partial\s+(payment|deposit)|installment|deposit|discount|negotiate|special\s+price|bargain|reduce\s+(the\s+)?price|lower\s+price)\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer asking for custom pricing or partial payment', stage: 'payment' };
+  }
+
+  // 4. Human request
+  if (/\b(call\s+me|your\s+(phone\s+)?number|speak\s+to\s+(someone|a\s+person|human|agent|manager)|talk\s+to\s+(someone|a\s+human|a\s+person|agent|manager)|connect\s+me|real\s+person)\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer requested a human', stage: 'human_request' };
+  }
+
+  // 5. Complaint
+  if (/\b(complain|complaint|problem|issue|not\s+working|broken|disappointed|unhappy|refund|terrible|awful|angry|wrong\s+(item|order|product))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer reported a complaint or issue', stage: 'complaint' };
+  }
+
+  // 6. Bulk: any quantity ≥ 5
+  const qtyMatches = msg.matchAll(/(\d+)\s*(pcs|pieces|units|items|x|of|qty|quantity|orders?)?/gi);
+  for (const m of qtyMatches) {
+    const n = parseInt(m[1], 10);
+    if (!isNaN(n) && n >= 5 && n <= 10000) {
+      return { triggered: true, reason: `Bulk order detected (${n} units)`, stage: 'bulk' };
+    }
+  }
+
+  return { triggered: false, reason: '', stage: 'browsing' };
+}
+
+// Fetch collected client info for a conversation (used in handoff context)
+async function getCollectedClientInfo(supabase: any, conversationId: string, customerPhone: string) {
+  try {
+    const { data } = await supabase
+      .from('client_information')
+      .select('info_type, information')
+      .or(`conversation_id.eq.${conversationId},customer_phone.eq.${customerPhone}`)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const collected: Record<string, string> = {};
+    for (const row of (data || [])) {
+      if (row?.info_type && row?.information && !collected[row.info_type]) {
+        collected[row.info_type] = String(row.information).substring(0, 200);
+      }
+    }
+    return collected;
+  } catch (e) {
+    console.error('[HANDOFF] Failed to fetch client info:', e);
+    return {};
+  }
+}
+
 // Detect image generation commands from WhatsApp messages
 // TIGHTENED: Requires explicit image keywords, no more false positives from common words
 function detectImageGenCommand(message: string): { 
@@ -892,7 +957,13 @@ async function sendBossHandoffNotification(
   customerName: string,
   summary: string,
   supabase: any,
-  handedOffBy: string = 'unknown'
+  handedOffBy: string = 'unknown',
+  handoffContext?: {
+    askingAbout?: string;
+    stage?: string;
+    triggerReason?: string;
+    collectedInfo?: Record<string, string>;
+  }
 ) {
   const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -919,13 +990,33 @@ async function sendBossHandoffNotification(
   const agentLabel = handedOffBy === 'support_agent' ? 'Support Agent' : 
                     handedOffBy === 'sales_agent' ? 'Sales Agent' : 
                     handedOffBy === 'supervisor_router' ? 'Supervisor (Payment/Critical)' : 
+                    handedOffBy === 'hybrid_trigger' ? 'Hybrid Mode (auto-handoff)' :
+                    handedOffBy === 'human_first' ? 'Human-First Mode' :
                     'System';
+
+  // Build structured context block if provided
+  let contextBlock = '';
+  if (handoffContext) {
+    const lines: string[] = [];
+    if (handoffContext.stage) lines.push(`Stage: ${handoffContext.stage}`);
+    if (handoffContext.triggerReason) lines.push(`Trigger: ${handoffContext.triggerReason}`);
+    if (handoffContext.askingAbout) lines.push(`Asking about: ${handoffContext.askingAbout.substring(0, 200)}`);
+    if (handoffContext.collectedInfo && Object.keys(handoffContext.collectedInfo).length > 0) {
+      const infoLines = Object.entries(handoffContext.collectedInfo)
+        .map(([k, v]) => `  • ${k}: ${v}`)
+        .join('\n');
+      lines.push(`Collected so far:\n${infoLines}`);
+    }
+    if (lines.length > 0) {
+      contextBlock = `\n\n${lines.join('\n')}`;
+    }
+  }
 
   const message = `🔔 ACTION REQUIRED
 
 Client Name: ${customerName}
 Client Number: ${displayPhone}
-Handed off by: ${agentLabel}
+Handed off by: ${agentLabel}${contextBlock}
 
 Summary:
 ${summary}
@@ -1449,17 +1540,33 @@ async function _processAIResponseInner(
       }
     }
 
-    // ========== HUMAN-FIRST / HYBRID MODE CHECK ==========
+    // ========== SERVICE MODE: AUTONOMOUS / HUMAN-FIRST / HYBRID ==========
     const serviceMode = aiOverrides?.service_mode || 'autonomous';
     console.log(`[SERVICE-MODE] Mode: ${serviceMode}`);
 
-    if (serviceMode === 'human_first' || (serviceMode === 'hybrid' && messageComplexity === 'complex')) {
-      console.log(`[HUMAN-FIRST] Queueing for human agent (mode=${serviceMode}, complexity=${messageComplexity})`);
-      
+    // Detect hybrid handoff trigger (used for hybrid; also informative for human_first context)
+    const hybridTrigger = detectHybridHandoffTrigger(userMessage);
+    if (serviceMode === 'hybrid') {
+      console.log(`[HYBRID-TRIGGER] triggered=${hybridTrigger.triggered} stage=${hybridTrigger.stage} reason="${hybridTrigger.reason}"`);
+    }
+
+    const shouldQueueForHuman =
+      serviceMode === 'human_first' ||
+      (serviceMode === 'hybrid' && hybridTrigger.triggered);
+
+    if (shouldQueueForHuman) {
+      const handoffSourceLabel = serviceMode === 'human_first' ? 'human_first' : 'hybrid_trigger';
+      const handoffStage = serviceMode === 'human_first' ? 'browsing' : hybridTrigger.stage;
+      const handoffReason = serviceMode === 'human_first'
+        ? 'Human-first mode: every customer message routes to a human'
+        : hybridTrigger.reason;
+
+      console.log(`[HANDOFF] Queueing for human (mode=${serviceMode}, stage=${handoffStage})`);
+
       // Generate AI summary + draft suggestions in background
       const summary = await generateConversationSummary(conversationId, supabase);
-      
-      // Generate 3 AI draft responses with different tones
+
+      // Generate 3 AI draft responses with different tones (best-effort)
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
@@ -1477,7 +1584,7 @@ async function _processAIResponseInner(
             temperature: 0.7,
             max_tokens: 600
           });
-          
+
           const draftData = await draftResponse.json();
           const draftContent = draftData.choices?.[0]?.message?.content || '[]';
           try {
@@ -1486,9 +1593,15 @@ async function _processAIResponseInner(
             aiDrafts = [{ tone: 'friendly', text: draftContent }];
           }
       } catch (draftError) {
-        console.error('[HUMAN-FIRST] Error generating drafts:', draftError);
+        console.error('[HANDOFF] Error generating drafts:', draftError);
         aiDrafts = [{ tone: 'friendly', text: `Thank you for contacting us about "${userMessage.substring(0, 50)}...". We're looking into this for you.` }];
       }
+
+      // Priority: hybrid complaints/buy-intent are high; human_first plain greeting is medium
+      const ticketPriority =
+        handoffStage === 'complaint' || handoffStage === 'ready_to_buy' || handoffStage === 'payment'
+          ? 'high'
+          : 'medium';
 
       // Create support ticket
       const { data: ticket } = await supabase
@@ -1499,15 +1612,14 @@ async function _processAIResponseInner(
           customer_phone: customerPhone,
           customer_name: conversation.customer_name || 'Unknown',
           issue_summary: userMessage.substring(0, 500),
-          issue_category: 'general',
-          priority: messageComplexity === 'complex' ? 'high' : 'medium',
+          issue_category: handoffStage === 'complaint' ? 'complaint' : 'general',
+          priority: ticketPriority,
           status: 'open'
         })
         .select()
         .single();
 
       // Fetch SLA config for priority
-      const ticketPriority = messageComplexity === 'complex' ? 'high' : 'medium';
       const { data: slaConfig } = await supabase
         .from('company_sla_config')
         .select('*')
@@ -1536,18 +1648,16 @@ async function _processAIResponseInner(
           department: null
         });
 
-      // Send acknowledgment to customer
-      const ticketNumber = ticket?.ticket_number || 'TKT-???';
-      const fallbackMsg = aiOverrides?.fallback_message || 'Thank you for your patience. Someone will respond shortly.';
-      const ackMessage = `Thank you for reaching out! 🙏\n\nYour request has been logged as *${ticketNumber}*.\n${fallbackMsg}`;
+      // Spec acknowledgment to customer
+      const ackMessage = 'Let me connect you with the team — someone will be with you shortly via WhatsApp. 📱';
 
       const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
       const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
       if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-        const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
-          ? company.whatsapp_number 
+        const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
+          ? company.whatsapp_number
           : `whatsapp:${company.whatsapp_number}`;
         const formData = new URLSearchParams();
         formData.append('From', fromNumber);
@@ -1578,10 +1688,32 @@ async function _processAIResponseInner(
         active_agent: 'human_queue'
       }).eq('id', conversationId);
 
-      console.log(`[HUMAN-FIRST] Queued successfully. Ticket: ${ticketNumber}, Drafts: ${aiDrafts.length}`);
-      markResponseSent(); // Human queue counts as handled — no fallback needed
+      // Notify boss with structured handoff context
+      try {
+        const collectedInfo = await getCollectedClientInfo(supabase, conversationId, customerPhone);
+        await sendBossHandoffNotification(
+          company,
+          customerPhone,
+          conversation.customer_name || 'Unknown',
+          summary,
+          supabase,
+          handoffSourceLabel,
+          {
+            askingAbout: userMessage,
+            stage: handoffStage,
+            triggerReason: handoffReason,
+            collectedInfo,
+          }
+        );
+      } catch (notifyErr) {
+        console.error('[HANDOFF] Boss notification failed:', notifyErr);
+      }
+
+      console.log(`[HANDOFF] Queued. Ticket: ${ticket?.ticket_number || 'TKT-???'}, Drafts: ${aiDrafts.length}, Stage: ${handoffStage}`);
+      markResponseSent();
       return; // Exit - no AI auto-response
     }
+
 
     // ========== DYNAMIC AGENT ROUTING (autonomous mode) ==========
     let selectedAgent = 'sales';
@@ -1652,9 +1784,9 @@ async function _processAIResponseInner(
         
         console.log(`[STATE] Before update - Paused: ${wasAlreadyPaused}, Handoff: ${wasAlreadyHandoff}, Agent: ${previousAgent}`);
         
-        if (selectedAgent === 'boss') {
-          // Boss agent - pause for human takeover
-          console.log(`[PAUSE] 🛑 Pausing conversation ${conversationId} for boss/human takeover`);
+        if (selectedAgent === 'boss' && serviceMode !== 'autonomous') {
+          // Boss agent - pause for human takeover (skip in autonomous mode)
+          console.log(`[PAUSE] 🛑 Pausing conversation ${conversationId} for boss/human takeover (mode=${serviceMode})`);
           
           await supabase.from('conversations').update({ 
             active_agent: 'boss',
@@ -1663,6 +1795,16 @@ async function _processAIResponseInner(
           }).eq('id', conversationId);
           
           console.log(`[STATE] After update - Paused: true, Handoff: true, Agent: boss`);
+        } else if (selectedAgent === 'boss' && serviceMode === 'autonomous') {
+          // Autonomous mode: AI keeps replying even when router picks boss; no human pause
+          console.log(`[AUTONOMOUS] Boss intent detected but staying AI-driven (no pause)`);
+          await supabase.from('conversations').update({
+            active_agent: 'sales', // fall back to sales personality so the AI keeps closing
+            is_paused_for_human: false,
+            human_takeover: false
+          }).eq('id', conversationId);
+          // Re-route the rest of this turn to the sales agent
+          selectedAgent = 'sales';
         } else {
           // Support or Sales agent - ensure NOT paused
           if (wasAlreadyPaused) {
@@ -1817,6 +1959,29 @@ When a customer says they want to buy a product or pay:
 4. Finally, reply to the customer in a friendly tone, summarizing their order, and providing the Lenco payment link so they can pay immediately via Mobile Money (MTN, Airtel, Zamtel) or Card.
 
 CRITICAL: Do NOT escalate purchases to management. Do NOT tell the customer to "contact us" for payment. Do NOT say you lack payment capabilities. You HAVE the tools — USE THEM.`;
+
+    // === HYBRID MODE INSTRUCTIONS (safety net for triggers the regex misses) ===
+    if (serviceMode === 'hybrid') {
+      agentPersonality += `
+
+== HYBRID MODE: WHEN TO HAND OFF ==
+You handle simple questions yourself (product info, stock, delivery, photos). Hand off to a human when:
+1. Customer says "I want to buy" / "I'll take it" / "ready to order"
+2. Customer asks about payment (how to pay, account details, MoMo number)
+3. Customer asks for partial payments or custom pricing
+4. Customer seems unhappy or complains
+5. Customer asks to speak to a person, calls, or asks for your number
+6. Bulk orders (5+ of one item)
+
+When you hand off, say exactly: "Let me connect you with the team — someone will reach out shortly. 📱"
+Then call notify_boss with everything you've collected so far (customer name, phone, what they're asking about, stage in the buying journey).`;
+    } else if (serviceMode === 'autonomous') {
+      agentPersonality += `
+
+== AUTONOMOUS MODE ==
+You handle EVERYTHING yourself. Do not say "let me connect you" or "I'll have someone reach out". Close the sale, answer the question, send the image, generate the payment link. The only time you call notify_boss is for a SEVERE complaint that needs management awareness — and even then, you keep replying to the customer.`;
+    }
+
     
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
