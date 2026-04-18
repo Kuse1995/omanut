@@ -1,51 +1,55 @@
 
 
-## What's actually going on
+User wants OpenClaw to self-diagnose AI failures without burning Lovable prompts / Meta messages on round-trips. OpenClaw itself proposed Track A + MCP code read. Two open questions: code-access route (B1 GitHub vs B2 whitelist) and notify_boss content visibility.
 
-OpenClaw's audit is **misleading you**. Here are the facts from the codebase:
+Track B1 (GitHub token) is outside our codebase — user configures it in OpenClaw's UI, no code change needed. B2 (whitelist tool) is one MCP tool we own. Recommend **both**: B1 for full repo, B2 as offline fallback. Cheap to ship.
 
-### `notify_boss` and `send_media` ARE implemented
+For notify_boss content: store message body in `boss_conversations` (already happens per `send-boss-notification`) and expose via tool. Phone numbers already in scope (active company gate). Low marginal exposure.
 
-They are registered in `supabase/functions/mcp-server/index.ts` at lines 908 and 992 (we shipped them two turns ago and they were deployed). OpenClaw is reporting "Method not found" because **its tool list is stale** — most MCP clients cache the `tools/list` result for a session and don't re-fetch after a server redeploy.
+Key safety: all new tools gated by `set_active_company` + `requireOpenClawEnabled` is wrong scope — these are reads, use a lighter `requireOpenClawReadEnabled` or just company gate. Config writes stay locked. Never return raw `system_prompt` field — return `{ has_override: bool, length: int, last_updated: ts }`.
 
-**Fix**: disconnect and reconnect the OpenClaw MCP integration in ChatGPT/Claude (or run the MCP `tools/list` call again). No code change needed.
+## Plan: 6 new read-only MCP tools + GitHub access
 
-OpenClaw also gave us hand-written code to "drop in" that uses `boss_whatsapp` and a `whatsapp_credentials` table — neither exists in our schema. We use `company_boss_phones` + Twilio (per the `getBossPhones` shared helper). That code would not work here. Ignore it.
+All in `supabase/functions/mcp-server/index.ts`, all gated by active company, all read-only.
 
-### `lookup_product`, `get_date_info`, `check_availability` are NOT MCP tools by design
+### Tools
 
-They live in `whatsapp-messages/index.ts` as inline tools for the **automated WhatsApp AI**, not the MCP server. OpenClaw should not be calling them — they're scoped to WhatsApp customer chats where the AI also has access to the live conversation, BMS catalog, and reservation tables.
+1. **`get_conversation_trace`** — `{ conversation_id, limit=20 }` → returns last N messages with role, content, tool_calls (name + args + result), errors. Strips any `system` role messages. Lets OpenClaw see exactly why a turn failed.
 
-If we want OpenClaw to do the same lookups, we expose them as **new MCP wrappers**, not by claiming the existing ones are broken. (We already have `bms_list_products`, `list_reservations`, etc. — those cover most of it.)
+2. **`get_ai_errors`** — `{ limit=20, since?, search? }` → reads `ai_error_logs` for active company. Returns error type, model, function name, error message, conversation_id, timestamp.
 
-### `bms_generate_payment_link` "Unauthorized"
+3. **`get_ai_override_summary`** — wraps `company_ai_overrides`. Returns `{ has_system_prompt: bool, prompt_length, banned_topics: [], voice_style, last_updated }`. **Never returns raw prompt content** (confidentiality memory).
 
-This isn't an MCP-auth issue. The MCP tool calls the BMS bridge with `BMS_API_SECRET`, and BMS itself enforces RBAC (per the `bms-role-based-access` memory). The active company's BMS user role likely doesn't have `generate_payment_link` permission. To confirm I'd pull recent BMS bridge logs.
+4. **`get_boss_notification_history`** — `{ limit=10 }` → reads `boss_conversations` for active company. Returns `{ message_content, created_at, response }`. Lets OpenClaw verify what it actually sent to Abraham.
 
-## Proposed plan
+5. **`get_function_logs`** — `{ function_name, search?, limit=50 }`. Whitelist: `whatsapp-messages`, `mcp-server`, `supervisor-agent`, `boss-chat`, `meta-webhook`, `send-boss-notification`, `send-whatsapp-message`. Calls Supabase analytics API. Returns last N log lines. **Unblocks "AI didn't answer" debugging without round-tripping Lovable.**
 
-Three small, independent things — pick any subset:
+6. **`read_function_source`** — `{ function_name, max_bytes=20000 }`. Same whitelist as #5. Reads from disk via `Deno.readTextFile`. Returns source. Truncates large files.
 
-### A. Verify the MCP tools really are live (no code change)
-Hit the deployed MCP endpoint with a `tools/list` call and confirm `notify_boss` and `send_media` are in the response. If yes → the problem is OpenClaw's cache and you reconnect the integration. If no → we redeploy `mcp-server`.
+### GitHub access (no code change)
 
-### B. Add the 3 missing MCP wrappers (only if you want OpenClaw to do these)
-- `lookup_product` — wraps existing BMS `lookup_product` intent (we already proxy other BMS intents).
-- `get_date_info` — pure utility, returns today/tomorrow/weekend dates in `Africa/Lusaka`.
-- `check_availability` — queries `reservations` for a given date/time and returns conflicts.
+Tell user to add a GitHub read-only Personal Access Token in OpenClaw's MCP/integration settings, scoped to this repo. OpenClaw natively reads GitHub when given a token. Fallback for when it's rate-limited or offline → tool #6.
 
-All three gated by company context (no `requireOpenClawEnabled` needed — they're read-only).
+### Safety
 
-### C. Investigate `bms_generate_payment_link` Unauthorized
-Pull the last few `mcp-server` + BMS bridge logs for that tool, identify whether it's the BMS role check or a missing `BMS_API_SECRET` for that company, and either grant the role on the BMS side or fix the auth header.
+- Every tool: `const companyId = await resolveCompanyId(params?.company_id)` then scope query by `company_id = companyId`.
+- Tool #3 never returns raw prompt content.
+- Tool #1 filters `role !== 'system'`.
+- Tool #5/6 reject any function name not in the whitelist (returns `{ error: "function not in allowlist" }`).
+- No new toggle needed — these are reads. Existing `set_active_company` requirement is enough.
 
-## Recommendation
+### Files to edit
 
-Do **A first** (30 seconds, no code). It's almost certainly the whole problem for `notify_boss` / `send_media` — OpenClaw is gaslighting you with a cached tool list. Then decide on B and C based on what you actually need OpenClaw to do.
+- `supabase/functions/mcp-server/index.ts` — 6 new `server.tool(...)` blocks following the existing pattern.
 
-## Files that would change
+No DB changes. No new edge functions. No new secrets.
 
-- **A**: none.
-- **B**: `supabase/functions/mcp-server/index.ts` only (3 new `server.tool(...)` blocks following the same pattern as the existing tools).
-- **C**: probably `supabase/functions/mcp-server/index.ts` BMS proxy block, plus a config check on the BMS side — depends on what the logs show.
+### Verification
+
+1. Reconnect OpenClaw MCP integration → confirm 6 new tools appear in `tools/list`.
+2. `get_conversation_trace { conversation_id: <recent failed convo> }` → shows tool calls + errors.
+3. `get_function_logs { function_name: "whatsapp-messages", search: "error" }` → returns recent error lines.
+4. `read_function_source { function_name: "whatsapp-messages" }` → returns source.
+5. `get_ai_override_summary` → returns metadata, **no raw prompt**.
+6. Hand OpenClaw a real failure ("AI didn't answer customer X") → it diagnoses without asking Lovable.
 
