@@ -338,13 +338,51 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
-    const result = await callBMS(connection, resolvedIntent, params, {
+    let result = await callBMS(connection, resolvedIntent, params, {
       companyId,
       conversationId: conversation_id,
       isHealthCheck: health_check === true || resolvedIntent === "health_check",
     });
 
     console.log(`[BMS-AGENT] ${resolvedIntent} result: success=${result.success} code=${(result as any).code} latency=${(result as any).latency_ms}ms attempts=${(result as any).attempts}`);
+
+    // SMART FALLBACK: if check_stock returns empty for a category-like term (e.g. "pan", "kettle"),
+    // retry as list_products with the same term as search filter. The external BMS check_stock
+    // does strict name matching and misses partial matches like "pan" → "Blue pans 24cm".
+    if (
+      resolvedIntent === "check_stock" &&
+      result.success &&
+      Array.isArray((result as any).data) &&
+      (result as any).data.length === 0
+    ) {
+      const searchTerm = (params.product_name || params.search || params.query || "").toString().trim();
+      if (searchTerm && searchTerm.length >= 2) {
+        console.log(`[BMS-AGENT] check_stock returned empty for "${searchTerm}" — retrying as list_products search`);
+        const fallbackParams = { ...params, search: searchTerm, limit: params.limit || 50 };
+        const fallback = await callBMS(connection, "list_products", fallbackParams, {
+          companyId,
+          conversationId: conversation_id,
+          isHealthCheck: false,
+        });
+        if (fallback.success && Array.isArray((fallback as any).data) && (fallback as any).data.length > 0) {
+          // Filter to items whose name actually contains the search term (case-insensitive)
+          const term = searchTerm.toLowerCase();
+          const matched = (fallback as any).data.filter((p: any) => {
+            const name = (p.name || p.product_name || "").toLowerCase();
+            return name.includes(term);
+          });
+          if (matched.length > 0) {
+            console.log(`[BMS-AGENT] fallback found ${matched.length} match(es) for "${searchTerm}"`);
+            result = {
+              ...fallback,
+              data: matched,
+              fallback_used: "list_products_search",
+            } as any;
+          }
+        }
+      }
+    }
+
     return respond(result, result.success ? 200 : 502);
   } catch (err) {
     console.error("[BMS-AGENT] Error:", err);
