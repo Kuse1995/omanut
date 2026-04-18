@@ -127,7 +127,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.2.0",
+    version: "1.3.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
