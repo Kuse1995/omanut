@@ -346,27 +346,28 @@ Deno.serve(async (req) => {
 
     console.log(`[BMS-AGENT] ${resolvedIntent} result: success=${result.success} code=${(result as any).code} latency=${(result as any).latency_ms}ms attempts=${(result as any).attempts}`);
 
-    // SMART FALLBACK: if check_stock returns empty for a category-like term (e.g. "pan", "kettle"),
-    // retry as list_products with the same term as search filter. The external BMS check_stock
-    // does strict name matching and misses partial matches like "pan" → "Blue pans 24cm".
-    if (
-      resolvedIntent === "check_stock" &&
-      result.success &&
-      Array.isArray((result as any).data) &&
-      (result as any).data.length === 0
-    ) {
+    // SMART FALLBACK: external BMS check_stock often returns a generic product list
+    // (not actually filtered by product_name) when the term doesn't exact-match.
+    // Detect "no real match" by checking if ANY returned item's name contains the search term.
+    // If not, retry as list_products with search filter (which DOES filter properly).
+    if (resolvedIntent === "check_stock" && result.success) {
       const searchTerm = (params.product_name || params.search || params.query || "").toString().trim();
-      if (searchTerm && searchTerm.length >= 2) {
-        console.log(`[BMS-AGENT] check_stock returned empty for "${searchTerm}" — retrying as list_products search`);
-        const fallbackParams = { ...params, search: searchTerm, limit: params.limit || 50 };
+      const dataArr = Array.isArray((result as any).data) ? (result as any).data : [];
+      const term = searchTerm.toLowerCase();
+      const hasRealMatch = term.length >= 2 && dataArr.some((p: any) => {
+        const name = (p.name || p.product_name || "").toLowerCase();
+        return name.includes(term);
+      });
+
+      if (searchTerm && searchTerm.length >= 2 && !hasRealMatch) {
+        console.log(`[BMS-AGENT] check_stock returned no real match for "${searchTerm}" (got ${dataArr.length} unrelated items) — retrying as list_products search`);
+        const fallbackParams = { ...params, search: searchTerm, limit: params.limit || 100 };
         const fallback = await callBMS(connection, "list_products", fallbackParams, {
           companyId,
           conversationId: conversation_id,
           isHealthCheck: false,
         });
-        if (fallback.success && Array.isArray((fallback as any).data) && (fallback as any).data.length > 0) {
-          // Filter to items whose name actually contains the search term (case-insensitive)
-          const term = searchTerm.toLowerCase();
+        if (fallback.success && Array.isArray((fallback as any).data)) {
           const matched = (fallback as any).data.filter((p: any) => {
             const name = (p.name || p.product_name || "").toLowerCase();
             return name.includes(term);
@@ -377,6 +378,14 @@ Deno.serve(async (req) => {
               ...fallback,
               data: matched,
               fallback_used: "list_products_search",
+            } as any;
+          } else {
+            // Genuinely no match — return empty array so the AI knows to say "we don't carry that"
+            console.log(`[BMS-AGENT] fallback also found no matches for "${searchTerm}" — returning empty`);
+            result = {
+              ...result,
+              data: [],
+              fallback_used: "list_products_search_empty",
             } as any;
           }
         }
