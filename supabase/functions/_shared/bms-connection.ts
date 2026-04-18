@@ -10,14 +10,35 @@ export interface BmsConnection {
 
 const FINCH_BRIDGE_URL = "https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge";
 
+// In-memory cache to avoid hitting the DB on every WhatsApp message.
+// 5-minute TTL — short enough that toggling a connection in admin takes effect quickly,
+// long enough to absorb message bursts.
+interface CacheEntry {
+  conn: BmsConnection | null;
+  expiresAt: number;
+}
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const connectionCache = new Map<string, CacheEntry>();
+
+export function invalidateBmsConnectionCache(companyId?: string): void {
+  if (companyId) connectionCache.delete(companyId);
+  else connectionCache.clear();
+}
+
 /**
  * Load BMS connection config for a company.
  * Falls back to global env vars (Finch backward compat) if no record exists.
+ * Cached for 5 minutes per company.
  */
 export async function loadBmsConnection(
   supabase: SupabaseClient,
   companyId: string
 ): Promise<BmsConnection | null> {
+  const cached = connectionCache.get(companyId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.conn;
+  }
+
   const { data, error } = await supabase
     .from("bms_connections")
     .select("bridge_url, api_secret, bms_type, tenant_id, is_active")
@@ -29,27 +50,31 @@ export async function loadBmsConnection(
     console.error("[BMS-CONNECTION] DB error:", error.message);
   }
 
+  let conn: BmsConnection | null = null;
   if (data) {
-    return {
+    conn = {
       bridge_url: data.bridge_url,
       api_secret: data.api_secret,
       bms_type: data.bms_type as "single_tenant" | "multi_tenant",
       tenant_id: data.tenant_id,
       is_active: data.is_active,
     };
+  } else {
+    // Fallback: global env vars (Finch single-tenant)
+    const globalSecret = Deno.env.get("BMS_API_SECRET");
+    if (globalSecret) {
+      conn = {
+        bridge_url: FINCH_BRIDGE_URL,
+        api_secret: globalSecret,
+        bms_type: "single_tenant",
+        tenant_id: null,
+        is_active: true,
+      };
+    }
   }
 
-  // Fallback: global env vars (Finch single-tenant)
-  const globalSecret = Deno.env.get("BMS_API_SECRET");
-  if (!globalSecret) return null;
-
-  return {
-    bridge_url: FINCH_BRIDGE_URL,
-    api_secret: globalSecret,
-    bms_type: "single_tenant",
-    tenant_id: null,
-    is_active: true,
-  };
+  connectionCache.set(companyId, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
+  return conn;
 }
 
 /**
