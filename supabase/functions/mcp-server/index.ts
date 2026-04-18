@@ -1733,6 +1733,87 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ═══════════════════════════════════════════════════════════
+  // BMS DIAGNOSTIC TOOLS — for OpenClaw self-serve debugging
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool("get_bms_health", {
+    description: "Get recent BMS health-check results for the company: status, latency stats, and error-code histogram. Lets you spot whether BMS is down before customers complain.",
+    inputSchema: z.object({
+      hours: z.number().optional().describe("How many hours back to look (default 24, max 168)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const hours = Math.min(Math.max(params?.hours ?? 24, 1), 168);
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+      const { data: rows, error } = await supabase
+        .from("bms_health_log")
+        .select("status, latency_ms, error_code, error_message, checked_at")
+        .eq("company_id", companyId)
+        .gte("checked_at", since)
+        .order("checked_at", { ascending: false })
+        .limit(500);
+
+      if (error) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: error.message }) }] };
+      }
+
+      const total = rows?.length ?? 0;
+      const byStatus: Record<string, number> = {};
+      const byErrorCode: Record<string, number> = {};
+      const latencies: number[] = [];
+      for (const r of rows || []) {
+        byStatus[r.status] = (byStatus[r.status] || 0) + 1;
+        if (r.error_code) byErrorCode[r.error_code] = (byErrorCode[r.error_code] || 0) + 1;
+        if (typeof r.latency_ms === "number") latencies.push(r.latency_ms);
+      }
+      latencies.sort((a, b) => a - b);
+      const pct = (q: number) => latencies.length ? latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * q))] : null;
+      const summary = {
+        window_hours: hours,
+        total_checks: total,
+        by_status: byStatus,
+        by_error_code: byErrorCode,
+        latency_ms: { p50: pct(0.5), p95: pct(0.95), p99: pct(0.99), max: latencies[latencies.length - 1] ?? null },
+        latest: (rows || []).slice(0, 5),
+      };
+      return { content: [{ type: "text" as const, text: JSON.stringify(summary, null, 2) }] };
+    },
+  });
+
+  server.tool("get_bms_call_history", {
+    description: "Inspect recent BMS calls (success/failure, latency, error codes, response excerpts). Use this to debug why a specific conversation or sale failed.",
+    inputSchema: z.object({
+      conversation_id: z.string().optional().describe("Filter to a single conversation"),
+      intent: z.string().optional().describe("Filter by BMS intent, e.g. record_sale"),
+      only_failures: z.boolean().optional().describe("Only return failed calls"),
+      limit: z.number().optional().describe("Max rows (default 20, max 100)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const limit = Math.min(Math.max(params?.limit ?? 20, 1), 100);
+
+      let query = supabase
+        .from("bms_call_log")
+        .select("created_at, intent, success, error_code, error_message, latency_ms, attempts, response_excerpt, conversation_id, params")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (params?.conversation_id) query = query.eq("conversation_id", params.conversation_id);
+      if (params?.intent) query = query.eq("intent", params.intent);
+      if (params?.only_failures) query = query.eq("success", false);
+
+      const { data: rows, error } = await query;
+      if (error) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: error.message }) }] };
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ count: rows?.length ?? 0, calls: rows ?? [] }, null, 2) }] };
+    },
+  });
+
   return server;
 }
 
