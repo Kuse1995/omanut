@@ -1784,9 +1784,9 @@ async function _processAIResponseInner(
         
         console.log(`[STATE] Before update - Paused: ${wasAlreadyPaused}, Handoff: ${wasAlreadyHandoff}, Agent: ${previousAgent}`);
         
-        if (selectedAgent === 'boss') {
-          // Boss agent - pause for human takeover
-          console.log(`[PAUSE] 🛑 Pausing conversation ${conversationId} for boss/human takeover`);
+        if (selectedAgent === 'boss' && serviceMode !== 'autonomous') {
+          // Boss agent - pause for human takeover (skip in autonomous mode)
+          console.log(`[PAUSE] 🛑 Pausing conversation ${conversationId} for boss/human takeover (mode=${serviceMode})`);
           
           await supabase.from('conversations').update({ 
             active_agent: 'boss',
@@ -1795,6 +1795,16 @@ async function _processAIResponseInner(
           }).eq('id', conversationId);
           
           console.log(`[STATE] After update - Paused: true, Handoff: true, Agent: boss`);
+        } else if (selectedAgent === 'boss' && serviceMode === 'autonomous') {
+          // Autonomous mode: AI keeps replying even when router picks boss; no human pause
+          console.log(`[AUTONOMOUS] Boss intent detected but staying AI-driven (no pause)`);
+          await supabase.from('conversations').update({
+            active_agent: 'sales', // fall back to sales personality so the AI keeps closing
+            is_paused_for_human: false,
+            human_takeover: false
+          }).eq('id', conversationId);
+          // Re-route the rest of this turn to the sales agent
+          selectedAgent = 'sales';
         } else {
           // Support or Sales agent - ensure NOT paused
           if (wasAlreadyPaused) {
