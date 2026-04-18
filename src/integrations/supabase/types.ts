@@ -403,6 +403,7 @@ export type Database = {
           conversation_id: string | null
           created_at: string
           detected_flags: string[] | null
+          error_code: string | null
           error_type: string
           expected_response: string | null
           fix_applied: string | null
@@ -422,6 +423,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           detected_flags?: string[] | null
+          error_code?: string | null
           error_type?: string
           expected_response?: string | null
           fix_applied?: string | null
@@ -441,6 +443,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           detected_flags?: string[] | null
+          error_code?: string | null
           error_type?: string
           expected_response?: string | null
           fix_applied?: string | null
@@ -503,6 +506,59 @@ export type Database = {
           },
         ]
       }
+      bms_call_log: {
+        Row: {
+          attempts: number | null
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          intent: string
+          latency_ms: number | null
+          params: Json | null
+          response_excerpt: string | null
+          success: boolean
+        }
+        Insert: {
+          attempts?: number | null
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          intent: string
+          latency_ms?: number | null
+          params?: Json | null
+          response_excerpt?: string | null
+          success: boolean
+        }
+        Update: {
+          attempts?: number | null
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          intent?: string
+          latency_ms?: number | null
+          params?: Json | null
+          response_excerpt?: string | null
+          success?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bms_call_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bms_connections: {
         Row: {
           api_secret: string
@@ -542,6 +598,91 @@ export type Database = {
             foreignKeyName: "bms_connections_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bms_health_log: {
+        Row: {
+          checked_at: string
+          company_id: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          latency_ms: number | null
+          status: string
+        }
+        Insert: {
+          checked_at?: string
+          company_id: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          latency_ms?: number | null
+          status: string
+        }
+        Update: {
+          checked_at?: string
+          company_id?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          latency_ms?: number | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bms_health_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bms_write_log: {
+        Row: {
+          company_id: string
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          expires_at: string
+          idempotency_key: string
+          intent: string
+          params: Json | null
+          result: Json | null
+          status: string
+        }
+        Insert: {
+          company_id: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          expires_at?: string
+          idempotency_key: string
+          intent: string
+          params?: Json | null
+          result?: Json | null
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          expires_at?: string
+          idempotency_key?: string
+          intent?: string
+          params?: Json | null
+          result?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bms_write_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },

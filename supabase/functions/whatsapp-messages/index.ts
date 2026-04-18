@@ -1982,6 +1982,16 @@ Then call notify_boss with everything you've collected so far (customer name, ph
 You handle EVERYTHING yourself. Do not say "let me connect you" or "I'll have someone reach out". Close the sale, answer the question, send the image, generate the payment link. The only time you call notify_boss is for a SEVERE complaint that needs management awareness — and even then, you keep replying to the customer.`;
     }
 
+    // === BMS DATA INTEGRITY (applies to ALL modes) ===
+    agentPersonality += `
+
+== BMS IS THE SOURCE OF TRUTH ==
+For stock counts, prices, order status, payment links, invoices, and any business data: use the BMS tools. They are the only authoritative source.
+- If a BMS tool returns success=false with code "BMS_DOWN", "TIMEOUT", or "CIRCUIT_OPEN": tell the customer honestly that "our system is slow right now, please give me a moment" and do NOT invent numbers from earlier in the conversation. Try the tool again, or hand off to a human if it keeps failing.
+- If it returns code "RBAC_DENIED": this account cannot perform that action. Apologize briefly and hand off via notify_boss.
+- If it returns code "NOT_FOUND": tell the customer the item or order isn't in the system, and offer alternatives.
+- NEVER fabricate stock levels, prices, or product names. If BMS doesn't return it, you don't know it.`;
+
     
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
@@ -4353,7 +4363,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: bmsToolName, params: bmsParams }),
+                  body: JSON.stringify({ action: bmsToolName, params: bmsParams, conversation_id: conversationId }),
                 }),
                 bmsToolName,
                 customerPhone,
@@ -4374,7 +4384,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     const catalogRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                       method: 'POST',
                       headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id, search: args.product_name } }),
+                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id, search: args.product_name }, conversation_id: conversationId }),
                     });
                     const catalogData = await catalogRes.json();
                     const allProducts = Array.isArray(catalogData?.data) ? catalogData.data : [];
@@ -4734,7 +4744,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: fnName, params: bmsParams }),
+                  body: JSON.stringify({ action: fnName, params: bmsParams, conversation_id: conversationId }),
                 }),
                 fnName,
                 customerPhone,
