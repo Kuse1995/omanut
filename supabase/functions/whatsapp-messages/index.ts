@@ -1540,17 +1540,33 @@ async function _processAIResponseInner(
       }
     }
 
-    // ========== HUMAN-FIRST / HYBRID MODE CHECK ==========
+    // ========== SERVICE MODE: AUTONOMOUS / HUMAN-FIRST / HYBRID ==========
     const serviceMode = aiOverrides?.service_mode || 'autonomous';
     console.log(`[SERVICE-MODE] Mode: ${serviceMode}`);
 
-    if (serviceMode === 'human_first' || (serviceMode === 'hybrid' && messageComplexity === 'complex')) {
-      console.log(`[HUMAN-FIRST] Queueing for human agent (mode=${serviceMode}, complexity=${messageComplexity})`);
-      
+    // Detect hybrid handoff trigger (used for hybrid; also informative for human_first context)
+    const hybridTrigger = detectHybridHandoffTrigger(userMessage);
+    if (serviceMode === 'hybrid') {
+      console.log(`[HYBRID-TRIGGER] triggered=${hybridTrigger.triggered} stage=${hybridTrigger.stage} reason="${hybridTrigger.reason}"`);
+    }
+
+    const shouldQueueForHuman =
+      serviceMode === 'human_first' ||
+      (serviceMode === 'hybrid' && hybridTrigger.triggered);
+
+    if (shouldQueueForHuman) {
+      const handoffSourceLabel = serviceMode === 'human_first' ? 'human_first' : 'hybrid_trigger';
+      const handoffStage = serviceMode === 'human_first' ? 'browsing' : hybridTrigger.stage;
+      const handoffReason = serviceMode === 'human_first'
+        ? 'Human-first mode: every customer message routes to a human'
+        : hybridTrigger.reason;
+
+      console.log(`[HANDOFF] Queueing for human (mode=${serviceMode}, stage=${handoffStage})`);
+
       // Generate AI summary + draft suggestions in background
       const summary = await generateConversationSummary(conversationId, supabase);
-      
-      // Generate 3 AI draft responses with different tones
+
+      // Generate 3 AI draft responses with different tones (best-effort)
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
@@ -1568,7 +1584,7 @@ async function _processAIResponseInner(
             temperature: 0.7,
             max_tokens: 600
           });
-          
+
           const draftData = await draftResponse.json();
           const draftContent = draftData.choices?.[0]?.message?.content || '[]';
           try {
@@ -1577,9 +1593,15 @@ async function _processAIResponseInner(
             aiDrafts = [{ tone: 'friendly', text: draftContent }];
           }
       } catch (draftError) {
-        console.error('[HUMAN-FIRST] Error generating drafts:', draftError);
+        console.error('[HANDOFF] Error generating drafts:', draftError);
         aiDrafts = [{ tone: 'friendly', text: `Thank you for contacting us about "${userMessage.substring(0, 50)}...". We're looking into this for you.` }];
       }
+
+      // Priority: hybrid complaints/buy-intent are high; human_first plain greeting is medium
+      const ticketPriority =
+        handoffStage === 'complaint' || handoffStage === 'ready_to_buy' || handoffStage === 'payment'
+          ? 'high'
+          : 'medium';
 
       // Create support ticket
       const { data: ticket } = await supabase
@@ -1590,15 +1612,14 @@ async function _processAIResponseInner(
           customer_phone: customerPhone,
           customer_name: conversation.customer_name || 'Unknown',
           issue_summary: userMessage.substring(0, 500),
-          issue_category: 'general',
-          priority: messageComplexity === 'complex' ? 'high' : 'medium',
+          issue_category: handoffStage === 'complaint' ? 'complaint' : 'general',
+          priority: ticketPriority,
           status: 'open'
         })
         .select()
         .single();
 
       // Fetch SLA config for priority
-      const ticketPriority = messageComplexity === 'complex' ? 'high' : 'medium';
       const { data: slaConfig } = await supabase
         .from('company_sla_config')
         .select('*')
@@ -1627,18 +1648,16 @@ async function _processAIResponseInner(
           department: null
         });
 
-      // Send acknowledgment to customer
-      const ticketNumber = ticket?.ticket_number || 'TKT-???';
-      const fallbackMsg = aiOverrides?.fallback_message || 'Thank you for your patience. Someone will respond shortly.';
-      const ackMessage = `Thank you for reaching out! 🙏\n\nYour request has been logged as *${ticketNumber}*.\n${fallbackMsg}`;
+      // Spec acknowledgment to customer
+      const ackMessage = 'Let me connect you with the team — someone will be with you shortly via WhatsApp. 📱';
 
       const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
       const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
       if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && company.whatsapp_number) {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-        const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
-          ? company.whatsapp_number 
+        const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
+          ? company.whatsapp_number
           : `whatsapp:${company.whatsapp_number}`;
         const formData = new URLSearchParams();
         formData.append('From', fromNumber);
@@ -1669,10 +1688,32 @@ async function _processAIResponseInner(
         active_agent: 'human_queue'
       }).eq('id', conversationId);
 
-      console.log(`[HUMAN-FIRST] Queued successfully. Ticket: ${ticketNumber}, Drafts: ${aiDrafts.length}`);
-      markResponseSent(); // Human queue counts as handled — no fallback needed
+      // Notify boss with structured handoff context
+      try {
+        const collectedInfo = await getCollectedClientInfo(supabase, conversationId, customerPhone);
+        await sendBossHandoffNotification(
+          company,
+          customerPhone,
+          conversation.customer_name || 'Unknown',
+          summary,
+          supabase,
+          handoffSourceLabel,
+          {
+            askingAbout: userMessage,
+            stage: handoffStage,
+            triggerReason: handoffReason,
+            collectedInfo,
+          }
+        );
+      } catch (notifyErr) {
+        console.error('[HANDOFF] Boss notification failed:', notifyErr);
+      }
+
+      console.log(`[HANDOFF] Queued. Ticket: ${ticket?.ticket_number || 'TKT-???'}, Drafts: ${aiDrafts.length}, Stage: ${handoffStage}`);
+      markResponseSent();
       return; // Exit - no AI auto-response
     }
+
 
     // ========== DYNAMIC AGENT ROUTING (autonomous mode) ==========
     let selectedAgent = 'sales';
