@@ -5253,48 +5253,54 @@ serve(async (req) => {
 
     // === REGULAR MESSAGE PROCESSING BELOW ===
 
-    // Look up company by WhatsApp number (with resilient matching)
-    const normalizeForLookup = (phone: string) => phone.replace(/^whatsapp:/i, '').replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '');
-    const normalizedTo = normalizeForLookup(To);
-    
-    // Try exact match first
-    let { data: company, error: companyError } = await supabase
+    // Look up company by WhatsApp number — STRICT exact match only.
+    // Substring/digit-fallback lookups were removed because they could match the wrong
+    // tenant when phone numbers shared digit suffixes, leaking customer messages
+    // across companies. We fail closed if no exact match is found.
+    const stripped = To.replace(/^whatsapp:/i, '');
+    const digitsOnly = stripped.replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '');
+    const plusForm = digitsOnly.startsWith('+') ? digitsOnly : `+${digitsOnly}`;
+    const waForm = `whatsapp:${plusForm}`;
+
+    // Match any of the canonical forms exactly. Do NOT use ilike '%digits%'.
+    const { data: matches, error: companyError } = await supabase
       .from('companies')
       .select('*, metadata')
-      .eq('whatsapp_number', To)
-      .maybeSingle();
+      .or(`whatsapp_number.eq.${To},whatsapp_number.eq.${stripped},whatsapp_number.eq.${plusForm},whatsapp_number.eq.${waForm}`);
 
-    // Fallback 1: try with whatsapp: prefix stripped
-    if (!company && !companyError) {
-      const stripped = To.replace(/^whatsapp:/i, '');
-      const { data: fallback1 } = await supabase
-        .from('companies')
-        .select('*, metadata')
-        .eq('whatsapp_number', stripped)
-        .maybeSingle();
-      if (fallback1) {
-        company = fallback1;
-        console.log('[COMPANY-LOOKUP] Found via stripped prefix:', stripped);
-      }
+    let company: any = null;
+    if (matches && matches.length === 1) {
+      company = matches[0];
+    } else if (matches && matches.length > 1) {
+      // Ambiguity = security event. Refuse to guess.
+      console.error('[COMPANY-LOOKUP][SECURITY] Multiple companies matched inbound To=', To, 'matches=', matches.map((m: any) => m.id));
+      try {
+        await supabase.from('cross_tenant_audit').insert({
+          source: 'whatsapp-messages.inbound',
+          decision: 'blocked',
+          reason: 'ambiguous_inbound_number',
+          customer_phone: From,
+          details: { to: To, candidate_company_ids: matches.map((m: any) => m.id) }
+        });
+      } catch (_) { /* best effort */ }
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>
+<Response><Message><![CDATA[This number is not configured. Please contact support.]]></Message></Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      });
     }
 
-    // Fallback 2: try ilike on last 10 digits
-    if (!company && !companyError && normalizedTo.length >= 10) {
-      const lastDigits = normalizedTo.slice(-10);
-      const { data: fallback2 } = await supabase
-        .from('companies')
-        .select('*, metadata')
-        .ilike('whatsapp_number', `%${lastDigits}%`)
-        .limit(1)
-        .maybeSingle();
-      if (fallback2) {
-        company = fallback2;
-        console.log('[COMPANY-LOOKUP] Found via digit fallback:', lastDigits);
-      }
-    }
-    
     if (!company) {
-      console.error('[COMPANY-LOOKUP] No company found for To:', To, 'normalized:', normalizedTo);
+      console.error('[COMPANY-LOOKUP] No exact-match company for To:', To);
+      try {
+        await supabase.from('cross_tenant_audit').insert({
+          source: 'whatsapp-messages.inbound',
+          decision: 'blocked',
+          reason: 'no_company_for_inbound_number',
+          customer_phone: From,
+          details: { to: To }
+        });
+      } catch (_) { /* best effort */ }
     }
 
     if (companyError) {
