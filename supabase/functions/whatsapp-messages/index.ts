@@ -333,6 +333,71 @@ function classifyMessageComplexity(message: string): 'simple' | 'complex' {
   return 'complex';
 }
 
+// ============= HYBRID-MODE HANDOFF TRIGGER DETECTOR =============
+// Returns { triggered, reason, stage } based on the spec's 6 hand-off triggers.
+type HybridStage = 'browsing' | 'interested' | 'ready_to_buy' | 'complaint' | 'bulk' | 'human_request' | 'payment';
+function detectHybridHandoffTrigger(userMessage: string): { triggered: boolean; reason: string; stage: HybridStage } {
+  const msg = (userMessage || '').toLowerCase();
+
+  // 1. Buy intent
+  if (/\b(i\s*want\s+to\s+buy|i'?ll?\s+take\s+(it|that|this|the)|ready\s+to\s+(pay|order|buy|purchase)|let'?s\s+do\s+it|i\s*want\s+to\s+(order|purchase)|i\s*will\s+(buy|take|order))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer expressed buy intent', stage: 'ready_to_buy' };
+  }
+
+  // 2. Payment talk
+  if (/\b(payment|pay\s+(now|by|with|via)|momo|account\s+(number|details)|how\s+do\s+i\s+pay|where\s+do\s+i\s+pay|how\s+can\s+i\s+pay|send\s+(your|me)\s+(account|payment|momo))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer asking about payment details', stage: 'payment' };
+  }
+
+  // 3. Partial / custom pricing
+  if (/\b(partial\s+(payment|deposit)|installment|deposit|discount|negotiate|special\s+price|bargain|reduce\s+(the\s+)?price|lower\s+price)\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer asking for custom pricing or partial payment', stage: 'payment' };
+  }
+
+  // 4. Human request
+  if (/\b(call\s+me|your\s+(phone\s+)?number|speak\s+to\s+(someone|a\s+person|human|agent|manager)|talk\s+to\s+(someone|a\s+human|a\s+person|agent|manager)|connect\s+me|real\s+person)\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer requested a human', stage: 'human_request' };
+  }
+
+  // 5. Complaint
+  if (/\b(complain|complaint|problem|issue|not\s+working|broken|disappointed|unhappy|refund|terrible|awful|angry|wrong\s+(item|order|product))\b/i.test(msg)) {
+    return { triggered: true, reason: 'Customer reported a complaint or issue', stage: 'complaint' };
+  }
+
+  // 6. Bulk: any quantity ≥ 5
+  const qtyMatches = msg.matchAll(/(\d+)\s*(pcs|pieces|units|items|x|of|qty|quantity|orders?)?/gi);
+  for (const m of qtyMatches) {
+    const n = parseInt(m[1], 10);
+    if (!isNaN(n) && n >= 5 && n <= 10000) {
+      return { triggered: true, reason: `Bulk order detected (${n} units)`, stage: 'bulk' };
+    }
+  }
+
+  return { triggered: false, reason: '', stage: 'browsing' };
+}
+
+// Fetch collected client info for a conversation (used in handoff context)
+async function getCollectedClientInfo(supabase: any, conversationId: string, customerPhone: string) {
+  try {
+    const { data } = await supabase
+      .from('client_information')
+      .select('info_type, information')
+      .or(`conversation_id.eq.${conversationId},customer_phone.eq.${customerPhone}`)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const collected: Record<string, string> = {};
+    for (const row of (data || [])) {
+      if (row?.info_type && row?.information && !collected[row.info_type]) {
+        collected[row.info_type] = String(row.information).substring(0, 200);
+      }
+    }
+    return collected;
+  } catch (e) {
+    console.error('[HANDOFF] Failed to fetch client info:', e);
+    return {};
+  }
+}
+
 // Detect image generation commands from WhatsApp messages
 // TIGHTENED: Requires explicit image keywords, no more false positives from common words
 function detectImageGenCommand(message: string): { 
