@@ -60,8 +60,26 @@ serve(async (req) => {
       );
     }
 
-    // Resolve conversation: by ID, or by phone+company_id lookup
+    // Resolve conversation: by ID, or by phone+company_id lookup.
+    // SECURITY: never auto-create a conversation for an unknown (phone, company_id) pair —
+    // that's how cross-tenant message leaks happen. Existing binding required.
     let conversation: any = null;
+    const callerScope = isServiceRole ? 'service_role' : 'user_jwt';
+
+    const auditDecision = async (decision: string, reason: string, resolvedCompanyId: string | null, customerPhone: string | null, extra: Record<string, unknown> = {}) => {
+      try {
+        await supabase.from('cross_tenant_audit').insert({
+          source: 'send-whatsapp-message',
+          caller_scope: callerScope,
+          asserted_company_id: company_id || null,
+          resolved_company_id: resolvedCompanyId,
+          customer_phone: customerPhone,
+          decision,
+          reason,
+          details: { user_id: userId, conversation_id: conversationId || null, ...extra }
+        });
+      } catch (_) { /* best effort */ }
+    };
 
     if (conversationId) {
       const { data, error } = await supabase
@@ -71,18 +89,25 @@ serve(async (req) => {
         .single();
       if (error || !data) {
         console.error('Error fetching conversation:', error);
+        await auditDecision('blocked', 'conversation_not_found', null, null);
         return new Response(
           JSON.stringify({ error: 'Conversation not found' }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      // If caller asserted a company_id, it MUST match the conversation's owner.
+      if (company_id && data.company_id !== company_id) {
+        console.error('[SECURITY] Conversation/company mismatch', { conversationId, asserted: company_id, actual: data.company_id });
+        await auditDecision('blocked', 'conversation_company_mismatch', data.company_id, data.phone, { actual_company_id: data.company_id });
+        return new Response(
+          JSON.stringify({ error: 'CROSS_TENANT_DENIED', message: 'Conversation does not belong to the asserted company.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
       conversation = data;
     } else if (phone && company_id) {
-      // Phone-based lookup (for MCP/internal calls)
-      // Normalize phone for matching: strip whatsapp: prefix
       const cleanPhone = phone.replace(/^whatsapp:/, '');
-      
-      // Try to find existing conversation by phone
+
       const { data: convs } = await supabase
         .from('conversations')
         .select('*, companies(twilio_number, whatsapp_number)')
@@ -94,32 +119,16 @@ serve(async (req) => {
       if (convs && convs.length > 0) {
         conversation = convs[0];
       } else {
-        // Create a new conversation
-        const { data: company } = await supabase
-          .from('companies')
-          .select('twilio_number, whatsapp_number')
-          .eq('id', company_id)
-          .single();
-
-        const { data: newConv, error: createErr } = await supabase
-          .from('conversations')
-          .insert({
-            company_id,
-            phone: cleanPhone,
-            platform: 'whatsapp',
-            status: 'active',
-          })
-          .select('*, companies(twilio_number, whatsapp_number)')
-          .single();
-
-        if (createErr || !newConv) {
-          console.error('Error creating conversation:', createErr);
-          return new Response(
-            JSON.stringify({ error: 'Failed to create conversation' }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        conversation = newConv;
+        // SECURITY: do NOT auto-create. Require an existing customer<->company binding.
+        console.warn('[SECURITY] NO_CUSTOMER_BINDING', { company_id, phone: cleanPhone, callerScope });
+        await auditDecision('blocked', 'no_customer_binding', company_id, cleanPhone);
+        return new Response(
+          JSON.stringify({
+            error: 'NO_CUSTOMER_BINDING',
+            message: 'This customer has no existing conversation with the specified company. Unsolicited cross-tenant messaging is not allowed.'
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     } else {
       return new Response(
@@ -145,12 +154,15 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!accessData) {
+        await auditDecision('blocked', 'user_not_in_company', conversation.company_id, conversation.phone);
         return new Response(
           JSON.stringify({ error: 'Unauthorized' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
     }
+
+    await auditDecision('allowed', 'binding_verified', conversation.company_id, conversation.phone);
 
     // Insert message into database
     const { error: msgError } = await supabase

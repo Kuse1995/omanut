@@ -446,7 +446,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // ── send_message ──
   server.tool("send_message", {
-    description: "Send a WhatsApp message to a customer. Provide either conversation_id (preferred) or phone number.",
+    description: "Send a WhatsApp message to an EXISTING customer of this company. Refuses if the phone number has no prior conversation with the company (no unsolicited cross-tenant messaging).",
     inputSchema: z.object({
       phone: z.string().optional().describe("Customer phone number (used if conversation_id not provided)"),
       conversation_id: z.string().optional().describe("Conversation ID to send message to (preferred)"),
@@ -456,6 +456,48 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
       await requireOpenClawEnabled(companyId);
+
+      const auditAttempt = async (decision: string, reason: string, extra: Record<string, unknown> = {}) => {
+        try {
+          await supabase.from("cross_tenant_audit").insert({
+            source: "mcp-server.send_message",
+            caller_scope: "mcp",
+            asserted_company_id: companyId,
+            customer_phone: params.phone || null,
+            decision,
+            reason,
+            details: { conversation_id: params.conversation_id || null, ...extra }
+          });
+        } catch (_) { /* best effort */ }
+      };
+
+      // Pre-flight: verify the (phone, companyId) binding exists, OR conversation_id belongs to companyId.
+      if (params.conversation_id) {
+        const { data: conv } = await supabase
+          .from("conversations")
+          .select("id, company_id, phone")
+          .eq("id", params.conversation_id)
+          .maybeSingle();
+        if (!conv || conv.company_id !== companyId) {
+          await auditAttempt("blocked", "conversation_company_mismatch", { actual_company_id: conv?.company_id });
+          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "CROSS_TENANT_DENIED", message: "Conversation does not belong to the active company." }) }] };
+        }
+      } else if (params.phone) {
+        const cleanPhone = params.phone.replace(/^whatsapp:/, "");
+        const { data: convs } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("company_id", companyId)
+          .or(`phone.eq.${cleanPhone},phone.eq.whatsapp:${cleanPhone}`)
+          .limit(1);
+        if (!convs || convs.length === 0) {
+          await auditAttempt("blocked", "no_customer_binding");
+          return { content: [{ type: "text" as const, text: JSON.stringify({ error: "NO_CUSTOMER_BINDING", message: `This customer (${cleanPhone}) has no existing conversation with the active company. Cannot send unsolicited message.` }) }] };
+        }
+      } else {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ error: "MISSING_TARGET", message: "Provide phone or conversation_id." }) }] };
+      }
+
       const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`;
       const body: any = { company_id: companyId, message: params.message, media_url: params.media_url };
       if (params.conversation_id) body.conversationId = params.conversation_id;
@@ -466,6 +508,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         body: JSON.stringify(body),
       });
       const result = await res.json();
+      await auditAttempt(res.ok ? "allowed" : "downstream_blocked", res.ok ? "sent" : (result?.error || "downstream_error"), { status: res.status });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
   });

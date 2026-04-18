@@ -1675,6 +1675,45 @@ export type Database = {
           },
         ]
       }
+      cross_tenant_audit: {
+        Row: {
+          asserted_company_id: string | null
+          caller_scope: string | null
+          created_at: string
+          customer_phone: string | null
+          decision: string
+          details: Json | null
+          id: string
+          reason: string | null
+          resolved_company_id: string | null
+          source: string
+        }
+        Insert: {
+          asserted_company_id?: string | null
+          caller_scope?: string | null
+          created_at?: string
+          customer_phone?: string | null
+          decision: string
+          details?: Json | null
+          id?: string
+          reason?: string | null
+          resolved_company_id?: string | null
+          source: string
+        }
+        Update: {
+          asserted_company_id?: string | null
+          caller_scope?: string | null
+          created_at?: string
+          customer_phone?: string | null
+          decision?: string
+          details?: Json | null
+          id?: string
+          reason?: string | null
+          resolved_company_id?: string | null
+          source?: string
+        }
+        Relationships: []
+      }
       customer_segments: {
         Row: {
           analysis_notes: string | null
