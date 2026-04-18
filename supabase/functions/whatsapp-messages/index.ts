@@ -4363,7 +4363,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: bmsToolName, params: bmsParams }),
+                  body: JSON.stringify({ action: bmsToolName, params: bmsParams, conversation_id: conversationId }),
                 }),
                 bmsToolName,
                 customerPhone,
@@ -4384,7 +4384,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     const catalogRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                       method: 'POST',
                       headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id, search: args.product_name } }),
+                      body: JSON.stringify({ action: 'list_products', params: { company_id: company.id, search: args.product_name }, conversation_id: conversationId }),
                     });
                     const catalogData = await catalogRes.json();
                     const allProducts = Array.isArray(catalogData?.data) ? catalogData.data : [];
@@ -4744,7 +4744,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 () => fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/bms-agent`, {
                   method: 'POST',
                   headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: fnName, params: bmsParams }),
+                  body: JSON.stringify({ action: fnName, params: bmsParams, conversation_id: conversationId }),
                 }),
                 fnName,
                 customerPhone,
