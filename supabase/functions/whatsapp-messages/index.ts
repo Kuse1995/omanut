@@ -4640,8 +4640,16 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     const hasCheckoutTools = checkoutToolNames.includes('check_stock') && 
                              checkoutToolNames.includes('record_sale') && 
                              checkoutToolNames.includes('generate_payment_link');
-    if (hasCheckoutTools && maxToolRounds < 3) {
-      console.log(`[TOOL-LOOP] Bumping max_tool_rounds from ${maxToolRounds} to 3 for checkout flow`);
+    if (hasCheckoutTools && maxToolRounds < 4) {
+      console.log(`[TOOL-LOOP] Bumping max_tool_rounds from ${maxToolRounds} to 4 for full checkout flow`);
+      maxToolRounds = 4;
+    }
+    // Floor of 3 for any BMS-enabled company so list/check chains don't silently truncate
+    const hasBmsReadTools = checkoutToolNames.some((n: string) =>
+      ['list_products', 'check_stock', 'bms_list_products', 'bms_check_stock', 'lookup_product'].includes(n)
+    );
+    if (hasBmsReadTools && maxToolRounds < 3) {
+      console.log(`[TOOL-LOOP] Bumping max_tool_rounds from ${maxToolRounds} to 3 for BMS read chain`);
       maxToolRounds = 3;
     }
     let currentRound = 0;
