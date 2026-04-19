@@ -112,6 +112,64 @@ export const CompanySettingsPanel = () => {
     },
   });
 
+  // Update sales mode (writes companies.metadata.sales_mode + syncs enabled_tools)
+  const updateSalesModeMutation = useMutation({
+    mutationFn: async (mode: 'autonomous' | 'human_in_loop') => {
+      if (!selectedCompany?.id) return;
+
+      const existingMetadata = (selectedCompany as any).metadata || {};
+      const { error: metaError } = await supabase
+        .from('companies')
+        .update({ metadata: { ...existingMetadata, sales_mode: mode } })
+        .eq('id', selectedCompany.id);
+      if (metaError) throw metaError;
+
+      const { data: overrides } = await supabase
+        .from('company_ai_overrides')
+        .select('id, enabled_tools')
+        .eq('company_id', selectedCompany.id)
+        .maybeSingle();
+
+      const currentTools: string[] = (overrides?.enabled_tools as string[]) || [];
+      let newTools: string[];
+      let newRounds: number;
+
+      if (mode === 'human_in_loop') {
+        newTools = currentTools.filter((t) => !CHECKOUT_TOOLS.includes(t));
+        newRounds = 3;
+      } else {
+        const merged = new Set(currentTools);
+        CHECKOUT_TOOLS.forEach((t) => merged.add(t));
+        newTools = Array.from(merged);
+        newRounds = 4;
+      }
+
+      if (overrides?.id) {
+        const { error } = await supabase
+          .from('company_ai_overrides')
+          .update({ enabled_tools: newTools, max_tool_rounds: newRounds })
+          .eq('company_id', selectedCompany.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('company_ai_overrides')
+          .insert({ company_id: selectedCompany.id, enabled_tools: newTools, max_tool_rounds: newRounds });
+        if (error) throw error;
+      }
+    },
+    onSuccess: (_, mode) => {
+      refreshCompanies();
+      toast.success(
+        mode === 'human_in_loop'
+          ? 'Switched to Human-in-the-Loop — AI will hand off sales to the boss'
+          : 'Switched to Autonomous Sales — AI will close sales end-to-end'
+      );
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to update sales mode');
+    },
+  });
+
   // Upsert SLA config
   const upsertSlaMutation = useMutation({
     mutationFn: async ({ priority, response, resolution, escalation }: { priority: string; response: number; resolution: number; escalation: number }) => {
