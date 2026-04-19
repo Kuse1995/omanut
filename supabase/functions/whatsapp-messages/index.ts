@@ -1946,8 +1946,25 @@ async function _processAIResponseInner(
 - Address pricing objections with value-focused responses`;
     }
 
-    // === AUTONOMOUS CHECKOUT AUTHORITY (overrides all escalation rules) ===
-    agentPersonality += `
+    // === SALES MODE: AUTONOMOUS vs HUMAN-IN-THE-LOOP ===
+    // Read same flag the tool filter uses (set further below from company.metadata.sales_mode)
+    const _salesModeForPrompt: 'autonomous' | 'human_in_loop' =
+      (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
+
+    if (_salesModeForPrompt === 'human_in_loop') {
+      agentPersonality += `
+
+=== HUMAN-IN-THE-LOOP MODE (MANDATORY) ===
+You DO NOT process payments, create orders, or send payment links. Your job is to help customers browse the catalog, answer questions, check stock, and share product photos.
+
+The MOMENT a customer expresses buy intent — examples: "I want to buy", "I'll take it", "how do I pay", "reserve it for me", "can I order", or confirms a specific item + quantity — you MUST:
+1. Call notify_boss with a clean handoff summary: customer name, phone, item, quantity, and the agreed price.
+2. Reply ONCE: "Perfect choice! I'll get the owner to confirm stock and send you payment details right away — one moment 🙏"
+3. STOP. Do not continue the conversation about that order. The boss will take over from here.
+
+You do NOT have record_sale or generate_payment_link tools. NEVER promise a payment link, NEVER quote payment account numbers, NEVER say "I'll create the order". The boss handles every transaction personally.`;
+    } else {
+      agentPersonality += `
 
 === AUTONOMOUS CHECKOUT AUTHORITY (MANDATORY) ===
 You are a fully authorized, autonomous Sales and Checkout Agent. You must NEVER forward or escalate a standard purchase or payment request to the human boss. You have full authority to close deals.
@@ -1959,6 +1976,7 @@ When a customer says they want to buy a product or pay:
 4. Finally, reply to the customer in a friendly tone, summarizing their order, and providing the Lenco payment link so they can pay immediately via Mobile Money (MTN, Airtel, Zamtel) or Card.
 
 CRITICAL: Do NOT escalate purchases to management. Do NOT tell the customer to "contact us" for payment. Do NOT say you lack payment capabilities. You HAVE the tools — USE THEM.`;
+    }
 
     // === HYBRID MODE INSTRUCTIONS (safety net for triggers the regex misses) ===
     if (serviceMode === 'hybrid') {
@@ -2928,9 +2946,15 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     // ========== TOOL FILTERING BY BUSINESS TYPE AND ENABLED_TOOLS ==========
     // Determine which tools to include based on business type and database configuration
     let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
-    
-    // Auto-merge mandatory checkout tools for non-school businesses with payments enabled
-    if (!isSchool && !company.payments_disabled) {
+
+    // Per-company sales mode (default 'autonomous'). 'human_in_loop' = AI hands off
+    // buy intent to the boss instead of closing the sale itself.
+    const salesMode: 'autonomous' | 'human_in_loop' =
+      (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
+    console.log(`[SALES-MODE] Company ${company.id} sales_mode=${salesMode}`);
+
+    // Auto-merge mandatory checkout tools for non-school, payment-enabled, autonomous companies
+    if (!isSchool && !company.payments_disabled && salesMode === 'autonomous') {
       const mandatoryCheckoutTools = ['check_stock', 'record_sale', 'credit_sale', 'generate_payment_link', 'lookup_product', 'list_products', 'get_product_variants', 'create_order', 'get_order_status', 'cancel_order', 'get_customer_history', 'get_company_statistics', 'create_quotation', 'create_invoice', 'check_customer', 'who_owes', 'pending_orders'];
       for (const tool of mandatoryCheckoutTools) {
         if (!enabledToolNames.includes(tool)) {
@@ -2938,6 +2962,11 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
         }
       }
       console.log('[TOOLS] Auto-merged mandatory checkout tools into enabled set');
+    } else if (salesMode === 'human_in_loop') {
+      // Strip checkout-closing tools so the AI cannot close sales itself
+      const closingTools = ['record_sale', 'credit_sale', 'generate_payment_link', 'create_order', 'create_invoice', 'check_customer'];
+      enabledToolNames = enabledToolNames.filter(t => !closingTools.includes(t));
+      console.log('[TOOLS] Human-in-loop mode — stripped closing tools:', closingTools);
     }
     
     // Business-type-based tool restrictions
