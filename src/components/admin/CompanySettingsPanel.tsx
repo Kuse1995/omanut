@@ -221,6 +221,7 @@ export const CompanySettingsPanel = () => {
   }
 
   const currentMode = (aiOverrides as any)?.service_mode || 'autonomous';
+  const currentSalesMode = ((selectedCompany as any).metadata?.sales_mode as 'autonomous' | 'human_in_loop' | undefined) || 'autonomous';
 
   return (
     <>
