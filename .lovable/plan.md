@@ -1,36 +1,43 @@
 
-The user wants ANZ's AI to NOT autonomously close sales. Instead, when a customer shows buying intent, the AI should hand off to a human (the boss) rather than running checkout itself. Omanut keeps autonomous checkout (or doesn't need it either since it's a tech/services company).
+Add a "Sales Mode" toggle card to `CompanySettingsPanel.tsx`, right under the existing "Service Mode" card. It writes to `companies.metadata.sales_mode` (the same JSONB field the edge function already reads), so no DB schema change and no edge-function change needed.
 
-This reverses part of what we just did. Let me think about what actually needs to change:
+**Two options, presented as a radio-card pair (matches existing Service Mode UI):**
 
-**Current ANZ state (after last fix):**
-- `enabled_tools` includes `record_sale`, `generate_payment_link`, `check_customer`, `check_stock` — full checkout chain
-- `max_tool_rounds = 4` (bumped for checkout)
-- System prompt likely tells AI to autonomously close per the autonomous-checkout-system memory
+1. **Autonomous Sales** — AI closes sales end-to-end (calls `record_sale` + `generate_payment_link`). Best for digital products and self-serve checkout.
+2. **Human-in-the-Loop** — AI browses, answers, checks stock, then hands off to the boss when buy intent is detected. Best for businesses where the owner wants to personally confirm every order.
 
-**What ANZ actually needs (human-in-the-loop):**
-- AI can browse catalog, answer questions, check stock, send media
-- When customer expresses buy intent ("I want to buy", "how do I pay", "I'll take it") → AI calls `notify_boss` with a clean handoff summary, tells customer "Let me get the owner to finalize this for you, one moment 🙏", and stops
-- Boss takes over via the existing takeover/boss-chat channel
-- No `record_sale`, no `generate_payment_link` — those tools get removed from ANZ
+**Implementation**
 
-**Changes needed:**
+- New card titled "Sales Mode" with `Bot` or `Users` icon, placed after the Service Mode card (around line 201).
+- Reads `selectedCompany.metadata?.sales_mode` (defaults to `'autonomous'`).
+- On click, merges new value into existing metadata JSONB:
+  ```ts
+  await supabase.from('companies')
+    .update({ metadata: { ...(selectedCompany.metadata || {}), sales_mode: newMode } })
+    .eq('id', selectedCompany.id);
+  refreshCompanies();
+  ```
+- Toast confirmation, then `refreshCompanies()` so `selectedCompany` reflects the change.
+- A small inline note below the toggle when `human_in_loop` is selected, reminding the admin to also remove `record_sale` / `generate_payment_link` from `enabled_tools` in AI Deep Settings (or we can do this automatically — see below).
 
-1. **ANZ `company_ai_overrides` update**:
-   - Remove from `enabled_tools`: `record_sale`, `generate_payment_link`, `check_customer`
-   - Keep: `check_stock`, `bms_list_products`, `lookup_product`, `list_media`, `send_media`, `notify_boss`, `create_scheduled_post`
-   - `max_tool_rounds` can drop back to 3 (browse + check_stock + notify_boss)
-   - Add a `human_handoff_mode` or similar flag — OR just bake it into system instructions
+**Bonus auto-sync (recommended, keeps config consistent)**
 
-2. **System instructions for ANZ**: Add explicit rule:
-   > "HUMAN-IN-THE-LOOP MODE: You DO NOT process payments or create orders. When a customer expresses buy intent (wants to purchase, asks how to pay, says 'I'll take it', confirms an item), call `notify_boss` with a summary (customer name, item, qty, price), then reply: 'Perfect choice! Let me get the owner to confirm and send you the payment details — one moment 🙏'. Then STOP. Do not call record_sale or generate_payment_link — these are not available to you."
+When switching modes, also update `company_ai_overrides.enabled_tools`:
+- → `human_in_loop`: strip `record_sale`, `generate_payment_link`, `check_customer` from the array, set `max_tool_rounds = 3`.
+- → `autonomous`: add those three back, set `max_tool_rounds = 4`.
 
-3. **Code: respect the per-company autonomy flag in `whatsapp-messages/index.ts`**:
-   - The autonomous checkout floor-bump logic (the one we just added at line 4636-4646) should NOT bump tool rounds for companies without the checkout tools enabled. Already handled by `hasCheckoutTools` check, so this is fine — but I should verify.
-   - The autonomous-checkout authority text injected into the prompt should be SKIPPED for companies without `record_sale` enabled. Need to find where that's added.
+This prevents the contradictory state where metadata says "human-in-loop" but the AI still has checkout tools enabled. Done in the same mutation.
 
-4. **New column (optional but cleaner)**: `companies.sales_mode` enum: `autonomous` | `human_in_loop`. Default `autonomous`. ANZ = `human_in_loop`. Then code branches cleanly instead of inferring from tool list. But this is bigger scope — I'll offer it as Bonus.
+**Files**
 
-5. **Memory update**: Add a memory note documenting that sales mode is per-company and how to configure it.
+- `src/components/admin/CompanySettingsPanel.tsx` — add Sales Mode card + mutation (~50 lines).
 
-I have enough context. Plan is small and clear — no need to ask questions.
+**Verification**
+
+1. Open a company in admin → Settings → see new "Sales Mode" card with current mode highlighted.
+2. Click "Human-in-the-Loop" on Omanut → toast confirms, `companies.metadata.sales_mode` = `human_in_loop`, `enabled_tools` no longer has `record_sale`.
+3. Send "I want to buy X" via WhatsApp → AI calls `notify_boss`, no payment link.
+4. Click "Autonomous" → tools restored, AI closes sales again.
+5. ANZ already shows "Human-in-the-Loop" as active (set last session) — no change needed, just confirms the UI reflects DB state.
+
+No migrations, no edge function changes — pure UI wiring on top of logic that already works.
