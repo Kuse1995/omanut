@@ -34,6 +34,21 @@ const SERVICE_MODES = [
   { value: 'hybrid', label: 'Hybrid', description: 'AI handles simple queries, escalates complex ones' },
 ];
 
+const SALES_MODES = [
+  {
+    value: 'autonomous',
+    label: 'Autonomous Sales',
+    description: 'AI closes sales end-to-end (records sale + sends payment link). Best for digital products and self-serve checkout.',
+  },
+  {
+    value: 'human_in_loop',
+    label: 'Human-in-the-Loop',
+    description: 'AI browses, answers, checks stock, then hands off to the boss when buy intent is detected. Best for owner-confirmed orders.',
+  },
+];
+
+const CHECKOUT_TOOLS = ['record_sale', 'generate_payment_link', 'check_customer'];
+
 const SLA_PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 
 export const CompanySettingsPanel = () => {
