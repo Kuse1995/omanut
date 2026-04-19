@@ -274,6 +274,50 @@ export const CompanySettingsPanel = () => {
             </CardContent>
           </Card>
 
+          {/* Sales Mode */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bot className="h-4 w-4 text-primary" />
+                Sales Mode
+              </CardTitle>
+              <CardDescription>
+                Choose whether the AI closes sales itself or hands off to a human
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {SALES_MODES.map((mode) => (
+                <div
+                  key={mode.value}
+                  className={`flex items-start justify-between gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    currentSalesMode === mode.value
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/30'
+                  } ${updateSalesModeMutation.isPending ? 'opacity-60 pointer-events-none' : ''}`}
+                  onClick={() => updateSalesModeMutation.mutate(mode.value as 'autonomous' | 'human_in_loop')}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{mode.label}</span>
+                      {currentSalesMode === mode.value && (
+                        <Badge className="text-[10px]">Active</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{mode.description}</p>
+                  </div>
+                  <div className={`h-4 w-4 mt-1 shrink-0 rounded-full border-2 ${
+                    currentSalesMode === mode.value ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+                  }`} />
+                </div>
+              ))}
+              {currentSalesMode === 'human_in_loop' && (
+                <p className="text-xs text-muted-foreground italic px-1">
+                  Checkout tools (record_sale, generate_payment_link, check_customer) are automatically removed. The AI will call notify_boss when buy intent is detected.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Payments Toggle */}
           <Card>
             <CardHeader className="pb-3">
