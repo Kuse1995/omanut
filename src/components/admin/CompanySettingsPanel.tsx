@@ -34,6 +34,21 @@ const SERVICE_MODES = [
   { value: 'hybrid', label: 'Hybrid', description: 'AI handles simple queries, escalates complex ones' },
 ];
 
+const SALES_MODES = [
+  {
+    value: 'autonomous',
+    label: 'Autonomous Sales',
+    description: 'AI closes sales end-to-end (records sale + sends payment link). Best for digital products and self-serve checkout.',
+  },
+  {
+    value: 'human_in_loop',
+    label: 'Human-in-the-Loop',
+    description: 'AI browses, answers, checks stock, then hands off to the boss when buy intent is detected. Best for owner-confirmed orders.',
+  },
+];
+
+const CHECKOUT_TOOLS = ['record_sale', 'generate_payment_link', 'check_customer'];
+
 const SLA_PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 
 export const CompanySettingsPanel = () => {
@@ -97,6 +112,64 @@ export const CompanySettingsPanel = () => {
     },
   });
 
+  // Update sales mode (writes companies.metadata.sales_mode + syncs enabled_tools)
+  const updateSalesModeMutation = useMutation({
+    mutationFn: async (mode: 'autonomous' | 'human_in_loop') => {
+      if (!selectedCompany?.id) return;
+
+      const existingMetadata = (selectedCompany as any).metadata || {};
+      const { error: metaError } = await supabase
+        .from('companies')
+        .update({ metadata: { ...existingMetadata, sales_mode: mode } })
+        .eq('id', selectedCompany.id);
+      if (metaError) throw metaError;
+
+      const { data: overrides } = await supabase
+        .from('company_ai_overrides')
+        .select('id, enabled_tools')
+        .eq('company_id', selectedCompany.id)
+        .maybeSingle();
+
+      const currentTools: string[] = (overrides?.enabled_tools as string[]) || [];
+      let newTools: string[];
+      let newRounds: number;
+
+      if (mode === 'human_in_loop') {
+        newTools = currentTools.filter((t) => !CHECKOUT_TOOLS.includes(t));
+        newRounds = 3;
+      } else {
+        const merged = new Set(currentTools);
+        CHECKOUT_TOOLS.forEach((t) => merged.add(t));
+        newTools = Array.from(merged);
+        newRounds = 4;
+      }
+
+      if (overrides?.id) {
+        const { error } = await supabase
+          .from('company_ai_overrides')
+          .update({ enabled_tools: newTools, max_tool_rounds: newRounds })
+          .eq('company_id', selectedCompany.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('company_ai_overrides')
+          .insert({ company_id: selectedCompany.id, enabled_tools: newTools, max_tool_rounds: newRounds });
+        if (error) throw error;
+      }
+    },
+    onSuccess: (_, mode) => {
+      refreshCompanies();
+      toast.success(
+        mode === 'human_in_loop'
+          ? 'Switched to Human-in-the-Loop — AI will hand off sales to the boss'
+          : 'Switched to Autonomous Sales — AI will close sales end-to-end'
+      );
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to update sales mode');
+    },
+  });
+
   // Upsert SLA config
   const upsertSlaMutation = useMutation({
     mutationFn: async ({ priority, response, resolution, escalation }: { priority: string; response: number; resolution: number; escalation: number }) => {
@@ -148,6 +221,7 @@ export const CompanySettingsPanel = () => {
   }
 
   const currentMode = (aiOverrides as any)?.service_mode || 'autonomous';
+  const currentSalesMode = ((selectedCompany as any).metadata?.sales_mode as 'autonomous' | 'human_in_loop' | undefined) || 'autonomous';
 
   return (
     <>
@@ -197,6 +271,50 @@ export const CompanySettingsPanel = () => {
                   }`} />
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          {/* Sales Mode */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Bot className="h-4 w-4 text-primary" />
+                Sales Mode
+              </CardTitle>
+              <CardDescription>
+                Choose whether the AI closes sales itself or hands off to a human
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {SALES_MODES.map((mode) => (
+                <div
+                  key={mode.value}
+                  className={`flex items-start justify-between gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                    currentSalesMode === mode.value
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/30'
+                  } ${updateSalesModeMutation.isPending ? 'opacity-60 pointer-events-none' : ''}`}
+                  onClick={() => updateSalesModeMutation.mutate(mode.value as 'autonomous' | 'human_in_loop')}
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">{mode.label}</span>
+                      {currentSalesMode === mode.value && (
+                        <Badge className="text-[10px]">Active</Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{mode.description}</p>
+                  </div>
+                  <div className={`h-4 w-4 mt-1 shrink-0 rounded-full border-2 ${
+                    currentSalesMode === mode.value ? 'border-primary bg-primary' : 'border-muted-foreground/30'
+                  }`} />
+                </div>
+              ))}
+              {currentSalesMode === 'human_in_loop' && (
+                <p className="text-xs text-muted-foreground italic px-1">
+                  Checkout tools (record_sale, generate_payment_link, check_customer) are automatically removed. The AI will call notify_boss when buy intent is detected.
+                </p>
+              )}
             </CardContent>
           </Card>
 
