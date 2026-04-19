@@ -1,61 +1,36 @@
 
+The user wants ANZ's AI to NOT autonomously close sales. Instead, when a customer shows buying intent, the AI should hand off to a human (the boss) rather than running checkout itself. Omanut keeps autonomous checkout (or doesn't need it either since it's a tech/services company).
 
-## Why ANZ keeps erroring (and Omanut doesn't)
+This reverses part of what we just did. Let me think about what actually needs to change:
 
-I pulled the data. Here's the actual diagnosis, not a guess:
+**Current ANZ state (after last fix):**
+- `enabled_tools` includes `record_sale`, `generate_payment_link`, `check_customer`, `check_stock` — full checkout chain
+- `max_tool_rounds = 4` (bumped for checkout)
+- System prompt likely tells AI to autonomously close per the autonomous-checkout-system memory
 
-**Omanut Tech**: 5 errors / 7d. **No `company_ai_overrides` row at all** — runs entirely on hard-coded defaults (`gemini-3-flash-preview` style, 60s timeout, 3 tool rounds, no checkout tools, mostly just answering questions about itself).
+**What ANZ actually needs (human-in-the-loop):**
+- AI can browse catalog, answer questions, check stock, send media
+- When customer expresses buy intent ("I want to buy", "how do I pay", "I'll take it") → AI calls `notify_boss` with a clean handoff summary, tells customer "Let me get the owner to finalize this for you, one moment 🙏", and stops
+- Boss takes over via the existing takeover/boss-chat channel
+- No `record_sale`, no `generate_payment_link` — those tools get removed from ANZ
 
-**ANZ**: 11 errors / 7d, all `silent_failure` + `timeout` pairs. Looking at conversation `47112e13`, the customer said "Blue pan 25cm" → AI tried to handoff and timed out → fallback message "Sorry about that! I missed that. Could you say that again?" was sent. Same pattern in 5 of the 5 ANZ conversations.
+**Changes needed:**
 
-**Five real differences hurting ANZ:**
+1. **ANZ `company_ai_overrides` update**:
+   - Remove from `enabled_tools`: `record_sale`, `generate_payment_link`, `check_customer`
+   - Keep: `check_stock`, `bms_list_products`, `lookup_product`, `list_media`, `send_media`, `notify_boss`, `create_scheduled_post`
+   - `max_tool_rounds` can drop back to 3 (browse + check_stock + notify_boss)
+   - Add a `human_handoff_mode` or similar flag — OR just bake it into system instructions
 
-1. **Wrong primary model** — ANZ uses `google/gemini-3-pro-preview` (slow, preview-tier, often 5-15s). Omanut uses defaults that route to `glm-4.7` for simple messages. Pro-preview is overkill for "I want a pan" and is the #1 source of timeouts.
+2. **System instructions for ANZ**: Add explicit rule:
+   > "HUMAN-IN-THE-LOOP MODE: You DO NOT process payments or create orders. When a customer expresses buy intent (wants to purchase, asks how to pay, says 'I'll take it', confirms an item), call `notify_boss` with a summary (customer name, item, qty, price), then reply: 'Perfect choice! Let me get the owner to confirm and send you the payment details — one moment 🙏'. Then STOP. Do not call record_sale or generate_payment_link — these are not available to you."
 
-2. **`max_tool_rounds = 2`** — ANZ has the lowest possible tool budget. The autonomous checkout chain needs `check_stock → record_sale → generate_payment_link` = 3 rounds. Code already auto-bumps to 3 *if* checkout tools are enabled, but ANZ doesn't have `record_sale` or `generate_payment_link` enabled, so it never bumps. Result: any conversation that needs more than 2 tool calls (e.g. `list_products` then `check_stock` then `bms_check_stock`) silently hits the cap.
+3. **Code: respect the per-company autonomy flag in `whatsapp-messages/index.ts`**:
+   - The autonomous checkout floor-bump logic (the one we just added at line 4636-4646) should NOT bump tool rounds for companies without the checkout tools enabled. Already handled by `hasCheckoutTools` check, so this is fine — but I should verify.
+   - The autonomous-checkout authority text injected into the prompt should be SKIPPED for companies without `record_sale` enabled. Need to find where that's added.
 
-3. **Missing checkout tools** — `enabled_tools` for ANZ is `{lookup_product, list_media, bms_list_products, notify_boss, send_media, create_scheduled_post}`. There's no `record_sale`, no `generate_payment_link`, no `check_customer`. So when the customer says "I want to buy a pan", the AI can browse but can't close → escalates to handoff → handoff timed out 3 times → silent failure logged.
+4. **New column (optional but cleaner)**: `companies.sales_mode` enum: `autonomous` | `human_in_loop`. Default `autonomous`. ANZ = `human_in_loop`. Then code branches cleanly instead of inferring from tool list. But this is bigger scope — I'll offer it as Bonus.
 
-4. **Stale catalog in system prompt** — The 3,244-char system instructions hard-code the catalog ("Blue pans 24cm — K450 | 4 in stock"). When stock changes, the prompt lies. The AI is told to use BMS as truth (per `bms-data-priority-messaging` memory), but it's also fed contradicting static data that wastes tokens and confuses tool selection.
+5. **Memory update**: Add a memory note documenting that sales mode is per-company and how to configure it.
 
-5. **Hostile fallback message** — ANZ's `fallback_message` is `"Sorry about that! I missed that. Could you say that again?"`. That's what gets sent every time something goes wrong. Customers see this and rage. Omanut uses the default `"Thank you for your patience..."` which at least sets the right expectation.
-
-## The fix — 5 small changes, ordered by impact
-
-### Fix 1 — Right-size ANZ's model (kills most timeouts)
-Update `company_ai_overrides` for ANZ:
-- `primary_model = 'google/gemini-2.5-flash'` (3-5x faster, plenty smart for retail)
-- `max_tokens = 1024` (currently 2048 — overshoot causes long replies + truncation risk)
-- `response_timeout_seconds = 30` (currently 60 — fail fast, retry sooner)
-
-### Fix 2 — Enable the autonomous checkout tool chain
-Add to ANZ's `enabled_tools`: `record_sale`, `generate_payment_link`, `check_customer`, `check_stock` (the BMS one, not just `bms_list_products`). This unlocks the autonomous checkout authority memory rule.
-
-### Fix 3 — Bump `max_tool_rounds` to 4
-Both as the ANZ override and as the floor in code. The auto-bump-to-3-if-checkout logic in `whatsapp-messages/index.ts` line 4636-4646 should also raise the floor for any `list_products`/`check_stock`-enabled company, not just ones with the full triple.
-
-### Fix 4 — Replace ANZ's fallback message
-Change to: `"Give me one moment — I'm checking on that for you. 🙏"` (positive, doesn't admit failure, doesn't ask the customer to repeat).
-
-### Fix 5 — Trim the static catalog from system prompt
-Replace the hard-coded "Blue pans 24cm — K450 | 4 in stock" block with a one-liner: `"For current stock and prices, always call check_stock or list_products. Do not quote prices from memory."` Keeps prompt at ~1,500 chars (faster), eliminates contradictions with live BMS data.
-
-### Bonus — Add a self-healing migration for any company missing overrides
-Auto-seed `company_ai_overrides` with sensible defaults whenever a company is created without one. Right now Omanut has none and works only because hard-coded defaults exist; new companies inherit whatever someone last clicked in the admin UI.
-
-## Files
-
-- New migration: update `company_ai_overrides` for ANZ (model, tokens, timeout, tools, fallback, instructions)
-- `supabase/functions/whatsapp-messages/index.ts` line 4636-4646: raise tool-round floor to 4 when any BMS read tool is enabled
-- New migration: trigger to auto-create `company_ai_overrides` row on `companies` insert
-
-## Verification
-
-1. Re-send "I want a pan" to ANZ → AI calls `check_stock`, `record_sale`, `generate_payment_link` in one turn, sends payment link. No timeout.
-2. Send a vague message ("hello") → routes to fast model, replies in <3s.
-3. Force a real failure (kill BMS) → fallback shows the new wording, not "I missed that".
-4. `select count(*) from ai_error_logs where company_id=ANZ and created_at > now()` → flat for 24h after deploy.
-5. Confirm Omanut still has no override row and still works (no regression).
-
-Total: 2 migrations + 1 edge function edit. ~15 min of work, fixes the ANZ error rate at the root.
-
+I have enough context. Plan is small and clear — no need to ask questions.
