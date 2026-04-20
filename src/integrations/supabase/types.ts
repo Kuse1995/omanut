@@ -1003,6 +1003,71 @@ export type Database = {
         }
         Relationships: []
       }
+      company_agent_modes: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string | null
+          enabled: boolean
+          enabled_tools: string[]
+          icon: string
+          id: string
+          is_default: boolean
+          name: string
+          pauses_for_human: boolean
+          priority: number
+          slug: string
+          system_prompt: string
+          trigger_examples: string[]
+          trigger_keywords: string[]
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          enabled_tools?: string[]
+          icon?: string
+          id?: string
+          is_default?: boolean
+          name: string
+          pauses_for_human?: boolean
+          priority?: number
+          slug: string
+          system_prompt?: string
+          trigger_examples?: string[]
+          trigger_keywords?: string[]
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          enabled_tools?: string[]
+          icon?: string
+          id?: string
+          is_default?: boolean
+          name?: string
+          pauses_for_human?: boolean
+          priority?: number
+          slug?: string
+          system_prompt?: string
+          trigger_examples?: string[]
+          trigger_keywords?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_agent_modes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_ai_overrides: {
         Row: {
           ab_test_enabled: boolean | null
@@ -3379,6 +3444,10 @@ export type Database = {
           selar_link: string
           similarity: number
         }[]
+      }
+      seed_company_agent_modes: {
+        Args: { _company_id: string }
+        Returns: undefined
       }
       ticket_company_id: { Args: { p_ticket_id: string }; Returns: string }
       user_has_company_access: {

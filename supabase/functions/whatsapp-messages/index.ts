@@ -602,6 +602,21 @@ async function detectFrustrationSignals(
 }
 
 
+interface AgentMode {
+  id: string;
+  slug: string;
+  name: string;
+  system_prompt: string;
+  trigger_keywords: string[];
+  trigger_examples: string[];
+  enabled_tools: string[];
+  enabled: boolean;
+  priority: number;
+  is_default: boolean;
+  pauses_for_human: boolean;
+  description?: string | null;
+}
+
 async function routeToAgent(
   userMessage: string,
   conversationHistory: any[],
@@ -609,8 +624,9 @@ async function routeToAgent(
     routingModel?: string;
     routingTemperature?: number;
     confidenceThreshold?: number;
+    modes?: AgentMode[];
   }
-): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
+): Promise<{ agent: string; reasoning: string; confidence: number; modeId?: string }> {
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
   
@@ -624,26 +640,43 @@ async function routeToAgent(
     .slice(-5)
     .map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
     .join('\n');
-  
-  const routingPrompt = `You are an intent classification system for a WhatsApp business AI.
 
-ANALYZE the customer's message and conversation context to determine the BEST agent to handle this:
+  // Build dynamic options block from modes if provided
+  const modes = (config?.modes || []).filter(m => m.enabled).sort((a, b) => a.priority - b.priority);
+  const hasDynamic = modes.length > 0;
 
-AGENT OPTIONS:
-1. **SUPPORT** - Customer needs help, has a complaint, problem, or question (non-sales)
+  let optionsBlock: string;
+  let allowedSlugs: string[];
+
+  if (hasDynamic) {
+    allowedSlugs = modes.map(m => m.slug);
+    optionsBlock = modes.map((m, i) => {
+      const kw = m.trigger_keywords?.length ? m.trigger_keywords.map(k => `"${k}"`).join(', ') : '(none)';
+      const ex = m.trigger_examples?.length ? m.trigger_examples.map(e => `  • ${e}`).join('\n') : '';
+      return `${i + 1}. **${m.slug.toUpperCase()}** — ${m.name}${m.description ? ` (${m.description})` : ''}
+   - Trigger keywords: ${kw}${ex ? `\n   - Example messages:\n${ex}` : ''}`;
+    }).join('\n\n');
+  } else {
+    allowedSlugs = ['support', 'sales', 'boss'];
+    optionsBlock = `1. **SUPPORT** - Customer needs help, has a complaint, problem, or question (non-sales)
    - Keywords: "issue", "problem", "wrong", "broken", "not working", "help", "how to", "why", "confused", "disappointed", "frustrated"
-   - Intent: Resolve issues, answer questions, handle complaints
 
 2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent, OR wants to pay/purchase
    - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me", "pay", "payment", "transfer", "invoice", "send payment link"
-   - Intent: Convert to sale, persuade, close deal, process payment autonomously
 
 3. **BOSS** - ONLY for truly critical situations requiring human escalation
    - ONLY use for: threats of legal action, abuse/harassment, fraud/scam reports, safety concerns, explicit demand to speak to a manager/owner
-   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries
-   - Intent: Human must handle critical/safety situation
+   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries`;
+  }
 
-⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES, never BOSS. The sales agent has full checkout authority.
+  const routingPrompt = `You are an intent classification system for a WhatsApp business AI.
+
+ANALYZE the customer's message and conversation context to determine the BEST agent mode to handle this:
+
+AGENT MODE OPTIONS:
+${optionsBlock}
+
+⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES (if available), never BOSS. The sales agent has full checkout authority.
 
 CONVERSATION CONTEXT:
 ${recentContext}
@@ -651,9 +684,9 @@ ${recentContext}
 CURRENT MESSAGE:
 ${userMessage}
 
-Respond with ONLY valid JSON (no markdown):
+Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${allowedSlugs.map(s => `"${s}"`).join(' | ')}.
 {
-  "agent": "support" | "sales" | "boss",
+  "agent": "<slug>",
   "reasoning": "Brief explanation (1 sentence)",
   "confidence": 0.0-1.0
 }`;
@@ -700,26 +733,36 @@ Respond with ONLY valid JSON (no markdown):
     // Parse JSON response
     const result = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
     
+    let chosen = String(result.agent || '').toLowerCase();
+    if (!allowedSlugs.includes(chosen)) {
+      chosen = allowedSlugs.includes('sales') ? 'sales' : (allowedSlugs[0] || 'sales');
+    }
+    const matchedMode = modes.find(m => m.slug === chosen);
     return {
-      agent: result.agent || 'sales',
-      reasoning: result.reasoning || 'Classification failed, defaulting to sales',
-      confidence: result.confidence || 0.5
+      agent: chosen,
+      reasoning: result.reasoning || 'Classification completed',
+      confidence: typeof result.confidence === 'number' ? result.confidence : 0.5,
+      modeId: matchedMode?.id
     };
     
   } catch (error) {
     console.error('[ROUTER] Error classifying intent:', error);
-    // Fallback to simple keyword matching
     const lowerMsg = userMessage.toLowerCase();
-    
-    // Payment/purchase keywords → SALES (not boss!) - AI has full checkout authority
-    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
-      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected - sales handles checkout', confidence: 0.9 };
+    if (hasDynamic) {
+      for (const m of modes) {
+        if (m.trigger_keywords?.some(k => k && lowerMsg.includes(k.toLowerCase()))) {
+          return { agent: m.slug, reasoning: `Keyword match for "${m.name}"`, confidence: 0.7, modeId: m.id };
+        }
+      }
+      const fb = modes.find(m => m.is_default) || modes[0];
+      return { agent: fb.slug, reasoning: 'Default mode (no keyword match)', confidence: 0.4, modeId: fb.id };
     }
-    
+    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
+      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected', confidence: 0.9 };
+    }
     if (lowerMsg.match(/problem|issue|wrong|broken|not working|help|disappointed|frustrated|complaint/)) {
       return { agent: 'support', reasoning: 'Support keyword detected', confidence: 0.7 };
     }
-    
     return { agent: 'sales', reasoning: 'Default routing', confidence: 0.5 };
   }
 }
@@ -1718,7 +1761,18 @@ async function _processAIResponseInner(
     // ========== DYNAMIC AGENT ROUTING (autonomous mode) ==========
     let selectedAgent = 'sales';
     let routingReasoning = 'Default routing';
+    let selectedMode: AgentMode | null = null;
     const previousAgent = conversation.active_agent || 'sales';
+
+    // Load custom agent modes for this company (if any)
+    const { data: agentModesRaw } = await supabase
+      .from('company_agent_modes')
+      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description')
+      .eq('company_id', companyId)
+      .eq('enabled', true)
+      .order('priority', { ascending: true });
+    const agentModes: AgentMode[] = (agentModesRaw || []) as AgentMode[];
+    console.log(`[ROUTER] Loaded ${agentModes.length} enabled custom agent modes`);
 
     if (agentRoutingEnabled && aiOverrides?.routing_enabled !== false) {
       try {
@@ -1726,11 +1780,11 @@ async function _processAIResponseInner(
         console.log(`[ROUTER] Current active agent: ${previousAgent}`);
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
-        // Pass routing configuration from database
         const routingConfig = {
           routingModel: aiOverrides?.routing_model || 'deepseek-chat',
           routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
-          confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6
+          confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6,
+          modes: agentModes,
         };
         
         let routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
@@ -1742,13 +1796,14 @@ async function _processAIResponseInner(
         if (selectedAgentFromRouter === 'boss' && isPaymentIntent) {
           console.log(`[ROUTER] ⚡ SAFETY OVERRIDE: Router chose 'boss' for payment intent. Forcing 'sales'.`);
           selectedAgentFromRouter = 'sales';
-          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously' };
+          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously', modeId: agentModes.find(m => m.slug === 'sales')?.id };
         }
         
         selectedAgent = selectedAgentFromRouter;
         routingReasoning = routingResult.reasoning;
+        selectedMode = agentModes.find(m => m.id === routingResult.modeId) || agentModes.find(m => m.slug === selectedAgent) || null;
         
-        console.log(`[ROUTER] ✓ Classification complete - Selected agent: ${selectedAgent}, Confidence: ${routingResult.confidence}`);
+        console.log(`[ROUTER] ✓ Selected: ${selectedAgent}${selectedMode ? ` (mode="${selectedMode.name}")` : ''}, confidence: ${routingResult.confidence}`);
         
         // ========== DETECT AGENT SWITCH ==========
         const agentSwitched = previousAgent !== selectedAgent;
@@ -1918,9 +1973,11 @@ async function _processAIResponseInner(
 
     // ========== AGENT-SPECIFIC SYSTEM PROMPTS (from database or defaults) ==========
     let agentPersonality = '';
-    
-    if (selectedAgent === 'support') {
-      // Use custom support agent prompt from database, or default
+
+    // Prefer dynamic mode prompt when present (covers HR, Logistics, custom modes, plus migrated support/sales/boss)
+    if (selectedMode?.system_prompt) {
+      agentPersonality = `\n\n🎯 YOU ARE THE ${selectedMode.name.toUpperCase()} AGENT:\n${selectedMode.system_prompt}`;
+    } else if (selectedAgent === 'support') {
       agentPersonality = aiOverrides?.support_agent_prompt || `
 
 🛠️ YOU ARE THE SUPPORT AGENT:
@@ -1932,7 +1989,6 @@ async function _processAIResponseInner(
 - Focus on making things right for the customer
 - If you cannot resolve the issue, escalate by using [HANDOFF_REQUIRED]`;
     } else if (selectedAgent === 'sales') {
-      // Use custom sales agent prompt from database, or default
       agentPersonality = aiOverrides?.sales_agent_prompt || `
 
 💼 YOU ARE THE SALES AGENT:
@@ -2012,7 +2068,8 @@ For stock counts, prices, order status, payment links, invoices, and any busines
 
     
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
-      isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
+      isCustomMode: !!selectedMode,
+      modeName: selectedMode?.name || null,
       promptLength: agentPersonality.length
     });
 
