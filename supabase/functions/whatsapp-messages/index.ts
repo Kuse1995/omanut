@@ -733,26 +733,36 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     // Parse JSON response
     const result = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
     
+    let chosen = String(result.agent || '').toLowerCase();
+    if (!allowedSlugs.includes(chosen)) {
+      chosen = allowedSlugs.includes('sales') ? 'sales' : (allowedSlugs[0] || 'sales');
+    }
+    const matchedMode = modes.find(m => m.slug === chosen);
     return {
-      agent: result.agent || 'sales',
-      reasoning: result.reasoning || 'Classification failed, defaulting to sales',
-      confidence: result.confidence || 0.5
+      agent: chosen,
+      reasoning: result.reasoning || 'Classification completed',
+      confidence: typeof result.confidence === 'number' ? result.confidence : 0.5,
+      modeId: matchedMode?.id
     };
     
   } catch (error) {
     console.error('[ROUTER] Error classifying intent:', error);
-    // Fallback to simple keyword matching
     const lowerMsg = userMessage.toLowerCase();
-    
-    // Payment/purchase keywords → SALES (not boss!) - AI has full checkout authority
-    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
-      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected - sales handles checkout', confidence: 0.9 };
+    if (hasDynamic) {
+      for (const m of modes) {
+        if (m.trigger_keywords?.some(k => k && lowerMsg.includes(k.toLowerCase()))) {
+          return { agent: m.slug, reasoning: `Keyword match for "${m.name}"`, confidence: 0.7, modeId: m.id };
+        }
+      }
+      const fb = modes.find(m => m.is_default) || modes[0];
+      return { agent: fb.slug, reasoning: 'Default mode (no keyword match)', confidence: 0.4, modeId: fb.id };
     }
-    
+    if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
+      return { agent: 'sales', reasoning: 'Payment/purchase keyword detected', confidence: 0.9 };
+    }
     if (lowerMsg.match(/problem|issue|wrong|broken|not working|help|disappointed|frustrated|complaint/)) {
       return { agent: 'support', reasoning: 'Support keyword detected', confidence: 0.7 };
     }
-    
     return { agent: 'sales', reasoning: 'Default routing', confidence: 0.5 };
   }
 }
