@@ -12,6 +12,7 @@ interface ModelConfigPanelProps {
 
 const AVAILABLE_MODELS = {
   primary: [
+    { value: 'zai/glm-4.7', label: 'GLM 4.7', description: 'Strong tool-calling, tight prompt adherence, lower cost', tier: 'standard' },
     { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro Preview', description: 'Most capable, excellent tool-calling', tier: 'premium' },
     { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Premium reasoning, large context', tier: 'premium' },
     { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Fast, cost-effective', tier: 'standard' },
