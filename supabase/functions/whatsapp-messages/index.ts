@@ -602,6 +602,21 @@ async function detectFrustrationSignals(
 }
 
 
+interface AgentMode {
+  id: string;
+  slug: string;
+  name: string;
+  system_prompt: string;
+  trigger_keywords: string[];
+  trigger_examples: string[];
+  enabled_tools: string[];
+  enabled: boolean;
+  priority: number;
+  is_default: boolean;
+  pauses_for_human: boolean;
+  description?: string | null;
+}
+
 async function routeToAgent(
   userMessage: string,
   conversationHistory: any[],
@@ -609,8 +624,9 @@ async function routeToAgent(
     routingModel?: string;
     routingTemperature?: number;
     confidenceThreshold?: number;
+    modes?: AgentMode[];
   }
-): Promise<{ agent: 'support' | 'sales' | 'boss'; reasoning: string; confidence: number }> {
+): Promise<{ agent: string; reasoning: string; confidence: number; modeId?: string }> {
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
   
@@ -624,26 +640,43 @@ async function routeToAgent(
     .slice(-5)
     .map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
     .join('\n');
-  
-  const routingPrompt = `You are an intent classification system for a WhatsApp business AI.
 
-ANALYZE the customer's message and conversation context to determine the BEST agent to handle this:
+  // Build dynamic options block from modes if provided
+  const modes = (config?.modes || []).filter(m => m.enabled).sort((a, b) => a.priority - b.priority);
+  const hasDynamic = modes.length > 0;
 
-AGENT OPTIONS:
-1. **SUPPORT** - Customer needs help, has a complaint, problem, or question (non-sales)
+  let optionsBlock: string;
+  let allowedSlugs: string[];
+
+  if (hasDynamic) {
+    allowedSlugs = modes.map(m => m.slug);
+    optionsBlock = modes.map((m, i) => {
+      const kw = m.trigger_keywords?.length ? m.trigger_keywords.map(k => `"${k}"`).join(', ') : '(none)';
+      const ex = m.trigger_examples?.length ? m.trigger_examples.map(e => `  • ${e}`).join('\n') : '';
+      return `${i + 1}. **${m.slug.toUpperCase()}** — ${m.name}${m.description ? ` (${m.description})` : ''}
+   - Trigger keywords: ${kw}${ex ? `\n   - Example messages:\n${ex}` : ''}`;
+    }).join('\n\n');
+  } else {
+    allowedSlugs = ['support', 'sales', 'boss'];
+    optionsBlock = `1. **SUPPORT** - Customer needs help, has a complaint, problem, or question (non-sales)
    - Keywords: "issue", "problem", "wrong", "broken", "not working", "help", "how to", "why", "confused", "disappointed", "frustrated"
-   - Intent: Resolve issues, answer questions, handle complaints
 
 2. **SALES** - Customer is shopping, asking about products/pricing, showing buying intent, OR wants to pay/purchase
    - Keywords: "price", "cost", "buy", "purchase", "order", "available", "options", "recommend", "best", "show me", "pay", "payment", "transfer", "invoice", "send payment link"
-   - Intent: Convert to sale, persuade, close deal, process payment autonomously
 
 3. **BOSS** - ONLY for truly critical situations requiring human escalation
    - ONLY use for: threats of legal action, abuse/harassment, fraud/scam reports, safety concerns, explicit demand to speak to a manager/owner
-   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries
-   - Intent: Human must handle critical/safety situation
+   - DO NOT route to BOSS for: normal purchases, payment requests, product questions, complaints, pricing inquiries`;
+  }
 
-⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES, never BOSS. The sales agent has full checkout authority.
+  const routingPrompt = `You are an intent classification system for a WhatsApp business AI.
+
+ANALYZE the customer's message and conversation context to determine the BEST agent mode to handle this:
+
+AGENT MODE OPTIONS:
+${optionsBlock}
+
+⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES (if available), never BOSS. The sales agent has full checkout authority.
 
 CONVERSATION CONTEXT:
 ${recentContext}
@@ -651,9 +684,9 @@ ${recentContext}
 CURRENT MESSAGE:
 ${userMessage}
 
-Respond with ONLY valid JSON (no markdown):
+Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${allowedSlugs.map(s => `"${s}"`).join(' | ')}.
 {
-  "agent": "support" | "sales" | "boss",
+  "agent": "<slug>",
   "reasoning": "Brief explanation (1 sentence)",
   "confidence": 0.0-1.0
 }`;
