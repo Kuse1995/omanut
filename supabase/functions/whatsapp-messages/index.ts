@@ -1538,6 +1538,17 @@ async function _processAIResponseInner(
     // Re-sort ascending after limiting (we fetched newest 12, now chronological order)
     if (messageHistory) messageHistory.reverse();
 
+    // ========== CONTEXTUAL AFFIRMATION DETECTION ==========
+    // If user just replied "yes/sure/ok" to a pending offer the assistant made,
+    // capture what the offer was so the router and the agent both have context.
+    const pendingAction: PendingAction | null = detectPendingAction(
+      (messageHistory || []).map(m => ({ role: m.role, content: m.content })),
+      userMessage
+    );
+    if (pendingAction) {
+      console.log(`[PENDING-ACTION] Detected affirmation to ${pendingAction.type ?? 'generic'} offer. Subject: ${pendingAction.subject ?? 'n/a'}`);
+    }
+
     // ========== CSAT RESPONSE DETECTION ==========
     // Check if customer is replying to a satisfaction survey (message is just a number 1-5)
     const csatMatch = userMessage.trim().match(/^([1-5])$/);
