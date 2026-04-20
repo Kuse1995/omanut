@@ -2412,7 +2412,7 @@ Key Guidelines:
    - Only provide detailed explanations when customer explicitly asks or for complex topics
    - Use bullet points for lists instead of long paragraphs
    - Get straight to the point
-   - NEVER use markdown tables (no `|` pipes, no `---` separators). WhatsApp does NOT render tables — they appear as broken raw text on mobile.
+   - NEVER use markdown tables (no pipe symbols, no dashed separators). WhatsApp does NOT render tables — they appear as broken raw text on mobile.
    - For multi-item data (stock levels, price lists, comparisons), use this WhatsApp-native format: one item per line, bold the name with *asterisks*, separate name from data with an em-dash or colon.
      Example for stock:
      *LSC* — 90 in stock @ K8,600
