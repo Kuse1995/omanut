@@ -12,14 +12,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { AIConfig } from "../AIDeepSettings";
 import { BossReportingPanel } from "./BossReportingPanel";
 import { SupervisorConfigPanel } from "./SupervisorConfigPanel";
+import { AgentModesPanel } from "./AgentModesPanel";
 import { Users, HeadphonesIcon, TrendingUp, Crown, X, Plus, Router, AlertTriangle, ChevronDown, Settings, Brain } from "lucide-react";
 
 interface AgentConfigPanelProps {
   config: AIConfig;
   updateConfig: (updates: Partial<AIConfig>) => void;
+  companyId: string;
 }
 
-export const AgentConfigPanel = ({ config, updateConfig }: AgentConfigPanelProps) => {
+export const AgentConfigPanel = ({ config, updateConfig, companyId }: AgentConfigPanelProps) => {
   const [newTrigger, setNewTrigger] = useState('');
   const [agentTab, setAgentTab] = useState('routing');
   const [bossReportingOpen, setBossReportingOpen] = useState(false);
