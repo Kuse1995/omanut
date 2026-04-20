@@ -1,43 +1,23 @@
 
-Add a "Sales Mode" toggle card to `CompanySettingsPanel.tsx`, right under the existing "Service Mode" card. It writes to `companies.metadata.sales_mode` (the same JSONB field the edge function already reads), so no DB schema change and no edge-function change needed.
+The user is saying that when a customer (or boss) asks the AI for stock levels of multiple items, the AI tries to format the response as a table, which doesn't render well in WhatsApp. WhatsApp doesn't support markdown tables — they appear as raw pipes and dashes, broken across lines on mobile.
 
-**Two options, presented as a radio-card pair (matches existing Service Mode UI):**
+This is a formatting rule, not a logic bug. The fix is in the system prompt — explicitly forbid markdown tables and prescribe a clean WhatsApp-native format (bullet list with bold names).
 
-1. **Autonomous Sales** — AI closes sales end-to-end (calls `record_sale` + `generate_payment_link`). Best for digital products and self-serve checkout.
-2. **Human-in-the-Loop** — AI browses, answers, checks stock, then hands off to the boss when buy intent is detected. Best for businesses where the owner wants to personally confirm every order.
+Where to add the rule:
+- The whatsapp-messages edge function builds the system prompt. There's likely a "formatting rules" section or output style block. I should add a hard rule there.
+- This applies to ALL companies, not just Finch — every WhatsApp tenant has the same rendering constraint.
 
-**Implementation**
+Proposed fix is small: one prompt rule + one example. No DB, no UI, no schema.
 
-- New card titled "Sales Mode" with `Bot` or `Users` icon, placed after the Service Mode card (around line 201).
-- Reads `selectedCompany.metadata?.sales_mode` (defaults to `'autonomous'`).
-- On click, merges new value into existing metadata JSONB:
-  ```ts
-  await supabase.from('companies')
-    .update({ metadata: { ...(selectedCompany.metadata || {}), sales_mode: newMode } })
-    .eq('id', selectedCompany.id);
-  refreshCompanies();
-  ```
-- Toast confirmation, then `refreshCompanies()` so `selectedCompany` reflects the change.
-- A small inline note below the toggle when `human_in_loop` is selected, reminding the admin to also remove `record_sale` / `generate_payment_link` from `enabled_tools` in AI Deep Settings (or we can do this automatically — see below).
+What the rule should say:
+> NEVER use markdown tables (no `|`, no `---` separators). WhatsApp renders them as broken text. For multi-item data (stock, prices, lists), use this format instead:
+> 
+> *Item Name* — value
+> *Item Name* — value
+> 
+> Example for stock:
+> *LSC* — 90 in stock @ K8,600
+> *LSF 2.0* — 45 in stock @ K12,000
+> *LSMax* — 12 in stock @ K18,500
 
-**Bonus auto-sync (recommended, keeps config consistent)**
-
-When switching modes, also update `company_ai_overrides.enabled_tools`:
-- → `human_in_loop`: strip `record_sale`, `generate_payment_link`, `check_customer` from the array, set `max_tool_rounds = 3`.
-- → `autonomous`: add those three back, set `max_tool_rounds = 4`.
-
-This prevents the contradictory state where metadata says "human-in-loop" but the AI still has checkout tools enabled. Done in the same mutation.
-
-**Files**
-
-- `src/components/admin/CompanySettingsPanel.tsx` — add Sales Mode card + mutation (~50 lines).
-
-**Verification**
-
-1. Open a company in admin → Settings → see new "Sales Mode" card with current mode highlighted.
-2. Click "Human-in-the-Loop" on Omanut → toast confirms, `companies.metadata.sales_mode` = `human_in_loop`, `enabled_tools` no longer has `record_sale`.
-3. Send "I want to buy X" via WhatsApp → AI calls `notify_boss`, no payment link.
-4. Click "Autonomous" → tools restored, AI closes sales again.
-5. ANZ already shows "Human-in-the-Loop" as active (set last session) — no change needed, just confirms the UI reflects DB state.
-
-No migrations, no edge function changes — pure UI wiring on top of logic that already works.
+Plan is tiny. No need to ask questions.
