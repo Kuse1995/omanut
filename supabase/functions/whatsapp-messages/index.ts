@@ -2068,7 +2068,8 @@ For stock counts, prices, order status, payment links, invoices, and any busines
 
     
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
-      isCustomPrompt: selectedAgent === 'support' ? !!aiOverrides?.support_agent_prompt : !!aiOverrides?.sales_agent_prompt,
+      isCustomMode: !!selectedMode,
+      modeName: selectedMode?.name || null,
       promptLength: agentPersonality.length
     });
 
