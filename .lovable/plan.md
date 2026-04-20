@@ -1,40 +1,82 @@
 
-## ANZ Training Audit — fix config, switch to GLM 4.7
 
-The KB and prompts are fine. Don't wipe them. The issues are 3 config bugs in `company_ai_overrides`. Switching the primary model to **GLM 4.7** (better tool-calling discipline + cheaper than GPT-5, strong instruction following) plus tightening temperature and tokens should solve the rambling, leaked tags, and hallucinated payment links.
+## Honest answer first: you already have most of this — but it's mis-framed
 
-### What's wrong
+What you're describing (HR mode, Customer Care mode, Sales mode, etc.) **already exists in the codebase** as the multi-agent routing system. Right now it has 3 hardcoded "agents":
 
-1. **Model + temp combo** — `gemini-2.5-flash` @ `temperature 0.9` is causing word salad and `</think>` leaks.
-2. **Hallucinated tools** — AI promises payment links it doesn't have (because Flash @ 0.9 won't obey the prompt).
-3. **Over-eager handoff** — `notify_boss` fires on product questions ("what about 25cm?"), not just buy intent.
+- **Support Agent** (Customer Care) — empathy, complaints
+- **Sales Agent** — product, closing
+- **Boss Agent** — strategic/management
 
-### Fix (one UPDATE on `company_ai_overrides` for ANZ)
+The router (`routing_model`) classifies each incoming WhatsApp message and picks the right agent prompt. You can already see it in **AI Deep Settings → Agents tab** — there's a tab per agent with its own system prompt.
 
-| Setting | Current | Change to | Why |
-|---|---|---|---|
-| `primary_model` | `google/gemini-2.5-flash` | `zai/glm-4.7` | Strong tool-calling discipline, follows prompts tightly, lower cost than GPT-5 |
-| `primary_temperature` | `0.9` | `0.4` | Sales bot needs consistency, not creativity |
-| `max_tokens` | `1024` | `400` | Forces concise replies, kills the rambling |
-| `response_length` | `medium` | `short` | Reinforces brevity |
+**So the infrastructure is there.** What's missing is:
+1. You can't *add new modes* (HR, Logistics, Finance, Recruitment) — the 3 agents are hardcoded.
+2. There's no UI to define what triggers each mode (e.g. "if message mentions 'job', 'CV', 'application' → HR mode").
+3. Modes can't be enabled/disabled per company (a restaurant doesn't need HR mode; a school does).
 
-Plus append to `system_instructions`:
+### My recommendation: **Yes, build it — but as "Custom Agent Modes," not a separate feature**
 
-> "A product question (e.g. 'do you have X?', 'how much is Y?', 'what about 25cm?') is NOT buy intent. Answer it normally with `check_stock`. Only call `notify_boss` when the customer says they want to buy, take, order, reserve, or pay for a SPECIFIC item."
+Don't build a parallel system. Extend the existing agent routing into a **dynamic, per-company list of modes**. This unlocks HR, Recruitment, Logistics, Finance, Reservations-only, After-hours, etc. — all configurable, no code changes per use case.
 
-### Pre-flight check
+### What to build
 
-Before applying, verify `zai/glm-4.7` is a valid model identifier in the Lovable AI gateway and is selectable in the AI Deep Settings panel. If not, fall back to `openai/gpt-5-mini` (closest equivalent: disciplined, mid-cost, strong tool use).
+**1. New table: `company_agent_modes`**
+```
+id | company_id | name | icon | system_prompt | trigger_keywords[] |
+trigger_examples[] | enabled_tools[] | enabled | priority | created_at
+```
+Replaces the 3 hardcoded prompt fields (`support_agent_prompt`, `sales_agent_prompt`, `boss_agent_prompt`) over time. We migrate those into rows of this table on first load so nothing breaks.
 
-### Files
+**2. UI: "Agent Modes" tab inside AI Deep Settings**
+Replaces the current Support/Sales/Boss tabs with a list view:
+- Each mode = a card with: name, icon, prompt textarea, trigger keywords, allowed tools, on/off switch.
+- "+ Add Mode" button with templates: HR/Recruitment, Customer Care, Sales, Reservations, Boss/Management, After-Hours, Technical Support, Finance/Billing.
+- Drag to reorder priority (router checks high-priority modes first).
 
-- One `UPDATE` on `company_ai_overrides` where `company_id = ANZ`. No code, no KB changes, no retraining.
-- If `glm-4.7` isn't in the model picker dropdown yet, also add it to `AVAILABLE_MODELS.primary` in `src/components/admin/deep-settings/ModelConfigPanel.tsx` so admins can see/change it via UI.
+**3. Router upgrade in `whatsapp-messages` edge function**
+Currently the router only chooses Support / Sales / Boss. Update it to:
+- Load all enabled modes for the company.
+- Build the routing prompt dynamically from each mode's `name` + `trigger_examples`.
+- Return the chosen mode's `id`, then load that mode's `system_prompt` + `enabled_tools`.
+
+**4. Seeded templates per industry**
+When a new company is created (or via a "Suggest modes" button), pre-fill modes based on `companies.business_type`:
+- Restaurant → Customer Care, Reservations, Boss
+- School → Customer Care, HR/Recruitment, Admissions, Boss
+- Retail (ANZ, Finch) → Customer Care, Sales, Boss
+- Anyone with a careers page → +HR mode
+
+### Why this matters in practice
+
+Right now if a job applicant WhatsApps Finch saying *"I'd like to apply for the cashier role"*, the AI hits the Sales prompt and tries to sell them a pan. With HR mode + the keyword `apply|CV|job|hiring` → router picks HR mode → AI collects name, role, CV, and notifies the boss via the existing `notify_boss` tool. Same plumbing, different face.
+
+### What NOT to do
+
+- Don't build a separate "modes" toggle on top of the existing agent system — it would duplicate logic.
+- Don't expose this to every customer initially — start by enabling it for ANZ + one other company that actually has HR needs (does Omanut?), validate, then roll out.
+- Don't make it a global mode switch the user manually flips. The router should pick automatically based on message content. Manual override only for edge cases.
+
+### Files to touch
+
+- **DB migration**: create `company_agent_modes` + seed function + trigger to copy legacy `support_agent_prompt`/`sales_agent_prompt`/`boss_agent_prompt` into rows on first read.
+- **`src/components/admin/deep-settings/AgentConfigPanel.tsx`** — replace the 5 hardcoded tabs with a dynamic list (keep Boss + Supervisor as special pinned modes since they have extra config panels).
+- **New**: `src/components/admin/deep-settings/AgentModeEditor.tsx` — single-mode editor card.
+- **New**: `src/components/admin/deep-settings/AgentModeTemplates.ts` — preset library (HR, Customer Care, Sales, etc.).
+- **`supabase/functions/whatsapp-messages/index.ts`** — replace static agent selection with dynamic mode loading + routing prompt builder.
+- **`supabase/functions/create-company/index.ts`** — seed default modes per business_type.
 
 ### Verification
 
-1. ANZ AI Deep Settings shows model = GLM 4.7, temp = 0.4, max_tokens = 400.
-2. WhatsApp ANZ: *"do you have a cake stand?"* → answers price + offers photo, **no escalation**.
-3. WhatsApp: *"I'll take the cake stand"* → calls `notify_boss`, replies "Perfect choice! I'll get the owner to confirm…" and stops.
-4. Next 5 conversations: no `</think>` leaks, no fake payment links, replies under 3 sentences.
-5. If any rambling persists after 24h, escalate to `gpt-5-mini`.
+1. Open AI Deep Settings → Agents on ANZ → see existing Support/Sales/Boss as modes (migrated from old prompt fields), nothing visually lost.
+2. Click "+ Add Mode" → pick "HR / Recruitment" template → save.
+3. WhatsApp ANZ: *"Hi, I'd like to apply for a job"* → routed to HR mode → AI asks for name/role/CV instead of selling pans.
+4. WhatsApp ANZ: *"how much is the cake stand?"* → still routed to Sales/Customer Care → answers normally.
+5. Disable HR mode → applicant message falls back to default mode → no regression.
+
+### Phased rollout (recommended)
+
+- **Phase 1 (now)**: Build the table + UI + router. Migrate existing 3 agents into modes. Ship to ANZ + Omanut only.
+- **Phase 2**: Add 4-5 industry templates and the "Suggest modes for my business" button.
+- **Phase 3**: Per-mode analytics — which mode handled how many conversations, conversion per mode, escalation rate per mode.
+
