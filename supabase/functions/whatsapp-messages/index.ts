@@ -2485,9 +2485,11 @@ CRITICAL HANDOFF PROTOCOL:
     ];
 
     // Add current user message + image context (avoid duplicating if transcript already contains it)
+    // Also inject pending-action context so the agent knows what a bare "yes" refers to.
+    const pendingActionHint = pendingAction ? `\n\n${describePendingActionForAgent(pendingAction)}` : '';
     const fullUserMessage = imageAnalysisContext 
-      ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}` 
-      : userMessage;
+      ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}${pendingActionHint}` 
+      : `${userMessage}${pendingActionHint}`;
 
     const lastParsed = recentMessages[recentMessages.length - 1];
     if (!lastParsed || lastParsed.role !== 'user' || lastParsed.content !== userMessage) {
