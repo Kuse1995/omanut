@@ -4,6 +4,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat, geminiChatWithFallback } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
+import {
+  detectPendingAction,
+  describePendingActionForAgent,
+  isShortAffirmation,
+  type PendingAction,
+} from "../_shared/pending-action.ts";
 
 /** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
  *  Preserves assistant messages with tool_calls even if content is null (required by API). */
@@ -635,11 +641,19 @@ async function routeToAgent(
   const routingTemperature = config?.routingTemperature ?? 0.3;
   const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   
-  // Build recent conversation context (last 5 messages)
+  // Build recent conversation context (last 6 messages, both roles, chronological)
   const recentContext = conversationHistory
-    .slice(-5)
-    .map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
+    .slice(-6)
+    .map(m => `[${m.role === 'user' ? 'customer' : 'assistant'}]: ${m.content}`)
     .join('\n');
+
+  // Detect short-affirmation context: when the customer says "yes/sure/ok",
+  // the routing target should be inferred from what the assistant just offered,
+  // not from the affirmation itself.
+  const pendingForRouter = detectPendingAction(conversationHistory, userMessage);
+  const affirmationHint = pendingForRouter
+    ? `\n\n⚠️ AFFIRMATION CONTEXT: The customer's latest message is a short "yes/sure/ok" reply to a pending offer the assistant just made (type: ${pendingForRouter.type ?? 'generic'}). Classify the intent based on what the ASSISTANT offered in the previous turn, not the bare affirmation.`
+    : '';
 
   // Build dynamic options block from modes if provided
   const modes = (config?.modes || []).filter(m => m.enabled).sort((a, b) => a.priority - b.priority);
@@ -677,6 +691,8 @@ AGENT MODE OPTIONS:
 ${optionsBlock}
 
 ⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES (if available), never BOSS. The sales agent has full checkout authority.
+
+⚠️ SHORT REPLIES: If the customer's message is a brief affirmation (yes / sure / ok / please / 👍), classify based on what the ASSISTANT just offered in the conversation context — do NOT classify the affirmation in isolation.${affirmationHint}
 
 CONVERSATION CONTEXT:
 ${recentContext}
@@ -1521,6 +1537,17 @@ async function _processAIResponseInner(
       .limit(12);
     // Re-sort ascending after limiting (we fetched newest 12, now chronological order)
     if (messageHistory) messageHistory.reverse();
+
+    // ========== CONTEXTUAL AFFIRMATION DETECTION ==========
+    // If user just replied "yes/sure/ok" to a pending offer the assistant made,
+    // capture what the offer was so the router and the agent both have context.
+    const pendingAction: PendingAction | null = detectPendingAction(
+      (messageHistory || []).map(m => ({ role: m.role, content: m.content })),
+      userMessage
+    );
+    if (pendingAction) {
+      console.log(`[PENDING-ACTION] Detected affirmation to ${pendingAction.type ?? 'generic'} offer. Subject: ${pendingAction.subject ?? 'n/a'}`);
+    }
 
     // ========== CSAT RESPONSE DETECTION ==========
     // Check if customer is replying to a satisfaction survey (message is just a number 1-5)
@@ -2385,7 +2412,7 @@ Key Guidelines:
    - Only provide detailed explanations when customer explicitly asks or for complex topics
    - Use bullet points for lists instead of long paragraphs
    - Get straight to the point
-   - NEVER use markdown tables (no `|` pipes, no `---` separators). WhatsApp does NOT render tables — they appear as broken raw text on mobile.
+   - NEVER use markdown tables (no pipe symbols, no dashed separators). WhatsApp does NOT render tables — they appear as broken raw text on mobile.
    - For multi-item data (stock levels, price lists, comparisons), use this WhatsApp-native format: one item per line, bold the name with *asterisks*, separate name from data with an em-dash or colon.
      Example for stock:
      *LSC* — 90 in stock @ K8,600
@@ -2458,9 +2485,11 @@ CRITICAL HANDOFF PROTOCOL:
     ];
 
     // Add current user message + image context (avoid duplicating if transcript already contains it)
+    // Also inject pending-action context so the agent knows what a bare "yes" refers to.
+    const pendingActionHint = pendingAction ? `\n\n${describePendingActionForAgent(pendingAction)}` : '';
     const fullUserMessage = imageAnalysisContext 
-      ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}` 
-      : userMessage;
+      ? `${userMessage}\n\n[IMAGE ANALYSIS CONTEXT]:${imageAnalysisContext}${pendingActionHint}` 
+      : `${userMessage}${pendingActionHint}`;
 
     const lastParsed = recentMessages[recentMessages.length - 1];
     if (!lastParsed || lastParsed.role !== 'user' || lastParsed.content !== userMessage) {
