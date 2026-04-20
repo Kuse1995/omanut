@@ -4,6 +4,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat, geminiChatWithFallback } from "../_shared/gemini-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
+import {
+  detectPendingAction,
+  describePendingActionForAgent,
+  isShortAffirmation,
+  type PendingAction,
+} from "../_shared/pending-action.ts";
 
 /** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
  *  Preserves assistant messages with tool_calls even if content is null (required by API). */
@@ -635,11 +641,19 @@ async function routeToAgent(
   const routingTemperature = config?.routingTemperature ?? 0.3;
   const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   
-  // Build recent conversation context (last 5 messages)
+  // Build recent conversation context (last 6 messages, both roles, chronological)
   const recentContext = conversationHistory
-    .slice(-5)
-    .map(m => `${m.role === 'user' ? 'Customer' : 'AI'}: ${m.content}`)
+    .slice(-6)
+    .map(m => `[${m.role === 'user' ? 'customer' : 'assistant'}]: ${m.content}`)
     .join('\n');
+
+  // Detect short-affirmation context: when the customer says "yes/sure/ok",
+  // the routing target should be inferred from what the assistant just offered,
+  // not from the affirmation itself.
+  const pendingForRouter = detectPendingAction(conversationHistory, userMessage);
+  const affirmationHint = pendingForRouter
+    ? `\n\n⚠️ AFFIRMATION CONTEXT: The customer's latest message is a short "yes/sure/ok" reply to a pending offer the assistant just made (type: ${pendingForRouter.type ?? 'generic'}). Classify the intent based on what the ASSISTANT offered in the previous turn, not the bare affirmation.`
+    : '';
 
   // Build dynamic options block from modes if provided
   const modes = (config?.modes || []).filter(m => m.enabled).sort((a, b) => a.priority - b.priority);
@@ -677,6 +691,8 @@ AGENT MODE OPTIONS:
 ${optionsBlock}
 
 ⚠️ CRITICAL: Payment, purchase, and checkout requests MUST go to SALES (if available), never BOSS. The sales agent has full checkout authority.
+
+⚠️ SHORT REPLIES: If the customer's message is a brief affirmation (yes / sure / ok / please / 👍), classify based on what the ASSISTANT just offered in the conversation context — do NOT classify the affirmation in isolation.${affirmationHint}
 
 CONVERSATION CONTEXT:
 ${recentContext}
