@@ -1761,7 +1761,18 @@ async function _processAIResponseInner(
     // ========== DYNAMIC AGENT ROUTING (autonomous mode) ==========
     let selectedAgent = 'sales';
     let routingReasoning = 'Default routing';
+    let selectedMode: AgentMode | null = null;
     const previousAgent = conversation.active_agent || 'sales';
+
+    // Load custom agent modes for this company (if any)
+    const { data: agentModesRaw } = await supabase
+      .from('company_agent_modes')
+      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description')
+      .eq('company_id', companyId)
+      .eq('enabled', true)
+      .order('priority', { ascending: true });
+    const agentModes: AgentMode[] = (agentModesRaw || []) as AgentMode[];
+    console.log(`[ROUTER] Loaded ${agentModes.length} enabled custom agent modes`);
 
     if (agentRoutingEnabled && aiOverrides?.routing_enabled !== false) {
       try {
@@ -1769,11 +1780,11 @@ async function _processAIResponseInner(
         console.log(`[ROUTER] Current active agent: ${previousAgent}`);
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
-        // Pass routing configuration from database
         const routingConfig = {
           routingModel: aiOverrides?.routing_model || 'deepseek-chat',
           routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
-          confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6
+          confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6,
+          modes: agentModes,
         };
         
         let routingResult = await routeToAgent(userMessage, messageHistory || [], routingConfig);
@@ -1785,13 +1796,14 @@ async function _processAIResponseInner(
         if (selectedAgentFromRouter === 'boss' && isPaymentIntent) {
           console.log(`[ROUTER] ⚡ SAFETY OVERRIDE: Router chose 'boss' for payment intent. Forcing 'sales'.`);
           selectedAgentFromRouter = 'sales';
-          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously' };
+          routingResult = { ...routingResult, agent: 'sales', reasoning: 'Payment intent override: sales agent handles checkout autonomously', modeId: agentModes.find(m => m.slug === 'sales')?.id };
         }
         
         selectedAgent = selectedAgentFromRouter;
         routingReasoning = routingResult.reasoning;
+        selectedMode = agentModes.find(m => m.id === routingResult.modeId) || agentModes.find(m => m.slug === selectedAgent) || null;
         
-        console.log(`[ROUTER] ✓ Classification complete - Selected agent: ${selectedAgent}, Confidence: ${routingResult.confidence}`);
+        console.log(`[ROUTER] ✓ Selected: ${selectedAgent}${selectedMode ? ` (mode="${selectedMode.name}")` : ''}, confidence: ${routingResult.confidence}`);
         
         // ========== DETECT AGENT SWITCH ==========
         const agentSwitched = previousAgent !== selectedAgent;
