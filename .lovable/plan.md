@@ -1,82 +1,65 @@
 
+## Fix AI context awareness for follow-up "yes/no" replies
 
-## Honest answer first: you already have most of this — but it's mis-framed
+The AI loses track of its own previous question. When it asks *"want to see some pictures?"* and the user replies *"yes"*, it doesn't connect that "yes" to the offer it just made — so no images get sent. This is a conversation-history wiring problem, not a model problem.
 
-What you're describing (HR mode, Customer Care mode, Sales mode, etc.) **already exists in the codebase** as the multi-agent routing system. Right now it has 3 hardcoded "agents":
+### Root cause (3 likely culprits, all in `whatsapp-messages`)
 
-- **Support Agent** (Customer Care) — empathy, complaints
-- **Sales Agent** — product, closing
-- **Boss Agent** — strategic/management
+1. **History window too small or assistant turns missing.** The function loads recent messages but may be (a) loading too few, (b) only loading user turns, or (c) sending raw text instead of structured `{role: 'user'|'assistant', content}` pairs. Without prior assistant turns the model literally cannot see what it offered.
+2. **Router classifies "yes" in isolation.** The mode router sees just *"yes"* and routes to a default mode (Customer Care) instead of the mode that just offered media (Sales). The new mode has no memory of the offer.
+3. **Image-send trigger requires explicit verb+keyword.** Per `whatsapp-image-gen-trigger-logic` memory, image generation needs explicit terms like "send pic" / "show photo". A bare "yes" fails the gate even when context makes intent obvious.
 
-The router (`routing_model`) classifies each incoming WhatsApp message and picks the right agent prompt. You can already see it in **AI Deep Settings → Agents tab** — there's a tab per agent with its own system prompt.
+### The fix
 
-**So the infrastructure is there.** What's missing is:
-1. You can't *add new modes* (HR, Logistics, Finance, Recruitment) — the 3 agents are hardcoded.
-2. There's no UI to define what triggers each mode (e.g. "if message mentions 'job', 'CV', 'application' → HR mode").
-3. Modes can't be enabled/disabled per company (a restaurant doesn't need HR mode; a school does).
+**A. Always load and pass structured history (12 messages, both roles)**
 
-### My recommendation: **Yes, build it — but as "Custom Agent Modes," not a separate feature**
+In `whatsapp-messages/index.ts`, before the router and before the main agent call:
+- Fetch the last **12 messages** (6 user + 6 assistant pairs) for the conversation, ordered ASC.
+- Map them into proper `{role, content}` array — never collapse into a single string.
+- Pass this array to BOTH the router classification call AND the agent generation call.
 
-Don't build a parallel system. Extend the existing agent routing into a **dynamic, per-company list of modes**. This unlocks HR, Recruitment, Logistics, Finance, Reservations-only, After-hours, etc. — all configurable, no code changes per use case.
+**B. Router must see history, not just the last message**
 
-### What to build
-
-**1. New table: `company_agent_modes`**
+Update the router prompt builder so the classification LLM gets:
 ```
-id | company_id | name | icon | system_prompt | trigger_keywords[] |
-trigger_examples[] | enabled_tools[] | enabled | priority | created_at
+Recent conversation:
+[assistant]: Want to see some pictures of the cake stand?
+[user]: yes
+
+Classify the LATEST user message in context of the conversation.
 ```
-Replaces the 3 hardcoded prompt fields (`support_agent_prompt`, `sales_agent_prompt`, `boss_agent_prompt`) over time. We migrate those into rows of this table on first load so nothing breaks.
+This single change fixes 80% of "yes/sure/ok" misrouting. Also add a rule: *"If the user reply is a short affirmation (yes/sure/ok/please/go ahead), classify based on what the assistant just offered, not the affirmation alone."*
 
-**2. UI: "Agent Modes" tab inside AI Deep Settings**
-Replaces the current Support/Sales/Boss tabs with a list view:
-- Each mode = a card with: name, icon, prompt textarea, trigger keywords, allowed tools, on/off switch.
-- "+ Add Mode" button with templates: HR/Recruitment, Customer Care, Sales, Reservations, Boss/Management, After-Hours, Technical Support, Finance/Billing.
-- Drag to reorder priority (router checks high-priority modes first).
+**C. Pending-action shortcut (the real human fix)**
 
-**3. Router upgrade in `whatsapp-messages` edge function**
-Currently the router only chooses Support / Sales / Boss. Update it to:
-- Load all enabled modes for the company.
-- Build the routing prompt dynamically from each mode's `name` + `trigger_examples`.
-- Return the chosen mode's `id`, then load that mode's `system_prompt` + `enabled_tools`.
+Add a lightweight helper before the router runs:
+- If the **last assistant message** contains a media offer pattern (regex: `/show|see|send|share|view/i` AND `/picture|photo|image|pic|video/i`) AND the **current user message** is a short affirmation (`/^(yes|yeah|yep|sure|ok|okay|please|go ahead|👍|✅)/i`), then **bypass the router** and route directly to a "fulfill_media_offer" path that calls `list_media` + `send_media` for the relevant product mentioned in the offer.
+- Same pattern for other common offers: "want me to reserve it?", "should I notify the boss?", "want the price list?".
 
-**4. Seeded templates per industry**
-When a new company is created (or via a "Suggest modes" button), pre-fill modes based on `companies.business_type`:
-- Restaurant → Customer Care, Reservations, Boss
-- School → Customer Care, HR/Recruitment, Admissions, Boss
-- Retail (ANZ, Finch) → Customer Care, Sales, Boss
-- Anyone with a careers page → +HR mode
+**D. Mirror the same logic for the image-gen trigger**
 
-### Why this matters in practice
-
-Right now if a job applicant WhatsApps Finch saying *"I'd like to apply for the cashier role"*, the AI hits the Sales prompt and tries to sell them a pan. With HR mode + the keyword `apply|CV|job|hiring` → router picks HR mode → AI collects name, role, CV, and notifies the boss via the existing `notify_boss` tool. Same plumbing, different face.
-
-### What NOT to do
-
-- Don't build a separate "modes" toggle on top of the existing agent system — it would duplicate logic.
-- Don't expose this to every customer initially — start by enabling it for ANZ + one other company that actually has HR needs (does Omanut?), validate, then roll out.
-- Don't make it a global mode switch the user manually flips. The router should pick automatically based on message content. Manual override only for edge cases.
+In the image-generation gate, treat "yes" as a valid trigger when the immediately preceding assistant turn proposed an image. Don't require the user to re-state the verb the AI just used.
 
 ### Files to touch
 
-- **DB migration**: create `company_agent_modes` + seed function + trigger to copy legacy `support_agent_prompt`/`sales_agent_prompt`/`boss_agent_prompt` into rows on first read.
-- **`src/components/admin/deep-settings/AgentConfigPanel.tsx`** — replace the 5 hardcoded tabs with a dynamic list (keep Boss + Supervisor as special pinned modes since they have extra config panels).
-- **New**: `src/components/admin/deep-settings/AgentModeEditor.tsx` — single-mode editor card.
-- **New**: `src/components/admin/deep-settings/AgentModeTemplates.ts` — preset library (HR, Customer Care, Sales, etc.).
-- **`supabase/functions/whatsapp-messages/index.ts`** — replace static agent selection with dynamic mode loading + routing prompt builder.
-- **`supabase/functions/create-company/index.ts`** — seed default modes per business_type.
+- `supabase/functions/whatsapp-messages/index.ts` — history loader, router prompt, pending-action shortcut, image-trigger gate.
+- Possibly `supabase/functions/_shared/` — extract a small `detectPendingAction(lastAssistant, currentUser)` helper for reuse in `bms-agent` / `boss-chat` / `meta-webhook`.
+- No DB changes. No UI changes. No new tools.
 
 ### Verification
 
-1. Open AI Deep Settings → Agents on ANZ → see existing Support/Sales/Boss as modes (migrated from old prompt fields), nothing visually lost.
-2. Click "+ Add Mode" → pick "HR / Recruitment" template → save.
-3. WhatsApp ANZ: *"Hi, I'd like to apply for a job"* → routed to HR mode → AI asks for name/role/CV instead of selling pans.
-4. WhatsApp ANZ: *"how much is the cake stand?"* → still routed to Sales/Customer Care → answers normally.
-5. Disable HR mode → applicant message falls back to default mode → no regression.
+1. WhatsApp ANZ: *"do you have the cake stand?"* → AI: *"Yes, K1,200. Want to see a picture?"* → reply *"yes"* → **AI sends the cake stand photo** (was previously silent or off-topic).
+2. *"are you open today?"* → AI: *"Yes, until 6pm. Want me to reserve a table?"* → *"sure"* → AI starts reservation flow.
+3. *"how much is the pan?"* → AI: *"K450. Want me to notify the team to hold one?"* → *"yes please"* → AI calls `notify_boss`.
+4. Negative case: random *"yes"* with no prior offer → AI politely asks *"yes to what?"* (don't fire random tools).
+5. Check 5 prior conversations: no regressions on normal Q&A.
 
-### Phased rollout (recommended)
+### Memory to save after implementation
 
-- **Phase 1 (now)**: Build the table + UI + router. Migrate existing 3 agents into modes. Ship to ANZ + Omanut only.
-- **Phase 2**: Add 4-5 industry templates and the "Suggest modes for my business" button.
-- **Phase 3**: Per-mode analytics — which mode handled how many conversations, conversion per mode, escalation rate per mode.
+`mem://features/contextual-affirmation-handling` — "Short affirmations (yes/sure/ok) following an assistant offer (media/reservation/handoff) bypass the router and fulfill the offered action directly. History window is 12 messages with structured role pairs."
 
+### Phased
+
+- **Phase 1 (this PR)**: A + B + C above. Ship to ANZ.
+- **Phase 2**: Extend to bms-agent and boss-chat.
+- **Phase 3**: Track "missed affirmation" rate as a metric in supervisor analysis.
