@@ -377,7 +377,7 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
               </TabsContent>
 
               <TabsContent value="agents">
-                <AgentConfigPanel config={config} updateConfig={updateConfig} />
+                <AgentConfigPanel config={config} updateConfig={updateConfig} companyId={companyId} />
               </TabsContent>
 
               <TabsContent value="tools">
