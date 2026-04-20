@@ -1973,9 +1973,11 @@ async function _processAIResponseInner(
 
     // ========== AGENT-SPECIFIC SYSTEM PROMPTS (from database or defaults) ==========
     let agentPersonality = '';
-    
-    if (selectedAgent === 'support') {
-      // Use custom support agent prompt from database, or default
+
+    // Prefer dynamic mode prompt when present (covers HR, Logistics, custom modes, plus migrated support/sales/boss)
+    if (selectedMode?.system_prompt) {
+      agentPersonality = `\n\n🎯 YOU ARE THE ${selectedMode.name.toUpperCase()} AGENT:\n${selectedMode.system_prompt}`;
+    } else if (selectedAgent === 'support') {
       agentPersonality = aiOverrides?.support_agent_prompt || `
 
 🛠️ YOU ARE THE SUPPORT AGENT:
@@ -1987,7 +1989,6 @@ async function _processAIResponseInner(
 - Focus on making things right for the customer
 - If you cannot resolve the issue, escalate by using [HANDOFF_REQUIRED]`;
     } else if (selectedAgent === 'sales') {
-      // Use custom sales agent prompt from database, or default
       agentPersonality = aiOverrides?.sales_agent_prompt || `
 
 💼 YOU ARE THE SALES AGENT:
