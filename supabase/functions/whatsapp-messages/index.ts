@@ -4958,9 +4958,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log(`[TOOL-LOOP-MEDIA] Result: ${mediaResult.sent}/${mediaResult.total}`);
           } else if (fnName === 'search_media') {
             // ===== ACTUAL SEARCH_MEDIA IN MULTI-ROUND LOOP =====
-            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}"`);
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}" media_type=${args.media_type}`);
             try {
               let results: any[] = [];
+              const requestedMediaType: 'image' | 'video' | null =
+                args.media_type === 'video' || /\b(video|videos|clip|clips|reel|reels|footage)\b/i.test(args.query || '')
+                  ? 'video'
+                  : args.media_type === 'image' ? 'image' : null;
               try {
                 const expandedQuery = normalizeSearchQuery(args.query, company);
                 const queryVec = await embedQuery(expandedQuery);
@@ -4972,7 +4976,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   match_count: args.count || 5,
                 });
                 if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                  results = mediaResults.map((m: any) => ({
+                  const filtered = requestedMediaType
+                    ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
+                    : mediaResults;
+                  results = filtered.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
                     file_path: m.file_path,
@@ -4985,10 +4992,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               if (results.length === 0) {
                 const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
-                const { data: textResults } = await supabase
+                let textQuery = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, tags, file_name')
-                  .eq('company_id', company.id)
+                  .eq('company_id', company.id);
+                if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
+                const { data: textResults } = await textQuery
                   .or(ilikeClauses)
                   .limit(args.count || 5);
                 if (textResults && textResults.length > 0) {
@@ -5001,11 +5010,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 }
               }
               if (results.length === 0) {
-                const { data: anyMedia } = await supabase
+                let lastResort = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, tags, file_name')
-                  .eq('company_id', company.id)
-                  .eq('media_type', 'image')
+                  .eq('company_id', company.id);
+                if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
+                const { data: anyMedia } = await lastResort
                   .order('created_at', { ascending: false })
                   .limit(args.count || 5);
                 if (anyMedia && anyMedia.length > 0) {
