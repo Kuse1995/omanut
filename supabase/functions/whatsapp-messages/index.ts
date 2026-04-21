@@ -2993,11 +2993,12 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
         type: "function",
         function: {
           name: "search_media",
-          description: "Semantically search the company's media library (photos, videos, documents) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs.",
+          description: "Semantically search the company's media library (photos AND videos) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs and a media_type field ('image' or 'video'). When the customer specifically asks for a video/clip/reel, set media_type='video' to filter to videos only.",
           parameters: {
             type: "object",
             properties: {
               query: { type: "string", description: "What the customer is looking for — product name, category, or description" },
+              media_type: { type: "string", enum: ["image", "video"], description: "Optional filter: only return images or only videos. Use 'video' when customer asks for a video/clip/reel/footage." },
               count: { type: "integer", description: "Max results to return (default 5)" }
             },
             required: ["query"]
