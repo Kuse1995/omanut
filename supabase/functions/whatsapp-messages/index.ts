@@ -3166,6 +3166,9 @@ Trust ONLY the information provided in this system prompt.
     let anyToolExecuted = false;
     let toolExecutionContext: string[] = [];
     let toolResults: Array<{tool_call_id: string, role: string, content: string}> = [];
+    // Cumulative buffer of EVERY tool result across all rounds — used by the final synthesis fallback
+    // so earlier-round product/media payloads aren't lost when toolResults is reset per round.
+    const allToolResults: Array<{tool_call_id: string, role: string, content: string, fn?: string}> = [];
     let aiData: any = null; // Store AI response for tool loop
 
     try {
