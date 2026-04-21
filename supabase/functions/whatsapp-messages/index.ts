@@ -4851,7 +4851,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         if (!roundResponse.ok) {
           const errBody = await roundResponse.text().catch(() => 'no body');
           console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed: ${roundResponse.status}`, errBody.slice(0, 500));
-          if (!assistantReply) assistantReply = "I processed your request. How else can I help you?";
+          // Leave assistantReply empty so the synthesis fallback below can build a real reply from tool results
           break;
         }
         
