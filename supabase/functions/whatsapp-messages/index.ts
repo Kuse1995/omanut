@@ -4262,7 +4262,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 });
 
                 if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                  results = mediaResults.map((m: any) => ({
+                  const filtered = requestedMediaType
+                    ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
+                    : mediaResults;
+                  results = filtered.map((m: any) => ({
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
@@ -4282,10 +4285,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
                 
-                const { data: textResults } = await supabase
+                let textQuery = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, file_type, tags, file_name')
-                  .eq('company_id', company.id)
+                  .eq('company_id', company.id);
+                if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
+                const { data: textResults } = await textQuery
                   .or(ilikeClauses)
                   .limit(args.count || 5);
 
@@ -4303,14 +4308,16 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 }
               }
 
-              // 3. Last resort: return ANY media from this company's library
+              // 3. Last resort: return latest media from this company's library
+              // Honors requested media_type so "send a video" doesn't silently fall back to images.
               if (results.length === 0) {
-                console.log('[SEARCH-MEDIA] No text matches, returning latest media from library');
-                const { data: anyMedia } = await supabase
+                console.log(`[SEARCH-MEDIA] No text matches, returning latest ${requestedMediaType || 'any'} media from library`);
+                let lastResort = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, file_type, tags, file_name')
-                  .eq('company_id', company.id)
-                  .eq('media_type', 'image')
+                  .eq('company_id', company.id);
+                if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
+                const { data: anyMedia } = await lastResort
                   .order('created_at', { ascending: false })
                   .limit(args.count || 5);
 
@@ -4324,7 +4331,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     file_path: m.file_path,
                     similarity: 0.3,
                   }));
-                  console.log(`[SEARCH-MEDIA] Returned ${results.length} latest media as fallback`);
+                  console.log(`[SEARCH-MEDIA] Returned ${results.length} latest ${requestedMediaType || 'any'} media as fallback`);
                 }
               }
 
