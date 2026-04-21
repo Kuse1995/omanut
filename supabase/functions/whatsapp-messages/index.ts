@@ -2265,10 +2265,15 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     }
 
     if (mediaWithUrls && mediaWithUrls.length > 0) {
-      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files available) ===\n`;
-      instructions += `You have ${mediaWithUrls.length} media files available. Use the search_media tool to find relevant photos/videos when customers ask for samples or product images.\n`;
+      const videoCount = mediaWithUrls.filter((m: any) => m.media_type === 'video').length;
+      const imageCount = mediaWithUrls.length - videoCount;
+      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files: ${imageCount} image${imageCount === 1 ? '' : 's'}, ${videoCount} video${videoCount === 1 ? '' : 's'}) ===\n`;
+      instructions += `Use the search_media tool to find relevant photos/videos when customers ask for samples, product images, or video demos.\n`;
       instructions += '⚠️ CRITICAL: Always use search_media to find the right files. NEVER make up or guess URLs.\n';
       instructions += 'After finding media via search_media, use send_media with the returned URLs.\n';
+      if (videoCount > 0) {
+        instructions += `When the customer specifically asks for a video / clip / reel / footage, call search_media with media_type="video" to filter to videos only.\n`;
+      }
     } else {
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
