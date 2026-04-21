@@ -2077,10 +2077,19 @@ You handle simple questions yourself (product info, stock, delivery, photos). Ha
 When you hand off, say exactly: "Let me connect you with the team — someone will reach out shortly. 📱"
 Then call notify_boss with everything you've collected so far (customer name, phone, what they're asking about, stage in the buying journey).`;
     } else if (serviceMode === 'autonomous') {
-      agentPersonality += `
+      if (_salesModeForPrompt === 'human_in_loop') {
+        agentPersonality += `
+
+== AUTONOMOUS MODE (with human-in-the-loop sales) ==
+You may answer, browse the catalog, check stock, send photos/videos, and collect buy intent.
+You MUST NOT create payment links, record sales, quote payment account numbers, or promise checkout.
+When the customer wants to buy, call notify_boss with notification_type="purchase_handoff" (include product, quantity, customer name/phone) and tell the customer the owner will confirm payment details shortly. Keep replying to follow-up questions about products, photos, and stock.`;
+      } else {
+        agentPersonality += `
 
 == AUTONOMOUS MODE ==
 You handle EVERYTHING yourself. Do not say "let me connect you" or "I'll have someone reach out". Close the sale, answer the question, send the image, generate the payment link. The only time you call notify_boss is for a SEVERE complaint that needs management awareness — and even then, you keep replying to the customer.`;
+      }
     }
 
     // === BMS DATA INTEGRITY (applies to ALL modes) ===
@@ -2639,13 +2648,13 @@ ${supervisorRecommendation.recommendedResponse}
         type: "function",
         function: {
           name: "notify_boss",
-          description: "Send an immediate notification to the boss for important situations: high-value opportunities (10+ guests, corporate events), complaints, reservation changes/cancellations, VIP information.",
+          description: "Send an immediate notification to the boss. Use for: purchase handoff (customer wants to buy in human-in-loop mode), customer issues/complaints, order follow-ups, high-value opportunities, reservation changes, VIP info.",
           parameters: {
             type: "object",
             properties: {
-              notification_type: { type: "string", enum: ["high_value", "complaint", "reservation_change", "cancellation", "vip_info"] },
+              notification_type: { type: "string", enum: ["purchase_handoff", "customer_issue", "order_followup", "high_value", "complaint", "reservation_change", "cancellation", "vip_info"] },
               priority: { type: "string", enum: ["high", "urgent"] },
-              summary: { type: "string", description: "Brief summary of the situation" },
+              summary: { type: "string", description: "Brief summary of the situation (include product, quantity, customer name/phone for purchase_handoff)" },
               details: { type: "string", description: "Additional context" }
             },
             required: ["notification_type", "priority", "summary"]
@@ -3158,6 +3167,99 @@ Trust ONLY the information provided in this system prompt.
     // Update the messages array with final instructions
     messages[0] = { role: 'system', content: instructions };
 
+    // ========== DETERMINISTIC PRE-CHECKS (run BEFORE the AI to avoid orchestration failures) ==========
+    // These short-circuit common retail flows that the model gets wrong:
+    //   A) "I want to buy 2" right after the assistant quoted a specific product → notify_boss + confirm
+    //   B) Bare "yes/yeah/sure" in a support flow where the assistant just asked for an order detail
+    //      → re-ask for the missing detail instead of hitting a "Give me a moment" dead-end
+    let deterministicReply: string | null = null;
+    try {
+      const lastAssistantMsg = [...(messageHistory || [])].reverse().find(m => m.role === 'assistant')?.content || '';
+      const trimmedUser = (userMessage || '').trim();
+      const lowerUser = trimmedUser.toLowerCase();
+
+      // ----- A) Buy intent referencing the previously quoted product -----
+      const buyIntentRegex = /^(i\s*('?ll|will)?\s*(want|need|like|love)\s*(to)?\s*(buy|order|get|take|grab)|i('?ll| will)\s*(take|buy|grab)|let me (buy|order|get|take)|can i (buy|order|get)|book me|reserve (me|it|one|two|three|four|five|\d+)|order me|gimme|give me|i want)\b/i;
+      const namesProductHints = /\b(pan|stand|cake|pot|kettle|tray|knife|knives|fork|spoon|plate|bowl|cup|mug|glass|bottle|product|item|sku|model)\b/i;
+      const isBuyIntent = buyIntentRegex.test(trimmedUser);
+      const productAlreadyNamed = namesProductHints.test(trimmedUser);
+
+      // Quantity extraction: words or digits
+      const qtyDigits = trimmedUser.match(/\b(\d{1,3})\b/);
+      const qtyWords: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, dozen: 12 };
+      const qtyWordMatch = lowerUser.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|dozen)\b/);
+      const quantity = qtyDigits ? parseInt(qtyDigits[1], 10) : (qtyWordMatch ? qtyWords[qtyWordMatch[1]] : null);
+
+      // Try to extract the previously quoted product from the last assistant message.
+      // Patterns we recognize:  *Product Name* — K123     or     Product Name - K123     or     "Product Name" K123
+      let lastQuotedProduct: string | null = null;
+      if (lastAssistantMsg) {
+        const starQuoted = lastAssistantMsg.match(/\*([^*\n]{2,80}?)\*\s*[—\-–:]\s*[A-Za-z]{0,3}\s*\d/);
+        const dashQuoted = !starQuoted && lastAssistantMsg.match(/([A-Z][\w\-\s]{2,60}?)\s+[—\-–]\s+[A-Za-z]{0,3}\s*\d/);
+        const m = starQuoted || dashQuoted;
+        if (m && m[1]) lastQuotedProduct = m[1].trim().replace(/\s+/g, ' ');
+      }
+
+      const _salesMode = (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
+
+      if (isBuyIntent && !productAlreadyNamed && lastQuotedProduct && _salesMode === 'human_in_loop') {
+        const qtyText = quantity ? `${quantity} × ` : '';
+        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${customerName || customerPhone} wants to buy.`;
+        // Fire-and-forget boss notification
+        try {
+          await supabase.from('boss_conversations').insert({
+            company_id: company.id,
+            message_from: 'ai_agent',
+            message_content: `[purchase_handoff] ${summary}\nCustomer phone: ${customerPhone}`,
+          });
+        } catch (e) { console.warn('[DETERMINISTIC-BUY] boss insert failed:', e); }
+        deterministicReply = `Perfect choice — I've asked the owner to confirm ${qtyText}*${lastQuotedProduct}* and send payment details shortly. 🙏`;
+        console.log('[DETERMINISTIC-BUY] Triggered for', { lastQuotedProduct, quantity });
+      }
+
+      // ----- B) Meaningless "yes" in a support flow that needs an order detail -----
+      const isBareAffirmation = /^(yes|yeah|yep|yup|sure|ok|okay|k|👍|✅)\.?$/i.test(trimmedUser);
+      const assistantAskedForOrderDetail = /\b(order\s+date|date\s+(of\s+)?order|item\s+(you\s+)?ordered|what\s+did\s+you\s+order|receipt|order\s+number|tracking)\b/i.test(lastAssistantMsg);
+      if (!deterministicReply && isBareAffirmation && assistantAskedForOrderDetail) {
+        deterministicReply = `Please send the order date or the item you ordered so I can check properly.`;
+        console.log('[DETERMINISTIC-SUPPORT] Bare affirmation in support flow; re-asking for missing detail.');
+      }
+    } catch (detErr) {
+      console.warn('[DETERMINISTIC-PRECHECK] Error (non-fatal, falling through to AI):', detErr);
+    }
+
+    // If a deterministic reply fired, skip the AI/tool loop entirely.
+    if (deterministicReply) {
+      const assistantReply = deterministicReply;
+      try {
+        await supabase.from('messages').insert({
+          conversation_id: conversationId, role: 'assistant', content: assistantReply,
+        });
+        await supabase.from('conversations').update({
+          transcript: `${conversation.transcript || ''}\nCustomer: ${userMessage}\nAssistant: ${assistantReply}\n`,
+        }).eq('id', conversationId);
+        const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_TOK = Deno.env.get('TWILIO_AUTH_TOKEN');
+        if (TWILIO_SID && TWILIO_TOK && company.whatsapp_number) {
+          const fromNumber = company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+          const fd = new URLSearchParams();
+          fd.append('From', fromNumber);
+          fd.append('To', normalizeWhatsAppTo(customerPhone));
+          fd.append('Body', assistantReply);
+          const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_SID}:${TWILIO_TOK}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: fd.toString(),
+          });
+          if (r.ok) { console.log('[DETERMINISTIC] Reply sent via Twilio'); markResponseSent(); }
+          else { console.error('[DETERMINISTIC] Twilio send failed:', r.status, await r.text().catch(() => '')); }
+        }
+      } catch (sendErr) {
+        console.error('[DETERMINISTIC] Failed to dispatch deterministic reply:', sendErr);
+      }
+      return;
+    }
+
     // Call Lovable AI Gateway with configurable timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), responseTimeout);
@@ -3166,6 +3268,9 @@ Trust ONLY the information provided in this system prompt.
     let anyToolExecuted = false;
     let toolExecutionContext: string[] = [];
     let toolResults: Array<{tool_call_id: string, role: string, content: string}> = [];
+    // Cumulative buffer of EVERY tool result across all rounds — used by the final synthesis fallback
+    // so earlier-round product/media payloads aren't lost when toolResults is reset per round.
+    const allToolResults: Array<{tool_call_id: string, role: string, content: string, fn?: string}> = [];
     let aiData: any = null; // Store AI response for tool loop
 
     try {
@@ -4773,7 +4878,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     }
 
     // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
-    let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 8); // safe cap (raised from 5 to honor configs like ANZ=6)
     
     // Ensure at least 3 rounds when checkout tools are active (check_stock -> record_sale -> generate_payment_link)
     const checkoutToolNames = (filteredTools || []).map((t: any) => t.function?.name).filter(Boolean);
@@ -4801,7 +4906,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       currentToolCalls = null;
     }
     let currentMessages = [...messages];
-    
+
+    // Snapshot the FIRST round's tool results into the cumulative buffer before they get reset.
+    for (const tr of toolResults) {
+      allToolResults.push({ ...tr, fn: (currentToolCalls || []).find((c: any) => c.id === tr.tool_call_id)?.function?.name });
+    }
+
     while (toolResults.length > 0 && currentRound < maxToolRounds) {
       currentRound++;
       console.log(`[TOOL-LOOP] Round ${currentRound}/${maxToolRounds}, processing ${toolResults.length} tool results`);
@@ -5083,7 +5193,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           }
           anyToolExecuted = true;
         }
-        
+
+        // Snapshot this round's tool results into the cumulative buffer (used by final synthesis)
+        for (const tr of toolResults) {
+          allToolResults.push({ ...tr, fn: (currentToolCalls || []).find((c: any) => c.id === tr.tool_call_id)?.function?.name });
+        }
+
       } catch (toolLoopError) {
         console.error(`[TOOL-LOOP] Error in round ${currentRound}:`, toolLoopError);
         if (!assistantReply) assistantReply = "Got it! What else can I help you with?";
@@ -5102,29 +5217,95 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
+    // ========== AUTO-SEND MEDIA FOR EXPLICIT MEDIA REQUESTS ==========
+    // If the customer explicitly asked for pics/videos and search_media succeeded but the model
+    // never called send_media, dispatch the top results deterministically. Caps at 3 to avoid spam.
+    try {
+      const lowerUserMsgForMedia = (userMessage || '').toLowerCase();
+      const askedForMedia = /\b(pic|pics|picture|pictures|photo|photos|image|images|video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia);
+      const askedForVideoOnly = /\b(video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia)
+        && !/\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
+      const askedForImageOnly = !askedForVideoOnly
+        && /\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
+
+      const sendMediaWasCalled = allToolResults.some(tr => tr.fn === 'send_media')
+        || toolExecutionContext.some(c => /send_media/i.test(c));
+
+      if (askedForMedia && !sendMediaWasCalled) {
+        // Collect all media URLs returned by any search_media call across all rounds
+        const candidates: Array<{ url: string; media_type: string }> = [];
+        for (const tr of allToolResults) {
+          if (tr.fn !== 'search_media') continue;
+          try {
+            const payload = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
+            const mediaArr = payload?.media || payload?.results || [];
+            if (Array.isArray(mediaArr)) {
+              for (const m of mediaArr) {
+                if (m?.url) candidates.push({ url: m.url, media_type: m.media_type || 'image' });
+              }
+            }
+          } catch { /* skip */ }
+        }
+        // Filter by requested type
+        let filtered = candidates;
+        if (askedForVideoOnly) filtered = candidates.filter(c => c.media_type === 'video');
+        else if (askedForImageOnly) filtered = candidates.filter(c => c.media_type === 'image');
+        // Dedupe + cap at 3
+        const seen = new Set<string>();
+        const toSend = [] as Array<{ url: string; media_type: string }>;
+        for (const c of filtered) {
+          if (seen.has(c.url)) continue;
+          seen.add(c.url);
+          toSend.push(c);
+          if (toSend.length >= 3) break;
+        }
+        if (toSend.length > 0) {
+          console.log(`[AUTO-SEND-MEDIA] Customer asked for media; model didn't call send_media. Auto-sending ${toSend.length} file(s).`);
+          const autoResult = await handleSendMedia(
+            { media_urls: toSend.map(t => t.url), category: 'auto', caption: '' },
+            company, customerPhone, conversationId, supabase
+          );
+          toolExecutionContext.push(`auto_send_media: ${autoResult.sent}/${autoResult.total} sent`);
+          // Surface a marker so synthesis knows photos were sent
+          allToolResults.push({
+            tool_call_id: 'auto-send',
+            role: 'tool',
+            content: JSON.stringify({ success: true, sent: autoResult.sent, total: autoResult.total }),
+            fn: 'send_media',
+          });
+        }
+      }
+    } catch (autoMediaErr) {
+      console.warn('[AUTO-SEND-MEDIA] Failed:', autoMediaErr);
+    }
+
     // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
-      if (anyToolExecuted && toolExecutionContext.length > 0) {
-        // ========== DETERMINISTIC SYNTHESIS FROM TOOL RESULTS ==========
-        // Tool calls succeeded but the model returned empty text. Build a real reply from toolResults
-        // so the customer sees the data instead of "I've processed your request".
+      if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
+        // ========== DETERMINISTIC SYNTHESIS FROM ALL TOOL RESULTS (across all rounds) ==========
         let synthesized = '';
         try {
           const ctxJoined = toolExecutionContext.join(' | ').toLowerCase();
-          const sentMedia = /send_media:\s*(\d+)\/\d+/.exec(ctxJoined);
-          const mediaSentCount = sentMedia ? parseInt(sentMedia[1], 10) : 0;
+          const sentMediaMatch = /send_media:\s*(\d+)\/\d+|auto_send_media:\s*(\d+)\/\d+/.exec(ctxJoined);
+          const mediaSentCount = sentMediaMatch
+            ? parseInt(sentMediaMatch[1] || sentMediaMatch[2] || '0', 10)
+            : 0;
 
-          // Pull product/stock data out of toolResults JSON payloads
+          // Pull product/stock data out of EVERY round's tool payloads, including BMS .data
           const products: Array<{ name: string; price?: string | number; stock?: any }> = [];
-          for (const tr of toolResults) {
+          for (const tr of allToolResults) {
             try {
               const payload = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
-              const candidates = payload?.products || payload?.items || payload?.results || (payload?.product ? [payload.product] : []);
+              const candidates = payload?.products
+                || payload?.items
+                || payload?.results
+                || payload?.data
+                || (payload?.product ? [payload.product] : []);
               if (Array.isArray(candidates)) {
-                for (const p of candidates.slice(0, 5)) {
+                for (const p of candidates.slice(0, 8)) {
                   const name = p?.name || p?.product_name || p?.title;
                   const price = p?.price ?? p?.unit_price ?? p?.selling_price;
-                  if (name) products.push({ name: String(name), price, stock: p?.stock ?? p?.quantity });
+                  if (name) products.push({ name: String(name), price, stock: p?.stock ?? p?.quantity ?? p?.in_stock });
                 }
               }
             } catch { /* skip non-JSON */ }
@@ -5151,10 +5332,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           assistantReply = synthesized;
           console.log('[SYNTHESIS-FALLBACK] Built deterministic reply from tool results:', synthesized.slice(0, 120));
         } else {
-          // Last resort: at least say WHAT we did instead of "processed"
-          const summary = toolExecutionContext.slice(-3).join(', ');
-          assistantReply = `Just checked on that for you — ${summary}. Anything else you'd like to know?`;
-          console.log('[SYNTHESIS-FALLBACK] No structured data, using context summary. Context:', toolExecutionContext);
+          // Safe customer-facing fallback — NEVER expose internal tool names or round numbers
+          assistantReply = `I'm still checking that for you — let me confirm with the owner and get right back. 🙏`;
+          console.log('[SYNTHESIS-FALLBACK] No structured data; using safe customer-facing fallback. Internal context (not sent):', toolExecutionContext);
         }
       } else {
         const lowerUserMsg = userMessage.toLowerCase();
