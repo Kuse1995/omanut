@@ -3158,6 +3158,99 @@ Trust ONLY the information provided in this system prompt.
     // Update the messages array with final instructions
     messages[0] = { role: 'system', content: instructions };
 
+    // ========== DETERMINISTIC PRE-CHECKS (run BEFORE the AI to avoid orchestration failures) ==========
+    // These short-circuit common retail flows that the model gets wrong:
+    //   A) "I want to buy 2" right after the assistant quoted a specific product → notify_boss + confirm
+    //   B) Bare "yes/yeah/sure" in a support flow where the assistant just asked for an order detail
+    //      → re-ask for the missing detail instead of hitting a "Give me a moment" dead-end
+    let deterministicReply: string | null = null;
+    try {
+      const lastAssistantMsg = [...(messageHistory || [])].reverse().find(m => m.role === 'assistant')?.content || '';
+      const trimmedUser = (userMessage || '').trim();
+      const lowerUser = trimmedUser.toLowerCase();
+
+      // ----- A) Buy intent referencing the previously quoted product -----
+      const buyIntentRegex = /^(i\s*('?ll|will)?\s*(want|need|like|love)\s*(to)?\s*(buy|order|get|take|grab)|i('?ll| will)\s*(take|buy|grab)|let me (buy|order|get|take)|can i (buy|order|get)|book me|reserve (me|it|one|two|three|four|five|\d+)|order me|gimme|give me|i want)\b/i;
+      const namesProductHints = /\b(pan|stand|cake|pot|kettle|tray|knife|knives|fork|spoon|plate|bowl|cup|mug|glass|bottle|product|item|sku|model)\b/i;
+      const isBuyIntent = buyIntentRegex.test(trimmedUser);
+      const productAlreadyNamed = namesProductHints.test(trimmedUser);
+
+      // Quantity extraction: words or digits
+      const qtyDigits = trimmedUser.match(/\b(\d{1,3})\b/);
+      const qtyWords: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, dozen: 12 };
+      const qtyWordMatch = lowerUser.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|dozen)\b/);
+      const quantity = qtyDigits ? parseInt(qtyDigits[1], 10) : (qtyWordMatch ? qtyWords[qtyWordMatch[1]] : null);
+
+      // Try to extract the previously quoted product from the last assistant message.
+      // Patterns we recognize:  *Product Name* — K123     or     Product Name - K123     or     "Product Name" K123
+      let lastQuotedProduct: string | null = null;
+      if (lastAssistantMsg) {
+        const starQuoted = lastAssistantMsg.match(/\*([^*\n]{2,80}?)\*\s*[—\-–:]\s*[A-Za-z]{0,3}\s*\d/);
+        const dashQuoted = !starQuoted && lastAssistantMsg.match(/([A-Z][\w\-\s]{2,60}?)\s+[—\-–]\s+[A-Za-z]{0,3}\s*\d/);
+        const m = starQuoted || dashQuoted;
+        if (m && m[1]) lastQuotedProduct = m[1].trim().replace(/\s+/g, ' ');
+      }
+
+      const _salesMode = (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
+
+      if (isBuyIntent && !productAlreadyNamed && lastQuotedProduct && _salesMode === 'human_in_loop') {
+        const qtyText = quantity ? `${quantity} × ` : '';
+        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${customerName || customerPhone} wants to buy.`;
+        // Fire-and-forget boss notification
+        try {
+          await supabase.from('boss_conversations').insert({
+            company_id: company.id,
+            message_from: 'ai_agent',
+            message_content: `[purchase_handoff] ${summary}\nCustomer phone: ${customerPhone}`,
+          });
+        } catch (e) { console.warn('[DETERMINISTIC-BUY] boss insert failed:', e); }
+        deterministicReply = `Perfect choice — I've asked the owner to confirm ${qtyText}*${lastQuotedProduct}* and send payment details shortly. 🙏`;
+        console.log('[DETERMINISTIC-BUY] Triggered for', { lastQuotedProduct, quantity });
+      }
+
+      // ----- B) Meaningless "yes" in a support flow that needs an order detail -----
+      const isBareAffirmation = /^(yes|yeah|yep|yup|sure|ok|okay|k|👍|✅)\.?$/i.test(trimmedUser);
+      const assistantAskedForOrderDetail = /\b(order\s+date|date\s+(of\s+)?order|item\s+(you\s+)?ordered|what\s+did\s+you\s+order|receipt|order\s+number|tracking)\b/i.test(lastAssistantMsg);
+      if (!deterministicReply && isBareAffirmation && assistantAskedForOrderDetail) {
+        deterministicReply = `Please send the order date or the item you ordered so I can check properly.`;
+        console.log('[DETERMINISTIC-SUPPORT] Bare affirmation in support flow; re-asking for missing detail.');
+      }
+    } catch (detErr) {
+      console.warn('[DETERMINISTIC-PRECHECK] Error (non-fatal, falling through to AI):', detErr);
+    }
+
+    // If a deterministic reply fired, skip the AI/tool loop entirely.
+    if (deterministicReply) {
+      const assistantReply = deterministicReply;
+      try {
+        await supabase.from('messages').insert({
+          conversation_id: conversationId, role: 'assistant', content: assistantReply,
+        });
+        await supabase.from('conversations').update({
+          transcript: `${conversation.transcript || ''}\nCustomer: ${userMessage}\nAssistant: ${assistantReply}\n`,
+        }).eq('id', conversationId);
+        const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_TOK = Deno.env.get('TWILIO_AUTH_TOKEN');
+        if (TWILIO_SID && TWILIO_TOK && company.whatsapp_number) {
+          const fromNumber = company.whatsapp_number.startsWith('whatsapp:') ? company.whatsapp_number : `whatsapp:${company.whatsapp_number}`;
+          const fd = new URLSearchParams();
+          fd.append('From', fromNumber);
+          fd.append('To', normalizeWhatsAppTo(customerPhone));
+          fd.append('Body', assistantReply);
+          const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Basic ' + btoa(`${TWILIO_SID}:${TWILIO_TOK}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: fd.toString(),
+          });
+          if (r.ok) { console.log('[DETERMINISTIC] Reply sent via Twilio'); markResponseSent(); }
+          else { console.error('[DETERMINISTIC] Twilio send failed:', r.status, await r.text().catch(() => '')); }
+        }
+      } catch (sendErr) {
+        console.error('[DETERMINISTIC] Failed to dispatch deterministic reply:', sendErr);
+      }
+      return;
+    }
+
     // Call Lovable AI Gateway with configurable timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), responseTimeout);
