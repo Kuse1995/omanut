@@ -2639,13 +2639,13 @@ ${supervisorRecommendation.recommendedResponse}
         type: "function",
         function: {
           name: "notify_boss",
-          description: "Send an immediate notification to the boss for important situations: high-value opportunities (10+ guests, corporate events), complaints, reservation changes/cancellations, VIP information.",
+          description: "Send an immediate notification to the boss. Use for: purchase handoff (customer wants to buy in human-in-loop mode), customer issues/complaints, order follow-ups, high-value opportunities, reservation changes, VIP info.",
           parameters: {
             type: "object",
             properties: {
-              notification_type: { type: "string", enum: ["high_value", "complaint", "reservation_change", "cancellation", "vip_info"] },
+              notification_type: { type: "string", enum: ["purchase_handoff", "customer_issue", "order_followup", "high_value", "complaint", "reservation_change", "cancellation", "vip_info"] },
               priority: { type: "string", enum: ["high", "urgent"] },
-              summary: { type: "string", description: "Brief summary of the situation" },
+              summary: { type: "string", description: "Brief summary of the situation (include product, quantity, customer name/phone for purchase_handoff)" },
               details: { type: "string", description: "Additional context" }
             },
             required: ["notification_type", "priority", "summary"]
