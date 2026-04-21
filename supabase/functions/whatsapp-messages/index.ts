@@ -4851,7 +4851,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         if (!roundResponse.ok) {
           const errBody = await roundResponse.text().catch(() => 'no body');
           console.error(`[TOOL-LOOP] Round ${currentRound} AI call failed: ${roundResponse.status}`, errBody.slice(0, 500));
-          if (!assistantReply) assistantReply = "I processed your request. How else can I help you?";
+          // Leave assistantReply empty so the synthesis fallback below can build a real reply from tool results
           break;
         }
         
@@ -5102,11 +5102,60 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
-    // Ensure we have a response — use contextual fallback instead of generic greeting
+    // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
       if (anyToolExecuted && toolExecutionContext.length > 0) {
-        assistantReply = "I've processed your request. Is there anything else I can help you with?";
-        console.log('[FALLBACK] Tools executed but no reply generated. Context:', toolExecutionContext);
+        // ========== DETERMINISTIC SYNTHESIS FROM TOOL RESULTS ==========
+        // Tool calls succeeded but the model returned empty text. Build a real reply from toolResults
+        // so the customer sees the data instead of "I've processed your request".
+        let synthesized = '';
+        try {
+          const ctxJoined = toolExecutionContext.join(' | ').toLowerCase();
+          const sentMedia = /send_media:\s*(\d+)\/\d+/.exec(ctxJoined);
+          const mediaSentCount = sentMedia ? parseInt(sentMedia[1], 10) : 0;
+
+          // Pull product/stock data out of toolResults JSON payloads
+          const products: Array<{ name: string; price?: string | number; stock?: any }> = [];
+          for (const tr of toolResults) {
+            try {
+              const payload = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
+              const candidates = payload?.products || payload?.items || payload?.results || (payload?.product ? [payload.product] : []);
+              if (Array.isArray(candidates)) {
+                for (const p of candidates.slice(0, 5)) {
+                  const name = p?.name || p?.product_name || p?.title;
+                  const price = p?.price ?? p?.unit_price ?? p?.selling_price;
+                  if (name) products.push({ name: String(name), price, stock: p?.stock ?? p?.quantity });
+                }
+              }
+            } catch { /* skip non-JSON */ }
+          }
+          const currency = company.currency_prefix || 'K';
+          const dedupeProducts = Array.from(new Map(products.map(p => [p.name.toLowerCase(), p])).values()).slice(0, 5);
+
+          if (mediaSentCount > 0 && dedupeProducts.length > 0) {
+            const lines = dedupeProducts.map(p => p.price != null ? `• *${p.name}* — ${currency}${p.price}` : `• *${p.name}*`).join('\n');
+            synthesized = `Here's what I found:\n${lines}\n\nPhotos sent above 👆 — which one catches your eye?`;
+          } else if (mediaSentCount > 0) {
+            synthesized = `Photos sent above 👆 — let me know which one you like and I'll get you the details.`;
+          } else if (dedupeProducts.length > 0) {
+            const lines = dedupeProducts.map(p => p.price != null ? `• *${p.name}* — ${currency}${p.price}` : `• *${p.name}*`).join('\n');
+            synthesized = `Here's what I found:\n${lines}\n\nWant a photo of any of these?`;
+          } else if (toolExecutionContext.some(c => /notify_boss|boss notified/i.test(c))) {
+            synthesized = `Got it — I've flagged this for the owner who'll reach out shortly. 🙏`;
+          }
+        } catch (synthErr) {
+          console.warn('[SYNTHESIS-FALLBACK] Error building deterministic reply:', synthErr);
+        }
+
+        if (synthesized) {
+          assistantReply = synthesized;
+          console.log('[SYNTHESIS-FALLBACK] Built deterministic reply from tool results:', synthesized.slice(0, 120));
+        } else {
+          // Last resort: at least say WHAT we did instead of "processed"
+          const summary = toolExecutionContext.slice(-3).join(', ');
+          assistantReply = `Just checked on that for you — ${summary}. Anything else you'd like to know?`;
+          console.log('[SYNTHESIS-FALLBACK] No structured data, using context summary. Context:', toolExecutionContext);
+        }
       } else {
         const lowerUserMsg = userMessage.toLowerCase();
         const isPurchaseIntent = /buy|purchase|order|payment link|pay|price/i.test(lowerUserMsg);
