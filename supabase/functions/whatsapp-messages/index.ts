@@ -5115,29 +5115,95 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
+    // ========== AUTO-SEND MEDIA FOR EXPLICIT MEDIA REQUESTS ==========
+    // If the customer explicitly asked for pics/videos and search_media succeeded but the model
+    // never called send_media, dispatch the top results deterministically. Caps at 3 to avoid spam.
+    try {
+      const lowerUserMsgForMedia = (userMessage || '').toLowerCase();
+      const askedForMedia = /\b(pic|pics|picture|pictures|photo|photos|image|images|video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia);
+      const askedForVideoOnly = /\b(video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia)
+        && !/\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
+      const askedForImageOnly = !askedForVideoOnly
+        && /\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
+
+      const sendMediaWasCalled = allToolResults.some(tr => tr.fn === 'send_media')
+        || toolExecutionContext.some(c => /send_media/i.test(c));
+
+      if (askedForMedia && !sendMediaWasCalled) {
+        // Collect all media URLs returned by any search_media call across all rounds
+        const candidates: Array<{ url: string; media_type: string }> = [];
+        for (const tr of allToolResults) {
+          if (tr.fn !== 'search_media') continue;
+          try {
+            const payload = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
+            const mediaArr = payload?.media || payload?.results || [];
+            if (Array.isArray(mediaArr)) {
+              for (const m of mediaArr) {
+                if (m?.url) candidates.push({ url: m.url, media_type: m.media_type || 'image' });
+              }
+            }
+          } catch { /* skip */ }
+        }
+        // Filter by requested type
+        let filtered = candidates;
+        if (askedForVideoOnly) filtered = candidates.filter(c => c.media_type === 'video');
+        else if (askedForImageOnly) filtered = candidates.filter(c => c.media_type === 'image');
+        // Dedupe + cap at 3
+        const seen = new Set<string>();
+        const toSend = [] as Array<{ url: string; media_type: string }>;
+        for (const c of filtered) {
+          if (seen.has(c.url)) continue;
+          seen.add(c.url);
+          toSend.push(c);
+          if (toSend.length >= 3) break;
+        }
+        if (toSend.length > 0) {
+          console.log(`[AUTO-SEND-MEDIA] Customer asked for media; model didn't call send_media. Auto-sending ${toSend.length} file(s).`);
+          const autoResult = await handleSendMedia(
+            { media_urls: toSend.map(t => t.url), category: 'auto', caption: '' },
+            company, customerPhone, conversationId, supabase
+          );
+          toolExecutionContext.push(`auto_send_media: ${autoResult.sent}/${autoResult.total} sent`);
+          // Surface a marker so synthesis knows photos were sent
+          allToolResults.push({
+            tool_call_id: 'auto-send',
+            role: 'tool',
+            content: JSON.stringify({ success: true, sent: autoResult.sent, total: autoResult.total }),
+            fn: 'send_media',
+          });
+        }
+      }
+    } catch (autoMediaErr) {
+      console.warn('[AUTO-SEND-MEDIA] Failed:', autoMediaErr);
+    }
+
     // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
-      if (anyToolExecuted && toolExecutionContext.length > 0) {
-        // ========== DETERMINISTIC SYNTHESIS FROM TOOL RESULTS ==========
-        // Tool calls succeeded but the model returned empty text. Build a real reply from toolResults
-        // so the customer sees the data instead of "I've processed your request".
+      if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
+        // ========== DETERMINISTIC SYNTHESIS FROM ALL TOOL RESULTS (across all rounds) ==========
         let synthesized = '';
         try {
           const ctxJoined = toolExecutionContext.join(' | ').toLowerCase();
-          const sentMedia = /send_media:\s*(\d+)\/\d+/.exec(ctxJoined);
-          const mediaSentCount = sentMedia ? parseInt(sentMedia[1], 10) : 0;
+          const sentMediaMatch = /send_media:\s*(\d+)\/\d+|auto_send_media:\s*(\d+)\/\d+/.exec(ctxJoined);
+          const mediaSentCount = sentMediaMatch
+            ? parseInt(sentMediaMatch[1] || sentMediaMatch[2] || '0', 10)
+            : 0;
 
-          // Pull product/stock data out of toolResults JSON payloads
+          // Pull product/stock data out of EVERY round's tool payloads, including BMS .data
           const products: Array<{ name: string; price?: string | number; stock?: any }> = [];
-          for (const tr of toolResults) {
+          for (const tr of allToolResults) {
             try {
               const payload = typeof tr.content === 'string' ? JSON.parse(tr.content) : tr.content;
-              const candidates = payload?.products || payload?.items || payload?.results || (payload?.product ? [payload.product] : []);
+              const candidates = payload?.products
+                || payload?.items
+                || payload?.results
+                || payload?.data
+                || (payload?.product ? [payload.product] : []);
               if (Array.isArray(candidates)) {
-                for (const p of candidates.slice(0, 5)) {
+                for (const p of candidates.slice(0, 8)) {
                   const name = p?.name || p?.product_name || p?.title;
                   const price = p?.price ?? p?.unit_price ?? p?.selling_price;
-                  if (name) products.push({ name: String(name), price, stock: p?.stock ?? p?.quantity });
+                  if (name) products.push({ name: String(name), price, stock: p?.stock ?? p?.quantity ?? p?.in_stock });
                 }
               }
             } catch { /* skip non-JSON */ }
@@ -5164,10 +5230,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           assistantReply = synthesized;
           console.log('[SYNTHESIS-FALLBACK] Built deterministic reply from tool results:', synthesized.slice(0, 120));
         } else {
-          // Last resort: at least say WHAT we did instead of "processed"
-          const summary = toolExecutionContext.slice(-3).join(', ');
-          assistantReply = `Just checked on that for you — ${summary}. Anything else you'd like to know?`;
-          console.log('[SYNTHESIS-FALLBACK] No structured data, using context summary. Context:', toolExecutionContext);
+          // Safe customer-facing fallback — NEVER expose internal tool names or round numbers
+          assistantReply = `I'm still checking that for you — let me confirm with the owner and get right back. 🙏`;
+          console.log('[SYNTHESIS-FALLBACK] No structured data; using safe customer-facing fallback. Internal context (not sent):', toolExecutionContext);
         }
       } else {
         const lowerUserMsg = userMessage.toLowerCase();
