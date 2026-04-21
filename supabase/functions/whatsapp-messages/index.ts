@@ -4239,9 +4239,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             }
           } else if (toolCall.function.name === 'search_media') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[SEARCH-MEDIA] Query:', args.query);
+            console.log('[SEARCH-MEDIA] Query:', args.query, 'media_type:', args.media_type);
             try {
               let results: any[] = [];
+
+              // Detect requested media type from explicit arg OR query keywords
+              const requestedMediaType: 'image' | 'video' | null =
+                args.media_type === 'video' || /\b(video|videos|clip|clips|reel|reels|footage)\b/i.test(args.query || '')
+                  ? 'video'
+                  : args.media_type === 'image' ? 'image' : null;
 
               // 1. Try semantic vector search first
               try {
