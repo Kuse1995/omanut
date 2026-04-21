@@ -2265,10 +2265,15 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
     }
 
     if (mediaWithUrls && mediaWithUrls.length > 0) {
-      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files available) ===\n`;
-      instructions += `You have ${mediaWithUrls.length} media files available. Use the search_media tool to find relevant photos/videos when customers ask for samples or product images.\n`;
+      const videoCount = mediaWithUrls.filter((m: any) => m.media_type === 'video').length;
+      const imageCount = mediaWithUrls.length - videoCount;
+      instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files: ${imageCount} image${imageCount === 1 ? '' : 's'}, ${videoCount} video${videoCount === 1 ? '' : 's'}) ===\n`;
+      instructions += `Use the search_media tool to find relevant photos/videos when customers ask for samples, product images, or video demos.\n`;
       instructions += '⚠️ CRITICAL: Always use search_media to find the right files. NEVER make up or guess URLs.\n';
       instructions += 'After finding media via search_media, use send_media with the returned URLs.\n';
+      if (videoCount > 0) {
+        instructions += `When the customer specifically asks for a video / clip / reel / footage, call search_media with media_type="video" to filter to videos only.\n`;
+      }
     } else {
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
@@ -2993,11 +2998,12 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
         type: "function",
         function: {
           name: "search_media",
-          description: "Semantically search the company's media library (photos, videos, documents) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs.",
+          description: "Semantically search the company's media library (photos AND videos) to find the most relevant files to share with the customer. Use instead of guessing URLs. Returns the top matching media with URLs and a media_type field ('image' or 'video'). When the customer specifically asks for a video/clip/reel, set media_type='video' to filter to videos only.",
           parameters: {
             type: "object",
             properties: {
               query: { type: "string", description: "What the customer is looking for — product name, category, or description" },
+              media_type: { type: "string", enum: ["image", "video"], description: "Optional filter: only return images or only videos. Use 'video' when customer asks for a video/clip/reel/footage." },
               count: { type: "integer", description: "Max results to return (default 5)" }
             },
             required: ["query"]
@@ -4239,9 +4245,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             }
           } else if (toolCall.function.name === 'search_media') {
             const args = JSON.parse(toolCall.function.arguments);
-            console.log('[SEARCH-MEDIA] Query:', args.query);
+            console.log('[SEARCH-MEDIA] Query:', args.query, 'media_type:', args.media_type);
             try {
               let results: any[] = [];
+
+              // Detect requested media type from explicit arg OR query keywords
+              const requestedMediaType: 'image' | 'video' | null =
+                args.media_type === 'video' || /\b(video|videos|clip|clips|reel|reels|footage)\b/i.test(args.query || '')
+                  ? 'video'
+                  : args.media_type === 'image' ? 'image' : null;
 
               // 1. Try semantic vector search first
               try {
@@ -4256,7 +4268,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 });
 
                 if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                  results = mediaResults.map((m: any) => ({
+                  const filtered = requestedMediaType
+                    ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
+                    : mediaResults;
+                  results = filtered.map((m: any) => ({
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
@@ -4276,10 +4291,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
                 
-                const { data: textResults } = await supabase
+                let textQuery = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, file_type, tags, file_name')
-                  .eq('company_id', company.id)
+                  .eq('company_id', company.id);
+                if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
+                const { data: textResults } = await textQuery
                   .or(ilikeClauses)
                   .limit(args.count || 5);
 
@@ -4297,14 +4314,16 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 }
               }
 
-              // 3. Last resort: return ANY media from this company's library
+              // 3. Last resort: return latest media from this company's library
+              // Honors requested media_type so "send a video" doesn't silently fall back to images.
               if (results.length === 0) {
-                console.log('[SEARCH-MEDIA] No text matches, returning latest media from library');
-                const { data: anyMedia } = await supabase
+                console.log(`[SEARCH-MEDIA] No text matches, returning latest ${requestedMediaType || 'any'} media from library`);
+                let lastResort = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, file_type, tags, file_name')
-                  .eq('company_id', company.id)
-                  .eq('media_type', 'image')
+                  .eq('company_id', company.id);
+                if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
+                const { data: anyMedia } = await lastResort
                   .order('created_at', { ascending: false })
                   .limit(args.count || 5);
 
@@ -4318,7 +4337,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     file_path: m.file_path,
                     similarity: 0.3,
                   }));
-                  console.log(`[SEARCH-MEDIA] Returned ${results.length} latest media as fallback`);
+                  console.log(`[SEARCH-MEDIA] Returned ${results.length} latest ${requestedMediaType || 'any'} media as fallback`);
                 }
               }
 
@@ -4945,9 +4964,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log(`[TOOL-LOOP-MEDIA] Result: ${mediaResult.sent}/${mediaResult.total}`);
           } else if (fnName === 'search_media') {
             // ===== ACTUAL SEARCH_MEDIA IN MULTI-ROUND LOOP =====
-            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}"`);
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing search_media for "${args.query}" media_type=${args.media_type}`);
             try {
               let results: any[] = [];
+              const requestedMediaType: 'image' | 'video' | null =
+                args.media_type === 'video' || /\b(video|videos|clip|clips|reel|reels|footage)\b/i.test(args.query || '')
+                  ? 'video'
+                  : args.media_type === 'image' ? 'image' : null;
               try {
                 const expandedQuery = normalizeSearchQuery(args.query, company);
                 const queryVec = await embedQuery(expandedQuery);
@@ -4959,7 +4982,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   match_count: args.count || 5,
                 });
                 if (!mediaErr && mediaResults && mediaResults.length > 0) {
-                  results = mediaResults.map((m: any) => ({
+                  const filtered = requestedMediaType
+                    ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
+                    : mediaResults;
+                  results = filtered.map((m: any) => ({
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
                     url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
                     file_path: m.file_path,
@@ -4972,10 +4998,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               if (results.length === 0) {
                 const searchTerms = args.query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
-                const { data: textResults } = await supabase
+                let textQuery = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, tags, file_name')
-                  .eq('company_id', company.id)
+                  .eq('company_id', company.id);
+                if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
+                const { data: textResults } = await textQuery
                   .or(ilikeClauses)
                   .limit(args.count || 5);
                 if (textResults && textResults.length > 0) {
@@ -4988,11 +5016,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 }
               }
               if (results.length === 0) {
-                const { data: anyMedia } = await supabase
+                let lastResort = supabase
                   .from('company_media')
                   .select('description, category, file_path, media_type, tags, file_name')
-                  .eq('company_id', company.id)
-                  .eq('media_type', 'image')
+                  .eq('company_id', company.id);
+                if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
+                const { data: anyMedia } = await lastResort
                   .order('created_at', { ascending: false })
                   .limit(args.count || 5);
                 if (anyMedia && anyMedia.length > 0) {
