@@ -2077,10 +2077,19 @@ You handle simple questions yourself (product info, stock, delivery, photos). Ha
 When you hand off, say exactly: "Let me connect you with the team — someone will reach out shortly. 📱"
 Then call notify_boss with everything you've collected so far (customer name, phone, what they're asking about, stage in the buying journey).`;
     } else if (serviceMode === 'autonomous') {
-      agentPersonality += `
+      if (_salesModeForPrompt === 'human_in_loop') {
+        agentPersonality += `
+
+== AUTONOMOUS MODE (with human-in-the-loop sales) ==
+You may answer, browse the catalog, check stock, send photos/videos, and collect buy intent.
+You MUST NOT create payment links, record sales, quote payment account numbers, or promise checkout.
+When the customer wants to buy, call notify_boss with notification_type="purchase_handoff" (include product, quantity, customer name/phone) and tell the customer the owner will confirm payment details shortly. Keep replying to follow-up questions about products, photos, and stock.`;
+      } else {
+        agentPersonality += `
 
 == AUTONOMOUS MODE ==
 You handle EVERYTHING yourself. Do not say "let me connect you" or "I'll have someone reach out". Close the sale, answer the question, send the image, generate the payment link. The only time you call notify_boss is for a SEVERE complaint that needs management awareness — and even then, you keep replying to the customer.`;
+      }
     }
 
     // === BMS DATA INTEGRITY (applies to ALL modes) ===
