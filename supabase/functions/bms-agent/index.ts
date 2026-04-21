@@ -348,19 +348,29 @@ Deno.serve(async (req) => {
 
     // SMART FALLBACK: external BMS check_stock often returns a generic product list
     // (not actually filtered by product_name) when the term doesn't exact-match.
-    // Detect "no real match" by checking if ANY returned item's name contains the search term.
-    // If not, retry as list_products with search filter (which DOES filter properly).
+    // Match by individual tokens (singular/plural-aware) so "blue 28cm pan" matches "Blue pans 28cm".
     if (resolvedIntent === "check_stock" && result.success) {
       const searchTerm = (params.product_name || params.search || params.query || "").toString().trim();
       const dataArr = Array.isArray((result as any).data) ? (result as any).data : [];
-      const term = searchTerm.toLowerCase();
-      const hasRealMatch = term.length >= 2 && dataArr.some((p: any) => {
-        const name = (p.name || p.product_name || "").toLowerCase();
-        return name.includes(term);
-      });
 
-      if (searchTerm && searchTerm.length >= 2 && !hasRealMatch) {
-        console.log(`[BMS-AGENT] check_stock returned no real match for "${searchTerm}" (got ${dataArr.length} unrelated items) — retrying as list_products search`);
+      // Tokenize + normalize singular/plural endings
+      const normalize = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      const stem = (w: string) => w.replace(/(ies|es|s)$/i, '');
+      const tokensOf = (s: string) => normalize(s).split(' ').filter(t => t.length >= 2).map(stem);
+      const queryTokens = tokensOf(searchTerm);
+
+      const matchesByTokens = (p: any) => {
+        const name = String(p.name || p.product_name || "");
+        const nameTokens = new Set(tokensOf(name));
+        if (queryTokens.length === 0) return false;
+        // Require ALL query tokens to appear (token-stem match) in the product name
+        return queryTokens.every(qt => nameTokens.has(qt));
+      };
+
+      const hasRealMatch = queryTokens.length > 0 && dataArr.some(matchesByTokens);
+
+      if (searchTerm && queryTokens.length > 0 && !hasRealMatch) {
+        console.log(`[BMS-AGENT] check_stock returned no real match for "${searchTerm}" (tokens=${queryTokens.join(',')}, got ${dataArr.length} unrelated items) — retrying as list_products search`);
         const fallbackParams = { ...params, search: searchTerm, limit: params.limit || 100 };
         const fallback = await callBMS(connection, "list_products", fallbackParams, {
           companyId,
@@ -368,25 +378,13 @@ Deno.serve(async (req) => {
           isHealthCheck: false,
         });
         if (fallback.success && Array.isArray((fallback as any).data)) {
-          const matched = (fallback as any).data.filter((p: any) => {
-            const name = (p.name || p.product_name || "").toLowerCase();
-            return name.includes(term);
-          });
+          const matched = (fallback as any).data.filter(matchesByTokens);
           if (matched.length > 0) {
-            console.log(`[BMS-AGENT] fallback found ${matched.length} match(es) for "${searchTerm}"`);
-            result = {
-              ...fallback,
-              data: matched,
-              fallback_used: "list_products_search",
-            } as any;
+            console.log(`[BMS-AGENT] fallback found ${matched.length} token-match(es) for "${searchTerm}"`);
+            result = { ...fallback, data: matched, fallback_used: "list_products_token_match" } as any;
           } else {
-            // Genuinely no match — return empty array so the AI knows to say "we don't carry that"
             console.log(`[BMS-AGENT] fallback also found no matches for "${searchTerm}" — returning empty`);
-            result = {
-              ...result,
-              data: [],
-              fallback_used: "list_products_search_empty",
-            } as any;
+            result = { ...result, data: [], fallback_used: "list_products_search_empty" } as any;
           }
         }
       }
