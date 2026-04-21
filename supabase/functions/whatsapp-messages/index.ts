@@ -4773,7 +4773,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     }
 
     // CRITICAL: Multi-round tool loop — keep calling AI with tools until no more tool calls
-    let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 5); // safe cap
+    let maxToolRounds = Math.min(aiOverrides?.max_tool_rounds || 3, 8); // safe cap (raised from 5 to honor configs like ANZ=6)
     
     // Ensure at least 3 rounds when checkout tools are active (check_stock -> record_sale -> generate_payment_link)
     const checkoutToolNames = (filteredTools || []).map((t: any) => t.function?.name).filter(Boolean);
