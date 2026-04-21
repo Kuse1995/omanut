@@ -4804,7 +4804,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       currentToolCalls = null;
     }
     let currentMessages = [...messages];
-    
+
+    // Snapshot the FIRST round's tool results into the cumulative buffer before they get reset.
+    for (const tr of toolResults) {
+      allToolResults.push({ ...tr, fn: (currentToolCalls || []).find((c: any) => c.id === tr.tool_call_id)?.function?.name });
+    }
+
     while (toolResults.length > 0 && currentRound < maxToolRounds) {
       currentRound++;
       console.log(`[TOOL-LOOP] Round ${currentRound}/${maxToolRounds}, processing ${toolResults.length} tool results`);
@@ -5086,7 +5091,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           }
           anyToolExecuted = true;
         }
-        
+
+        // Snapshot this round's tool results into the cumulative buffer (used by final synthesis)
+        for (const tr of toolResults) {
+          allToolResults.push({ ...tr, fn: (currentToolCalls || []).find((c: any) => c.id === tr.tool_call_id)?.function?.name });
+        }
+
       } catch (toolLoopError) {
         console.error(`[TOOL-LOOP] Error in round ${currentRound}:`, toolLoopError);
         if (!assistantReply) assistantReply = "Got it! What else can I help you with?";
