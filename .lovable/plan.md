@@ -1,90 +1,247 @@
 
-## ANZ Configuration Deep-Fix — end-to-end audit + proper baseline
+## ANZ WhatsApp fixes — stop internal traces, preserve context, make retail flow deterministic
 
-You've been patching ANZ symptom by symptom (timeouts, model swaps, affirmation handling, video search). The real issue is the **configuration baseline is wrong for ANZ's use case** — they're a high-volume retail catalog (cake stands, pans, kitchenware) with photos, prices, and stock that changes daily. The default config was built for service businesses (Omanut, Finch). That mismatch is why ANZ keeps breaking while the others mostly work.
+The screenshots show ANZ is still not production-ready. The worst failures are not “model intelligence” problems; they are orchestration bugs in `whatsapp-messages`.
 
-This plan does a **full audit + reset** of ANZ specifically. Takes longer but ends the whack-a-mole.
+### What is going wrong
 
-### Phase 1 — Audit (read-only, ~10 min)
+1. **Internal tool traces are leaking to customers**
+   - Replies like `[R3] search_media found 5 results, [R4] BMS check_stock completed...` are unacceptable.
+   - That came from the fallback branch that was meant to prevent silence, but it exposed internal debug context.
 
-Pull the truth before changing anything:
+2. **Successful tool results are being lost**
+   - The fallback synthesis only reads the current `toolResults`, but `toolResults` gets reset during each tool round.
+   - By the time synthesis runs, earlier product/media results are gone.
+   - It also does not parse BMS `data`, so stock/product results are missed even when BMS succeeded.
 
-1. **Current ANZ overrides** — `company_ai_overrides` row: model, tokens, tool rounds, timeout, enabled tools, system instructions, banned topics.
-2. **Agent modes** — `company_agent_modes` rows: which modes exist, their prompts, trigger keywords, priorities.
-3. **Catalog reality** — count of `company_media` (images vs videos), `payment_products`, BMS catalog size. Tells us if the AI has data to work with.
-4. **Last 50 ANZ conversations** — group failures by type:
-   - Timeout dead-ends (fallback_message sent, no follow-up)
-   - Empty synthesis ("I've processed your request")
-   - Wrong tool path (asked for photo, got nothing)
-   - Affirmation misses ("yes" → silence)
-   - Hallucinated prices/products
-   - Router misclassification (sales → support)
-5. **Edge function logs (last 24h)** — error patterns: `[RETRY-EXHAUSTED]`, tool timeouts, BMS failures, model errors.
+3. **ANZ was configured for 6 tool rounds, but code caps it at 5**
+   - Current code uses `Math.min(aiOverrides?.max_tool_rounds || 3, 5)`.
+   - So the ANZ baseline says 6, but runtime silently cuts it to 5.
 
-Output: a one-page diagnosis showing the top 3 failure modes with counts.
+4. **“I want to buy 2” loses the previous product**
+   - The AI had just quoted `Blue pans 28cm — K550`, but the next message “I want to buy 2” was handled as standalone.
+   - It should infer: customer wants 2 of the last quoted product, then notify the owner.
 
-### Phase 2 — Configuration reset (the real fix)
+5. **Support follow-up “yes” is being treated as meaningful**
+   - After “my order is late”, the AI asks for order date/item.
+   - Customer says “yes”.
+   - That “yes” does not provide the missing detail, so the AI should ask again clearly, not send a fallback.
 
-Based on audit, apply ANZ-specific overrides:
+6. **Prompts conflict for ANZ**
+   - ANZ is human-in-loop for sales, but the generic autonomous mode prompt still says “generate payment link”.
+   - That contradiction is why the AI sometimes says it will provide a payment link.
 
-**A. Model + budget tuned for retail multi-tool flows**
-- `primary_model`: keep GLM 4.7 (good tool discipline) OR fall back to `google/gemini-2.5-flash` if GLM is causing the empty-reply bug.
-- `max_tool_rounds`: 4 → **6** (catalog browse needs check_stock + list_products + list_media + send_media + synthesis).
-- `response_timeout_seconds`: 30 → **45**.
-- `max_tokens`: 400 → **600** (room to list 3-5 products + photos + ask qualifying question).
-- `routing_temperature`: 0.3 (consistent routing).
-- `primary_temperature`: 0.4 (decisive, less rambling).
+7. **Media search works, but media sending is not guaranteed**
+   - For “prices and pics”, `search_media` succeeded, but `send_media` did not always happen.
+   - If customer explicitly asks for pics/videos and media search succeeds, the system should auto-send media if the model fails to call `send_media`.
 
-**B. System instructions rewritten for ANZ specifically**
-Replace the generic instruction block with a tight ANZ-flavored one:
-- "You sell kitchenware (cake stands, pans, baking tools). Always check live stock before quoting."
-- "When customer asks about a product: check_stock → if in stock, quote price + offer photo → if they say yes/sure/ok, call list_media + send_media."
-- "Never invent prices. Never say 'I've processed your request' — always state what you did or what's next."
-- "Max 3 sentences per reply. Use *bold* for product names and prices."
+---
 
-**C. Enabled tools — prune to what ANZ actually uses**
-Drop tools that are never called for ANZ (e.g. `create_scheduled_post`, digital product tools). Smaller tool list = better routing accuracy + faster responses.
+## Implementation plan
 
-**D. Agent modes — verify they fit retail**
-- Keep: Sales, Customer Care, Boss.
-- Tune Sales prompt: explicit "offer photo after price" pattern + autonomous checkout via `notify_boss` (ANZ is human-in-loop per memory).
-- Tune Customer Care: handle "where's my order" / "can I exchange" — common ANZ asks.
+### 1. Remove customer-facing internal fallback text
 
-### Phase 3 — Code-level safety nets (from previous "fix it" plan, kept)
+In `supabase/functions/whatsapp-messages/index.ts`:
 
-These are still needed because no config alone fixes them:
+- Delete the fallback that builds:
+  - `Just checked on that for you — [R3] ...`
+- Replace it with safe customer wording only:
+  - Product found: list product names/prices.
+  - Media found/sent: “Photos sent above.”
+  - Nothing usable: “I’m still checking that for you — let me confirm with the owner.”
 
-1. **Real synthesis fallback** — when model returns empty after successful `list_media`/`list_products`/`check_stock`, build deterministic reply from tool results instead of "I've processed your request".
-2. **Auto-retry on hard timeout** — single retry with halved tokens before sending dead-end fallback message.
-3. **Affirmation handling** — already shipped, verify it's firing for ANZ.
+No internal tool names, round numbers, or debug strings should ever reach WhatsApp.
 
-### Phase 4 — Verification harness
+---
 
-Run these 8 scripted scenarios against ANZ's live config end-to-end:
+### 2. Preserve all tool results across rounds
 
-1. *"do you have cake stands?"* → price + photo offer
-2. *"yes"* (after offer) → photo arrives
-3. *"show me all your pans with prices and pics"* → multi-tool roundtrip completes
-4. *"how much is the blue 28cm pan?"* → exact price from check_stock, no hallucination
-5. *"I want to buy 2"* → notify_boss fires, "Perfect choice, owner will confirm"
-6. *"do you have video of the cake stand spinning?"* → video search hits, sends video
-7. *"my order is late"* → routes to Customer Care, empathetic reply
-8. Random *"yes"* with no prior offer → asks "yes to what?"
+Add a separate accumulator:
 
-Pass = 7/8. Document failures, iterate.
+```ts
+const allToolResults = [];
+```
 
-### Phase 5 — Document what ANZ's config IS (so we stop drifting)
+Every time a tool returns, push into both:
+- `toolResults` for the next model round
+- `allToolResults` for final synthesis
 
-Save a memory: `mem://configurations/anz-baseline` — exact values for model, tokens, tool rounds, timeout, enabled tools, system instructions snippet. Next time something breaks, we diff against this baseline instead of guessing.
+Then synthesis uses `allToolResults`, not only the last round.
 
-### Files touched
+Also update product extraction to parse:
+- `payload.data`
+- `payload.products`
+- `payload.items`
+- `payload.results`
+- `payload.product`
 
-- DB: `company_ai_overrides` UPDATE for ANZ company_id (Phase 2A, 2C).
-- DB: `company_agent_modes` UPDATE for ANZ Sales + Customer Care prompts (Phase 2B, 2D).
-- `supabase/functions/whatsapp-messages/index.ts` — synthesis fallback + auto-retry (Phase 3).
-- New memory file (Phase 5).
-- No UI changes, no schema changes, no new tools.
+This fixes BMS results being ignored.
 
-### What I need from you before I start
+---
 
-One quick confirmation so Phase 2 doesn't go sideways:
+### 3. Fix ANZ’s actual max tool rounds
+
+Change:
+
+```ts
+Math.min(aiOverrides?.max_tool_rounds || 3, 5)
+```
+
+to allow ANZ’s configured 6 rounds:
+
+```ts
+Math.min(aiOverrides?.max_tool_rounds || 3, 8)
+```
+
+ANZ remains configured at 6.
+
+---
+
+### 4. Add deterministic auto-send for explicit media requests
+
+If the customer asked for:
+- pics
+- pictures
+- photos
+- images
+- videos
+- clips
+
+and `search_media` found results but `send_media` was not called, automatically send the top matching media.
+
+Rules:
+- If customer asked for video, send videos only.
+- If customer asked for pictures/photos, send images only.
+- Cap at 3 media files per reply for ANZ to avoid spam.
+- Store `[Sent X/Y media]` in messages as it already does.
+
+This makes “show me all your pans with prices and pics” reliable even if the model stops early.
+
+---
+
+### 5. Fix “I want to buy 2” after a quoted product
+
+Before routing to the model, add deterministic context handling:
+
+If latest user message is buy intent and does not name a product, inspect the last assistant message for a quoted product.
+
+Example:
+
+```text
+Assistant: *Blue pans 28cm — K550* (4 in stock). Want to see a picture?
+Customer: I want to buy 2
+```
+
+System should:
+1. Extract product: `Blue pans 28cm`
+2. Extract quantity: `2`
+3. Call `notify_boss`
+4. Reply:
+   “Perfect choice — I’ve asked the owner to confirm 2 × *Blue pans 28cm* and send payment details shortly. 🙏”
+
+No “which product are you interested in?” when the product was already named.
+
+---
+
+### 6. Fix meaningless “yes” in support flow
+
+If the previous assistant message asked for a missing order detail like:
+- order date
+- item ordered
+- receipt
+- order number
+
+and customer replies only “yes”, the system should not treat that as a valid answer.
+
+Reply deterministically:
+
+```text
+Please send the order date or the item you ordered so I can check properly.
+```
+
+This prevents “Give me one moment…” dead-ends when the customer has not provided the needed detail.
+
+---
+
+### 7. Remove ANZ prompt contradictions
+
+Update the prompt assembly so:
+
+- `service_mode = autonomous` means the AI keeps responding instead of hard-handing off.
+- `sales_mode = human_in_loop` means the AI never creates payment links or orders.
+
+For ANZ, the final instruction should be:
+
+```text
+You may answer, browse catalog, check stock, send photos/videos, and collect intent.
+You must not create payment links, record sales, or promise checkout.
+When the customer wants to buy, notify the owner and say the owner will confirm payment details.
+```
+
+Remove the generic “generate payment link” instruction whenever `sales_mode = human_in_loop`.
+
+---
+
+### 8. Expand `notify_boss` schema for ANZ flows
+
+The prompt asks for notifications like customer issue and purchase handoff, but the tool schema only allows:
+
+```text
+high_value, complaint, reservation_change, cancellation, vip_info
+```
+
+Add supported enum values:
+- `purchase_handoff`
+- `customer_issue`
+- `order_followup`
+
+Update the handler titles so owner notifications are clearer:
+- `purchase_handoff` → “Purchase Request”
+- `customer_issue` → “Customer Issue”
+- `order_followup` → “Order Follow-up”
+
+---
+
+### 9. Improve BMS product matching
+
+In `bms-agent` and the local BMS fallback inside `whatsapp-messages`:
+
+- Normalize plural/singular terms:
+  - `pan` / `pans`
+  - `stand` / `stands`
+- Match by tokens, not exact phrase order.
+
+So:
+
+```text
+blue 28cm pan
+```
+
+matches:
+
+```text
+Blue pans 28cm
+```
+
+This avoids BMS returning the full catalog and the AI guessing from unrelated rows.
+
+---
+
+### 10. Re-run the 8 ANZ tests
+
+After deploying the backend function and DB prompt/schema updates, verify:
+
+1. “do you have cake stands?” → price + photo offer.
+2. “yes” → actual cake stand photo sent.
+3. “show me all your pans with prices and pics” → product summary + media, no internal traces.
+4. “how much is the blue 28cm pan?” → exact BMS price/stock.
+5. “I want to buy 2” → owner notified for 2 × blue 28cm pan.
+6. “do you have video of the cake stand spinning?” → videos sent.
+7. “my order is late” → asks for order date/item.
+8. “yes” after that → asks again for order date/item, no fallback.
+
+Pass criteria:
+- No `[R3]`, tool names, or debug traces in customer messages.
+- No payment-link promise for ANZ.
+- No “which product?” when previous product is obvious.
+- No dead-end “Give me one moment” unless the system is truly failing.
