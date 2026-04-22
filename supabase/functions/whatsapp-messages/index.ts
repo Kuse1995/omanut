@@ -5636,13 +5636,16 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       console.error('[FRUSTRATION-DETECT] Error:', frustErr);
     }
 
-    // Insert assistant message
+    // Insert assistant message — tag with promise_fulfillment metadata when this
+    // invocation came from the watchdog, so a re-stall is detected on the next tick
+    // and escalates after 1 retry instead of 2.
     await supabase
       .from('messages')
       .insert({
         conversation_id: conversationId,
         role: 'assistant',
-        content: assistantReply
+        content: assistantReply,
+        message_metadata: isPromiseFulfillment ? { promise_fulfillment: true } : null,
       });
 
     // Update conversation transcript
