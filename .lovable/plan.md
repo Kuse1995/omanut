@@ -1,65 +1,91 @@
 
 
-## Auto-sync BMS data instead of manual pull
+## Fix secondary boss phone save + add roles
 
-Right now `BmsSyncPanel` only fires when a user clicks "Sync from BMS" — it pulls products, stock, and sales, formats them, and writes them into the company's Knowledge Base wrapped in `<!-- BMS_SYNC_START -->` markers. Nothing keeps that text in sync after a sale on the BMS side.
+### Why the second number didn't save
 
-You're right — the AI should never quote stale stock. The fix is to **stop relying on the cached KB snapshot for live data and pull it on-demand at conversation time**, plus a low-frequency safety-net background sync.
+In `CompanyForm.tsx` (line 359), the boss-phones insert error is **swallowed silently**:
 
-### The real problem with the current design
+```ts
+if (phoneError) console.error('Error saving boss phones:', phoneError);
+```
 
-Even if we cron the existing sync every 5 minutes, the AI still answers from a **frozen text blob** in the Knowledge Base. Between syncs it will always be wrong. The KB is the wrong place for stock numbers — it should hold *static* business facts (policies, hours, return policy), not live inventory.
+No toast, no thrown error → the form shows "Company updated successfully" even when the phones insert fails. Most likely cause of the actual failure: a unique constraint on `(company_id, phone)` exists, and the delete-then-insert sequence sometimes hits a race or the second row's phone got typed identically/empty/duplicated by the legacy `companies.boss_phone` reload. Two real bugs:
 
-Live data already has a path: the `list_products` and `check_stock` BMS tools call the bridge in real time. So the right architecture is:
+1. **Silent error** — user sees "Success" but nothing saved.
+2. **No client-side validation** — duplicate phones, empty phones, or missing `+` prefix are submitted as-is and rejected by the DB.
 
-1. **Live data** (stock, prices, current orders) → tools only, never the KB.
-2. **Catalog snapshot** (product names, categories, photos for the AI to "know what exists") → background-synced, with timestamp and short TTL.
-3. **Manual sync button** → kept as an override for when a boss wants to force-refresh after a big change.
+### Roles for boss phones
 
-### Fix
+Today each entry has three notification toggles (`notify_reservations`, `notify_payments`, `notify_alerts`). You're asking for proper **roles** like "Social Media Manager", "Owner", "Accountant", etc. — where the role determines what notifications they get and what they can do via WhatsApp boss-chat.
 
-#### 1. Background auto-sync (cron)
-- New cron: `bms-auto-sync-cron` runs every 15 minutes.
-- For every company with an active `bms_connections` row, call the existing `bms-training-sync` function.
-- Updates only the BMS-marked block in `quick_reference_info`. Static KB content the user wrote stays untouched (already supported by the START/END markers).
-- Skip companies where the last sync succeeded < 10 minutes ago (avoid stampedes if cron fires twice).
+### Plan
 
-#### 2. Real-time invalidation via BMS callback
-The Omanut BMS bridge already has a `bms-callback` edge function. Extend it to accept a `stock_changed` / `sale_recorded` event:
-- Bridge POSTs `{ event: "sale_recorded", tenant_id, company_id, products: [...] }` whenever a transaction completes.
-- `bms-callback` triggers `bms-training-sync` immediately for that company so KB metadata + auto-linked media reflect the change within seconds.
-- If the bridge can't push events yet, the 15-min cron is the fallback.
+#### 1. Surface the real save error
+- In `CompanyForm.tsx`, throw on `phoneError` instead of `console.error` so the toast shows the actual DB message.
+- Validate before insert: trim phones, require a leading `+`, deduplicate by phone, ensure exactly one `is_primary`.
+- Show inline red text per row when validation fails (no submit until fixed).
 
-#### 3. Stop using cached stock numbers in the KB
-- `bms-training-sync` keeps the **product catalog + low-stock alerts** in the KB block (helpful for the AI to know what exists and what's running low *for guidance*) but adds a clear instruction header:
-  > "STOCK NUMBERS BELOW ARE A SNAPSHOT. Always call `check_stock` or `list_products` before quoting availability to a customer."
-- This is already the system's intent (see `mem://features/bms-data-priority-messaging`) but the prompt doesn't currently say it loud enough — the AI was treating the KB snapshot as truth.
-- Add a one-line reinforcement to the global system prompt builder in `whatsapp-messages/index.ts` so it's enforced for every company with a BMS connection.
+#### 2. Add a `role` column to `company_boss_phones`
+DB migration:
+- Add `role text not null default 'owner'` to `company_boss_phones`.
+- Add a CHECK-via-trigger (not a CHECK constraint, per memory) restricting role to a known set: `owner`, `manager`, `social_media_manager`, `accountant`, `operations`, `support_lead`, `custom`.
+- Add `role_label text` (free-text) for when role = `custom`.
+- Backfill: existing rows → `role = 'owner'` if `is_primary`, else `'manager'`.
 
-#### 4. UI updates in `BmsSyncPanel`
-- Show last auto-sync timestamp (`Last synced 4 min ago`) above the manual sync button.
-- Add a small "Auto-sync: every 15 min + on sale" status pill so the boss can see it's live.
-- Manual sync remains as a "Force refresh now" override.
+#### 3. Role → notification preset mapping
+Each role implies sensible defaults the user can still override per-toggle:
 
-#### 5. Auto-link media on every sync (already partially done)
-The current sync auto-links unlinked media to BMS products by name match. Move this into a shared helper so both the cron and the callback path use it. No new logic, just deduplication.
+| Role | reservations | payments | alerts | social media | content approval |
+|---|---|---|---|---|---|
+| Owner | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | – | ✓ |
+| Social Media Manager | – | – | – | ✓ | ✓ |
+| Accountant | – | ✓ | – | – | – |
+| Operations | ✓ | – | ✓ | – | – |
+| Support Lead | – | – | ✓ | – | – |
+
+Two new toggle columns are needed to support the social-media role:
+- `notify_social_media boolean default false` (post drafts, comment alerts, scheduling needs)
+- `notify_content_approval boolean default false` (AI-drafted posts awaiting approval)
+
+Selecting a role in the UI **prefills** the toggles; user can still tweak.
+
+#### 4. UI updates in `CompanyForm.tsx` boss-phones section
+- New "Role" dropdown per entry (owner/manager/social media manager/accountant/operations/support lead/custom).
+- When role = `custom`, show a label text field.
+- Add the two new toggles ("Social media", "Content approval") to the existing toggle row.
+- Show a small role badge in the entry header.
+
+#### 5. Route notifications by role/toggle
+- `_shared/boss-phones.ts` — extend `BossPhoneFilter` with `notify_social_media` and `notify_content_approval`. Return the new fields in `BossPhone`.
+- `send-boss-notification/index.ts` — add notification types `social_media_alert` and `content_approval_request`; route them via `getBossPhones(..., { notify_social_media: true })` / `{ notify_content_approval: true }`.
+- `publish-meta-post`, `schedule-meta-post`, `auto-content-creator`, `boss-media-watchdog`: when something needs social-media-manager attention, call `send-boss-notification` with the new types so only the relevant phones get pinged.
+- Existing flows (`send-boss-reservation-request`, `sla-escalation`, payment alerts) keep their current filters — backward compatible.
+
+#### 6. Boss-chat awareness of role
+- `boss-chat/index.ts` already resolves the company by phone. Extend the lookup to also return the caller's `role` and inject one line into the system prompt: `You are speaking with the {role_label or role} for {company_name}. Tailor responses to their domain (e.g. social media manager → focus on content + scheduling; accountant → finance + payments).`
+- No tool changes — purely prompt-level scoping.
+
+#### 7. Memory
+- `mem://features/boss-phone-roles.md` — document role enum, notification mapping, and prompt-injection rule.
 
 ### Files
 
-- New: `supabase/functions/bms-auto-sync-cron/index.ts` — iterates companies with active `bms_connections`, calls `bms-training-sync` per company, respects 10-min cooldown.
-- DB migration — `cron.schedule('bms-auto-sync', '*/15 * * * *', ...)` invoking the new function; add `last_bms_sync_at timestamptz` to `bms_connections`.
-- Edit: `supabase/functions/bms-callback/index.ts` — handle `sale_recorded` / `stock_changed` events and trigger `bms-training-sync` per company.
-- Edit: `supabase/functions/bms-training-sync/index.ts` — write `last_bms_sync_at`, prepend the "snapshot only — call tools for live stock" header to the KB block.
-- Edit: `supabase/functions/whatsapp-messages/index.ts` — add a one-line reinforcement to the system prompt when the company has a BMS connection.
-- Edit: `src/components/admin/BmsSyncPanel.tsx` — show last auto-sync time + auto-sync status pill.
-- Memory: `mem://features/bms-auto-sync.md` — record the new behavior (15-min cron + sale_recorded webhook + tool-first stock policy).
+- `src/components/CompanyForm.tsx` — surface insert errors, validate, role dropdown + new toggles.
+- DB migration — add `role`, `role_label`, `notify_social_media`, `notify_content_approval`; validation trigger; backfill.
+- `supabase/functions/_shared/boss-phones.ts` — extend `BossPhone` and `BossPhoneFilter`.
+- `supabase/functions/send-boss-notification/index.ts` — handle new notification types.
+- `supabase/functions/boss-chat/index.ts` — inject role into system prompt.
+- `supabase/functions/publish-meta-post`, `schedule-meta-post`, `auto-content-creator`, `boss-media-watchdog` — route social-media-related pings to the right phones.
+- New memory file.
 
 ### Validation
 
-1. Trigger a sale on the BMS for a connected company → within seconds, `quick_reference_info` BMS block updates with new stock numbers.
-2. With auto-sync disabled (force), a customer asks "do you have X?" → AI calls `check_stock` (live), not the KB number.
-3. Cron runs every 15 min; second-run-within-10-min skipped per cooldown.
-4. `BmsSyncPanel` shows "Last synced 2 min ago — auto-sync active".
+1. Add a second boss phone with role = "Social Media Manager", save → row appears in DB with the right role + toggles. Remove its phone, save → toast shows the actual DB error (no false success).
+2. AI generates a post needing approval → only the social-media-manager phone gets the WhatsApp ping; owner doesn't.
+3. New reservation comes in → only `notify_reservations = true` phones get pinged (owner + manager + operations).
+4. Social-media-manager messages the boss line → AI greeting acknowledges their role.
 
-No schema-breaking changes, no new tools for the AI, no UI redesign.
+No new tools, no UI redesign, additive schema only.
 
