@@ -1,69 +1,65 @@
 
 
-## Fix the real cause: phantom `bms_*` tool names
+## Remove Lovable AI Gateway entirely
 
-The watchdog and router are now working. The AI keeps stalling because it calls `bms_list_products` — a tool that's **advertised to the model but not executable**. The executor's `BMS_TOOLS` array contains `list_products` and `check_stock`, not their `bms_*` aliases. Result: tool call goes nowhere, no tool result is returned, synthesis fallback fires "one moment 🙏", watchdog kicks in, same broken loop.
+You're right — the system has its own provider keys (Zhipu/`glm-4.7`, DeepSeek, Gemini direct). Routing through the Lovable AI Gateway is just burning credits unnecessarily. Rip it out.
 
-### Evidence
+### What's currently using Lovable AI Gateway
 
-From the latest log:
-```
-[TOOLS] Enabled tools: ["lookup_product","list_media","send_media","search_media",
-                        "notify_boss","check_stock","bms_list_products","bms_check_stock", ...]
-[AI-TOOLS] toolNames: ["bms_list_products"]      ← AI picks the phantom name
-[BACKGROUND] AI response: assistantReply: ""     ← no real reply
-[FALLBACK] No AI response generated, using contextual fallback
-[BACKGROUND] Final reply: Give me one moment — I'm checking on that for you. 🙏
-```
+From `_shared/gemini-client.ts` and recent edits, the gateway (`https://ai.gateway.lovable.dev/...` + `LOVABLE_API_KEY`) is used as:
+1. The **fallback path** when `ZHIPU_API_KEY` is missing for `glm-4.7`-class models.
+2. The **provider** for any `google/gemini-*` model name (after the `zai/` normalization fix).
+3. Possibly inside `supervisor-agent` after we switched it to `google/gemini-2.5-flash`.
 
-DB confirms `enabled_tools` still contains the `bms_*` aliases.
+### Fix
 
-### Fixes
+#### 1. Strip every Lovable Gateway call site
+- `supabase/functions/_shared/gemini-client.ts`: remove all `ai.gateway.lovable.dev` URLs and any branch that uses `LOVABLE_API_KEY`. Replace with direct provider calls only:
+  - `glm-*`, `zhipu/*`, `zai/*` → Zhipu API (`https://open.bigmodel.cn/api/paas/v4/chat/completions`) using `ZHIPU_API_KEY`.
+  - `google/gemini-*` → Google Generative Language API directly using `GEMINI_API_KEY`.
+  - `deepseek/*` → DeepSeek API using `DEEPSEEK_API_KEY`.
+- Audit every other edge function that touches the gateway and replace with the matching provider call. Likely candidates: `supervisor-agent`, `analyze-conversation`, `analyze-and-followup`, `boss-chat`, `ai-playground`, `smart-configure`, `auto-content-creator`, `ai-training-coach`, anything importing `gemini-client`.
 
-#### 1. Normalize tool aliases at runtime (`whatsapp-messages/index.ts`)
-When building `enabledToolNames` from company overrides, map every `bms_<name>` → `<name>` and de-duplicate. This makes the system tolerant to whatever's stored in the DB.
+#### 2. Remove the gateway as a fallback target
+The current "transparent fallback to Lovable Gateway when Zhipu key missing" logic must be deleted. New behavior when a provider key is missing:
+- log a clear `[CONFIG-ERROR] Missing <PROVIDER>_API_KEY for model <name>`
+- fall back to a different **direct** provider the system already has a key for (e.g. Zhipu → Gemini direct → DeepSeek), in that order
+- if no direct provider keys are configured, return a clean error and escalate via `notify_boss` rather than silently calling the gateway
 
-```text
-bms_list_products  → list_products
-bms_check_stock    → check_stock
-bms_*              → *
-```
+#### 3. Pin ANZ to a directly-keyed model
+- Set `company_ai_overrides.primary_model` for ANZ to `glm-4.7` (Zhipu, working today).
+- Set fallback chain to `glm-4.7 → google/gemini-2.5-flash (direct) → deepseek/deepseek-chat (direct)` — none of these touch the gateway.
 
-Then the AI gets a clean tool list, picks `list_products`, the executor recognizes it, BMS bridge runs, real catalog comes back.
+#### 4. Remove `LOVABLE_API_KEY` references
+- Remove from any `Deno.env.get("LOVABLE_API_KEY")` call.
+- Don't delete the secret itself (it's auto-managed); just stop reading it.
 
-#### 2. Stop hard-coding `glm-4.7` for "simple" messages
-Line 2629: `selectedModel = messageComplexity === 'simple' ? 'glm-4.7' : primaryModel`.
-This overrides the company's configured model with `glm-4.7` — which works only because Zhipu has credit. But it bypasses the per-company config we just fixed. Change to: always use `primaryModel`. Faster routing should be a model-config concern, not a runtime override.
-
-#### 3. Clean ANZ's `enabled_tools` in the DB (one-time migration)
-Remove `bms_list_products`, `bms_check_stock` from ANZ's `company_ai_overrides.enabled_tools`. Keep `list_products`, `check_stock`. Belt-and-suspenders alongside fix #1.
-
-#### 4. Synthesis-fallback safety net
-When the AI returns an empty reply AND tool calls were attempted but **no executor matched them** (zero tool results pushed), do NOT emit "Give me one moment 🙏". Instead:
-- log `[TOOL-MISMATCH] AI called <name> which has no executor` 
-- escalate immediately to `notify_boss(customer_issue)` 
-- send the customer the clean handoff message
-
-This breaks the infinite-stall pattern at the source so the watchdog never even has to fire for this class of bug.
-
-#### 5. Re-enable the watchdog cron
-Now that the underlying loop is fixed, re-schedule `pending-promise-watchdog` at `*/1 * * * *`. With the cooldown + hard-cap + re-stall detection already in place, it's safe.
-
-#### 6. Unpause ANZ conversation `67b90349-...`
-Set `is_paused_for_human = false`, reset `promise_fulfillment_count = 0`, clear `last_promise_fulfillment_at`. Ready for the verification test.
+#### 5. Update memory
+- `mem://configurations/anz-baseline.md`: model is `glm-4.7` via Zhipu direct, no gateway.
+- Add a Core rule to `mem://index.md`: "Never call the Lovable AI Gateway. Use direct provider APIs (Zhipu, Gemini, DeepSeek) only."
 
 ### Validation
 
-Send "what's in stock?" to ANZ:
-- `[TOOLS]` log shows `list_products` (not `bms_list_products`).
-- AI calls `list_products` → bms-agent runs → real catalog returned.
-- Customer gets stock + photos in one turn, no "one moment".
-- `messages.message_metadata.promise_fulfillment` is never written.
+- `grep -r "ai.gateway.lovable.dev\|LOVABLE_API_KEY" supabase/functions` returns **zero** matches.
+- Send "what's in stock?" to ANZ → answers via `glm-4.7` (Zhipu direct), no gateway in logs.
+- Force ANZ to use `google/gemini-2.5-flash` → calls `generativelanguage.googleapis.com` directly with `GEMINI_API_KEY`.
+
+### Required secrets (confirm before implementing)
+
+The replacement only works if these provider keys exist:
+- `ZHIPU_API_KEY` — for `glm-*` (you have this — it's why glm-4.7 works today)
+- `GEMINI_API_KEY` — for `google/gemini-*` direct
+- `DEEPSEEK_API_KEY` — for `deepseek/*` direct (currently out of credit but key exists)
+
+If `GEMINI_API_KEY` is missing, I'll request it via the secrets flow before touching code, otherwise removing the gateway will break any company configured for Gemini.
 
 ### Files
 
-- `supabase/functions/whatsapp-messages/index.ts` — alias normalization, drop hard-coded `glm-4.7`, tool-mismatch escalation in synthesis fallback.
-- DB migration — clean ANZ `enabled_tools`, unpause conversation, reset counters, re-add cron.
+- `supabase/functions/_shared/gemini-client.ts` — full rewrite of provider routing, no gateway.
+- All edge functions importing `gemini-client` — no API change needed if the client interface stays the same.
+- `supabase/functions/supervisor-agent/index.ts` — confirm it uses the cleaned client, not a direct gateway fetch.
+- DB migration — pin ANZ model + fallback chain to direct-provider models.
+- `mem://index.md` + `mem://configurations/anz-baseline.md` — record the rule.
 
-No new tools, no schema changes, no UI changes.
+No schema changes, no UI changes, no new tools.
 
