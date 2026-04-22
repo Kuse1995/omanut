@@ -91,13 +91,11 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     const endIdx = quickReferenceInfo.indexOf(BMS_SYNC_END);
 
     if (startIdx !== -1 && endIdx !== -1) {
-      // Replace existing BMS section
       newKb =
         quickReferenceInfo.slice(0, startIdx) +
         wrappedText +
         quickReferenceInfo.slice(endIdx + BMS_SYNC_END.length);
     } else {
-      // Append
       newKb = quickReferenceInfo
         ? `${quickReferenceInfo}\n\n${wrappedText}`
         : wrappedText;
@@ -106,6 +104,7 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     onApply(newKb);
     setDialogOpen(false);
     toast.success("BMS data applied to Knowledge Base — don't forget to save!");
+    checkBmsConnection();
   };
 
   if (checking || !hasBms) return null;
