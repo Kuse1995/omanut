@@ -25,6 +25,7 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
   const [previewText, setPreviewText] = useState("");
   const [counts, setCounts] = useState<{ products: number; stock_alerts: number; has_sales: boolean } | null>(null);
   const [rawErrors, setRawErrors] = useState<Record<string, string | null>>({});
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
   useEffect(() => {
     checkBmsConnection();
@@ -35,17 +36,30 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     try {
       const { data } = await supabase
         .from("bms_connections")
-        .select("id")
+        .select("id, last_bms_sync_at")
         .eq("company_id", companyId)
         .eq("is_active", true)
         .maybeSingle();
       setHasBms(!!data);
+      setLastSyncAt(data?.last_bms_sync_at ?? null);
     } catch {
       setHasBms(false);
     } finally {
       setChecking(false);
     }
   };
+
+  const formatRelative = (iso: string | null) => {
+    if (!iso) return "never";
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
 
   const startSync = async () => {
     setSyncing(true);
