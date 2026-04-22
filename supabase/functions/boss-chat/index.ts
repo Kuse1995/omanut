@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat, veoStartGeneration } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiImageGenerate, veoStartGeneration } from "../_shared/gemini-client.ts";
 import { minimaxStartVideoGeneration } from "../_shared/minimax-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import { resolveCompaniesForPhone } from "../_shared/boss-phones.ts";
@@ -2564,51 +2564,34 @@ ${identityContext ? `Brand identity:\n${identityContext}` : ''}
 Style: ${angle}, ${light}, ${bg}, ${comp}
 CRITICAL: Show the EXACT product described in the request. Do NOT substitute with a different product. Do NOT add text or watermarks. The composition MUST be vertical/portrait oriented.`;
 
-                    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-                    if (!LOVABLE_API_KEY) {
-                      console.error('[BOSS-VID] LOVABLE_API_KEY not configured, cannot generate first frame');
-                    } else {
-                      const aiRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                          model: 'google/gemini-2.5-flash-image',
-                          messages: [{ role: 'user', content: firstFramePrompt }],
-                          modalities: ['image', 'text'],
-                        }),
+                    try {
+                      const { imageBase64 } = await geminiImageGenerate({
+                        model: 'gemini-2.5-flash-image',
+                        prompt: firstFramePrompt,
                       });
 
-                      if (aiRes.ok) {
-                        const aiData = await aiRes.json();
-                        const base64Url = aiData.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+                      if (imageBase64) {
+                        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+                        const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+                        const filePath = `first-frames/${company.id}/${crypto.randomUUID()}.png`;
 
-                        if (base64Url) {
-                          const base64Data = base64Url.replace(/^data:image\/\w+;base64,/, '');
-                          const imageBytes = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-                          const filePath = `first-frames/${company.id}/${crypto.randomUUID()}.png`;
+                        const { error: uploadErr } = await supabase.storage
+                          .from('company-media')
+                          .upload(filePath, imageBytes, { contentType: 'image/png', upsert: false });
 
-                          const { error: uploadErr } = await supabase.storage
-                            .from('company-media')
-                            .upload(filePath, imageBytes, { contentType: 'image/png', upsert: false });
-
-                          if (uploadErr) {
-                            console.error('[BOSS-VID] First frame upload error:', uploadErr);
-                          } else {
-                            const { data: pub } = supabase.storage.from('company-media').getPublicUrl(filePath);
-                            inputImageUrl = pub.publicUrl;
-                            toolImageUrl = inputImageUrl;
-                            console.log('[BOSS-VID] ✅ First frame generated and uploaded:', inputImageUrl);
-                          }
+                        if (uploadErr) {
+                          console.error('[BOSS-VID] First frame upload error:', uploadErr);
                         } else {
-                          console.warn('[BOSS-VID] Nano Banana returned no image in response');
+                          const { data: pub } = supabase.storage.from('company-media').getPublicUrl(filePath);
+                          inputImageUrl = pub.publicUrl;
+                          toolImageUrl = inputImageUrl;
+                          console.log('[BOSS-VID] ✅ First frame generated (direct Gemini) and uploaded:', inputImageUrl);
                         }
                       } else {
-                        const errText = await aiRes.text();
-                        console.error('[BOSS-VID] Nano Banana error:', aiRes.status, errText.substring(0, 300));
+                        console.warn('[BOSS-VID] Direct Gemini returned no image');
                       }
+                    } catch (e) {
+                      console.error('[BOSS-VID] First frame direct-Gemini error:', e instanceof Error ? e.message : e);
                     }
                   } catch (e) {
                     console.error('[BOSS-VID] First frame generation failed:', e);
