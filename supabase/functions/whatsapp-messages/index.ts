@@ -214,18 +214,100 @@ async function dispatchMediaToWhatsApp(opts: {
     : { success: false, sent: 0, total: signedUrls.length, message: 'All media sends failed.' };
 }
 
+// ── Strip leaked Supabase storage URLs from assistant text replies ──
+// Defence-in-depth: even with the model only seeing media_ids, an older cached
+// prompt or a hallucinated URL should never reach the customer. The actual
+// media is delivered as a WhatsApp attachment via send_media.
+export function stripLeakedMediaUrls(text: string): string {
+  if (!text) return text;
+  let cleaned = text;
+  // Full public/signed storage URLs
+  cleaned = cleaned.replace(/https?:\/\/[^\s)]*supabase\.co\/storage\/v1\/object\/(?:public|sign)\/[^\s)]+/gi, '');
+  // Bare bucket paths like company-media/...
+  cleaned = cleaned.replace(/\b(?:company-media|conversation-media|company-documents|payment-proofs|digital-products|email-assets)\/[^\s)]+/gi, '');
+  // Tidy: dangling "URL:", "Link:", trailing colons before what we removed
+  cleaned = cleaned.replace(/\b(?:url|link|file|image|photo|video)\s*:\s*(?=$|\n|\s)/gi, '');
+  // Collapse double spaces and orphan punctuation left behind
+  cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
+  cleaned = cleaned.replace(/\s+([,.;:!?])/g, '$1');
+  cleaned = cleaned.replace(/\(\s*\)/g, '');
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trim();
+}
+
+// ── Resolve media_ids to public storage URLs, scoped to caller's company ──
+// Returns { urls, rejected } — any id whose company_id ≠ companyId is dropped
+// and audited as a cross-tenant attempt.
+async function resolveMediaIdsToUrls(
+  mediaIds: string[],
+  companyId: string,
+  supabase: any
+): Promise<{ urls: string[]; rejected: string[] }> {
+  if (!mediaIds || mediaIds.length === 0) return { urls: [], rejected: [] };
+  const { data, error } = await supabase
+    .from('company_media')
+    .select('id, file_path, company_id')
+    .in('id', mediaIds);
+  if (error || !data) {
+    console.error('[RESOLVE-MEDIA-IDS] Lookup failed:', error);
+    return { urls: [], rejected: mediaIds };
+  }
+  const urls: string[] = [];
+  const rejected: string[] = [];
+  const foundIds = new Set<string>();
+  for (const row of data) {
+    foundIds.add(row.id);
+    if (row.company_id !== companyId) {
+      console.warn('[RESOLVE-MEDIA-IDS] CROSS-TENANT REJECT', { id: row.id, owner: row.company_id, caller: companyId });
+      rejected.push(row.id);
+      try {
+        await supabase.from('cross_tenant_audit').insert({
+          source: 'whatsapp-messages.send_media',
+          caller_scope: 'ai_tool',
+          asserted_company_id: companyId,
+          resolved_company_id: row.company_id,
+          decision: 'blocked',
+          reason: 'media_id_company_mismatch',
+          details: { media_id: row.id }
+        });
+      } catch (_) { /* best effort */ }
+      continue;
+    }
+    urls.push(`https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${row.file_path}`);
+  }
+  for (const id of mediaIds) if (!foundIds.has(id)) rejected.push(id);
+  return { urls, rejected };
+}
+
 // ── Unified send_media handler (validates, auto-recovers, dispatches) ──
 async function handleSendMedia(
-  args: { media_urls: string[]; caption?: string; category?: string },
+  args: { media_urls?: string[]; media_ids?: string[]; caption?: string; category?: string },
   company: any,
   customerPhone: string,
   conversationId: string,
   supabase: any
 ): Promise<{ result: any; textReply?: string }> {
-  const invalid = findInvalidUrls(args.media_urls || []);
-  let urls = args.media_urls || [];
+  // Prefer media_ids (server-resolved, tenant-safe). Fall back to media_urls for backward compat.
+  let urls: string[] = [];
+  if (Array.isArray(args.media_ids) && args.media_ids.length > 0) {
+    const { urls: resolved, rejected } = await resolveMediaIdsToUrls(args.media_ids, company.id, supabase);
+    if (rejected.length > 0) {
+      console.warn(`[SEND-MEDIA] Rejected ${rejected.length} media_ids (not found or cross-tenant)`);
+    }
+    urls = resolved;
+    if (urls.length === 0) {
+      return {
+        result: { success: false, sent: 0, total: 0, message: 'Could not resolve any media_ids to files in your library.' },
+        textReply: "I couldn't find those files in our library. Let me know what you'd like to see and I'll search again."
+      };
+    }
+  } else {
+    urls = args.media_urls || [];
+  }
 
-  if (invalid.length > 0) {
+  const invalid = findInvalidUrls(urls);
+
+  if (invalid.length > 0 && (!args.media_ids || args.media_ids.length === 0)) {
     console.warn('[SEND-MEDIA] Invalid URLs detected, auto-recovering:', invalid);
     const recoveryQuery = args.caption || args.category || 'product';
     const recovered = await recoverMediaFromLibrary(recoveryQuery, company.id, company, urls.length || 5, supabase);
@@ -2320,8 +2402,8 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       const imageCount = mediaWithUrls.length - videoCount;
       instructions += `\n\n=== MEDIA LIBRARY (${mediaWithUrls.length} files: ${imageCount} image${imageCount === 1 ? '' : 's'}, ${videoCount} video${videoCount === 1 ? '' : 's'}) ===\n`;
       instructions += `Use the search_media tool to find relevant photos/videos when customers ask for samples, product images, or video demos.\n`;
-      instructions += '⚠️ CRITICAL: Always use search_media to find the right files. NEVER make up or guess URLs.\n';
-      instructions += 'After finding media via search_media, use send_media with the returned URLs.\n';
+      instructions += '⚠️ CRITICAL: search_media returns opaque media_id values — pass those exact ids to send_media as media_ids. NEVER write URLs, file paths, or storage links in your reply text. The customer receives the media as a WhatsApp attachment.\n';
+      instructions += 'Your text reply alongside media should be a SHORT human caption (max 1 short sentence, e.g. "Here\'s one of our recent installs ☀️"). Do NOT describe URLs, file names, or technical metadata.\n';
       if (videoCount > 0) {
         instructions += `When the customer specifically asks for a video / clip / reel / footage, call search_media with media_type="video" to filter to videos only.\n`;
       }
@@ -2462,7 +2544,7 @@ Key Guidelines:
    Customer sends MTN screenshot showing K250 → Context shows pending transaction "ABC's for Christians - ZMW 250"
    → Call: deliver_digital_product(product_name: "ABC's for Christians", reason: "Payment proof verified - K250 MTN transfer")
    → Product is automatically sent to customer via WhatsApp
-6. CRITICAL: NEVER invent or guess media URLs. ALWAYS call search_media first, then use the exact URLs it returns in send_media. When customers ask for samples/photos/videos, call search_media first then send_media with the returned URLs
+6. CRITICAL: NEVER write media URLs or file paths in your reply text. Call search_media → pass the returned media_id values to send_media as media_ids. The image/video is delivered as a WhatsApp attachment automatically — your text should only contain a short human caption.
 7. KEEP RESPONSES SHORT AND CONCISE:
    - Simple questions (greetings, yes/no, basic info): 1-3 sentences maximum
    - Only provide detailed explanations when customer explicitly asks or for complex topics
@@ -2476,7 +2558,7 @@ Key Guidelines:
      *LSMax* — 12 in stock @ K18,500
 8. If you don't know something, admit it politely
 9. Never make up information not provided above
-10. CRITICAL: When sending media, do NOT say you'll send it - just call send_media immediately
+10. CRITICAL: When sending media, do NOT say you'll send it — just call send_media immediately. Never paste storage URLs or file paths in your text reply; the attachment is delivered separately.
 11. Use natural Zambian phrasing and Kwacha prices using ${company.currency_prefix}.
 12. CRITICAL - NO REPETITIVE QUESTIONS:
     - Before asking ANY question, check if the answer is in conversation history
@@ -2708,15 +2790,15 @@ ${supervisorRecommendation.recommendedResponse}
         type: "function",
         function: {
           name: "send_media",
-          description: "Send media files to customer via WhatsApp. IMPORTANT: You MUST call search_media first to get valid URLs. Never fabricate or guess URLs. Use the exact URLs returned by search_media.",
+          description: "Send media files to customer via WhatsApp. You MUST call search_media first and pass the returned media_id values here as media_ids. Do NOT write URLs in your reply text — the customer receives the file as an attachment. Keep any caption short (1 sentence).",
           parameters: {
             type: "object",
             properties: {
-              media_urls: { type: "array", items: { type: "string" }, description: "Array of media file URLs from the library" },
-              caption: { type: "string", description: "Caption for the media" },
+              media_ids: { type: "array", items: { type: "string" }, description: "Array of media_id values returned by search_media. Preferred." },
+              caption: { type: "string", description: "Short human caption for the media (max 1 sentence). Do NOT include URLs or file paths." },
               category: { type: "string", description: "Category of media" }
             },
-            required: ["media_urls", "category"]
+            required: ["media_ids", "category"]
           }
         }
       },
@@ -3351,7 +3433,7 @@ Trust ONLY the information provided in this system prompt.
 
     // If a deterministic reply fired, skip the AI/tool loop entirely.
     if (deterministicReply) {
-      const assistantReply = deterministicReply;
+      const assistantReply = stripLeakedMediaUrls(deterministicReply);
       try {
         await supabase.from('messages').insert({
           conversation_id: conversationId, role: 'assistant', content: assistantReply,
@@ -4507,12 +4589,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
                     : mediaResults;
                   results = filtered.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -4528,7 +4609,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 
                 let textQuery = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
                 const { data: textResults } = await textQuery
@@ -4537,12 +4618,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                   console.log(`[SEARCH-MEDIA] Text fallback found ${results.length} results`);
@@ -4555,7 +4635,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 console.log(`[SEARCH-MEDIA] No text matches, returning latest ${requestedMediaType || 'any'} media from library`);
                 let lastResort = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
                 const { data: anyMedia } = await lastResort
@@ -4564,12 +4644,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
                 if (anyMedia && anyMedia.length > 0) {
                   results = anyMedia.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description || m.file_name,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                   console.log(`[SEARCH-MEDIA] Returned ${results.length} latest ${requestedMediaType || 'any'} media as fallback`);
@@ -4580,7 +4659,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolExecutionContext.push(`search_media found ${results.length} results for "${args.query}"`);
               toolResults.push({
                 tool_call_id: toolCall.id, role: "tool",
-                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Use send_media with the URLs above.' : 'No matching media found.' })
+                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Pass these media_id values to send_media. Do NOT mention URLs in your reply text.' : 'No matching media found.' })
               });
             } catch (error) {
               console.error('[SEARCH-MEDIA] Error:', error);
@@ -5232,9 +5311,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
                     : mediaResults;
                   results = filtered.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -5246,7 +5324,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
                 let textQuery = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
                 const { data: textResults } = await textQuery
@@ -5254,9 +5332,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   .limit(args.count || 5);
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                 }
@@ -5264,7 +5341,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               if (results.length === 0) {
                 let lastResort = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
                 const { data: anyMedia } = await lastResort
@@ -5272,9 +5349,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   .limit(args.count || 5);
                 if (anyMedia && anyMedia.length > 0) {
                   results = anyMedia.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description || m.file_name, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                 }
@@ -5627,6 +5703,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       console.log(`[HANDOFF] Boss notified - handoff triggered by ${selectedAgent} agent`);
     }
 
+    // Sanitize: strip any leaked storage URLs/file paths the model may have
+    // inlined in its caption. The actual media is delivered as an attachment via send_media.
+    assistantReply = stripLeakedMediaUrls(assistantReply);
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
     // ========== FRUSTRATION SIGNAL DETECTION ==========
