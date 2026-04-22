@@ -1,70 +1,54 @@
 
 
-## Why GreenGrid keeps replying "Give me one moment…"
+## Fix: AI leaks raw storage URLs in WhatsApp media captions
 
-### What's actually happening (timeline from the DB)
+### What the customer saw
 
-```text
-22:08  customer:  Hello
-22:08  AI:        Welcome to GreenGrid Energy…
-22:09  customer:  Can I see some pics of solar panels you've installed
-22:09  AI:        Give me one moment 🙏        ← stall #1
-22:11  AI:        Give me one moment 🙏        ← stall #2 (watchdog re-run)
-22:22  AI:        Give me one moment 🙏        ← stall #3 (watchdog re-run)
-22:32  AI:        I'm having trouble pulling that up… owner notified  ← watchdog escalation
-```
+After the media-tool fix, GreenGrid did send the photo — but the assistant's text reply also contained the **raw `https://dzheddvoiauevcayifev.supabase.co/storage/...` URL** alongside the caption. The image arrived twice in effect: once as a real WhatsApp media attachment, once as an ugly URL pasted into the message body.
 
 ### Root cause
 
-GreenGrid's `enabled_tools` list is the **ANZ baseline** we seeded on every new company yesterday:
+In `supabase/functions/whatsapp-messages/index.ts`, `search_media` returns its results to the model as JSON containing the public storage `url` for each match (lines ~4571 and ~5276):
 
-```
-[lookup_product, list_media, send_media, notify_boss,
- create_scheduled_post, check_stock, list_products, check_customer,
- record_sale, generate_payment_link, bms_list_products, bms_check_stock]
+```json
+{ "media": [{ "description": "...", "url": "https://dzheddvoiauevcayifev...", ... }] }
 ```
 
-But `whatsapp-messages/index.ts` only defines tools named **`search_media`** + `send_media` for media flows — **not `list_media`**. So when the customer asks for solar panel photos:
-
-1. The AI tries to satisfy the request, but `search_media` is **not in the enabled list** → it can't look up media.
-2. Every system-prompt branch that mentions media (lines 2322-2324, 2465) tells the AI: *"You MUST call `search_media` first, NEVER fabricate URLs."* With that tool absent, the safest output the model can produce is the stalling fallback.
-3. `pending-promise-watchdog` sees the "one moment" message, re-invokes `whatsapp-messages` with `isPromiseFulfillment=true` (which says *"DO NOT stall, use your tools"*), but the tool list hasn't changed, so it stalls again.
-4. After two re-runs the watchdog hits `MAX_FULFILLMENTS_PER_HOUR`, sends the "I'm having trouble pulling that up" handoff, pauses the conversation, and pings the owner.
-
-So GreenGrid (and every other company seeded yesterday) is structurally unable to send media on WhatsApp because its tool config references a tool name that the runtime doesn't know about.
-
-Secondary contributor: GreenGrid has 12 rows in `company_media`, but none of them have embeddings or descriptions tied to "solar panels" yet, so even with `search_media` enabled the vector search would fall through to the latest-media fallback. Fixing the tool name unblocks that path; tagging/captioning media is a separate content-quality task.
+The model is told "use the exact URLs returned by `search_media` in `send_media`", so it dutifully copies the URL into the `send_media` arguments — and frequently into its own free-text caption too. Nothing strips that URL before the assistant text is sent over Twilio.
 
 ### Fix
 
-**1. Replace `list_media` with `search_media` in the baseline tool set**
-Update the seed defaults in `company_ai_overrides` (the `trg_seed_company_ai_overrides` trigger) so new companies get the actual runtime tool name. One-shot migration to backfill all existing rows where `enabled_tools` contains `'list_media'` → swap it for `'search_media'`. Affects: GreenGrid, Finch, ANZ, Omanut, North Park, E-Library, Art of Intelligence — every company seeded with the baseline.
+**1. Hide URLs from the model — return opaque media IDs**
+- In both `search_media` execution paths (background path ~line 4481 and tool-loop path ~line 5211), shape the tool result as:
+  ```json
+  { "media": [{ "media_id": "<uuid>", "description": "...", "category": "...", "media_type": "image", "tags": [...] }] }
+  ```
+  Drop `url` and `file_path` from what the model sees.
+- Update the `send_media` tool schema (~line 2707) so it accepts `media_ids: string[]` instead of (or in addition to, with `media_urls` deprecated) `media_urls: string[]`. Keep backward compat: if `media_urls` is supplied, still process it via the existing `handleSendMedia`/`recoverMediaFromLibrary` path.
+- In `handleSendMedia` (line 218), when `media_ids` are passed, resolve them server-side from `company_media` to public URLs scoped to `company.id` (defence-in-depth: reject any id whose `company_id` ≠ caller's company).
+- Update the system prompt blocks at lines 2322-2324, 2465, 2479, 2711 to say: *"Call `search_media`, then `send_media` with the returned `media_id` values. Never write URLs in your reply text — the customer receives the actual image as an attachment."*
 
-**2. Drop BMS tools from companies that have no BMS connection**
-For companies whose `bms_connections` row is missing or `is_active=false` (GreenGrid, North Park, E-Library, Art of Intelligence), strip `check_stock`, `list_products`, `record_sale`, `generate_payment_link`, `bms_list_products`, `bms_check_stock`, `lookup_product` from `enabled_tools`. Otherwise the AI still sees them in the schema, calls `check_stock` for "solar panels", `bms-agent` returns `no_connection`, and the model falls back to "one moment" again on the next round.
+**2. Strip leaked URLs from assistant text (defence in depth)**
+Add a post-processor right before the assistant reply is persisted/sent to Twilio that removes any `https://*supabase.co/storage/v1/object/...` URL (and any bare `company-media/...` path) from `assistantReply`. Collapse the resulting double-spaces / dangling colons. If the stripped text becomes empty, fall back to a short caption like "Here's one of our recent installs ☀️" (or empty if `send_media` already supplied a caption).
 
-**3. Tighten the watchdog so it doesn't repeat the same stall 3× before escalating**
-In `pending-promise-watchdog/index.ts`, when `wasFulfillmentOutput === true` (the previous reply was already a watchdog re-run that re-stalled), escalate **immediately** instead of allowing a second re-run. Already in the code at line 118 — but the message at 22:11 was the first watchdog attempt, so its `message_metadata.promise_fulfillment` flag was never set on insert. Add `message_metadata: { promise_fulfillment: true }` to the assistant message persisted by `whatsapp-messages` whenever `isPromiseFulfillment === true` was passed in, so the next watchdog tick sees the flag and escalates after 1 retry instead of 2.
-
-**4. Sync the seed with reality going forward**
-Update `mem://configurations/anz-baseline` and `mem://architecture/company-ai-overrides-defaults` to use `search_media` (not `list_media`), and to note that BMS tools should only be seeded for companies with an active `bms_connections` row.
+**3. Tighten the caption guidance**
+In the system prompt media section, add: *"Your text reply should be a short human caption (max 1 short sentence). The media itself is delivered separately — do not describe URLs, file paths, or technical metadata."*
 
 ### Files
 
-- **DB migration** —
-  - Update the `trg_seed_company_ai_overrides` function/default constant: `list_media` → `search_media`.
-  - Backfill: `UPDATE company_ai_overrides SET enabled_tools = array_replace(enabled_tools, 'list_media', 'search_media')`.
-  - Backfill: for company_ids without an active `bms_connections` row, remove BMS tool names from `enabled_tools`.
-- **`supabase/functions/whatsapp-messages/index.ts`** — when persisting the assistant reply during an `isPromiseFulfillment` invocation, write `message_metadata: { promise_fulfillment: true }` so the watchdog can detect a re-stall.
-- **`mem://configurations/anz-baseline.md`** + **`mem://architecture/company-ai-overrides-defaults.md`** — correct the tool list.
+- `supabase/functions/whatsapp-messages/index.ts` —
+  - `search_media` execution (background path + tool-loop path): replace `url`/`file_path` in tool output with `media_id` + minimal metadata.
+  - `send_media` tool schema: accept `media_ids`. `handleSendMedia`: resolve `media_ids` → URLs via `company_media` lookup with `company_id` guard.
+  - System prompt updates (lines ~2322-2327, 2465, 2479, 2711) — tell model to use ids, not URLs, and keep captions short.
+  - New `stripLeakedMediaUrls(text)` helper, applied to every assistant text reply before it's persisted to `messages` and before Twilio dispatch.
+
+No DB schema changes. No frontend changes. No auth changes.
 
 ### Validation
 
-1. From `+260972064502` to GreenGrid: "Can I see some pics of solar panels you've installed" → AI calls `search_media`, sends one of the 12 GreenGrid media files (best vector match, or latest image as fallback), single reply, no "one moment".
-2. Same prompt to Finch (which has BMS) → still works for media; BMS tools still available for stock questions.
-3. Same prompt to North Park (no BMS, no relevant media) → AI does **not** loop on `check_stock`; either returns the latest image or politely says it doesn't have photos, and falls into a single notify_boss handoff if needed.
-4. Force a stall (temporarily remove `search_media` from one test company) → watchdog escalates after **1** retry, not 2.
-5. Tail `whatsapp-messages` logs → no `[BMS-AGENT] no_connection` entries for tenants without BMS.
-
-No UI changes, no auth/RLS changes, no BMS code changes.
+1. From `+260972064502` to GreenGrid: "send me a pic of solar panels" → AI sends image attachment + a short caption with **no URL** in the text.
+2. Same flow on Finch / ANZ → still works; existing `search_media`→`send_media` chain unchanged behaviourally for the customer.
+3. Inspect `messages` rows for the test conversation → `content` column contains caption only, no `supabase.co/storage` substring.
+4. Force the model to put a URL in its reply (test by leaving old prompt cached) → post-processor strips it; image still delivered once.
+5. Cross-tenant safety: try `send_media` with a `media_id` belonging to another company → rejected, no media sent, audit log entry.
 
