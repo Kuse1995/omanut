@@ -25,6 +25,7 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
   const [previewText, setPreviewText] = useState("");
   const [counts, setCounts] = useState<{ products: number; stock_alerts: number; has_sales: boolean } | null>(null);
   const [rawErrors, setRawErrors] = useState<Record<string, string | null>>({});
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
   useEffect(() => {
     checkBmsConnection();
@@ -35,17 +36,30 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     try {
       const { data } = await supabase
         .from("bms_connections")
-        .select("id")
+        .select("id, last_bms_sync_at")
         .eq("company_id", companyId)
         .eq("is_active", true)
         .maybeSingle();
       setHasBms(!!data);
+      setLastSyncAt(data?.last_bms_sync_at ?? null);
     } catch {
       setHasBms(false);
     } finally {
       setChecking(false);
     }
   };
+
+  const formatRelative = (iso: string | null) => {
+    if (!iso) return "never";
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
+
 
   const startSync = async () => {
     setSyncing(true);
@@ -77,13 +91,11 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     const endIdx = quickReferenceInfo.indexOf(BMS_SYNC_END);
 
     if (startIdx !== -1 && endIdx !== -1) {
-      // Replace existing BMS section
       newKb =
         quickReferenceInfo.slice(0, startIdx) +
         wrappedText +
         quickReferenceInfo.slice(endIdx + BMS_SYNC_END.length);
     } else {
-      // Append
       newKb = quickReferenceInfo
         ? `${quickReferenceInfo}\n\n${wrappedText}`
         : wrappedText;
@@ -92,6 +104,7 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     onApply(newKb);
     setDialogOpen(false);
     toast.success("BMS data applied to Knowledge Base — don't forget to save!");
+    checkBmsConnection();
   };
 
   if (checking || !hasBms) return null;
@@ -102,23 +115,29 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     <>
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2 flex-wrap">
                 <Database className="h-5 w-5" />
                 BMS Data Sync
+                <Badge variant="outline" className="text-xs font-normal">
+                  Auto-sync: every 15 min + on sale
+                </Badge>
               </CardTitle>
-              <CardDescription>
-                Pull products, stock levels, and sales data from your connected business management system to train the AI.
+              <CardDescription className="mt-1">
+                Live stock & prices are always pulled in real-time when a customer asks. This snapshot just helps the AI know what exists.
               </CardDescription>
+              <p className="text-xs text-muted-foreground mt-2">
+                Last synced: <span className="font-medium text-foreground">{formatRelative(lastSyncAt)}</span>
+              </p>
             </div>
-            <Button onClick={startSync} disabled={syncing} size="sm">
+            <Button onClick={startSync} disabled={syncing} size="sm" variant="outline">
               {syncing ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4 mr-2" />
               )}
-              {syncing ? "Syncing..." : "Sync from BMS"}
+              {syncing ? "Syncing..." : "Force refresh"}
             </Button>
           </div>
         </CardHeader>

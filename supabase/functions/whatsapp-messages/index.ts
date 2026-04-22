@@ -2288,6 +2288,11 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       instructions += `\n\n=== QUICK REFERENCE KNOWLEDGE BASE ===\n${company.quick_reference_info}`;
     }
 
+    // Reinforce snapshot-vs-live rule when KB contains a BMS sync block
+    if (company.quick_reference_info && company.quick_reference_info.includes('<!-- BMS_SYNC_START -->')) {
+      instructions += `\n\n⚠️ CRITICAL: The PRODUCTS, STOCK and PRICING numbers in the BMS sync block above are a CACHED SNAPSHOT (refreshed every 15 min + on each sale). They CAN be stale. NEVER quote stock or prices from that snapshot to a customer. ALWAYS call check_stock or list_products first to get the live number from the BMS, then answer.`;
+    }
+
     // Add AI overrides if present
     if (aiOverrides) {
       if (aiOverrides.system_instructions) {

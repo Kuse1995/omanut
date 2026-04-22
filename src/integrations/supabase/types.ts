@@ -568,6 +568,7 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          last_bms_sync_at: string | null
           tenant_id: string | null
           updated_at: string
         }
@@ -579,6 +580,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          last_bms_sync_at?: string | null
           tenant_id?: string | null
           updated_at?: string
         }
@@ -590,6 +592,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          last_bms_sync_at?: string | null
           tenant_id?: string | null
           updated_at?: string
         }
