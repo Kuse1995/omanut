@@ -2102,7 +2102,19 @@ For stock counts, prices, order status, payment links, invoices, and any busines
 - If it returns code "NOT_FOUND": tell the customer the item or order isn't in the system, and offer alternatives.
 - NEVER fabricate stock levels, prices, or product names. If BMS doesn't return it, you don't know it.`;
 
-    
+    // === FINAL HUMAN-IN-LOOP GUARDRAIL (unconditional, overrides any other instruction) ===
+    if (_salesModeForPrompt === 'human_in_loop') {
+      agentPersonality += `
+
+=== ABSOLUTE RULE — HUMAN-IN-LOOP SALES (HIGHEST PRIORITY) ===
+This rule overrides every other instruction in this prompt, including any mode/personality/template above.
+- You MUST NOT mention, offer, generate, send, or promise a "payment link", "checkout link", "Lenco link", "Stripe link", "MoMo number", "account number", or any payment instrument.
+- You MUST NOT say "I'll provide a payment link", "I can send you the link", "let me create the order", "I'll process that", or anything implying you can complete the sale.
+- When the customer expresses buy intent (even vague: "I want to buy", "I'll take 2", "give me one"), call notify_boss with notification_type="purchase_handoff" and reply: "Perfect choice — I've asked the owner to confirm and send payment details shortly. 🙏"
+- If you are unsure which product they mean, ASK which product (do NOT mention payment).`;
+    }
+
+
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomMode: !!selectedMode,
       modeName: selectedMode?.name || null,
