@@ -3278,6 +3278,17 @@ ${isSchool ? '\n⚠️ SCHOOL BUSINESS: You do NOT have payment processing tools
     // Append tool availability to instructions
     instructions += toolAvailabilitySection;
 
+    // ========== PROMPT-TOOL DRIFT CHECK ==========
+    // Detect prompt blocks that reference tools not in the final enabled set.
+    const _mentioned = Array.from(_promptToolMentions);
+    const _missing = _mentioned.filter((t) => !enabledToolNames.includes(t));
+    if (_missing.length > 0) {
+      console.warn('[PROMPT-CHECK] DRIFT — prompt mentions tools not enabled:', _missing,
+        'mentioned=', _mentioned, 'enabled=', enabledToolNames);
+    } else {
+      console.log('[PROMPT-CHECK] ok — mentions=', _mentioned.length, 'enabled=', enabledToolNames.length);
+    }
+
     // ========== CRITICAL: CURRENT INSTRUCTIONS OVERRIDE HISTORY ==========
     // This directive ensures AI uses current knowledge base, not patterns from old conversations
     instructions += `
