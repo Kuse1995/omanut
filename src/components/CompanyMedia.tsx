@@ -100,11 +100,16 @@ export default function CompanyMedia({ companyId }: CompanyMediaProps) {
         const { data, error } = await supabase.functions.invoke('bms-agent', {
           body: { action: 'list_products', params: { company_id: companyId } }
         });
-        if (!error && data?.success && Array.isArray(data.data)) {
+        // SECURITY: explicitly treat no_connection as empty so we never display
+        // another tenant's products if the bms-agent contract changes.
+        if (!error && data?.success && Array.isArray(data.data) && !data.no_connection) {
           setBmsProducts(data.data);
+        } else {
+          setBmsProducts([]);
         }
       } catch (e) {
         console.log('BMS products not available:', e);
+        setBmsProducts([]);
       }
     };
     fetchBmsProducts();
