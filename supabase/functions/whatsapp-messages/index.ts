@@ -5411,7 +5411,40 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
     // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
-      if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
+      // ========== TOOL-MISMATCH SAFETY NET ==========
+      // AI tried to call tools, but ZERO matched an executor → phantom-tool failure.
+      // Escalate to the owner instead of emitting a "one moment 🙏" stall (which the
+      // watchdog would then re-fulfill in a loop).
+      const aiTriedTools = attemptedToolNames.size > 0;
+      const nothingExecuted = !anyToolExecuted && allToolResults.length === 0;
+      if (aiTriedTools && nothingExecuted) {
+        const phantomNames = Array.from(attemptedToolNames).join(', ');
+        console.error(`[TOOL-MISMATCH] AI called [${phantomNames}] but no executor matched. Escalating to owner.`);
+        try {
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId: company.id,
+              notification_type: 'customer_issue',
+              customer_phone: customerPhone,
+              customer_name: (conversation as any)?.customer_name || customerPhone,
+              message: `AI tried to use unknown tools (${phantomNames}) for this customer. Their last message: "${userMessage?.slice(0, 200) || ''}". Please respond directly.`,
+              urgency: 'high',
+            },
+          });
+        } catch (escErr) {
+          console.error('[TOOL-MISMATCH] Failed to notify owner:', escErr);
+        }
+        // Pause auto-replies on this conversation so the loop stops cleanly
+        try {
+          await supabase
+            .from('conversations')
+            .update({ is_paused_for_human: true })
+            .eq('id', conversationId);
+        } catch (pauseErr) {
+          console.error('[TOOL-MISMATCH] Failed to pause conversation:', pauseErr);
+        }
+        assistantReply = `Thanks for your patience — I've passed this to the owner who'll get right back to you. 🙏`;
+      } else if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
         // ========== DETERMINISTIC SYNTHESIS FROM ALL TOOL RESULTS (across all rounds) ==========
         let synthesized = '';
         try {
