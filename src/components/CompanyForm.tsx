@@ -405,33 +405,74 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             }
           }
 
-          // Delete existing entries and re-insert
-          const { error: deleteError } = await supabase
+          // Diff-based sync: only delete rows the user actually removed,
+          // update existing rows, insert new ones. Never wipe everything up-front.
+          const { data: existingRows, error: fetchExistingError } = await supabase
             .from('company_boss_phones')
-            .delete()
+            .select('id')
             .eq('company_id', companyId);
-          if (deleteError) throw new Error(`Could not clear existing phones: ${deleteError.message}`);
+          if (fetchExistingError) {
+            throw new Error(`Could not load existing phones: ${fetchExistingError.message}`);
+          }
 
-          if (cleaned.length > 0) {
-            const phonesToInsert = cleaned.map(p => ({
-              company_id: companyId,
-              phone: p.phone,
-              label: p.label || null,
-              role: p.role,
-              role_label: p.role === 'custom' ? p.role_label : null,
-              is_primary: p.is_primary,
-              notify_reservations: p.notify_reservations,
-              notify_payments: p.notify_payments,
-              notify_alerts: p.notify_alerts,
-              notify_social_media: p.notify_social_media,
-              notify_content_approval: p.notify_content_approval,
-            }));
+          const keepIds = new Set(cleaned.filter(p => p.id).map(p => p.id as string));
+          const idsToDelete = (existingRows || [])
+            .map(r => r.id as string)
+            .filter(id => !keepIds.has(id));
 
-            const { error: phoneError } = await supabase
+          // Update existing rows individually so a single failure doesn't lose data
+          for (const p of cleaned.filter(p => p.id)) {
+            const { error: updateError } = await supabase
               .from('company_boss_phones')
-              .insert(phonesToInsert);
-            if (phoneError) {
-              throw new Error(`Could not save boss phones: ${phoneError.message}`);
+              .update({
+                phone: p.phone,
+                label: p.label || null,
+                role: p.role,
+                role_label: p.role === 'custom' ? p.role_label : null,
+                is_primary: p.is_primary,
+                notify_reservations: p.notify_reservations,
+                notify_payments: p.notify_payments,
+                notify_alerts: p.notify_alerts,
+                notify_social_media: p.notify_social_media,
+                notify_content_approval: p.notify_content_approval,
+              })
+              .eq('id', p.id as string);
+            if (updateError) {
+              throw new Error(`Could not update phone ${p.phone}: ${updateError.message}`);
+            }
+          }
+
+          // Insert new rows (no id yet)
+          const newRows = cleaned.filter(p => !p.id).map(p => ({
+            company_id: companyId,
+            phone: p.phone,
+            label: p.label || null,
+            role: p.role,
+            role_label: p.role === 'custom' ? p.role_label : null,
+            is_primary: p.is_primary,
+            notify_reservations: p.notify_reservations,
+            notify_payments: p.notify_payments,
+            notify_alerts: p.notify_alerts,
+            notify_social_media: p.notify_social_media,
+            notify_content_approval: p.notify_content_approval,
+          }));
+          if (newRows.length > 0) {
+            const { error: insertError } = await supabase
+              .from('company_boss_phones')
+              .insert(newRows);
+            if (insertError) {
+              throw new Error(`Could not add new boss phones: ${insertError.message}`);
+            }
+          }
+
+          // Only after successful inserts/updates, remove rows the user dropped
+          if (idsToDelete.length > 0) {
+            const { error: deleteError } = await supabase
+              .from('company_boss_phones')
+              .delete()
+              .in('id', idsToDelete);
+            if (deleteError) {
+              throw new Error(`Could not remove deleted phones: ${deleteError.message}`);
             }
           }
         }
