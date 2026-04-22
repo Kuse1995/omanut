@@ -1,51 +1,69 @@
 
 
-## Stop the message flood and fix the root causes
+## Fix the real cause: phantom `bms_*` tool names
 
-### Immediate bleeding (do first)
+The watchdog and router are now working. The AI keeps stalling because it calls `bms_list_products` — a tool that's **advertised to the model but not executable**. The executor's `BMS_TOOLS` array contains `list_products` and `check_stock`, not their `bms_*` aliases. Result: tool call goes nowhere, no tool result is returned, synthesis fallback fires "one moment 🙏", watchdog kicks in, same broken loop.
 
-1. **Kill the watchdog cron** temporarily by unscheduling `pending-promise-watchdog` until the underlying loop is fixed. Re-enable in step 4.
-2. **Pause ANZ conversation 67b90349-55e9-42c6-9f41-00d8fa601afa** (`is_paused_for_human = true`) so no further auto-replies fire while we fix things.
+### Evidence
 
-### Root-cause fixes
+From the latest log:
+```
+[TOOLS] Enabled tools: ["lookup_product","list_media","send_media","search_media",
+                        "notify_boss","check_stock","bms_list_products","bms_check_stock", ...]
+[AI-TOOLS] toolNames: ["bms_list_products"]      ← AI picks the phantom name
+[BACKGROUND] AI response: assistantReply: ""     ← no real reply
+[FALLBACK] No AI response generated, using contextual fallback
+[BACKGROUND] Final reply: Give me one moment — I'm checking on that for you. 🙏
+```
 
-#### 3. Fix `routeToAgent` crash (`whatsapp-messages/index.ts` line 719)
-Replace unsafe `data.choices[0]` with `data?.choices?.[0]`. If missing, log the payload and fall back to keyword routing. This stops the per-turn `TypeError`.
+DB confirms `enabled_tools` still contains the `bms_*` aliases.
 
-#### 4. Fix the watchdog infinite loop (`pending-promise-watchdog/index.ts`)
-Three guards, all required:
-- **Conversation-level cooldown**: track `last_promise_fulfillment_at` on the conversation row (or in a dedicated table). Skip any conversation fulfilled in the last 10 minutes, regardless of which message is now "newest".
-- **Per-conversation hard cap**: max 2 fulfillment attempts per rolling hour. Third stall → `notify_boss` + send the customer "owner has been notified" + mark conversation `is_paused_for_human = true` to fully stop the loop.
-- **Detect re-stall**: if the message produced by the previous fulfillment is itself a promise pattern, do NOT fulfill it again — escalate immediately.
+### Fixes
 
-#### 5. Fix the model config so the AI actually answers
-`zai/glm-4.7` does not exist on Google's API. Two options, pick one in the fix:
-- **A (recommended)**: normalize `zai/*` → route to Zhipu provider in `_shared/gemini-client.ts`. Add a `ZHIPU_API_KEY` env check; if missing, transparently fall back to `google/gemini-2.5-flash` instead of trying `glm-4.7` against Google.
-- **B (fast)**: hard-update ANZ's `company_ai_overrides.primary_model` to `google/gemini-2.5-flash` and remove the broken model entirely.
+#### 1. Normalize tool aliases at runtime (`whatsapp-messages/index.ts`)
+When building `enabledToolNames` from company overrides, map every `bms_<name>` → `<name>` and de-duplicate. This makes the system tolerant to whatever's stored in the DB.
 
-I recommend **B for the immediate fix** + **A as the durable fix** so future companies can't reintroduce this.
+```text
+bms_list_products  → list_products
+bms_check_stock    → check_stock
+bms_*              → *
+```
 
-#### 6. Stop supervisor from blocking every turn
-DeepSeek is returning "Insufficient Balance". `supervisor-agent` should treat this as a soft failure (already does — "proceeding without guidance") but log a single warning per hour, not per turn. Also: route supervisor to a working model (Lovable AI Gateway / Gemini) instead of DeepSeek so it actually contributes again.
+Then the AI gets a clean tool list, picks `list_products`, the executor recognizes it, BMS bridge runs, real catalog comes back.
 
-#### 7. Fix attempt tracking so the cooldown works
-Current code writes the marker onto the **stalled** message. But the watchdog reads the **newest** assistant message, which is the new stall — so the marker is invisible. Move the marker to **conversation-level metadata** (new column or `metadata` jsonb on `conversations`) keyed by timestamp, not by message id.
+#### 2. Stop hard-coding `glm-4.7` for "simple" messages
+Line 2629: `selectedModel = messageComplexity === 'simple' ? 'glm-4.7' : primaryModel`.
+This overrides the company's configured model with `glm-4.7` — which works only because Zhipu has credit. But it bypasses the per-company config we just fixed. Change to: always use `primaryModel`. Faster routing should be a model-config concern, not a runtime override.
+
+#### 3. Clean ANZ's `enabled_tools` in the DB (one-time migration)
+Remove `bms_list_products`, `bms_check_stock` from ANZ's `company_ai_overrides.enabled_tools`. Keep `list_products`, `check_stock`. Belt-and-suspenders alongside fix #1.
+
+#### 4. Synthesis-fallback safety net
+When the AI returns an empty reply AND tool calls were attempted but **no executor matched them** (zero tool results pushed), do NOT emit "Give me one moment 🙏". Instead:
+- log `[TOOL-MISMATCH] AI called <name> which has no executor` 
+- escalate immediately to `notify_boss(customer_issue)` 
+- send the customer the clean handoff message
+
+This breaks the infinite-stall pattern at the source so the watchdog never even has to fire for this class of bug.
+
+#### 5. Re-enable the watchdog cron
+Now that the underlying loop is fixed, re-schedule `pending-promise-watchdog` at `*/1 * * * *`. With the cooldown + hard-cap + re-stall detection already in place, it's safe.
+
+#### 6. Unpause ANZ conversation `67b90349-...`
+Set `is_paused_for_human = false`, reset `promise_fulfillment_count = 0`, clear `last_promise_fulfillment_at`. Ready for the verification test.
 
 ### Validation
 
-After deploy:
-1. Send "what's in stock" to ANZ → expect a real answer using `list_products` + `search_media`, no "one moment".
-2. Force a stall (rare) → watchdog fulfills once within ~2 min.
-3. Force a second stall → watchdog escalates to owner, pauses conversation, sends ONE customer message, stops.
-4. Confirm logs show no `TypeError` in `routeToAgent` and no per-turn 404 on the model.
+Send "what's in stock?" to ANZ:
+- `[TOOLS]` log shows `list_products` (not `bms_list_products`).
+- AI calls `list_products` → bms-agent runs → real catalog returned.
+- Customer gets stock + photos in one turn, no "one moment".
+- `messages.message_metadata.promise_fulfillment` is never written.
 
 ### Files
 
-- `supabase/functions/whatsapp-messages/index.ts` — safe router parsing.
-- `supabase/functions/pending-promise-watchdog/index.ts` — cooldown, hard cap, re-stall detection, conversation-level attempt tracking.
-- `supabase/functions/_shared/gemini-client.ts` — `zai/*` normalization with safe fallback.
-- `supabase/functions/supervisor-agent/index.ts` — switch off DeepSeek, throttle error logs.
-- DB migration — add `conversations.last_promise_fulfillment_at timestamptz`; update ANZ `company_ai_overrides.primary_model` to `google/gemini-2.5-flash`; pause runaway conversation.
+- `supabase/functions/whatsapp-messages/index.ts` — alias normalization, drop hard-coded `glm-4.7`, tool-mismatch escalation in synthesis fallback.
+- DB migration — clean ANZ `enabled_tools`, unpause conversation, reset counters, re-add cron.
 
-No schema-breaking changes, no new tools.
+No new tools, no schema changes, no UI changes.
 
