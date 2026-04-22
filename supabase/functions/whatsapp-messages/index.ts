@@ -6116,7 +6116,7 @@ serve(async (req) => {
       const allBossPhones = await getBossPhones(supabase, company.id);
       allBossPhonesNormalized = allBossPhones.map(bp => normalizePhone(bp.phone)).filter(Boolean);
     } catch (e) {
-      console.error('[BOSS-DETECT] Error loading boss phones:', e);
+      console.error('[BOSS-DETECT] Error loading boss phones:', e instanceof Error ? e.stack : e);
     }
     if (bossPhone && !allBossPhonesNormalized.includes(bossPhone)) {
       allBossPhonesNormalized.push(bossPhone);
