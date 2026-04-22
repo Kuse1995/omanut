@@ -2623,10 +2623,11 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
-    
-    // Select model based on complexity
-    const selectedModel = messageComplexity === 'simple' ? 'glm-4.7' : primaryModel;
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+
+    // Always respect the company's configured primary model. Speed/complexity tradeoffs
+    // belong in the per-company model config, NOT a runtime hard-code.
+    const selectedModel = primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
@@ -3088,7 +3089,19 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
 
     // ========== TOOL FILTERING BY BUSINESS TYPE AND ENABLED_TOOLS ==========
     // Determine which tools to include based on business type and database configuration
-    let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
+    // Normalize phantom `bms_*` aliases (stored in DB) to their real executor names so
+    // the AI is never advertised tools we cannot actually run.
+    const rawEnabledTools: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
+    let enabledToolNames: string[] = Array.from(new Set(
+      rawEnabledTools.map((name) => {
+        if (typeof name !== 'string') return name;
+        if (name.startsWith('bms_')) return name.slice(4);
+        return name;
+      })
+    ));
+    if (rawEnabledTools.some((n) => typeof n === 'string' && n.startsWith('bms_'))) {
+      console.log('[TOOLS] Normalized bms_* aliases. Before:', rawEnabledTools, 'After:', enabledToolNames);
+    }
 
     // Per-company sales mode (default 'autonomous'). 'human_in_loop' = AI hands off
     // buy intent to the boss instead of closing the sale itself.
