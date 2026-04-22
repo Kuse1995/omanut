@@ -41,7 +41,8 @@ export async function loadBmsConnection(
   supabase: SupabaseClient,
   companyId: string
 ): Promise<BmsConnection | null> {
-  const cached = connectionCache.get(companyId);
+  const key = cacheKey(companyId);
+  const cached = connectionCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.conn;
   }
@@ -71,7 +72,7 @@ export async function loadBmsConnection(
   // bms_connections row gets null — callers must handle that explicitly rather
   // than be silently routed to another tenant's BMS.
 
-  connectionCache.set(companyId, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
+  connectionCache.set(key, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
   return conn;
 }
 
