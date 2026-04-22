@@ -1,68 +1,77 @@
 
 
-## Fix: admin can't manually send messages (401 Unauthorized)
+## Fix: company creation fails on retry ("Email already in use")
 
-### Root cause (confirmed)
+### Root cause (confirmed from logs + DB)
 
-From the cross-tenant audit log, your manual send was **blocked with reason `user_not_in_company`**:
+Your first attempt at 19:29:40 actually **partially succeeded** then crashed:
 
-- Admin user `abkanyanta@gmail.com` → has global `admin` role ✓
-- Admin is NOT a row in `company_users` for the target tenant (Omanut Technologies) ✗
-- `send-whatsapp-message` requires JWT sender to be in `company_users` for the conversation's company → returns **401**
+1. ✅ Auth user created (`710eb5df...` / charleshimoondejr@gmail.com)
+2. ✅ Company `GreenGrid Energy` (`a23f9137...`) inserted
+3. ✅ `users` row inserted, `company_users` row inserted, `user_roles` row inserted
+4. 💥 Crashed inserting into `company_ai_overrides`: **duplicate key on `company_id`**
 
-The function was hardened against cross-tenant leaks but never carved out an exception for platform admins. Result: admins can only message tenants they happen to be enrolled in, which defeats the whole admin console.
+Why the duplicate? The `companies` table has a trigger `trg_seed_company_ai_overrides` that auto-inserts a row into `company_ai_overrides` on every new company. But `create-company/index.ts` (lines 153-164) **also** explicitly inserts into `company_ai_overrides` when `system_instructions`/`qa_style`/`banned_topics` are provided in the form — colliding with the trigger's row.
+
+The function then threw, but **none of the prior inserts were rolled back** (no transaction wrapping). So now:
+- Auth user exists ✓
+- `company_users` row exists ✓ → orphan check fails (`cuCount > 0`) → "Email already in use"
+- Every retry hits the same wall
 
 ### Fix
 
-In `supabase/functions/send-whatsapp-message/index.ts`, the JWT authorization block (lines 147-163) currently only checks `company_users`. Add an admin-role bypass before the rejection:
+#### 1. `supabase/functions/create-company/index.ts` — replace insert with upsert
+The trigger already created the row with empty defaults. Change the explicit insert (lines ~153-164) to an **update** of the existing row instead of an insert:
 
 ```ts
-if (userId && !isServiceRole) {
-  // Platform admins can send into any tenant's conversation
-  const { data: adminRole } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('role', 'admin')
-    .maybeSingle();
+if (system_instructions || qa_style || banned_topics) {
+  const { error: aiError } = await supabaseAdmin
+    .from('company_ai_overrides')
+    .update({
+      system_instructions: system_instructions || '',
+      qa_style: qa_style || '',
+      banned_topics: banned_topics || '',
+    })
+    .eq('company_id', company.id);
 
-  if (!adminRole) {
-    // Non-admin users must be enrolled in the company
-    const { data: accessData } = await supabase
-      .from('company_users')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('company_id', conversation.company_id)
-      .maybeSingle();
-
-    if (!accessData) {
-      await auditDecision('blocked', 'user_not_in_company', conversation.company_id, conversation.phone);
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-  } else {
-    // Audit admin override for traceability
-    await auditDecision('allowed', 'admin_role_override', conversation.company_id, conversation.phone, { admin_user_id: userId });
-  }
+  if (aiError) throw aiError;
 }
 ```
 
-### Why this is safe
-- Only users with the `admin` role in `user_roles` (already the source of truth for the admin portal at `/admin/login`) bypass the company-membership check.
-- Every admin send is still recorded in `cross_tenant_audit` with reason `admin_role_override`, so the audit trail stays intact.
-- Service-role callers (MCP, internal cron) keep their existing path. Non-admin company users still must be in `company_users`.
+This way the trigger keeps seeding the baseline (model, tool rounds, tokens, enabled_tools — all the ANZ baseline defaults we set yesterday), and the form just overlays the three editable text fields.
+
+#### 2. Wrap the multi-step creation in a cleanup path
+If anything after `auth.admin.createUser` fails, the function must roll back what it created so the next retry starts clean. Add a `try/catch` around steps 2-6 that on failure:
+- deletes `company_ai_overrides` row (if any)
+- deletes `user_roles` row
+- deletes `company_users` row
+- deletes `users` row
+- deletes `companies` row
+- deletes auth user via `auth.admin.deleteUser`
+
+Then re-throws so the client sees the real error.
+
+#### 3. One-shot cleanup of the existing orphan so this user can retry now
+Run a migration that removes the half-created GreenGrid Energy + its admin user:
+```sql
+DELETE FROM public.user_roles WHERE user_id='710eb5df-1c48-4aae-a744-1aafd5259c87';
+DELETE FROM public.company_users WHERE user_id='710eb5df-1c48-4aae-a744-1aafd5259c87';
+DELETE FROM public.users WHERE id='710eb5df-1c48-4aae-a744-1aafd5259c87';
+DELETE FROM public.company_ai_overrides WHERE company_id='a23f9137-30b0-438d-b220-a9c5cdc265f0';
+DELETE FROM public.companies WHERE id='a23f9137-30b0-438d-b220-a9c5cdc265f0';
+```
+Then delete the auth user from inside the edge function on first retry (the orphan-check path already handles this once `cu_count`/`users_count` are 0).
+
+#### 4. Surface the real error to the admin UI
+The current catch block returns a generic `"An error occurred processing your request"` (line 184), which is why you couldn't see the duplicate-key issue. Return the actual `error.message` for admin-only callers (this function already verifies admin role at the top, so it's safe).
 
 ### Files
-
-- **`supabase/functions/send-whatsapp-message/index.ts`** — add admin-role bypass in the JWT authz block (~lines 147-163). Redeploy.
-
-No DB migration, no schema changes, no UI changes.
+- **`supabase/functions/create-company/index.ts`** — switch ai-overrides insert → update; add rollback; return real error message; redeploy.
+- **DB migration** — delete the orphaned GreenGrid Energy company + admin user rows so retry works immediately.
 
 ### Validation
-
-1. As admin (`abkanyanta@gmail.com`), open any tenant's conversation in the admin console → type "hello" → send. Expect 200 + message delivered to the customer; audit row shows `decision: allowed, reason: admin_role_override`.
-2. As a regular company user (non-admin) sending into their own company → still works (existing path).
-3. As a regular user trying to send into a company they don't belong to → still blocked with `user_not_in_company` (security preserved).
+1. Open admin → New Company → fill the same form (charleshimoondejr@gmail.com, GreenGrid Energy) → Create.
+2. Expect 200, company appears in list, admin can log in with the password set in the form.
+3. `company_ai_overrides` row exists once with the baseline defaults plus the three text overrides from the form.
+4. Trigger an intentional failure (e.g., duplicate phone number) → verify auth user + partial rows are cleaned up and the form can be resubmitted with the same email.
 
