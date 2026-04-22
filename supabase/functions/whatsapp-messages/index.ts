@@ -6108,8 +6108,23 @@ serve(async (req) => {
     const fromPhone = normalizePhone(From);
     const bossPhone = company.boss_phone ? normalizePhone(company.boss_phone) : '';
     const takeoverPhone = company.takeover_number ? normalizePhone(company.takeover_number) : '';
-    
-    console.log('Phone comparison:', { fromPhone, bossPhone, takeoverPhone, isBoss: fromPhone === bossPhone, isTakeover: fromPhone === takeoverPhone });
+
+    // Load all configured boss phones (multi-boss support via company_boss_phones table)
+    let allBossPhonesNormalized: string[] = [];
+    try {
+      const allBossPhones = await getBossPhones(supabase, company.id);
+      allBossPhonesNormalized = allBossPhones.map(bp => normalizePhone(bp.phone)).filter(Boolean);
+    } catch (e) {
+      console.error('[BOSS-DETECT] Error loading boss phones:', e);
+    }
+    if (bossPhone && !allBossPhonesNormalized.includes(bossPhone)) {
+      allBossPhonesNormalized.push(bossPhone);
+    }
+
+    const isBoss = allBossPhonesNormalized.includes(fromPhone);
+    const isTakeover = !!takeoverPhone && fromPhone === takeoverPhone;
+
+    console.log('Phone comparison:', { fromPhone, bossPhone, takeoverPhone, allBossPhonesNormalized, isBoss, isTakeover });
     
     // Handle message from takeover number - conversation selector
     if (company.takeover_number && fromPhone === takeoverPhone) {
@@ -6321,7 +6336,7 @@ serve(async (req) => {
       });
     }
     
-    if (company.boss_phone && fromPhone === bossPhone) {
+    if (isBoss) {
       console.log('Message from BOSS - Wake Up Routine + Command Handler');
       
       // Update admin_last_active to open 24-hour service window
