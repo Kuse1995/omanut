@@ -1,21 +1,23 @@
 /**
  * Shared AI client for all edge functions.
- * Text/tool-calling models route through Zhipu (GLM), Gemini, DeepSeek, or Lovable AI Gateway based on model prefix.
- * Image/video generation always uses Gemini/OpenAI native APIs.
+ * ALL text/tool-calling models route through DIRECT provider APIs only:
+ *   - glm-* / zai/* / zhipu/*  → Zhipu (open.bigmodel.cn)
+ *   - deepseek*                → DeepSeek API
+ *   - google/gemini-* / gpt-*  → Google Generative Language API (direct)
+ * The Lovable AI Gateway is NEVER called from this client.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
-const LOVABLE_GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai|zai|zhipu|deepseek)\//, '');
 }
 
-/** Determine provider from model name */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini' {
+/** Determine provider from model name. No 'lovable' option — gateway is removed. */
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
@@ -23,7 +25,7 @@ function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini'
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
-  if (normalized.startsWith('gemini-') || normalized.startsWith('gpt-')) return 'lovable';
+  // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
 
@@ -56,16 +58,16 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiUrl = ZHIPU_OPENAI_URL;
       apiKey = Deno.env.get('ZHIPU_API_KEY');
       if (!apiKey) {
-        // Safe fallback: if no Zhipu key, route via Lovable Gateway to Gemini
-        console.warn(`[AI-CLIENT] ZHIPU_API_KEY missing for model "${options.model}", falling back to gemini-2.5-flash via Lovable Gateway`);
-        apiUrl = LOVABLE_GATEWAY_URL;
-        apiKey = Deno.env.get('LOVABLE_API_KEY');
-        if (apiKey) {
-          modelToSend = 'google/gemini-2.5-flash';
+        console.error(`[CONFIG-ERROR] Missing ZHIPU_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        if (!apiKey) {
+          console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY too, falling back to DeepSeek`);
+          apiUrl = DEEPSEEK_OPENAI_URL;
+          apiKey = Deno.env.get('DEEPSEEK_API_KEY');
+          modelToSend = 'deepseek-chat';
+          if (!apiKey) throw new Error('No direct provider API keys configured (ZHIPU/GEMINI/DEEPSEEK all missing)');
         } else {
-          apiUrl = GEMINI_OPENAI_URL;
-          apiKey = Deno.env.get('GEMINI_API_KEY');
-          if (!apiKey) throw new Error('No API key available for Zhipu fallback (ZHIPU_API_KEY/LOVABLE_API_KEY/GEMINI_API_KEY all missing)');
           modelToSend = 'gemini-2.5-flash';
         }
       }
@@ -73,25 +75,25 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
     case 'deepseek':
       apiUrl = DEEPSEEK_OPENAI_URL;
       apiKey = Deno.env.get('DEEPSEEK_API_KEY');
-      if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured');
-      break;
-    case 'lovable':
-      apiUrl = LOVABLE_GATEWAY_URL;
-      apiKey = Deno.env.get('LOVABLE_API_KEY');
       if (!apiKey) {
-        // Fall back to direct Gemini if no Lovable key
+        console.error(`[CONFIG-ERROR] Missing DEEPSEEK_API_KEY for model "${options.model}", falling back to direct Gemini`);
         apiUrl = GEMINI_OPENAI_URL;
         apiKey = Deno.env.get('GEMINI_API_KEY');
-        if (!apiKey) throw new Error('No API key available (LOVABLE_API_KEY or GEMINI_API_KEY)');
-      } else {
-        // Lovable gateway needs the full prefixed model name
-        modelToSend = options.model.includes('/') ? options.model : `google/${normalizedModel}`;
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (DEEPSEEK/GEMINI both missing)');
       }
       break;
+    case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
       apiKey = Deno.env.get('GEMINI_API_KEY');
-      if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY for model "${options.model}", falling back to Zhipu glm-4.7`);
+        apiUrl = ZHIPU_OPENAI_URL;
+        apiKey = Deno.env.get('ZHIPU_API_KEY');
+        modelToSend = 'glm-4.7';
+        if (!apiKey) throw new Error('No direct provider API keys configured (GEMINI/ZHIPU both missing)');
+      }
       break;
   }
 
