@@ -116,23 +116,29 @@ export const BmsSyncPanel = ({ companyId, quickReferenceInfo, onApply }: BmsSync
     <>
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <CardTitle className="flex items-center gap-2 flex-wrap">
                 <Database className="h-5 w-5" />
                 BMS Data Sync
+                <Badge variant="outline" className="text-xs font-normal">
+                  Auto-sync: every 15 min + on sale
+                </Badge>
               </CardTitle>
-              <CardDescription>
-                Pull products, stock levels, and sales data from your connected business management system to train the AI.
+              <CardDescription className="mt-1">
+                Live stock & prices are always pulled in real-time when a customer asks. This snapshot just helps the AI know what exists.
               </CardDescription>
+              <p className="text-xs text-muted-foreground mt-2">
+                Last synced: <span className="font-medium text-foreground">{formatRelative(lastSyncAt)}</span>
+              </p>
             </div>
-            <Button onClick={startSync} disabled={syncing} size="sm">
+            <Button onClick={startSync} disabled={syncing} size="sm" variant="outline">
               {syncing ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4 mr-2" />
               )}
-              {syncing ? "Syncing..." : "Sync from BMS"}
+              {syncing ? "Syncing..." : "Force refresh"}
             </Button>
           </div>
         </CardHeader>
