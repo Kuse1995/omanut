@@ -287,38 +287,45 @@ supervisorConfig.outputFormat === 'bullet_points' ?
 
 Be strategic, data-driven, and focus on ${focusAreasText}.`;
 
-    // Call DeepSeek AI for supervisor analysis
-    console.log('[Supervisor] Calling DeepSeek AI for strategic analysis...');
-    
-    const deepseekResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${deepseekApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          { 
-            role: 'system', 
-            content: `You are a strategic supervisor AI. Analyze conversations and provide ${supervisorConfig.recommendationStyle} recommendations. ${supervisorConfig.outputFormat === 'structured_json' ? 'Always respond with valid JSON only.' : 'Respond in the requested format.'}` 
-          },
-          { role: 'user', content: supervisorPrompt }
-        ],
-        temperature: supervisorConfig.analysisDepth === 'exhaustive' ? 0.8 : 0.7,
-        max_tokens: supervisorConfig.analysisDepth === 'quick' ? 1500 : 
-                   supervisorConfig.analysisDepth === 'exhaustive' ? 6000 : 4000
-      }),
+    // Call AI for supervisor analysis — route through Lovable Gateway (Gemini) by default,
+    // since DeepSeek has been returning "Insufficient Balance" and blocking every turn.
+    console.log('[Supervisor] Calling AI for strategic analysis (gemini-2.5-flash via Lovable Gateway)...');
+
+    const aiResponse = await geminiChat({
+      model: 'google/gemini-2.5-flash',
+      messages: [
+        {
+          role: 'system',
+          content: `You are a strategic supervisor AI. Analyze conversations and provide ${supervisorConfig.recommendationStyle} recommendations. ${supervisorConfig.outputFormat === 'structured_json' ? 'Always respond with valid JSON only.' : 'Respond in the requested format.'}`
+        },
+        { role: 'user', content: supervisorPrompt }
+      ],
+      temperature: supervisorConfig.analysisDepth === 'exhaustive' ? 0.8 : 0.7,
+      max_tokens: supervisorConfig.analysisDepth === 'quick' ? 1500 :
+                 supervisorConfig.analysisDepth === 'exhaustive' ? 6000 : 4000
     });
 
-    if (!deepseekResponse.ok) {
-      const errorText = await deepseekResponse.text();
-      console.error('[Supervisor] DeepSeek API error:', errorText);
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      // Throttle noisy errors — log only once per hour per status code
+      const now = Date.now();
+      const key = `supervisor_err_${aiResponse.status}`;
+      // @ts-ignore — using globalThis as a tiny in-memory throttle store (per isolate)
+      const last = (globalThis as any)[key] || 0;
+      if (now - last > 3_600_000) {
+        console.error(`[Supervisor] AI provider error ${aiResponse.status}: ${errorText.slice(0, 200)}`);
+        // @ts-ignore
+        (globalThis as any)[key] = now;
+      }
       throw new Error('Supervisor analysis failed');
     }
 
-    const deepseekData = await deepseekResponse.json();
-    let responseContent = deepseekData.choices[0].message.content;
+    const aiData = await aiResponse.json();
+    let responseContent = aiData?.choices?.[0]?.message?.content || '';
+    if (!responseContent) {
+      console.warn('[Supervisor] AI returned empty content, payload:', JSON.stringify(aiData).slice(0, 200));
+      throw new Error('Supervisor analysis returned empty content');
+    }
     
     let recommendation;
     if (supervisorConfig.outputFormat === 'structured_json') {

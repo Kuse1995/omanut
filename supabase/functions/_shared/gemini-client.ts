@@ -9,13 +9,17 @@ const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const LOVABLE_GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
-/** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash") */
+/** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
-  return model.replace(/^(google|openai)\//, '');
+  return model.replace(/^(google|openai|zai|zhipu|deepseek)\//, '');
 }
 
 /** Determine provider from model name */
 function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini' {
+  const lowered = model.toLowerCase();
+  // Explicit provider prefixes win over name heuristics
+  if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
+  if (lowered.startsWith('deepseek/')) return 'deepseek';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
@@ -51,7 +55,20 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
     case 'zhipu':
       apiUrl = ZHIPU_OPENAI_URL;
       apiKey = Deno.env.get('ZHIPU_API_KEY');
-      if (!apiKey) throw new Error('ZHIPU_API_KEY is not configured');
+      if (!apiKey) {
+        // Safe fallback: if no Zhipu key, route via Lovable Gateway to Gemini
+        console.warn(`[AI-CLIENT] ZHIPU_API_KEY missing for model "${options.model}", falling back to gemini-2.5-flash via Lovable Gateway`);
+        apiUrl = LOVABLE_GATEWAY_URL;
+        apiKey = Deno.env.get('LOVABLE_API_KEY');
+        if (apiKey) {
+          modelToSend = 'google/gemini-2.5-flash';
+        } else {
+          apiUrl = GEMINI_OPENAI_URL;
+          apiKey = Deno.env.get('GEMINI_API_KEY');
+          if (!apiKey) throw new Error('No API key available for Zhipu fallback (ZHIPU_API_KEY/LOVABLE_API_KEY/GEMINI_API_KEY all missing)');
+          modelToSend = 'gemini-2.5-flash';
+        }
+      }
       break;
     case 'deepseek':
       apiUrl = DEEPSEEK_OPENAI_URL;
