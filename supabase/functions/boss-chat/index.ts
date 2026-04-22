@@ -1297,10 +1297,25 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const maxTokens = aiOverrides?.max_tokens || 8192;
     const bossAgentPrompt = aiOverrides?.boss_agent_prompt;
     
+    // Role-aware caller context
+    const roleDisplay = callerRole === 'custom' ? (callerRoleLabel || 'Custom') :
+      callerRole ? callerRole.replace(/_/g, ' ') : 'team member';
+    const roleFocusHint: Record<string, string> = {
+      owner: 'You can discuss anything — strategy, operations, finance, content, customers.',
+      manager: 'Focus on operations, reservations, customer issues, and content approval.',
+      social_media_manager: 'Focus on content creation, post scheduling, comments, and social media performance. Skip finance internals unless asked.',
+      accountant: 'Focus on payments, transactions, revenue, and financial reporting. Skip social media operations unless asked.',
+      operations: 'Focus on reservations, scheduling, staff coordination, and day-to-day operations.',
+      support_lead: 'Focus on customer complaints, escalations, support tickets, and resolution quality.',
+      custom: 'Tailor responses to their stated role.',
+    };
+    const focusLine = roleFocusHint[callerRole || 'owner'] || roleFocusHint.owner;
+    const roleContext = `\n\n=== CALLER CONTEXT ===\nYou are speaking with the ${roleDisplay} for ${company.name}.\n${focusLine}`;
+
     // If there's a custom boss agent prompt, append it to the system prompt
-    const finalSystemPrompt = bossAgentPrompt 
-      ? `${systemPrompt}\n\n=== CUSTOM BOSS AGENT INSTRUCTIONS ===\n${bossAgentPrompt}`
-      : systemPrompt;
+    const finalSystemPrompt = bossAgentPrompt
+      ? `${systemPrompt}${roleContext}\n\n=== CUSTOM BOSS AGENT INSTRUCTIONS ===\n${bossAgentPrompt}`
+      : `${systemPrompt}${roleContext}`;
     
     // AI calls use geminiChat() with GEMINI_API_KEY
     
