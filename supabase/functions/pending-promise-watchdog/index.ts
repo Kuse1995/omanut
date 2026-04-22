@@ -9,10 +9,15 @@ const corsHeaders = {
 // Promise patterns — assistant messages that imply a follow-up will come.
 const PROMISE_PATTERNS: RegExp[] = [
   /give me (one |a )?moment/i,
+  /give me (a sec|a second|a minute|a min)/i,
   /checking on (that|it|this)/i,
-  /let me (check|confirm|verify|look)/i,
+  /checking (now|that for you|right now|the)/i,
+  /let me (check|confirm|verify|look|find|pull|grab)/i,
+  /let me check (the |that |on )?(date|availability|calendar|schedule|stock|with)/i,
   /\bone moment\b/i,
-  /i'?ll (get back|come back|check|confirm)/i,
+  /\bhold on\b/i,
+  /i'?ll (get back|come back|check|confirm|find out|look (in)?to|reach out)/i,
+  /i'?d be happy to .* let me/i,
   /working on (that|it)/i,
   /let me check what/i,
   /find some pictures/i,
