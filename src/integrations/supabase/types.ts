@@ -1317,9 +1317,13 @@ export type Database = {
           is_primary: boolean
           label: string | null
           notify_alerts: boolean
+          notify_content_approval: boolean
           notify_payments: boolean
           notify_reservations: boolean
+          notify_social_media: boolean
           phone: string
+          role: string
+          role_label: string | null
         }
         Insert: {
           company_id: string
@@ -1328,9 +1332,13 @@ export type Database = {
           is_primary?: boolean
           label?: string | null
           notify_alerts?: boolean
+          notify_content_approval?: boolean
           notify_payments?: boolean
           notify_reservations?: boolean
+          notify_social_media?: boolean
           phone: string
+          role?: string
+          role_label?: string | null
         }
         Update: {
           company_id?: string
@@ -1339,9 +1347,13 @@ export type Database = {
           is_primary?: boolean
           label?: string | null
           notify_alerts?: boolean
+          notify_content_approval?: boolean
           notify_payments?: boolean
           notify_reservations?: boolean
+          notify_social_media?: boolean
           phone?: string
+          role?: string
+          role_label?: string | null
         }
         Relationships: [
           {

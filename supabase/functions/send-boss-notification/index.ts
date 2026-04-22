@@ -36,12 +36,40 @@ serve(async (req) => {
       });
     }
 
-    // Get boss phones from the new table
-    const bossPhones = await getBossPhones(supabase, companyId);
+    // Get boss phones from the new table — filter by notification type
+    const phoneFilter: any = {};
+    switch (notificationType) {
+      case 'new_reservation':
+      case 'reservation_modified':
+        phoneFilter.notify_reservations = true;
+        break;
+      case 'payment_request':
+      case 'payment_proof_uploaded':
+        phoneFilter.notify_payments = true;
+        break;
+      case 'social_media_alert':
+        phoneFilter.notify_social_media = true;
+        break;
+      case 'content_approval_request':
+        phoneFilter.notify_content_approval = true;
+        break;
+      case 'interested_client':
+      case 'conversation_summary':
+      case 'action_required':
+      case 'high_value_opportunity':
+      case 'customer_complaint':
+      case 'vip_client_info':
+      case 'low_credit_alert':
+      case 'system_recalibration':
+      default:
+        phoneFilter.notify_alerts = true;
+        break;
+    }
+    const bossPhones = await getBossPhones(supabase, companyId, phoneFilter);
 
     if (bossPhones.length === 0) {
-      console.log('No boss phones configured for company:', companyId);
-      return new Response(JSON.stringify({ success: false, message: 'No boss phone' }), {
+      console.log('No boss phones configured for company/type:', companyId, notificationType);
+      return new Response(JSON.stringify({ success: false, message: 'No matching boss phone' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
@@ -97,7 +125,15 @@ serve(async (req) => {
       case 'system_recalibration':
         message = `🚨 #SYSTEM_RECALIBRATION_REQUIRED\n\nCustomer: ${data.customer_name || 'Unknown'}\nPhone: ${data.customer_phone}\nConsecutive Errors: ${data.error_count || 2}\nError Types: ${(data.error_types || []).join(', ')}\n\n${data.trigger_reason || 'Multiple consecutive AI errors detected.'}\n\nRecommendation: Manual human takeover advised.\n\nReply: TAKEOVER ${data.customer_phone}`;
         break;
-      
+
+      case 'social_media_alert':
+        message = `📣 Social Media Update\n\n${data.title || 'Action needed on social media'}\n\n${data.details || data.message || ''}${data.platform ? `\n\nPlatform: ${data.platform}` : ''}${data.link ? `\n\nLink: ${data.link}` : ''}`;
+        break;
+
+      case 'content_approval_request':
+        message = `✍️ Content Awaiting Approval\n\n${data.platform ? `Platform: ${data.platform}\n` : ''}${data.scheduled_for ? `Scheduled: ${data.scheduled_for}\n` : ''}\nDraft:\n${data.caption || data.content || data.details || ''}\n\nReply APPROVE to publish or REJECT to discard.`;
+        break;
+
       default:
         message = data.message || 'Notification from AI assistant';
     }

@@ -12,14 +12,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 
+type BossRole = 'owner' | 'manager' | 'social_media_manager' | 'accountant' | 'operations' | 'support_lead' | 'custom';
+
 interface BossPhoneEntry {
   id?: string;
   phone: string;
   label: string;
+  role: BossRole;
+  role_label: string;
   is_primary: boolean;
   notify_reservations: boolean;
   notify_payments: boolean;
   notify_alerts: boolean;
+  notify_social_media: boolean;
+  notify_content_approval: boolean;
+}
+
+const ROLE_OPTIONS: { value: BossRole; label: string }[] = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'social_media_manager', label: 'Social Media Manager' },
+  { value: 'accountant', label: 'Accountant' },
+  { value: 'operations', label: 'Operations' },
+  { value: 'support_lead', label: 'Support Lead' },
+  { value: 'custom', label: 'Custom…' },
+];
+
+const ROLE_PRESETS: Record<BossRole, Pick<BossPhoneEntry, 'notify_reservations' | 'notify_payments' | 'notify_alerts' | 'notify_social_media' | 'notify_content_approval'>> = {
+  owner:                { notify_reservations: true,  notify_payments: true,  notify_alerts: true,  notify_social_media: true,  notify_content_approval: true  },
+  manager:              { notify_reservations: true,  notify_payments: true,  notify_alerts: true,  notify_social_media: false, notify_content_approval: true  },
+  social_media_manager: { notify_reservations: false, notify_payments: false, notify_alerts: false, notify_social_media: true,  notify_content_approval: true  },
+  accountant:           { notify_reservations: false, notify_payments: true,  notify_alerts: false, notify_social_media: false, notify_content_approval: false },
+  operations:           { notify_reservations: true,  notify_payments: false, notify_alerts: true,  notify_social_media: false, notify_content_approval: false },
+  support_lead:         { notify_reservations: false, notify_payments: false, notify_alerts: true,  notify_social_media: false, notify_content_approval: false },
+  custom:               { notify_reservations: false, notify_payments: false, notify_alerts: false, notify_social_media: false, notify_content_approval: false },
+};
+
+function roleDisplayLabel(entry: Pick<BossPhoneEntry, 'role' | 'role_label'>): string {
+  if (entry.role === 'custom') return entry.role_label?.trim() || 'Custom';
+  return ROLE_OPTIONS.find(o => o.value === entry.role)?.label || entry.role;
 }
 
 interface CompanyFormProps {
@@ -257,20 +288,28 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             id: p.id,
             phone: p.phone,
             label: p.label || '',
+            role: (p.role as BossRole) || 'owner',
+            role_label: p.role_label || '',
             is_primary: p.is_primary,
             notify_reservations: p.notify_reservations,
             notify_payments: p.notify_payments,
             notify_alerts: p.notify_alerts,
+            notify_social_media: p.notify_social_media ?? false,
+            notify_content_approval: p.notify_content_approval ?? false,
           })));
         } else if (data.boss_phone) {
           // Fallback: show legacy boss_phone as single entry
           setBossPhones([{
             phone: data.boss_phone,
             label: 'Owner',
+            role: 'owner',
+            role_label: '',
             is_primary: true,
             notify_reservations: true,
             notify_payments: true,
             notify_alerts: true,
+            notify_social_media: true,
+            notify_content_approval: true,
           }]);
         }
       }
@@ -331,32 +370,68 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
         if (aiError) throw aiError;
 
-        // Sync boss phones
+        // Sync boss phones — with validation + surfaced errors
         if (companyId) {
+          // Client-side validation
+          const cleaned = bossPhones
+            .map(p => ({ ...p, phone: p.phone.trim(), label: p.label.trim(), role_label: p.role_label.trim() }))
+            .filter(p => p.phone.length > 0);
+
+          // Require leading +
+          const missingPlus = cleaned.find(p => !p.phone.startsWith('+'));
+          if (missingPlus) {
+            throw new Error(`Phone "${missingPlus.phone}" must start with + and country code (e.g. +260...)`);
+          }
+          // Dedupe
+          const seen = new Set<string>();
+          for (const p of cleaned) {
+            if (seen.has(p.phone)) {
+              throw new Error(`Duplicate phone number: ${p.phone}`);
+            }
+            seen.add(p.phone);
+          }
+          // Custom role requires label
+          const customNoLabel = cleaned.find(p => p.role === 'custom' && !p.role_label);
+          if (customNoLabel) {
+            throw new Error(`Custom role on ${customNoLabel.phone} requires a label.`);
+          }
+          // Exactly one primary if any phones exist
+          if (cleaned.length > 0) {
+            const primaryCount = cleaned.filter(p => p.is_primary).length;
+            if (primaryCount === 0) cleaned[0].is_primary = true;
+            else if (primaryCount > 1) {
+              const firstPrimaryIdx = cleaned.findIndex(p => p.is_primary);
+              cleaned.forEach((p, i) => { p.is_primary = i === firstPrimaryIdx; });
+            }
+          }
+
           // Delete existing entries and re-insert
-          await supabase
+          const { error: deleteError } = await supabase
             .from('company_boss_phones')
             .delete()
             .eq('company_id', companyId);
+          if (deleteError) throw new Error(`Could not clear existing phones: ${deleteError.message}`);
 
-          if (bossPhones.length > 0) {
-            const phonesToInsert = bossPhones
-              .filter(p => p.phone.trim())
-              .map(p => ({
-                company_id: companyId,
-                phone: p.phone.trim(),
-                label: p.label || null,
-                is_primary: p.is_primary,
-                notify_reservations: p.notify_reservations,
-                notify_payments: p.notify_payments,
-                notify_alerts: p.notify_alerts,
-              }));
+          if (cleaned.length > 0) {
+            const phonesToInsert = cleaned.map(p => ({
+              company_id: companyId,
+              phone: p.phone,
+              label: p.label || null,
+              role: p.role,
+              role_label: p.role === 'custom' ? p.role_label : null,
+              is_primary: p.is_primary,
+              notify_reservations: p.notify_reservations,
+              notify_payments: p.notify_payments,
+              notify_alerts: p.notify_alerts,
+              notify_social_media: p.notify_social_media,
+              notify_content_approval: p.notify_content_approval,
+            }));
 
-            if (phonesToInsert.length > 0) {
-              const { error: phoneError } = await supabase
-                .from('company_boss_phones')
-                .insert(phonesToInsert);
-              if (phoneError) console.error('Error saving boss phones:', phoneError);
+            const { error: phoneError } = await supabase
+              .from('company_boss_phones')
+              .insert(phonesToInsert);
+            if (phoneError) {
+              throw new Error(`Could not save boss phones: ${phoneError.message}`);
             }
           }
         }
@@ -733,10 +808,10 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                   onClick={() => setBossPhones([...bossPhones, {
                     phone: '',
                     label: '',
+                    role: 'owner',
+                    role_label: '',
                     is_primary: bossPhones.length === 0,
-                    notify_reservations: true,
-                    notify_payments: true,
-                    notify_alerts: true,
+                    ...ROLE_PRESETS.owner,
                   }])}
                 >
                   <Plus className="h-3 w-3 mr-1" /> Add Phone
@@ -745,6 +820,16 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
               {bossPhones.map((entry, idx) => (
                 <div key={idx} className="border border-border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                      {roleDisplayLabel(entry)}
+                    </span>
+                    {entry.is_primary && (
+                      <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        Primary
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <Input
                       value={entry.phone}
@@ -763,7 +848,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                         updated[idx] = { ...updated[idx], label: e.target.value };
                         setBossPhones(updated);
                       }}
-                      placeholder="Label (e.g. Owner)"
+                      placeholder="Name (optional)"
                       className="w-36"
                     />
                     <Button
@@ -793,7 +878,43 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
-                  <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground w-12 shrink-0">Role</Label>
+                    <Select
+                      value={entry.role}
+                      onValueChange={(value: BossRole) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = {
+                          ...updated[idx],
+                          role: value,
+                          ...ROLE_PRESETS[value],
+                        };
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ROLE_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {entry.role === 'custom' && (
+                      <Input
+                        value={entry.role_label}
+                        onChange={(e) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], role_label: e.target.value };
+                          setBossPhones(updated);
+                        }}
+                        placeholder="Custom role name"
+                        className="h-8 flex-1"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
                     <label className="flex items-center gap-1.5">
                       <Switch
                         checked={entry.notify_reservations}
@@ -829,6 +950,30 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                         className="scale-75"
                       />
                       Alerts
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_social_media}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_social_media: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Social media
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_content_approval}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_content_approval: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Content approval
                     </label>
                   </div>
                 </div>
