@@ -144,21 +144,32 @@ serve(async (req) => {
       );
     }
 
-    // Authorization check: JWT users must belong to the company
+    // Authorization check: JWT users must belong to the company (or be a platform admin)
     if (userId && !isServiceRole) {
-      const { data: accessData } = await supabase
-        .from('company_users')
-        .select('id')
+      const { data: adminRole } = await supabase
+        .from('user_roles')
+        .select('role')
         .eq('user_id', userId)
-        .eq('company_id', conversation.company_id)
+        .eq('role', 'admin')
         .maybeSingle();
 
-      if (!accessData) {
-        await auditDecision('blocked', 'user_not_in_company', conversation.company_id, conversation.phone);
-        return new Response(
-          JSON.stringify({ error: 'Unauthorized' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+      if (!adminRole) {
+        const { data: accessData } = await supabase
+          .from('company_users')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('company_id', conversation.company_id)
+          .maybeSingle();
+
+        if (!accessData) {
+          await auditDecision('blocked', 'user_not_in_company', conversation.company_id, conversation.phone);
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      } else {
+        await auditDecision('allowed', 'admin_role_override', conversation.company_id, conversation.phone, { admin_user_id: userId });
       }
     }
 
