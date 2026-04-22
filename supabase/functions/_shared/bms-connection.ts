@@ -28,7 +28,7 @@ function cacheKey(companyId: string): string {
 }
 
 export function invalidateBmsConnectionCache(companyId?: string): void {
-  if (companyId) connectionCache.delete(companyId);
+  if (companyId) connectionCache.delete(cacheKey(companyId));
   else connectionCache.clear();
 }
 
