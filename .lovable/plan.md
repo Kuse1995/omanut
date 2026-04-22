@@ -1,91 +1,52 @@
 
 
-## Fix secondary boss phone save + add roles
+## Fix: secondary boss number still routes to customer AI
 
-### Why the second number didn't save
+### Root cause (confirmed from edge function logs)
 
-In `CompanyForm.tsx` (line 359), the boss-phones insert error is **swallowed silently**:
-
-```ts
-if (phoneError) console.error('Error saving boss phones:', phoneError);
+Runtime error in `whatsapp-messages`:
+```
+[BOSS-DETECT] Error loading boss phones: ReferenceError: getBossPhones is not defined
 ```
 
-No toast, no thrown error → the form shows "Company updated successfully" even when the phones insert fails. Most likely cause of the actual failure: a unique constraint on `(company_id, phone)` exists, and the delete-then-insert sequence sometimes hits a race or the second row's phone got typed identically/empty/duplicated by the legacy `companies.boss_phone` reload. Two real bugs:
+The previous fix added two `getBossPhones(...)` call sites in `supabase/functions/whatsapp-messages/index.ts` (lines 4997 and 6115) but **never added the import**. The `try/catch` swallows the ReferenceError, `allBossPhonesNormalized` falls back to just the legacy `companies.boss_phone` (260967546533 — the owner), and ANZ's secondary social_media_manager number (+260972064502) is never recognized as a boss → message goes to the customer AI.
 
-1. **Silent error** — user sees "Success" but nothing saved.
-2. **No client-side validation** — duplicate phones, empty phones, or missing `+` prefix are submitted as-is and rejected by the DB.
+DB confirms both rows exist for ANZ:
+- `+260 967546533` — owner (legacy)
+- `+260972064502` — social_media_manager ✓
 
-### Roles for boss phones
+### Fix
 
-Today each entry has three notification toggles (`notify_reservations`, `notify_payments`, `notify_alerts`). You're asking for proper **roles** like "Social Media Manager", "Owner", "Accountant", etc. — where the role determines what notifications they get and what they can do via WhatsApp boss-chat.
+#### 1. Add the missing import in `supabase/functions/whatsapp-messages/index.ts`
+Add at the top alongside the other `_shared` imports:
+```ts
+import { getBossPhones } from "../_shared/boss-phones.ts";
+```
 
-### Plan
+#### 2. Fix the legacy 3-arg call site (line ~4997)
+Current: `getBossPhones(supabase, company.id, company.boss_phone)` — third arg is a string, but the signature expects a `BossPhoneFilter` object. Change to:
+```ts
+const bossPhones = await getBossPhones(supabase, company.id);
+```
+(Function already falls back to `companies.boss_phone` internally when the table is empty.)
 
-#### 1. Surface the real save error
-- In `CompanyForm.tsx`, throw on `phoneError` instead of `console.error` so the toast shows the actual DB message.
-- Validate before insert: trim phones, require a leading `+`, deduplicate by phone, ensure exactly one `is_primary`.
-- Show inline red text per row when validation fails (no submit until fixed).
+#### 3. Stop swallowing the boss-detect error
+In the `try/catch` around `getBossPhones` (line ~6114), log loudly and re-throw in dev — at minimum, change the catch to also log the stack so future regressions surface immediately:
+```ts
+} catch (e) {
+  console.error('[BOSS-DETECT] Error loading boss phones:', e instanceof Error ? e.stack : e);
+}
+```
 
-#### 2. Add a `role` column to `company_boss_phones`
-DB migration:
-- Add `role text not null default 'owner'` to `company_boss_phones`.
-- Add a CHECK-via-trigger (not a CHECK constraint, per memory) restricting role to a known set: `owner`, `manager`, `social_media_manager`, `accountant`, `operations`, `support_lead`, `custom`.
-- Add `role_label text` (free-text) for when role = `custom`.
-- Backfill: existing rows → `role = 'owner'` if `is_primary`, else `'manager'`.
-
-#### 3. Role → notification preset mapping
-Each role implies sensible defaults the user can still override per-toggle:
-
-| Role | reservations | payments | alerts | social media | content approval |
-|---|---|---|---|---|---|
-| Owner | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manager | ✓ | ✓ | ✓ | – | ✓ |
-| Social Media Manager | – | – | – | ✓ | ✓ |
-| Accountant | – | ✓ | – | – | – |
-| Operations | ✓ | – | ✓ | – | – |
-| Support Lead | – | – | ✓ | – | – |
-
-Two new toggle columns are needed to support the social-media role:
-- `notify_social_media boolean default false` (post drafts, comment alerts, scheduling needs)
-- `notify_content_approval boolean default false` (AI-drafted posts awaiting approval)
-
-Selecting a role in the UI **prefills** the toggles; user can still tweak.
-
-#### 4. UI updates in `CompanyForm.tsx` boss-phones section
-- New "Role" dropdown per entry (owner/manager/social media manager/accountant/operations/support lead/custom).
-- When role = `custom`, show a label text field.
-- Add the two new toggles ("Social media", "Content approval") to the existing toggle row.
-- Show a small role badge in the entry header.
-
-#### 5. Route notifications by role/toggle
-- `_shared/boss-phones.ts` — extend `BossPhoneFilter` with `notify_social_media` and `notify_content_approval`. Return the new fields in `BossPhone`.
-- `send-boss-notification/index.ts` — add notification types `social_media_alert` and `content_approval_request`; route them via `getBossPhones(..., { notify_social_media: true })` / `{ notify_content_approval: true }`.
-- `publish-meta-post`, `schedule-meta-post`, `auto-content-creator`, `boss-media-watchdog`: when something needs social-media-manager attention, call `send-boss-notification` with the new types so only the relevant phones get pinged.
-- Existing flows (`send-boss-reservation-request`, `sla-escalation`, payment alerts) keep their current filters — backward compatible.
-
-#### 6. Boss-chat awareness of role
-- `boss-chat/index.ts` already resolves the company by phone. Extend the lookup to also return the caller's `role` and inject one line into the system prompt: `You are speaking with the {role_label or role} for {company_name}. Tailor responses to their domain (e.g. social media manager → focus on content + scheduling; accountant → finance + payments).`
-- No tool changes — purely prompt-level scoping.
-
-#### 7. Memory
-- `mem://features/boss-phone-roles.md` — document role enum, notification mapping, and prompt-injection rule.
+#### 4. Deploy + verify
+- Deploy `whatsapp-messages`.
+- Re-text from `+260972064502` to ANZ's WhatsApp.
+- Check logs for `Phone comparison:` — `allBossPhonesNormalized` should now contain both `260967546533` and `260972064502`, and `isBoss: true`.
+- The reply should come from boss-chat (with the social-media-manager role context), not the customer assistant.
 
 ### Files
 
-- `src/components/CompanyForm.tsx` — surface insert errors, validate, role dropdown + new toggles.
-- DB migration — add `role`, `role_label`, `notify_social_media`, `notify_content_approval`; validation trigger; backfill.
-- `supabase/functions/_shared/boss-phones.ts` — extend `BossPhone` and `BossPhoneFilter`.
-- `supabase/functions/send-boss-notification/index.ts` — handle new notification types.
-- `supabase/functions/boss-chat/index.ts` — inject role into system prompt.
-- `supabase/functions/publish-meta-post`, `schedule-meta-post`, `auto-content-creator`, `boss-media-watchdog` — route social-media-related pings to the right phones.
-- New memory file.
+- `supabase/functions/whatsapp-messages/index.ts` — add import, fix legacy call site, harden catch.
 
-### Validation
-
-1. Add a second boss phone with role = "Social Media Manager", save → row appears in DB with the right role + toggles. Remove its phone, save → toast shows the actual DB error (no false success).
-2. AI generates a post needing approval → only the social-media-manager phone gets the WhatsApp ping; owner doesn't.
-3. New reservation comes in → only `notify_reservations = true` phones get pinged (owner + manager + operations).
-4. Social-media-manager messages the boss line → AI greeting acknowledges their role.
-
-No new tools, no UI redesign, additive schema only.
+No DB changes, no UI changes, no other functions touched.
 
