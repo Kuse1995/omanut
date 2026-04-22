@@ -18,7 +18,14 @@ interface CacheEntry {
   expiresAt: number;
 }
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Cache key is namespaced by a per-cold-start nonce so a redeploy auto-invalidates
+// any stale entries in the previous worker's memory. (Edge Function cold starts give
+// each worker a fresh module scope, so this nonce is regenerated per deploy.)
+const CACHE_NAMESPACE = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const connectionCache = new Map<string, CacheEntry>();
+function cacheKey(companyId: string): string {
+  return `${CACHE_NAMESPACE}:${companyId}`;
+}
 
 export function invalidateBmsConnectionCache(companyId?: string): void {
   if (companyId) connectionCache.delete(companyId);
