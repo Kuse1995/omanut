@@ -65,11 +65,19 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
         const membership = companies.find(c => c.company_id === selectedCompany.id);
         setCurrentRole(membership?.role || null);
       } else if (companies.length > 0) {
-        // Auto-select default company or first company
-        const defaultCompany = companies.find(c => c.is_default) || companies[0];
-        if (defaultCompany) {
-          await loadCompanyDetails(defaultCompany.company_id);
-          setCurrentRole(defaultCompany.role);
+        // Restore previously selected company from localStorage if still accessible
+        const storedId = typeof window !== 'undefined'
+          ? localStorage.getItem('selectedCompanyId')
+          : null;
+        const storedMembership = storedId
+          ? companies.find(c => c.company_id === storedId)
+          : null;
+        const target = storedMembership
+          || companies.find(c => c.is_default)
+          || companies[0];
+        if (target) {
+          await loadCompanyDetails(target.company_id);
+          setCurrentRole(target.role);
         }
       }
     } catch (err) {
@@ -88,6 +96,9 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
 
     if (!error && data) {
       setSelectedCompany(data);
+      try {
+        localStorage.setItem('selectedCompanyId', data.id);
+      } catch {}
     }
   };
 
@@ -96,6 +107,9 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
     if (!membership) return;
 
     setIsLoading(true);
+    try {
+      localStorage.setItem('selectedCompanyId', companyId);
+    } catch {}
     await loadCompanyDetails(companyId);
     setCurrentRole(membership.role);
     setIsLoading(false);
