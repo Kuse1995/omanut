@@ -10,6 +10,7 @@ import {
   isShortAffirmation,
   type PendingAction,
 } from "../_shared/pending-action.ts";
+import { getBossPhones } from "../_shared/boss-phones.ts";
 
 /** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
  *  Preserves assistant messages with tool_calls even if content is null (required by API). */
@@ -4994,7 +4995,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
         // Notify boss about complete AI failure
         try {
-          const bossPhones = await getBossPhones(supabase, company.id, company.boss_phone);
+          const bossPhones = await getBossPhones(supabase, company.id);
           for (const bp of bossPhones) {
             await sendTwilioMessage(
               bp,
@@ -6115,7 +6116,7 @@ serve(async (req) => {
       const allBossPhones = await getBossPhones(supabase, company.id);
       allBossPhonesNormalized = allBossPhones.map(bp => normalizePhone(bp.phone)).filter(Boolean);
     } catch (e) {
-      console.error('[BOSS-DETECT] Error loading boss phones:', e);
+      console.error('[BOSS-DETECT] Error loading boss phones:', e instanceof Error ? e.stack : e);
     }
     if (bossPhone && !allBossPhonesNormalized.includes(bossPhone)) {
       allBossPhonesNormalized.push(bossPhone);
