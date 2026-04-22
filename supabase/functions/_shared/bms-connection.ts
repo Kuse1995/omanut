@@ -18,10 +18,17 @@ interface CacheEntry {
   expiresAt: number;
 }
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// Cache key is namespaced by a per-cold-start nonce so a redeploy auto-invalidates
+// any stale entries in the previous worker's memory. (Edge Function cold starts give
+// each worker a fresh module scope, so this nonce is regenerated per deploy.)
+const CACHE_NAMESPACE = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const connectionCache = new Map<string, CacheEntry>();
+function cacheKey(companyId: string): string {
+  return `${CACHE_NAMESPACE}:${companyId}`;
+}
 
 export function invalidateBmsConnectionCache(companyId?: string): void {
-  if (companyId) connectionCache.delete(companyId);
+  if (companyId) connectionCache.delete(cacheKey(companyId));
   else connectionCache.clear();
 }
 
@@ -34,7 +41,8 @@ export async function loadBmsConnection(
   supabase: SupabaseClient,
   companyId: string
 ): Promise<BmsConnection | null> {
-  const cached = connectionCache.get(companyId);
+  const key = cacheKey(companyId);
+  const cached = connectionCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.conn;
   }
@@ -64,7 +72,7 @@ export async function loadBmsConnection(
   // bms_connections row gets null — callers must handle that explicitly rather
   // than be silently routed to another tenant's BMS.
 
-  connectionCache.set(companyId, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
+  connectionCache.set(key, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
   return conn;
 }
 

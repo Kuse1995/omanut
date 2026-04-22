@@ -314,6 +314,27 @@ Deno.serve(async (req) => {
     // active bms_connections row must NOT be served data from another tenant's BMS.
     if (!connection) {
       console.warn(`[BMS-AGENT] No active BMS connection for company ${companyId} — returning empty result for action ${action}`);
+
+      // Audit so any future leak attempt is immediately visible
+      if (companyId) {
+        try {
+          const admin = createClient(
+            Deno.env.get("SUPABASE_URL")!,
+            Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+          );
+          await admin.from("cross_tenant_audit").insert({
+            source: "bms-agent",
+            decision: "rejected",
+            reason: "no_bms_connection",
+            asserted_company_id: companyId,
+            resolved_company_id: null,
+            details: { action, intent: ACTION_ALIASES[action] || action },
+          });
+        } catch (e) {
+          console.error("[BMS-AGENT] audit insert failed:", e);
+        }
+      }
+
       // For read-style intents, return success with empty data so UIs degrade gracefully
       // (e.g. the "Link to BMS Product" dropdown shows no products instead of leaking another tenant's list).
       const isRead = !["record_sale", "credit_sale", "update_stock", "bulk_add_inventory", "create_contact",
