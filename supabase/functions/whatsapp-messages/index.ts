@@ -3433,7 +3433,7 @@ Trust ONLY the information provided in this system prompt.
 
     // If a deterministic reply fired, skip the AI/tool loop entirely.
     if (deterministicReply) {
-      const assistantReply = deterministicReply;
+      const assistantReply = stripLeakedMediaUrls(deterministicReply);
       try {
         await supabase.from('messages').insert({
           conversation_id: conversationId, role: 'assistant', content: assistantReply,
@@ -5703,6 +5703,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       console.log(`[HANDOFF] Boss notified - handoff triggered by ${selectedAgent} agent`);
     }
 
+    // Sanitize: strip any leaked storage URLs/file paths the model may have
+    // inlined in its caption. The actual media is delivered as an attachment via send_media.
+    assistantReply = stripLeakedMediaUrls(assistantReply);
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
     // ========== FRUSTRATION SIGNAL DETECTION ==========
