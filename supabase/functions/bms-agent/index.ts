@@ -310,19 +310,20 @@ Deno.serve(async (req) => {
       connection = await loadBmsConnection(supabase, companyId);
     }
 
+    // SECURITY: never fall back to a global BMS connection. A company without its own
+    // active bms_connections row must NOT be served data from another tenant's BMS.
     if (!connection) {
-      const globalSecret = Deno.env.get("BMS_API_SECRET");
-      if (globalSecret) {
-        connection = {
-          bridge_url: "https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge",
-          api_secret: globalSecret,
-          bms_type: "single_tenant",
-          tenant_id: null,
-          is_active: true,
-        };
-      } else {
-        return respond({ success: false, code: "VALIDATION", error: "No BMS connection configured for this company" }, 400);
+      console.warn(`[BMS-AGENT] No active BMS connection for company ${companyId} — returning empty result for action ${action}`);
+      // For read-style intents, return success with empty data so UIs degrade gracefully
+      // (e.g. the "Link to BMS Product" dropdown shows no products instead of leaking another tenant's list).
+      const isRead = !["record_sale", "credit_sale", "update_stock", "bulk_add_inventory", "create_contact",
+        "create_invoice", "create_quotation", "create_order", "update_order_status", "cancel_order",
+        "send_receipt", "send_invoice", "send_quotation", "send_payslip", "record_expense",
+        "clock_in", "clock_out", "generate_payment_link", "register_omanut_link"].includes(action);
+      if (isRead) {
+        return respond({ success: true, code: "OK", data: [], no_connection: true });
       }
+      return respond({ success: false, code: "NO_BMS_CONNECTION", error: "This company has no active BMS connection." }, 400);
     }
 
     const resolvedIntent = ACTION_ALIASES[action] || action;
