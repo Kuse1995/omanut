@@ -167,8 +167,8 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
 }
 
 /**
- * Generate images using the native Gemini API (not OpenAI-compatible).
- * The OpenAI chat/completions endpoint doesn't support image generation for these models.
+ * Generate images using the native Gemini API directly.
+ * No Lovable AI Gateway — direct Google Generative Language API only.
  * Supports optional input images for editing/product-anchored generation.
  */
 export async function geminiImageGenerate(options: {
@@ -176,92 +176,13 @@ export async function geminiImageGenerate(options: {
   prompt: string;
   inputImageUrls?: string[];
 }): Promise<{ imageBase64: string | null; text: string | null }> {
-  // Try Lovable AI Gateway first (no quota issues), fall back to direct Gemini
-  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
   const geminiKey = Deno.env.get('GEMINI_API_KEY');
-
-  if (!lovableKey && !geminiKey) {
-    throw new Error('Neither LOVABLE_API_KEY nor GEMINI_API_KEY is configured');
-  }
-
-  // Build input content parts
-  const contentParts: any[] = [{ type: 'text', text: options.prompt }];
-  if (options.inputImageUrls && options.inputImageUrls.length > 0) {
-    for (const imageUrl of options.inputImageUrls) {
-      if (imageUrl.startsWith('data:')) {
-        contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-      } else {
-        try {
-          const imgResponse = await fetch(imageUrl);
-          if (imgResponse.ok) {
-            const imgBuffer = await imgResponse.arrayBuffer();
-            const bytes = new Uint8Array(imgBuffer);
-            let imgBase64 = '';
-            const chunkSize = 32768;
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              const chunk = bytes.subarray(i, i + chunkSize);
-              imgBase64 += String.fromCharCode.apply(null, [...chunk]);
-            }
-            imgBase64 = btoa(imgBase64);
-            const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-            contentParts.push({ type: 'image_url', image_url: { url: `data:${contentType};base64,${imgBase64}` } });
-          }
-        } catch (e) {
-          console.error(`Failed to fetch input image: ${imageUrl}`, e);
-        }
-      }
-    }
+  if (!geminiKey) {
+    throw new Error('[CONFIG-ERROR] GEMINI_API_KEY is not configured — cannot generate images');
   }
 
   const model = normalizeModel(options.model || 'gemini-3-pro-image-preview');
-
-  // Strategy 1: Lovable AI Gateway (preferred — no quota issues)
-  if (lovableKey) {
-    try {
-      console.log('[IMAGE-GEN] Using Lovable AI Gateway for image generation');
-      const gatewayResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${lovableKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: `google/${model}`,
-          messages: [{ role: 'user', content: contentParts.length === 1 ? options.prompt : contentParts }],
-          modalities: ['image', 'text'],
-        }),
-      });
-
-      if (gatewayResponse.ok) {
-        const data = await gatewayResponse.json();
-        const message = data.choices?.[0]?.message;
-        let imageBase64: string | null = null;
-        let text: string | null = message?.content || null;
-
-        if (message?.images && message.images.length > 0) {
-          imageBase64 = message.images[0].image_url?.url || null;
-        }
-
-        if (imageBase64) {
-          console.log('[IMAGE-GEN] Lovable AI Gateway image generation successful');
-          return { imageBase64, text };
-        }
-      } else {
-        const errText = await gatewayResponse.text();
-        console.warn(`[IMAGE-GEN] Lovable AI Gateway failed (${gatewayResponse.status}): ${errText.substring(0, 200)}`);
-      }
-    } catch (e) {
-      console.warn('[IMAGE-GEN] Lovable AI Gateway error:', e);
-    }
-  }
-
-  // Strategy 2: Direct Gemini API (fallback)
-  if (!geminiKey) {
-    throw new Error('Image generation failed via Lovable AI Gateway and GEMINI_API_KEY is not available as fallback');
-  }
-
-  console.log('[IMAGE-GEN] Falling back to direct Gemini API');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+  console.log(`[IMAGE-GEN] Using direct Gemini API with model: ${model}`);
 
   // Build native Gemini parts
   const parts: any[] = [{ text: options.prompt }];
@@ -295,14 +216,13 @@ export async function geminiImageGenerate(options: {
     }
   }
 
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts }],
-      generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-      },
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
     }),
   });
 
