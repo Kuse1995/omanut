@@ -1865,7 +1865,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                         prompt: args.image_prompt,
                         messageType: 'generate',
                         scheduledPostId: pendingPost.id,
-                        bossPhone: company.boss_phone,
+                        bossPhone: From || company.boss_phone,
                       }),
                     }).catch(e => console.error('[BOSS-CHAT] Async image gen fire-and-forget error:', e.message));
                   } else {
@@ -1939,7 +1939,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                           prompt: args.image_prompt,
                           messageType: 'generate',
                           scheduledPostId: pendingPost.id,
-                          bossPhone: company.boss_phone,
+                          bossPhone: From || company.boss_phone,
                         }),
                       }).catch(e => console.error('[BOSS-CHAT] Async image gen for scheduled post error:', e.message));
                     } else {
@@ -2352,7 +2352,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                 conversationId: null,
                 prompt: imgPrompt,
                 messageType,
-                bossPhone: company.boss_phone || '',
+                bossPhone: From || company.boss_phone || '',
               };
 
               try {
