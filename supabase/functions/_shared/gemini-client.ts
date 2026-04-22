@@ -1,21 +1,23 @@
 /**
  * Shared AI client for all edge functions.
- * Text/tool-calling models route through Zhipu (GLM), Gemini, DeepSeek, or Lovable AI Gateway based on model prefix.
- * Image/video generation always uses Gemini/OpenAI native APIs.
+ * ALL text/tool-calling models route through DIRECT provider APIs only:
+ *   - glm-* / zai/* / zhipu/*  → Zhipu (open.bigmodel.cn)
+ *   - deepseek*                → DeepSeek API
+ *   - google/gemini-* / gpt-*  → Google Generative Language API (direct)
+ * The Lovable AI Gateway is NEVER called from this client.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
-const LOVABLE_GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai|zai|zhipu|deepseek)\//, '');
 }
 
-/** Determine provider from model name */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini' {
+/** Determine provider from model name. No 'lovable' option — gateway is removed. */
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
@@ -23,7 +25,7 @@ function getProvider(model: string): 'zhipu' | 'deepseek' | 'lovable' | 'gemini'
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
-  if (normalized.startsWith('gemini-') || normalized.startsWith('gpt-')) return 'lovable';
+  // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
 
@@ -56,16 +58,16 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiUrl = ZHIPU_OPENAI_URL;
       apiKey = Deno.env.get('ZHIPU_API_KEY');
       if (!apiKey) {
-        // Safe fallback: if no Zhipu key, route via Lovable Gateway to Gemini
-        console.warn(`[AI-CLIENT] ZHIPU_API_KEY missing for model "${options.model}", falling back to gemini-2.5-flash via Lovable Gateway`);
-        apiUrl = LOVABLE_GATEWAY_URL;
-        apiKey = Deno.env.get('LOVABLE_API_KEY');
-        if (apiKey) {
-          modelToSend = 'google/gemini-2.5-flash';
+        console.error(`[CONFIG-ERROR] Missing ZHIPU_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        if (!apiKey) {
+          console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY too, falling back to DeepSeek`);
+          apiUrl = DEEPSEEK_OPENAI_URL;
+          apiKey = Deno.env.get('DEEPSEEK_API_KEY');
+          modelToSend = 'deepseek-chat';
+          if (!apiKey) throw new Error('No direct provider API keys configured (ZHIPU/GEMINI/DEEPSEEK all missing)');
         } else {
-          apiUrl = GEMINI_OPENAI_URL;
-          apiKey = Deno.env.get('GEMINI_API_KEY');
-          if (!apiKey) throw new Error('No API key available for Zhipu fallback (ZHIPU_API_KEY/LOVABLE_API_KEY/GEMINI_API_KEY all missing)');
           modelToSend = 'gemini-2.5-flash';
         }
       }
@@ -73,25 +75,25 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
     case 'deepseek':
       apiUrl = DEEPSEEK_OPENAI_URL;
       apiKey = Deno.env.get('DEEPSEEK_API_KEY');
-      if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured');
-      break;
-    case 'lovable':
-      apiUrl = LOVABLE_GATEWAY_URL;
-      apiKey = Deno.env.get('LOVABLE_API_KEY');
       if (!apiKey) {
-        // Fall back to direct Gemini if no Lovable key
+        console.error(`[CONFIG-ERROR] Missing DEEPSEEK_API_KEY for model "${options.model}", falling back to direct Gemini`);
         apiUrl = GEMINI_OPENAI_URL;
         apiKey = Deno.env.get('GEMINI_API_KEY');
-        if (!apiKey) throw new Error('No API key available (LOVABLE_API_KEY or GEMINI_API_KEY)');
-      } else {
-        // Lovable gateway needs the full prefixed model name
-        modelToSend = options.model.includes('/') ? options.model : `google/${normalizedModel}`;
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (DEEPSEEK/GEMINI both missing)');
       }
       break;
+    case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
       apiKey = Deno.env.get('GEMINI_API_KEY');
-      if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY for model "${options.model}", falling back to Zhipu glm-4.7`);
+        apiUrl = ZHIPU_OPENAI_URL;
+        apiKey = Deno.env.get('ZHIPU_API_KEY');
+        modelToSend = 'glm-4.7';
+        if (!apiKey) throw new Error('No direct provider API keys configured (GEMINI/ZHIPU both missing)');
+      }
       break;
   }
 
@@ -165,8 +167,8 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
 }
 
 /**
- * Generate images using the native Gemini API (not OpenAI-compatible).
- * The OpenAI chat/completions endpoint doesn't support image generation for these models.
+ * Generate images using the native Gemini API directly.
+ * No Lovable AI Gateway — direct Google Generative Language API only.
  * Supports optional input images for editing/product-anchored generation.
  */
 export async function geminiImageGenerate(options: {
@@ -174,92 +176,13 @@ export async function geminiImageGenerate(options: {
   prompt: string;
   inputImageUrls?: string[];
 }): Promise<{ imageBase64: string | null; text: string | null }> {
-  // Try Lovable AI Gateway first (no quota issues), fall back to direct Gemini
-  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
   const geminiKey = Deno.env.get('GEMINI_API_KEY');
-
-  if (!lovableKey && !geminiKey) {
-    throw new Error('Neither LOVABLE_API_KEY nor GEMINI_API_KEY is configured');
-  }
-
-  // Build input content parts
-  const contentParts: any[] = [{ type: 'text', text: options.prompt }];
-  if (options.inputImageUrls && options.inputImageUrls.length > 0) {
-    for (const imageUrl of options.inputImageUrls) {
-      if (imageUrl.startsWith('data:')) {
-        contentParts.push({ type: 'image_url', image_url: { url: imageUrl } });
-      } else {
-        try {
-          const imgResponse = await fetch(imageUrl);
-          if (imgResponse.ok) {
-            const imgBuffer = await imgResponse.arrayBuffer();
-            const bytes = new Uint8Array(imgBuffer);
-            let imgBase64 = '';
-            const chunkSize = 32768;
-            for (let i = 0; i < bytes.length; i += chunkSize) {
-              const chunk = bytes.subarray(i, i + chunkSize);
-              imgBase64 += String.fromCharCode.apply(null, [...chunk]);
-            }
-            imgBase64 = btoa(imgBase64);
-            const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-            contentParts.push({ type: 'image_url', image_url: { url: `data:${contentType};base64,${imgBase64}` } });
-          }
-        } catch (e) {
-          console.error(`Failed to fetch input image: ${imageUrl}`, e);
-        }
-      }
-    }
+  if (!geminiKey) {
+    throw new Error('[CONFIG-ERROR] GEMINI_API_KEY is not configured — cannot generate images');
   }
 
   const model = normalizeModel(options.model || 'gemini-3-pro-image-preview');
-
-  // Strategy 1: Lovable AI Gateway (preferred — no quota issues)
-  if (lovableKey) {
-    try {
-      console.log('[IMAGE-GEN] Using Lovable AI Gateway for image generation');
-      const gatewayResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${lovableKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: `google/${model}`,
-          messages: [{ role: 'user', content: contentParts.length === 1 ? options.prompt : contentParts }],
-          modalities: ['image', 'text'],
-        }),
-      });
-
-      if (gatewayResponse.ok) {
-        const data = await gatewayResponse.json();
-        const message = data.choices?.[0]?.message;
-        let imageBase64: string | null = null;
-        let text: string | null = message?.content || null;
-
-        if (message?.images && message.images.length > 0) {
-          imageBase64 = message.images[0].image_url?.url || null;
-        }
-
-        if (imageBase64) {
-          console.log('[IMAGE-GEN] Lovable AI Gateway image generation successful');
-          return { imageBase64, text };
-        }
-      } else {
-        const errText = await gatewayResponse.text();
-        console.warn(`[IMAGE-GEN] Lovable AI Gateway failed (${gatewayResponse.status}): ${errText.substring(0, 200)}`);
-      }
-    } catch (e) {
-      console.warn('[IMAGE-GEN] Lovable AI Gateway error:', e);
-    }
-  }
-
-  // Strategy 2: Direct Gemini API (fallback)
-  if (!geminiKey) {
-    throw new Error('Image generation failed via Lovable AI Gateway and GEMINI_API_KEY is not available as fallback');
-  }
-
-  console.log('[IMAGE-GEN] Falling back to direct Gemini API');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+  console.log(`[IMAGE-GEN] Using direct Gemini API with model: ${model}`);
 
   // Build native Gemini parts
   const parts: any[] = [{ text: options.prompt }];
@@ -293,14 +216,13 @@ export async function geminiImageGenerate(options: {
     }
   }
 
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts }],
-      generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-      },
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
     }),
   });
 
