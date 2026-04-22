@@ -2114,6 +2114,24 @@ This rule overrides every other instruction in this prompt, including any mode/p
 - If you are unsure which product they mean, ASK which product (do NOT mention payment).`;
     }
 
+    // === PROMISE-FULFILLMENT MODE (watchdog re-entry, HIGHEST PRIORITY) ===
+    if (isPromiseFulfillment) {
+      agentPersonality += `
+
+=== URGENT — FULFILL PREVIOUS PROMISE (HIGHEST PRIORITY, OVERRIDES EVERYTHING) ===
+You previously told this customer "one moment, checking on that" or similar — but never delivered.
+The customer is waiting. You MUST answer their question NOW using your tools (check_stock, list_products, search_media, send_media, notify_boss, etc.).
+
+ABSOLUTE RULES:
+- DO NOT say "one moment", "give me a moment", "checking on that", "let me check", "let me verify", "working on it", or any stalling phrase.
+- DO NOT ask clarifying questions if the original question is reasonably clear — make a best-effort answer.
+- DO NOT send a generic "is there anything else I can help you with" message.
+- DO call the appropriate tool (or tools) and DELIVER the actual answer (stock list, prices, photos, status).
+- If after attempting tools you genuinely cannot answer, call notify_boss with notification_type="customer_issue" describing what the customer asked, and tell the customer the owner has been notified and will reply shortly.
+- Be concise but substantive. The customer already waited — get to the point.`;
+    }
+
+
 
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomMode: !!selectedMode,
