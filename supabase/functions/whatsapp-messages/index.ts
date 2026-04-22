@@ -1646,7 +1646,7 @@ async function _processAIResponseInner(
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
-            model: aiOverrides?.primary_model || 'glm-4.7',
+            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
             messages: [
               {
                 role: 'system',
@@ -2623,10 +2623,11 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
-    
-    // Select model based on complexity
-    const selectedModel = messageComplexity === 'simple' ? 'glm-4.7' : primaryModel;
+    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+
+    // Always respect the company's configured primary model. Speed/complexity tradeoffs
+    // belong in the per-company model config, NOT a runtime hard-code.
+    const selectedModel = primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
@@ -3088,7 +3089,19 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
 
     // ========== TOOL FILTERING BY BUSINESS TYPE AND ENABLED_TOOLS ==========
     // Determine which tools to include based on business type and database configuration
-    let enabledToolNames: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
+    // Normalize phantom `bms_*` aliases (stored in DB) to their real executor names so
+    // the AI is never advertised tools we cannot actually run.
+    const rawEnabledTools: string[] = aiOverrides?.enabled_tools || Object.keys(allToolDefinitions);
+    let enabledToolNames: string[] = Array.from(new Set(
+      rawEnabledTools.map((name) => {
+        if (typeof name !== 'string') return name;
+        if (name.startsWith('bms_')) return name.slice(4);
+        return name;
+      })
+    ));
+    if (rawEnabledTools.some((n) => typeof n === 'string' && n.startsWith('bms_'))) {
+      console.log('[TOOLS] Normalized bms_* aliases. Before:', rawEnabledTools, 'After:', enabledToolNames);
+    }
 
     // Per-company sales mode (default 'autonomous'). 'human_in_loop' = AI hands off
     // buy intent to the boss instead of closing the sale itself.
@@ -3373,6 +3386,9 @@ Trust ONLY the information provided in this system prompt.
     // Cumulative buffer of EVERY tool result across all rounds — used by the final synthesis fallback
     // so earlier-round product/media payloads aren't lost when toolResults is reset per round.
     const allToolResults: Array<{tool_call_id: string, role: string, content: string, fn?: string}> = [];
+    // Tracks every tool the AI tried to call (across all rounds), so we can detect
+    // "AI called tools, but none had executors" — a phantom-tool failure mode.
+    const attemptedToolNames: Set<string> = new Set();
     let aiData: any = null; // Store AI response for tool loop
 
     try {
@@ -3395,6 +3411,12 @@ Trust ONLY the information provided in this system prompt.
       aiData = await response.json();
       assistantReply = aiData.choices[0].message.content || '';
       const toolCalls = aiData.choices[0].message.tool_calls;
+      if (Array.isArray(toolCalls)) {
+        for (const tc of toolCalls) {
+          const n = tc?.function?.name;
+          if (typeof n === 'string') attemptedToolNames.add(n);
+        }
+      }
 
       if (!assistantReply && (!toolCalls || toolCalls.length === 0)) {
         console.warn('[AI-RESPONSE] Model returned empty content and no tool calls for message:', userMessage?.substring(0, 100));
@@ -5075,7 +5097,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           hasReply: !!roundData.choices[0].message.content,
           newToolCalls: newToolCalls?.map((t: any) => t.function.name) || []
         });
-        
+        if (Array.isArray(newToolCalls)) {
+          for (const tc of newToolCalls) {
+            const n = tc?.function?.name;
+            if (typeof n === 'string') attemptedToolNames.add(n);
+          }
+        }
+
         if (!newToolCalls || newToolCalls.length === 0) {
           console.log(`[TOOL-LOOP] No more tool calls after round ${currentRound}, done.`);
           break;
@@ -5383,7 +5411,40 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
     // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
-      if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
+      // ========== TOOL-MISMATCH SAFETY NET ==========
+      // AI tried to call tools, but ZERO matched an executor → phantom-tool failure.
+      // Escalate to the owner instead of emitting a "one moment 🙏" stall (which the
+      // watchdog would then re-fulfill in a loop).
+      const aiTriedTools = attemptedToolNames.size > 0;
+      const nothingExecuted = !anyToolExecuted && allToolResults.length === 0;
+      if (aiTriedTools && nothingExecuted) {
+        const phantomNames = Array.from(attemptedToolNames).join(', ');
+        console.error(`[TOOL-MISMATCH] AI called [${phantomNames}] but no executor matched. Escalating to owner.`);
+        try {
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId: company.id,
+              notification_type: 'customer_issue',
+              customer_phone: customerPhone,
+              customer_name: (conversation as any)?.customer_name || customerPhone,
+              message: `AI tried to use unknown tools (${phantomNames}) for this customer. Their last message: "${userMessage?.slice(0, 200) || ''}". Please respond directly.`,
+              urgency: 'high',
+            },
+          });
+        } catch (escErr) {
+          console.error('[TOOL-MISMATCH] Failed to notify owner:', escErr);
+        }
+        // Pause auto-replies on this conversation so the loop stops cleanly
+        try {
+          await supabase
+            .from('conversations')
+            .update({ is_paused_for_human: true })
+            .eq('id', conversationId);
+        } catch (pauseErr) {
+          console.error('[TOOL-MISMATCH] Failed to pause conversation:', pauseErr);
+        }
+        assistantReply = `Thanks for your patience — I've passed this to the owner who'll get right back to you. 🙏`;
+      } else if (anyToolExecuted && (allToolResults.length > 0 || toolExecutionContext.length > 0)) {
         // ========== DETERMINISTIC SYNTHESIS FROM ALL TOOL RESULTS (across all rounds) ==========
         let synthesized = '';
         try {
