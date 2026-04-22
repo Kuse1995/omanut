@@ -4589,12 +4589,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
                     : mediaResults;
                   results = filtered.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
