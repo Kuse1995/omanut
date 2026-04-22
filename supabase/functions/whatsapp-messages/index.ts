@@ -10,6 +10,7 @@ import {
   isShortAffirmation,
   type PendingAction,
 } from "../_shared/pending-action.ts";
+import { getBossPhones } from "../_shared/boss-phones.ts";
 
 /** Filter out messages with null/undefined/empty content to prevent 400/404 Gemini errors.
  *  Preserves assistant messages with tool_calls even if content is null (required by API). */
