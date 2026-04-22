@@ -3411,6 +3411,12 @@ Trust ONLY the information provided in this system prompt.
       aiData = await response.json();
       assistantReply = aiData.choices[0].message.content || '';
       const toolCalls = aiData.choices[0].message.tool_calls;
+      if (Array.isArray(toolCalls)) {
+        for (const tc of toolCalls) {
+          const n = tc?.function?.name;
+          if (typeof n === 'string') attemptedToolNames.add(n);
+        }
+      }
 
       if (!assistantReply && (!toolCalls || toolCalls.length === 0)) {
         console.warn('[AI-RESPONSE] Model returned empty content and no tool calls for message:', userMessage?.substring(0, 100));
@@ -5091,7 +5097,13 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           hasReply: !!roundData.choices[0].message.content,
           newToolCalls: newToolCalls?.map((t: any) => t.function.name) || []
         });
-        
+        if (Array.isArray(newToolCalls)) {
+          for (const tc of newToolCalls) {
+            const n = tc?.function?.name;
+            if (typeof n === 'string') attemptedToolNames.add(n);
+          }
+        }
+
         if (!newToolCalls || newToolCalls.length === 0) {
           console.log(`[TOOL-LOOP] No more tool calls after round ${currentRound}, done.`);
           break;
