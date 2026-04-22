@@ -4618,12 +4618,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                   console.log(`[SEARCH-MEDIA] Text fallback found ${results.length} results`);
@@ -4645,12 +4644,11 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
                 if (anyMedia && anyMedia.length > 0) {
                   results = anyMedia.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description || m.file_name,
                     category: m.category,
                     media_type: m.media_type,
                     tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                   console.log(`[SEARCH-MEDIA] Returned ${results.length} latest ${requestedMediaType || 'any'} media as fallback`);
@@ -4661,7 +4659,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolExecutionContext.push(`search_media found ${results.length} results for "${args.query}"`);
               toolResults.push({
                 tool_call_id: toolCall.id, role: "tool",
-                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Use send_media with the URLs above.' : 'No matching media found.' })
+                content: JSON.stringify({ success: true, media: results, total: results.length, message: results.length > 0 ? 'Found matching media. Pass these media_id values to send_media. Do NOT mention URLs in your reply text.' : 'No matching media found.' })
               });
             } catch (error) {
               console.error('[SEARCH-MEDIA] Error:', error);
@@ -5313,9 +5311,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                     ? mediaResults.filter((m: any) => m.media_type === requestedMediaType)
                     : mediaResults;
                   results = filtered.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: m.similarity,
                   }));
                 }
@@ -5335,9 +5332,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   .limit(args.count || 5);
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.5,
                   }));
                 }
@@ -5353,9 +5349,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   .limit(args.count || 5);
                 if (anyMedia && anyMedia.length > 0) {
                   results = anyMedia.map((m: any) => ({
+                    media_id: m.id,
                     description: m.description || m.file_name, category: m.category, media_type: m.media_type, tags: m.tags,
-                    url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`,
-                    file_path: m.file_path,
                     similarity: 0.3,
                   }));
                 }
