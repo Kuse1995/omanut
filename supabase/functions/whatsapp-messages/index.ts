@@ -744,10 +744,14 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     }
     
     const data = await response.json();
-    const content = data.choices[0]?.message?.content || '{}';
-    
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      console.warn('[ROUTER] Provider returned no choices, payload shape:', JSON.stringify(data).slice(0, 300));
+      throw new Error('Router provider returned no choices');
+    }
+
     // Parse JSON response
-    const result = JSON.parse(content.replace(/```json\n?|\n?```/g, '').trim());
+    const result = JSON.parse(String(content).replace(/```json\n?|\n?```/g, '').trim());
     
     let chosen = String(result.agent || '').toLowerCase();
     if (!allowedSlugs.includes(chosen)) {

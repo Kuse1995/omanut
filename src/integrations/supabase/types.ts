@@ -1624,9 +1624,12 @@ export type Database = {
           is_paused_for_human: boolean | null
           last_message_at: string | null
           last_message_preview: string | null
+          last_promise_fulfillment_at: string | null
           phone: string | null
           pinned: boolean | null
           platform: string
+          promise_fulfillment_count: number
+          promise_fulfillment_window_start: string | null
           quality_flag: string | null
           started_at: string
           status: string
@@ -1650,9 +1653,12 @@ export type Database = {
           is_paused_for_human?: boolean | null
           last_message_at?: string | null
           last_message_preview?: string | null
+          last_promise_fulfillment_at?: string | null
           phone?: string | null
           pinned?: boolean | null
           platform?: string
+          promise_fulfillment_count?: number
+          promise_fulfillment_window_start?: string | null
           quality_flag?: string | null
           started_at?: string
           status?: string
@@ -1676,9 +1682,12 @@ export type Database = {
           is_paused_for_human?: boolean | null
           last_message_at?: string | null
           last_message_preview?: string | null
+          last_promise_fulfillment_at?: string | null
           phone?: string | null
           pinned?: boolean | null
           platform?: string
+          promise_fulfillment_count?: number
+          promise_fulfillment_window_start?: string | null
           quality_flag?: string | null
           started_at?: string
           status?: string
