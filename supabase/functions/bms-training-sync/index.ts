@@ -159,9 +159,16 @@ Deno.serve(async (req) => {
     }
 
     const syncDate = new Date().toISOString();
+    const header = `⚠️ STOCK NUMBERS BELOW ARE A SNAPSHOT (synced ${syncDate}).\nALWAYS call check_stock or list_products before quoting availability or price to a customer. Treat the snapshot as catalog hints only — never as live truth.`;
     const formattedText = sections.length > 0
-      ? `[Last synced from BMS: ${syncDate}]\n\n${sections.join("\n\n")}`
+      ? `${header}\n\n${sections.join("\n\n")}`
       : "";
+
+    // Stamp last_bms_sync_at so the cron can respect cooldown
+    await supabase
+      .from("bms_connections")
+      .update({ last_bms_sync_at: syncDate })
+      .eq("company_id", company_id);
 
     // AUTO-LINK: Try to match unlinked media to BMS products by description/tags
     let autoLinked = 0;
