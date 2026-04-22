@@ -59,19 +59,10 @@ export async function loadBmsConnection(
       tenant_id: data.tenant_id,
       is_active: data.is_active,
     };
-  } else {
-    // Fallback: global env vars (Finch single-tenant)
-    const globalSecret = Deno.env.get("BMS_API_SECRET");
-    if (globalSecret) {
-      conn = {
-        bridge_url: FINCH_BRIDGE_URL,
-        api_secret: globalSecret,
-        bms_type: "single_tenant",
-        tenant_id: null,
-        is_active: true,
-      };
-    }
   }
+  // SECURITY: no global env-var fallback. A company without its own active
+  // bms_connections row gets null — callers must handle that explicitly rather
+  // than be silently routed to another tenant's BMS.
 
   connectionCache.set(companyId, { conn, expiresAt: Date.now() + CACHE_TTL_MS });
   return conn;
