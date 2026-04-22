@@ -6336,7 +6336,7 @@ serve(async (req) => {
       });
     }
     
-    if (company.boss_phone && fromPhone === bossPhone) {
+    if (isBoss) {
       console.log('Message from BOSS - Wake Up Routine + Command Handler');
       
       // Update admin_last_active to open 24-hour service window
