@@ -37,6 +37,11 @@ serve(async (req) => {
     // Find company - prefer companyId if provided (avoids duplicate boss_phone conflicts)
     let company: any = null;
     let companyError: any = null;
+    let callerRole: string | undefined;
+    let callerRoleLabel: string | null | undefined;
+
+    // Resolve caller role by phone (works whether or not companyId was provided)
+    const resolvedByPhone = From ? await resolveCompaniesForPhone(supabase, From) : [];
 
     if (companyId) {
       const result = await supabase
@@ -46,9 +51,12 @@ serve(async (req) => {
         .single();
       company = result.data;
       companyError = result.error;
+      const match = resolvedByPhone.find(c => c.company_id === companyId);
+      callerRole = match?.role;
+      callerRoleLabel = match?.role_label;
     } else {
       // Resolve using company_boss_phones table (supports multi-company)
-      const matchedCompanies = await resolveCompaniesForPhone(supabase, From || '');
+      const matchedCompanies = resolvedByPhone;
 
       if (matchedCompanies.length === 0) {
         console.error('Management phone not found:', From);
@@ -70,6 +78,8 @@ serve(async (req) => {
             .single();
           company = result.data;
           companyError = result.error;
+          callerRole = selected.role;
+          callerRoleLabel = selected.role_label;
         } else {
           // Present selection menu
           const menu = matchedCompanies.map((c, i) => `${i + 1}. ${c.company_name}`).join('\n');
@@ -87,6 +97,8 @@ serve(async (req) => {
           .single();
         company = result.data;
         companyError = result.error;
+        callerRole = matchedCompanies[0].role;
+        callerRoleLabel = matchedCompanies[0].role_label;
       }
     }
 
