@@ -1,65 +1,65 @@
 
 
-## Remove Lovable AI Gateway entirely
+## Auto-sync BMS data instead of manual pull
 
-You're right — the system has its own provider keys (Zhipu/`glm-4.7`, DeepSeek, Gemini direct). Routing through the Lovable AI Gateway is just burning credits unnecessarily. Rip it out.
+Right now `BmsSyncPanel` only fires when a user clicks "Sync from BMS" — it pulls products, stock, and sales, formats them, and writes them into the company's Knowledge Base wrapped in `<!-- BMS_SYNC_START -->` markers. Nothing keeps that text in sync after a sale on the BMS side.
 
-### What's currently using Lovable AI Gateway
+You're right — the AI should never quote stale stock. The fix is to **stop relying on the cached KB snapshot for live data and pull it on-demand at conversation time**, plus a low-frequency safety-net background sync.
 
-From `_shared/gemini-client.ts` and recent edits, the gateway (`https://ai.gateway.lovable.dev/...` + `LOVABLE_API_KEY`) is used as:
-1. The **fallback path** when `ZHIPU_API_KEY` is missing for `glm-4.7`-class models.
-2. The **provider** for any `google/gemini-*` model name (after the `zai/` normalization fix).
-3. Possibly inside `supervisor-agent` after we switched it to `google/gemini-2.5-flash`.
+### The real problem with the current design
+
+Even if we cron the existing sync every 5 minutes, the AI still answers from a **frozen text blob** in the Knowledge Base. Between syncs it will always be wrong. The KB is the wrong place for stock numbers — it should hold *static* business facts (policies, hours, return policy), not live inventory.
+
+Live data already has a path: the `list_products` and `check_stock` BMS tools call the bridge in real time. So the right architecture is:
+
+1. **Live data** (stock, prices, current orders) → tools only, never the KB.
+2. **Catalog snapshot** (product names, categories, photos for the AI to "know what exists") → background-synced, with timestamp and short TTL.
+3. **Manual sync button** → kept as an override for when a boss wants to force-refresh after a big change.
 
 ### Fix
 
-#### 1. Strip every Lovable Gateway call site
-- `supabase/functions/_shared/gemini-client.ts`: remove all `ai.gateway.lovable.dev` URLs and any branch that uses `LOVABLE_API_KEY`. Replace with direct provider calls only:
-  - `glm-*`, `zhipu/*`, `zai/*` → Zhipu API (`https://open.bigmodel.cn/api/paas/v4/chat/completions`) using `ZHIPU_API_KEY`.
-  - `google/gemini-*` → Google Generative Language API directly using `GEMINI_API_KEY`.
-  - `deepseek/*` → DeepSeek API using `DEEPSEEK_API_KEY`.
-- Audit every other edge function that touches the gateway and replace with the matching provider call. Likely candidates: `supervisor-agent`, `analyze-conversation`, `analyze-and-followup`, `boss-chat`, `ai-playground`, `smart-configure`, `auto-content-creator`, `ai-training-coach`, anything importing `gemini-client`.
+#### 1. Background auto-sync (cron)
+- New cron: `bms-auto-sync-cron` runs every 15 minutes.
+- For every company with an active `bms_connections` row, call the existing `bms-training-sync` function.
+- Updates only the BMS-marked block in `quick_reference_info`. Static KB content the user wrote stays untouched (already supported by the START/END markers).
+- Skip companies where the last sync succeeded < 10 minutes ago (avoid stampedes if cron fires twice).
 
-#### 2. Remove the gateway as a fallback target
-The current "transparent fallback to Lovable Gateway when Zhipu key missing" logic must be deleted. New behavior when a provider key is missing:
-- log a clear `[CONFIG-ERROR] Missing <PROVIDER>_API_KEY for model <name>`
-- fall back to a different **direct** provider the system already has a key for (e.g. Zhipu → Gemini direct → DeepSeek), in that order
-- if no direct provider keys are configured, return a clean error and escalate via `notify_boss` rather than silently calling the gateway
+#### 2. Real-time invalidation via BMS callback
+The Omanut BMS bridge already has a `bms-callback` edge function. Extend it to accept a `stock_changed` / `sale_recorded` event:
+- Bridge POSTs `{ event: "sale_recorded", tenant_id, company_id, products: [...] }` whenever a transaction completes.
+- `bms-callback` triggers `bms-training-sync` immediately for that company so KB metadata + auto-linked media reflect the change within seconds.
+- If the bridge can't push events yet, the 15-min cron is the fallback.
 
-#### 3. Pin ANZ to a directly-keyed model
-- Set `company_ai_overrides.primary_model` for ANZ to `glm-4.7` (Zhipu, working today).
-- Set fallback chain to `glm-4.7 → google/gemini-2.5-flash (direct) → deepseek/deepseek-chat (direct)` — none of these touch the gateway.
+#### 3. Stop using cached stock numbers in the KB
+- `bms-training-sync` keeps the **product catalog + low-stock alerts** in the KB block (helpful for the AI to know what exists and what's running low *for guidance*) but adds a clear instruction header:
+  > "STOCK NUMBERS BELOW ARE A SNAPSHOT. Always call `check_stock` or `list_products` before quoting availability to a customer."
+- This is already the system's intent (see `mem://features/bms-data-priority-messaging`) but the prompt doesn't currently say it loud enough — the AI was treating the KB snapshot as truth.
+- Add a one-line reinforcement to the global system prompt builder in `whatsapp-messages/index.ts` so it's enforced for every company with a BMS connection.
 
-#### 4. Remove `LOVABLE_API_KEY` references
-- Remove from any `Deno.env.get("LOVABLE_API_KEY")` call.
-- Don't delete the secret itself (it's auto-managed); just stop reading it.
+#### 4. UI updates in `BmsSyncPanel`
+- Show last auto-sync timestamp (`Last synced 4 min ago`) above the manual sync button.
+- Add a small "Auto-sync: every 15 min + on sale" status pill so the boss can see it's live.
+- Manual sync remains as a "Force refresh now" override.
 
-#### 5. Update memory
-- `mem://configurations/anz-baseline.md`: model is `glm-4.7` via Zhipu direct, no gateway.
-- Add a Core rule to `mem://index.md`: "Never call the Lovable AI Gateway. Use direct provider APIs (Zhipu, Gemini, DeepSeek) only."
-
-### Validation
-
-- `grep -r "ai.gateway.lovable.dev\|LOVABLE_API_KEY" supabase/functions` returns **zero** matches.
-- Send "what's in stock?" to ANZ → answers via `glm-4.7` (Zhipu direct), no gateway in logs.
-- Force ANZ to use `google/gemini-2.5-flash` → calls `generativelanguage.googleapis.com` directly with `GEMINI_API_KEY`.
-
-### Required secrets (confirm before implementing)
-
-The replacement only works if these provider keys exist:
-- `ZHIPU_API_KEY` — for `glm-*` (you have this — it's why glm-4.7 works today)
-- `GEMINI_API_KEY` — for `google/gemini-*` direct
-- `DEEPSEEK_API_KEY` — for `deepseek/*` direct (currently out of credit but key exists)
-
-If `GEMINI_API_KEY` is missing, I'll request it via the secrets flow before touching code, otherwise removing the gateway will break any company configured for Gemini.
+#### 5. Auto-link media on every sync (already partially done)
+The current sync auto-links unlinked media to BMS products by name match. Move this into a shared helper so both the cron and the callback path use it. No new logic, just deduplication.
 
 ### Files
 
-- `supabase/functions/_shared/gemini-client.ts` — full rewrite of provider routing, no gateway.
-- All edge functions importing `gemini-client` — no API change needed if the client interface stays the same.
-- `supabase/functions/supervisor-agent/index.ts` — confirm it uses the cleaned client, not a direct gateway fetch.
-- DB migration — pin ANZ model + fallback chain to direct-provider models.
-- `mem://index.md` + `mem://configurations/anz-baseline.md` — record the rule.
+- New: `supabase/functions/bms-auto-sync-cron/index.ts` — iterates companies with active `bms_connections`, calls `bms-training-sync` per company, respects 10-min cooldown.
+- DB migration — `cron.schedule('bms-auto-sync', '*/15 * * * *', ...)` invoking the new function; add `last_bms_sync_at timestamptz` to `bms_connections`.
+- Edit: `supabase/functions/bms-callback/index.ts` — handle `sale_recorded` / `stock_changed` events and trigger `bms-training-sync` per company.
+- Edit: `supabase/functions/bms-training-sync/index.ts` — write `last_bms_sync_at`, prepend the "snapshot only — call tools for live stock" header to the KB block.
+- Edit: `supabase/functions/whatsapp-messages/index.ts` — add a one-line reinforcement to the system prompt when the company has a BMS connection.
+- Edit: `src/components/admin/BmsSyncPanel.tsx` — show last auto-sync time + auto-sync status pill.
+- Memory: `mem://features/bms-auto-sync.md` — record the new behavior (15-min cron + sale_recorded webhook + tool-first stock policy).
 
-No schema changes, no UI changes, no new tools.
+### Validation
+
+1. Trigger a sale on the BMS for a connected company → within seconds, `quick_reference_info` BMS block updates with new stock numbers.
+2. With auto-sync disabled (force), a customer asks "do you have X?" → AI calls `check_stock` (live), not the KB number.
+3. Cron runs every 15 min; second-run-within-10-min skipped per cooldown.
+4. `BmsSyncPanel` shows "Last synced 2 min ago — auto-sync active".
+
+No schema-breaking changes, no new tools for the AI, no UI redesign.
 
