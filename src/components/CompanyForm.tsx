@@ -808,10 +808,10 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                   onClick={() => setBossPhones([...bossPhones, {
                     phone: '',
                     label: '',
+                    role: 'owner',
+                    role_label: '',
                     is_primary: bossPhones.length === 0,
-                    notify_reservations: true,
-                    notify_payments: true,
-                    notify_alerts: true,
+                    ...ROLE_PRESETS.owner,
                   }])}
                 >
                   <Plus className="h-3 w-3 mr-1" /> Add Phone
@@ -820,6 +820,16 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
 
               {bossPhones.map((entry, idx) => (
                 <div key={idx} className="border border-border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                      {roleDisplayLabel(entry)}
+                    </span>
+                    {entry.is_primary && (
+                      <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                        Primary
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     <Input
                       value={entry.phone}
@@ -838,7 +848,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                         updated[idx] = { ...updated[idx], label: e.target.value };
                         setBossPhones(updated);
                       }}
-                      placeholder="Label (e.g. Owner)"
+                      placeholder="Name (optional)"
                       className="w-36"
                     />
                     <Button
@@ -868,7 +878,43 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
-                  <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground w-12 shrink-0">Role</Label>
+                    <Select
+                      value={entry.role}
+                      onValueChange={(value: BossRole) => {
+                        const updated = [...bossPhones];
+                        updated[idx] = {
+                          ...updated[idx],
+                          role: value,
+                          ...ROLE_PRESETS[value],
+                        };
+                        setBossPhones(updated);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ROLE_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {entry.role === 'custom' && (
+                      <Input
+                        value={entry.role_label}
+                        onChange={(e) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], role_label: e.target.value };
+                          setBossPhones(updated);
+                        }}
+                        placeholder="Custom role name"
+                        className="h-8 flex-1"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-x-4 gap-y-2 text-xs flex-wrap">
                     <label className="flex items-center gap-1.5">
                       <Switch
                         checked={entry.notify_reservations}
@@ -904,6 +950,30 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
                         className="scale-75"
                       />
                       Alerts
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_social_media}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_social_media: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Social media
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <Switch
+                        checked={entry.notify_content_approval}
+                        onCheckedChange={(checked) => {
+                          const updated = [...bossPhones];
+                          updated[idx] = { ...updated[idx], notify_content_approval: checked };
+                          setBossPhones(updated);
+                        }}
+                        className="scale-75"
+                      />
+                      Content approval
                     </label>
                   </div>
                 </div>
