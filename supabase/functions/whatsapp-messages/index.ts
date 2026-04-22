@@ -2102,7 +2102,19 @@ For stock counts, prices, order status, payment links, invoices, and any busines
 - If it returns code "NOT_FOUND": tell the customer the item or order isn't in the system, and offer alternatives.
 - NEVER fabricate stock levels, prices, or product names. If BMS doesn't return it, you don't know it.`;
 
-    
+    // === FINAL HUMAN-IN-LOOP GUARDRAIL (unconditional, overrides any other instruction) ===
+    if (_salesModeForPrompt === 'human_in_loop') {
+      agentPersonality += `
+
+=== ABSOLUTE RULE — HUMAN-IN-LOOP SALES (HIGHEST PRIORITY) ===
+This rule overrides every other instruction in this prompt, including any mode/personality/template above.
+- You MUST NOT mention, offer, generate, send, or promise a "payment link", "checkout link", "Lenco link", "Stripe link", "MoMo number", "account number", or any payment instrument.
+- You MUST NOT say "I'll provide a payment link", "I can send you the link", "let me create the order", "I'll process that", or anything implying you can complete the sale.
+- When the customer expresses buy intent (even vague: "I want to buy", "I'll take 2", "give me one"), call notify_boss with notification_type="purchase_handoff" and reply: "Perfect choice — I've asked the owner to confirm and send payment details shortly. 🙏"
+- If you are unsure which product they mean, ASK which product (do NOT mention payment).`;
+    }
+
+
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomMode: !!selectedMode,
       modeName: selectedMode?.name || null,
@@ -3191,18 +3203,84 @@ Trust ONLY the information provided in this system prompt.
       const quantity = qtyDigits ? parseInt(qtyDigits[1], 10) : (qtyWordMatch ? qtyWords[qtyWordMatch[1]] : null);
 
       // Try to extract the previously quoted product from the last assistant message.
-      // Patterns we recognize:  *Product Name* — K123     or     Product Name - K123     or     "Product Name" K123
-      let lastQuotedProduct: string | null = null;
-      if (lastAssistantMsg) {
-        const starQuoted = lastAssistantMsg.match(/\*([^*\n]{2,80}?)\*\s*[—\-–:]\s*[A-Za-z]{0,3}\s*\d/);
-        const dashQuoted = !starQuoted && lastAssistantMsg.match(/([A-Z][\w\-\s]{2,60}?)\s+[—\-–]\s+[A-Za-z]{0,3}\s*\d/);
-        const m = starQuoted || dashQuoted;
-        if (m && m[1]) lastQuotedProduct = m[1].trim().replace(/\s+/g, ' ');
-      }
+      // Layered matcher — picks the LAST (most recent) match across all strategies.
+      const extractQuotedProduct = (text: string): string | null => {
+        if (!text) return null;
+        const PRICE_TOKEN = /(K\s?\d|ZMW\s*\d|\$\s*\d|USD\s*\d)/i;
+        const STOP_LIST = /^(stock|price|prices|photo|photos|picture|pictures|video|videos|image|images|order|orders|item|items|product|products)$/i;
+        const candidates: { idx: number; name: string }[] = [];
+
+        const sanitize = (raw: string): string | null => {
+          let n = raw.replace(/[*"'`_]+/g, '').trim().replace(/\s+/g, ' ');
+          // Strip leading bullets/numbering
+          n = n.replace(/^[-•·\d.)\s]+/, '').trim();
+          if (n.length < 3 || n.length > 80) return null;
+          if (/^\d+$/.test(n)) return null;
+          if (STOP_LIST.test(n)) return null;
+          if (PRICE_TOKEN.test(n)) return null; // shouldn't happen post-split
+          return n;
+        };
+
+        // Strategy 1: bold span (single * or **) that contains a price → split on delimiter
+        const boldRe = /(\*\*?)([^*\n]{2,120})\1/g;
+        let m: RegExpExecArray | null;
+        while ((m = boldRe.exec(text)) !== null) {
+          const inner = m[2];
+          if (!PRICE_TOKEN.test(inner)) continue;
+          const parts = inner.split(/\s*[—–\-:@]\s*/);
+          if (parts.length >= 2) {
+            const cleaned = sanitize(parts[0]);
+            if (cleaned) candidates.push({ idx: m.index, name: cleaned });
+          }
+        }
+
+        // Strategy 2: bold name then price OUTSIDE the bold (legacy format)
+        const boldThenPriceRe = /(\*\*?)([^*\n]{2,80})\1\s*[—–\-:]\s*[A-Za-z]{0,3}\s*\d/g;
+        while ((m = boldThenPriceRe.exec(text)) !== null) {
+          const cleaned = sanitize(m[2]);
+          if (cleaned) candidates.push({ idx: m.index, name: cleaned });
+        }
+
+        // Strategy 3: plain quoted "Product" within 30 chars of a price
+        const quotedRe = /"([^"\n]{2,80})"[^\n]{0,30}?(K\s?\d|ZMW\s*\d|\$\s*\d)/g;
+        while ((m = quotedRe.exec(text)) !== null) {
+          const cleaned = sanitize(m[1]);
+          if (cleaned) candidates.push({ idx: m.index, name: cleaned });
+        }
+
+        if (candidates.length === 0) return null;
+        // Most recent (largest idx) wins
+        candidates.sort((a, b) => b.idx - a.idx);
+        return candidates[0].name;
+      };
+
+      const lastQuotedProduct: string | null = extractQuotedProduct(lastAssistantMsg);
 
       const _salesMode = (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
 
-      if (isBuyIntent && !productAlreadyNamed && lastQuotedProduct && _salesMode === 'human_in_loop') {
+      // Check if the user's named-hint overlaps with the quoted product (e.g. "buy 2 pans" + "Blue pans 28cm")
+      const hintOverlapsQuoted = (() => {
+        if (!productAlreadyNamed || !lastQuotedProduct) return true; // not applicable
+        const hintMatches = trimmedUser.toLowerCase().match(namesProductHints);
+        if (!hintMatches) return true;
+        const quotedLower = lastQuotedProduct.toLowerCase();
+        // Strip trailing 's' to allow plural overlap
+        const stem = (w: string) => w.replace(/s$/i, '');
+        return hintMatches.some(h => quotedLower.includes(stem(h)) || quotedLower.includes(h.toLowerCase()));
+      })();
+
+      console.log('[DETERMINISTIC-BUY] eval', {
+        isBuyIntent,
+        productAlreadyNamed,
+        lastQuotedProduct,
+        salesMode: _salesMode,
+        hintOverlapsQuoted,
+        quantity,
+        lastAssistantSnippet: (lastAssistantMsg || '').slice(0, 200),
+        userMessage: trimmedUser.slice(0, 120),
+      });
+
+      if (isBuyIntent && lastQuotedProduct && _salesMode === 'human_in_loop' && hintOverlapsQuoted) {
         const qtyText = quantity ? `${quantity} × ` : '';
         const summary = `${qtyText}*${lastQuotedProduct}* — customer ${customerName || customerPhone} wants to buy.`;
         // Fire-and-forget boss notification
