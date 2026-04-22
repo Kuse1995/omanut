@@ -14,6 +14,8 @@ const PROMISE_PATTERNS: RegExp[] = [
   /\bone moment\b/i,
   /i'?ll (get back|come back|check|confirm)/i,
   /working on (that|it)/i,
+  /let me check what/i,
+  /find some pictures/i,
 ];
 
 // The synthesis-fallback signature — short message ending with hourglass/folded-hands/magnifier.
@@ -23,7 +25,7 @@ function isPromiseMessage(content: string): boolean {
   if (!content) return false;
   const trimmed = content.trim();
   if (PROMISE_PATTERNS.some((re) => re.test(trimmed))) return true;
-  if (trimmed.length < 80 && FALLBACK_SIGNATURE.test(trimmed)) return true;
+  if (trimmed.length < 120 && FALLBACK_SIGNATURE.test(trimmed)) return true;
   return false;
 }
 
@@ -33,13 +35,10 @@ function normalizeWhatsApp(phone: string): string {
 }
 
 const PROMISE_AGE_MIN_SECONDS = 90;          // wait at least 90s before declaring abandoned
-const PROMISE_AGE_MAX_SECONDS = 15 * 60;     // ignore anything older than 15 min (covers our scan window)
-const COOLDOWN_SECONDS = 10 * 60;            // don't retry the same promise more than once per 10 min
+const PROMISE_AGE_MAX_SECONDS = 15 * 60;     // ignore anything older than 15 min
+const COOLDOWN_SECONDS = 10 * 60;            // 10 min cooldown between fulfillments per conversation
+const MAX_FULFILLMENTS_PER_HOUR = 2;         // hard cap per conversation per rolling hour
 const MAX_FULFILLMENTS_PER_RUN = 5;          // global cap per cron tick
-
-function getMeta(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -50,14 +49,13 @@ serve(async (req) => {
   );
 
   const startedAt = Date.now();
-  const stats = { scanned: 0, candidates: 0, fulfilled: 0, escalated: 0, skipped: 0 };
+  const stats = { scanned: 0, candidates: 0, fulfilled: 0, escalated: 0, skipped: 0, paused: 0 };
 
   try {
-    // 1. Pull active conversations with recent activity.
     const cutoff = new Date(Date.now() - PROMISE_AGE_MAX_SECONDS * 1000).toISOString();
     const { data: convs, error: convErr } = await supabase
       .from("conversations")
-      .select("id, company_id, phone, customer_name, last_message_at, status, human_takeover, is_paused_for_human, companies!inner(whatsapp_number)")
+      .select("id, company_id, phone, customer_name, last_message_at, status, is_paused_for_human, last_promise_fulfillment_at, promise_fulfillment_count, promise_fulfillment_window_start, companies!inner(whatsapp_number, boss_phone)")
       .eq("status", "active")
       .or("is_paused_for_human.is.null,is_paused_for_human.eq.false")
       .gte("last_message_at", cutoff)
@@ -72,7 +70,25 @@ serve(async (req) => {
       const company: any = (conv as any).companies;
       if (!company?.whatsapp_number) continue;
 
-      // 2. Get last assistant message and the user message that preceded it.
+      // CONVERSATION-LEVEL COOLDOWN — check first, before reading messages
+      const lastFulfill = (conv as any).last_promise_fulfillment_at;
+      if (lastFulfill) {
+        const sinceSec = (Date.now() - new Date(lastFulfill).getTime()) / 1000;
+        if (sinceSec < COOLDOWN_SECONDS) {
+          console.log(`[PROMISE-WATCHDOG] conv=${conv.id} action=skip (cooldown ${Math.round(sinceSec)}s < ${COOLDOWN_SECONDS}s)`);
+          stats.skipped += 1;
+          continue;
+        }
+      }
+
+      // PER-HOUR HARD CAP — if window expired, reset; if at cap, escalate
+      const windowStart = (conv as any).promise_fulfillment_window_start;
+      const currentCount = (conv as any).promise_fulfillment_count || 0;
+      const windowAgeSec = windowStart ? (Date.now() - new Date(windowStart).getTime()) / 1000 : Infinity;
+      const inWindow = windowAgeSec < 3600;
+      const effectiveCount = inWindow ? currentCount : 0;
+
+      // Get last assistant + preceding user message
       const { data: lastMsgs } = await supabase
         .from("messages")
         .select("id, role, content, created_at, message_metadata")
@@ -88,52 +104,38 @@ serve(async (req) => {
       const ageSec = Math.floor((Date.now() - new Date(last.created_at).getTime()) / 1000);
       if (ageSec < PROMISE_AGE_MIN_SECONDS) continue;
 
-      // Find the most recent user message before the promise.
       const userMsg = lastMsgs.find((m) => m.role === "user" && new Date(m.created_at) < new Date(last.created_at));
       if (!userMsg || !userMsg.content?.trim()) continue;
 
-      const lastMeta = getMeta((last as any).message_metadata);
-      const userMeta = getMeta((userMsg as any).message_metadata);
-
       stats.candidates += 1;
 
-      // 3. Cooldown / loop guard via assistant-message metadata.
-      const lastAttempt = lastMeta.promise_fulfillment_attempted_at as string | undefined;
-      if (lastAttempt) {
-        const sinceAttempt = (Date.now() - new Date(lastAttempt).getTime()) / 1000;
-        if (sinceAttempt < COOLDOWN_SECONDS) {
-          console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (cooldown, attempted_at=${lastAttempt})`);
-          stats.skipped += 1;
-          continue;
-        }
+      // RE-STALL DETECTION — if the last assistant message itself came from a fulfillment attempt
+      // and is still a promise, escalate immediately instead of trying again.
+      const lastMeta = (last.message_metadata && typeof last.message_metadata === "object")
+        ? (last.message_metadata as Record<string, any>) : {};
+      const wasFulfillmentOutput = lastMeta.promise_fulfillment === true;
 
-        console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (already-attempted)`);
-        stats.skipped += 1;
-        continue;
-      }
-
-      if (userMeta.promise_fulfillment === true) {
-        console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (promise-generated-turn-stalled-again)`);
+      if (wasFulfillmentOutput || effectiveCount >= MAX_FULFILLMENTS_PER_HOUR) {
+        console.log(`[PROMISE-WATCHDOG] conv=${conv.id} action=escalate (wasFulfillmentOutput=${wasFulfillmentOutput} count=${effectiveCount}/${MAX_FULFILLMENTS_PER_HOUR})`);
+        await escalateToOwner(supabase, conv, company, userMsg.content);
         stats.escalated += 1;
+        stats.paused += 1;
         continue;
       }
 
-      console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} promise="${(last.content || '').slice(0, 60)}" age=${ageSec}s action=fulfill`);
+      console.log(`[PROMISE-WATCHDOG] conv=${conv.id} promise="${(last.content || '').slice(0, 60)}" age=${ageSec}s action=fulfill (attempt ${effectiveCount + 1}/${MAX_FULFILLMENTS_PER_HOUR})`);
 
-      // 4. Mark the attempt BEFORE invoking, to avoid double-fire on slow runs.
-      const attemptAt = new Date().toISOString();
+      // Reserve the attempt at conversation level BEFORE invoking
+      const nowIso = new Date().toISOString();
       await supabase
-        .from("messages")
+        .from("conversations")
         .update({
-          message_metadata: {
-            ...lastMeta,
-            promise_fulfillment_attempted_at: attemptAt,
-            promise_watchdog: true,
-          },
+          last_promise_fulfillment_at: nowIso,
+          promise_fulfillment_count: effectiveCount + 1,
+          promise_fulfillment_window_start: inWindow ? windowStart : nowIso,
         })
-        .eq("id", last.id);
+        .eq("id", conv.id);
 
-      // 5. Re-invoke whatsapp-messages with the original user question + fulfillment flag.
       try {
         const fromWa = normalizeWhatsApp(conv.phone || "");
         const toWa = normalizeWhatsApp(company.whatsapp_number);
@@ -181,3 +183,62 @@ serve(async (req) => {
     });
   }
 });
+
+async function escalateToOwner(
+  supabase: any,
+  conv: any,
+  company: any,
+  customerQuestion: string,
+) {
+  // 1. Pause the conversation so no further auto-replies fire.
+  await supabase
+    .from("conversations")
+    .update({ is_paused_for_human: true })
+    .eq("id", conv.id);
+
+  // 2. Send the customer ONE clean handoff message (via send-whatsapp-message edge function).
+  try {
+    await fetch(
+      `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-whatsapp-message`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        },
+        body: JSON.stringify({
+          to: conv.phone,
+          message: "I'm having trouble pulling that up right now — the owner has been notified and will reply shortly.",
+          companyId: conv.company_id,
+          conversationId: conv.id,
+        }),
+      },
+    );
+  } catch (e) {
+    console.error(`[PROMISE-WATCHDOG] customer handoff send failed conv=${conv.id}`, e);
+  }
+
+  // 3. Notify the owner.
+  if (company.boss_phone) {
+    try {
+      await fetch(
+        `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-boss-notification`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify({
+            companyId: conv.company_id,
+            type: "customer_issue",
+            message: `Customer ${conv.customer_name || conv.phone} is stuck — AI couldn't fulfill their request after multiple attempts.\n\nCustomer asked: "${customerQuestion.slice(0, 200)}"\n\nConversation paused — please take over.`,
+            conversationId: conv.id,
+          }),
+        },
+      );
+    } catch (e) {
+      console.error(`[PROMISE-WATCHDOG] boss notify failed conv=${conv.id}`, e);
+    }
+  }
+}
