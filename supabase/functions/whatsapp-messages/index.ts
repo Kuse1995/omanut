@@ -1242,7 +1242,8 @@ async function processAIResponse(
   userMessage: string,
   storedMediaUrls: string[],
   storedMediaTypes: string[],
-  customerPhone: string
+  customerPhone: string,
+  isPromiseFulfillment: boolean = false,
 ) {
   const HARD_TIMEOUT_MS = 55000;
   const supabase = createClient(
@@ -1254,7 +1255,7 @@ async function processAIResponse(
   let responseSent = false;
 
   const actualProcessing = async () => {
-    await _processAIResponseInner(conversationId, companyId, userMessage, storedMediaUrls, storedMediaTypes, customerPhone, supabase, () => { responseSent = true; });
+    await _processAIResponseInner(conversationId, companyId, userMessage, storedMediaUrls, storedMediaTypes, customerPhone, isPromiseFulfillment, supabase, () => { responseSent = true; });
   };
 
   const timeoutPromise = new Promise<string>((resolve) =>
@@ -1290,6 +1291,7 @@ async function _processAIResponseInner(
   storedMediaUrls: string[],
   storedMediaTypes: string[],
   customerPhone: string,
+  isPromiseFulfillment: boolean,
   supabase: any,
   markResponseSent: () => void
 ) {
@@ -6790,6 +6792,7 @@ serve(async (req) => {
       media_urls: storedMediaUrls,
       media_types: storedMediaTypes,
       media_count: storedMediaUrls.length,
+      promise_fulfillment: isPromiseFulfillment,
       message_type: storedMediaUrls.length > 0 
         ? (Body ? 'text_with_media' : 'media')
         : 'text'
@@ -6815,7 +6818,8 @@ serve(async (req) => {
         Body,
         storedMediaUrls,
         storedMediaTypes,
-        customerPhone
+        customerPhone,
+        isPromiseFulfillment
       )
     );
 
