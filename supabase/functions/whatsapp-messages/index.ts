@@ -2114,6 +2114,24 @@ This rule overrides every other instruction in this prompt, including any mode/p
 - If you are unsure which product they mean, ASK which product (do NOT mention payment).`;
     }
 
+    // === PROMISE-FULFILLMENT MODE (watchdog re-entry, HIGHEST PRIORITY) ===
+    if (isPromiseFulfillment) {
+      agentPersonality += `
+
+=== URGENT — FULFILL PREVIOUS PROMISE (HIGHEST PRIORITY, OVERRIDES EVERYTHING) ===
+You previously told this customer "one moment, checking on that" or similar — but never delivered.
+The customer is waiting. You MUST answer their question NOW using your tools (check_stock, list_products, search_media, send_media, notify_boss, etc.).
+
+ABSOLUTE RULES:
+- DO NOT say "one moment", "give me a moment", "checking on that", "let me check", "let me verify", "working on it", or any stalling phrase.
+- DO NOT ask clarifying questions if the original question is reasonably clear — make a best-effort answer.
+- DO NOT send a generic "is there anything else I can help you with" message.
+- DO call the appropriate tool (or tools) and DELIVER the actual answer (stock list, prices, photos, status).
+- If after attempting tools you genuinely cannot answer, call notify_boss with notification_type="customer_issue" describing what the customer asked, and tell the customer the owner has been notified and will reply shortly.
+- Be concise but substantive. The customer already waited — get to the point.`;
+    }
+
+
 
     console.log(`[AI-CONFIG] Agent personality loaded for ${selectedAgent}:`, {
       isCustomMode: !!selectedMode,
@@ -5618,13 +5636,38 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Track promise-fulfillment mode for prompt augmentation later in the pipeline.
+  let isPromiseFulfillment = false;
+
   try {
-    // Guard: only accept form-data from Twilio webhooks
     const contentType = req.headers.get('content-type') || '';
-    if (!contentType.includes('form') && req.method === 'POST') {
-      // Non-form requests (JSON status callbacks, etc.) - acknowledge silently
-      console.log('[SKIP] Non-form-data request, content-type:', contentType);
-      return new Response('OK', { status: 200, headers: corsHeaders });
+
+    // === PROMISE-FULFILLMENT JSON BRIDGE ===
+    // The pending-promise-watchdog invokes this function with JSON instead of Twilio form-data.
+    // We synthesize an equivalent FormData payload and fall through to the normal pipeline.
+    let formData: FormData;
+    if (contentType.includes('application/json')) {
+      let jsonBody: any;
+      try { jsonBody = await req.json(); } catch { jsonBody = {}; }
+      if (!jsonBody?.isPromiseFulfillment) {
+        console.log('[SKIP] Non-promise JSON request');
+        return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+      isPromiseFulfillment = true;
+      const origQ = jsonBody.Body || jsonBody.original_question || '';
+      console.log('[PROMISE-FULFILL] Re-entry From=', jsonBody.From, 'To=', jsonBody.To, 'q=', origQ.slice(0, 80));
+      formData = new FormData();
+      formData.append('From', jsonBody.From || '');
+      formData.append('To', jsonBody.To || '');
+      formData.append('Body', origQ);
+      formData.append('ProfileName', jsonBody.ProfileName || '');
+      formData.append('NumMedia', '0');
+    } else {
+      if (!contentType.includes('form') && req.method === 'POST') {
+        console.log('[SKIP] Non-form-data request, content-type:', contentType);
+        return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+      formData = await req.formData();
     }
 
     const supabase = createClient(
@@ -5632,8 +5675,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Parse Twilio WhatsApp webhook payload
-    const formData = await req.formData();
+    // Parse Twilio WhatsApp webhook payload (or synthesized payload from watchdog)
     const From = formData.get('From') as string;
     const To = formData.get('To') as string;
     const Body = formData.get('Body') as string || '';
