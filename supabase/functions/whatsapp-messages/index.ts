@@ -6792,6 +6792,7 @@ serve(async (req) => {
       media_urls: storedMediaUrls,
       media_types: storedMediaTypes,
       media_count: storedMediaUrls.length,
+      promise_fulfillment: isPromiseFulfillment,
       message_type: storedMediaUrls.length > 0 
         ? (Body ? 'text_with_media' : 'media')
         : 'text'
@@ -6817,7 +6818,8 @@ serve(async (req) => {
         Body,
         storedMediaUrls,
         storedMediaTypes,
-        customerPhone
+        customerPhone,
+        isPromiseFulfillment
       )
     );
 
