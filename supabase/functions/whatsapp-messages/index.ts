@@ -4609,7 +4609,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 
                 let textQuery = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
                 const { data: textResults } = await textQuery
@@ -4635,7 +4635,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 console.log(`[SEARCH-MEDIA] No text matches, returning latest ${requestedMediaType || 'any'} media from library`);
                 let lastResort = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, file_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
                 const { data: anyMedia } = await lastResort
@@ -5324,7 +5324,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 const ilikeClauses = searchTerms.map((t: string) => `file_name.ilike.%${t}%,description.ilike.%${t}%`).join(',');
                 let textQuery = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
                 const { data: textResults } = await textQuery
@@ -5341,7 +5341,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               if (results.length === 0) {
                 let lastResort = supabase
                   .from('company_media')
-                  .select('description, category, file_path, media_type, tags, file_name')
+                  .select('id, description, category, file_path, media_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) lastResort = lastResort.eq('media_type', requestedMediaType);
                 const { data: anyMedia } = await lastResort
