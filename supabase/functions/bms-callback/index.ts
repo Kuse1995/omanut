@@ -75,6 +75,21 @@ Deno.serve(async (req) => {
 
     console.log(`[BMS-CALLBACK] Event: ${event}, Company: ${resolvedCompanyId}, Tenant: ${payloadTenantId || "legacy"}`);
 
+    // Stock-changing events → invalidate KB snapshot immediately
+    if (resolvedCompanyId && (event === "sale_recorded" || event === "stock_changed" || event === "new_order" || event === "out_of_stock" || event === "low_stock")) {
+      supabase.functions.invoke("bms-training-sync", {
+        body: { company_id: resolvedCompanyId },
+      }).then(({ error }) => {
+        if (error) console.error(`[BMS-CALLBACK] Auto-sync trigger failed:`, error.message);
+        else console.log(`[BMS-CALLBACK] Auto-sync triggered for ${resolvedCompanyId} after ${event}`);
+      }).catch((e) => console.error(`[BMS-CALLBACK] Auto-sync error:`, e));
+    }
+
+    // For pure invalidation events with no notification payload, exit early
+    if (event === "sale_recorded" || event === "stock_changed") {
+      return respond({ success: true, event, action: "kb_resync_triggered" });
+    }
+
     // Look up boss phone for the company
     let bossPhone: string | null = null;
     let companyName = "Your business";
