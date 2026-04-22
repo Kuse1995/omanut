@@ -1,107 +1,51 @@
 
 
-## Pending-promise watchdog — the AI must keep its word
+## Stop the message flood and fix the root causes
 
-### The actual problem (from ANZ ↔ 0967254226)
+### Immediate bleeding (do first)
 
-```
-07:52:03  customer:  "I'd like to know what you have in stock and see some pictures"
-07:52:14  AI:        "Give me one moment — I'm checking on that for you. 🙏"
-                     ❌ never followed up
-```
+1. **Kill the watchdog cron** temporarily by unscheduling `pending-promise-watchdog` until the underlying loop is fixed. Re-enable in step 4.
+2. **Pause ANZ conversation 67b90349-55e9-42c6-9f41-00d8fa601afa** (`is_paused_for_human = true`) so no further auto-replies fire while we fix things.
 
-Same exact pattern the day before:
+### Root-cause fixes
 
-```
-17:29:15  customer:  "I'd like to know what you have in stock and see some pictures"
-17:29:24  AI:        "Give me one moment — I'm checking on that for you. 🙏"
-17:34:06  customer:  "??"   ← customer had to nudge
-17:34:29  AI:        "I've processed your request. Is there anything else I can help you with?"
-                     ❌ meaningless — never actually delivered the catalog/pics
-```
+#### 3. Fix `routeToAgent` crash (`whatsapp-messages/index.ts` line 719)
+Replace unsafe `data.choices[0]` with `data?.choices?.[0]`. If missing, log the payload and fall back to keyword routing. This stops the per-turn `TypeError`.
 
-The AI is making a verbal promise ("one moment", "checking on that", "let me confirm") and then **abandoning the customer**. Existing systems don't catch it:
+#### 4. Fix the watchdog infinite loop (`pending-promise-watchdog/index.ts`)
+Three guards, all required:
+- **Conversation-level cooldown**: track `last_promise_fulfillment_at` on the conversation row (or in a dedicated table). Skip any conversation fulfilled in the last 10 minutes, regardless of which message is now "newest".
+- **Per-conversation hard cap**: max 2 fulfillment attempts per rolling hour. Third stall → `notify_boss` + send the customer "owner has been notified" + mark conversation `is_paused_for_human = true` to fully stop the loop.
+- **Detect re-stall**: if the message produced by the previous fulfillment is itself a promise pattern, do NOT fulfill it again — escalate immediately.
 
-- `analyze-and-followup` runs only at 09:00, 14:00, 18:00 — too slow, and it's a *strategic re-engagement* job, not a promise-keeper.
-- `sla-escalation` runs every 2 min but escalates to the boss — it does not make the AI itself fulfill the promise.
-- The synthesis fallback in `whatsapp-messages` produces these "one moment" replies when the tool loop runs out of rounds with no usable result — the AI literally promises a follow-up it has no mechanism to deliver.
+#### 5. Fix the model config so the AI actually answers
+`zai/glm-4.7` does not exist on Google's API. Two options, pick one in the fix:
+- **A (recommended)**: normalize `zai/*` → route to Zhipu provider in `_shared/gemini-client.ts`. Add a `ZHIPU_API_KEY` env check; if missing, transparently fall back to `google/gemini-2.5-flash` instead of trying `glm-4.7` against Google.
+- **B (fast)**: hard-update ANZ's `company_ai_overrides.primary_model` to `google/gemini-2.5-flash` and remove the broken model entirely.
 
-### The fix — a `pending-promise-watchdog` agent
+I recommend **B for the immediate fix** + **A as the durable fix** so future companies can't reintroduce this.
 
-A new edge function + every-minute cron that detects abandoned promises and makes the AI actually fulfill them within ~2 minutes, before the customer has to nudge.
+#### 6. Stop supervisor from blocking every turn
+DeepSeek is returning "Insufficient Balance". `supervisor-agent` should treat this as a soft failure (already does — "proceeding without guidance") but log a single warning per hour, not per turn. Also: route supervisor to a working model (Lovable AI Gateway / Gemini) instead of DeepSeek so it actually contributes again.
 
-#### 1. Detect a pending promise
+#### 7. Fix attempt tracking so the cooldown works
+Current code writes the marker onto the **stalled** message. But the watchdog reads the **newest** assistant message, which is the new stall — so the marker is invisible. Move the marker to **conversation-level metadata** (new column or `metadata` jsonb on `conversations`) keyed by timestamp, not by message id.
 
-A conversation has a pending promise when ALL of these are true:
+### Validation
 
-- Last message is from `assistant`.
-- That message matches a "promise pattern":
-  - `/give me (one |a )?moment/i`
-  - `/checking on (that|it|this)/i`
-  - `/let me (check|confirm|verify|look)/i`
-  - `/one moment\b/i`
-  - `/i'?ll (get back|come back|check|confirm)/i`
-  - `/working on (that|it)/i`
-  - Any message ending with `… 🙏` or `… 🔍` or `… ⏳` and shorter than 80 chars (the synthesis fallback signature).
-- At least **90 seconds** have passed since that assistant message (gives genuine tool loops time to finish naturally).
-- No newer assistant message has been sent.
-- Conversation `status = 'active'`.
-- Company has `whatsapp_number` configured.
-
-#### 2. Fulfill the promise (not re-engage)
-
-For each detected pending promise:
-
-1. Find the **last user message before** the promise — that's the actual question the AI failed to answer.
-2. Re-run the WhatsApp pipeline by invoking `whatsapp-messages` programmatically with:
-   - the original user question
-   - the full conversation history
-   - a system flag `isPromiseFulfillment: true` that prepends to the system prompt:
-     > "You previously told the customer 'one moment, checking on that' but never delivered. Answer their question NOW using your tools (check_stock, list_products, search_media, etc.). Do NOT say 'one moment' again. Do NOT ask clarifying questions. Deliver the actual answer."
-3. The new reply replaces the dead-end ack in the customer's experience.
-
-If the second attempt also produces a "one moment" pattern (rare — model fully stuck), fall back to:
-- Send `notify_boss(customer_issue)` with summary "AI failed to answer twice — please respond to {phone}".
-- Send the customer: *"I'm having trouble pulling that up — the owner has been notified and will reply shortly."*
-
-#### 3. Prevent loops
-
-Add a `metadata.promise_fulfillment_attempts` counter on the conversation row. Skip if already attempted in the last 10 minutes for the same promise message. Hard cap: 1 fulfillment attempt per promise.
-
-#### 4. Run frequency
-
-Cron schedule: `*/1 * * * *` (every minute). Each run:
-- Scans `conversations` where `status='active'` AND `last_message_at > now() - interval '15 minutes'`.
-- Per company budget: max 5 fulfillments per run to avoid runaway cost.
-
-#### 5. Observability
-
-Log per detection:
-```
-[PROMISE-WATCHDOG] conv=<id> phone=<phone> promise="<text>" age=<sec> action=fulfill|skip|escalate
-```
-
-Add a memory note in `mem://features/pending-promise-watchdog.md` so future drift doesn't reintroduce dead-end "one moment" replies.
-
----
+After deploy:
+1. Send "what's in stock" to ANZ → expect a real answer using `list_products` + `search_media`, no "one moment".
+2. Force a stall (rare) → watchdog fulfills once within ~2 min.
+3. Force a second stall → watchdog escalates to owner, pauses conversation, sends ONE customer message, stops.
+4. Confirm logs show no `TypeError` in `routeToAgent` and no per-turn 404 on the model.
 
 ### Files
 
-**New:**
-- `supabase/functions/pending-promise-watchdog/index.ts` — the agent.
-- DB migration: cron job `pending-promise-watchdog` on `*/1 * * * *`.
-- `mem://features/pending-promise-watchdog.md`.
+- `supabase/functions/whatsapp-messages/index.ts` — safe router parsing.
+- `supabase/functions/pending-promise-watchdog/index.ts` — cooldown, hard cap, re-stall detection, conversation-level attempt tracking.
+- `supabase/functions/_shared/gemini-client.ts` — `zai/*` normalization with safe fallback.
+- `supabase/functions/supervisor-agent/index.ts` — switch off DeepSeek, throttle error logs.
+- DB migration — add `conversations.last_promise_fulfillment_at timestamptz`; update ANZ `company_ai_overrides.primary_model` to `google/gemini-2.5-flash`; pause runaway conversation.
 
-**Edited:**
-- `supabase/functions/whatsapp-messages/index.ts` — accept `isPromiseFulfillment` flag in body and inject the "answer now, don't stall" prompt prefix.
-
-**No changes:** schema, tools, UI, prompts for normal flows, `analyze-and-followup` (keeps its strategic re-engagement role).
-
-### Acceptance test
-
-Manually replay the failing turn for ANZ ↔ 0967254226:
-1. Send "I'd like to know what you have in stock and see some pictures" again.
-2. If the AI replies "one moment", wait 90 seconds.
-3. Within ~120 seconds total, the watchdog must send the actual catalog + media.
-4. No "??" nudge required from the customer.
+No schema-breaking changes, no new tools.
 
