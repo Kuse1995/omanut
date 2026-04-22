@@ -2252,6 +2252,30 @@ ABSOLUTE RULES:
     const isDigitalProducts = businessType.includes('digital') || businessType.includes('ebook') || 
                               businessType.includes('product') || businessType.includes('store');
     
+    // ========== EARLY TOOL RESOLUTION (mirrors final filtering further below) ==========
+    // We need to know which tools the model will actually have BEFORE assembling the prompt,
+    // so prompt blocks that reference specific tools can be gated. The final tool-filtering
+    // block (~line 3178+) re-derives this list and is idempotent.
+    const _rawEnabledToolsEarly: string[] = aiOverrides?.enabled_tools || [];
+    const _enabledToolNamesEarly: string[] = Array.from(new Set(
+      _rawEnabledToolsEarly.map((n: string) => (typeof n === 'string' && n.startsWith('bms_')) ? n.slice(4) : n)
+    ));
+    const _salesModeEarly: 'autonomous' | 'human_in_loop' =
+      (company.metadata as any)?.sales_mode === 'human_in_loop' ? 'human_in_loop' : 'autonomous';
+    if (!isSchool && !company.payments_disabled && _salesModeEarly === 'autonomous') {
+      for (const t of ['check_stock','record_sale','generate_payment_link']) {
+        if (!_enabledToolNamesEarly.includes(t) && (aiOverrides?.enabled_tools || []).includes(t)) {
+          _enabledToolNamesEarly.push(t);
+        }
+      }
+    }
+    for (const t of ['search_media','search_knowledge','search_past_conversations','notify_boss']) {
+      if (!_enabledToolNamesEarly.includes(t)) _enabledToolNamesEarly.push(t);
+    }
+    const hasTool = (name: string): boolean => _enabledToolNamesEarly.includes(name);
+    const _promptToolMentions = new Set<string>();
+    const mentionTool = (name: string): string => { _promptToolMentions.add(name); return name; };
+
     let instructions = `You are a friendly AI assistant for ${company.name}`;
     
     if (company.business_type) {
@@ -2270,7 +2294,15 @@ Business Type: ${company.business_type || 'General Business'}
 ${company.industry ? `Industry: ${company.industry}` : ''}
 
 CRITICAL: Your responses, tone, and behavior MUST align with this business type.
-You are NOT a generic chatbot - you are the voice of ${company.name}.`;
+You are NOT a generic chatbot - you are the voice of ${company.name}.
+
+=== CAPABILITY DISCIPLINE (HIGHEST PRIORITY) ===
+You may ONLY promise actions you can perform with the tools listed in "YOUR AVAILABLE TOOLS" below.
+NEVER say "let me check…", "give me a moment…", "I'll find out…", "I'll get back to you…", "checking now…", "hold on…", or any variant — UNLESS you are calling a tool in the SAME response.
+If you don't have a tool for what the customer asked:
+  • Give a direct answer from the knowledge base / business info above, OR
+  • Call ${mentionTool('notify_boss')} to escalate.
+DO NOT stall. DO NOT promise follow-ups you cannot deliver. Every reply must either answer, act (tool call), or escalate.`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
