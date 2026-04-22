@@ -37,6 +37,10 @@ const PROMISE_AGE_MAX_SECONDS = 15 * 60;     // ignore anything older than 15 mi
 const COOLDOWN_SECONDS = 10 * 60;            // don't retry the same promise more than once per 10 min
 const MAX_FULFILLMENTS_PER_RUN = 5;          // global cap per cron tick
 
+function getMeta(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -53,9 +57,9 @@ serve(async (req) => {
     const cutoff = new Date(Date.now() - PROMISE_AGE_MAX_SECONDS * 1000).toISOString();
     const { data: convs, error: convErr } = await supabase
       .from("conversations")
-      .select("id, company_id, phone, customer_name, last_message_at, status, human_takeover, metadata, companies!inner(whatsapp_number)")
+      .select("id, company_id, phone, customer_name, last_message_at, status, human_takeover, is_paused_for_human, companies!inner(whatsapp_number)")
       .eq("status", "active")
-      .or("human_takeover.is.null,human_takeover.eq.false")
+      .or("is_paused_for_human.is.null,is_paused_for_human.eq.false")
       .gte("last_message_at", cutoff)
       .order("last_message_at", { ascending: false })
       .limit(80);
@@ -71,10 +75,10 @@ serve(async (req) => {
       // 2. Get last assistant message and the user message that preceded it.
       const { data: lastMsgs } = await supabase
         .from("messages")
-        .select("id, role, content, created_at")
+        .select("id, role, content, created_at, message_metadata")
         .eq("conversation_id", conv.id)
         .order("created_at", { ascending: false })
-        .limit(6);
+        .limit(8);
 
       if (!lastMsgs || lastMsgs.length === 0) continue;
       const last = lastMsgs[0];
@@ -88,31 +92,46 @@ serve(async (req) => {
       const userMsg = lastMsgs.find((m) => m.role === "user" && new Date(m.created_at) < new Date(last.created_at));
       if (!userMsg || !userMsg.content?.trim()) continue;
 
+      const lastMeta = getMeta((last as any).message_metadata);
+      const userMeta = getMeta((userMsg as any).message_metadata);
+
       stats.candidates += 1;
 
-      // 3. Cooldown / loop guard via metadata.
-      const meta: any = conv.metadata || {};
-      const fulfillments: Record<string, string> = meta.promise_fulfillment_attempts || {};
-      const lastAttempt = fulfillments[last.id];
+      // 3. Cooldown / loop guard via assistant-message metadata.
+      const lastAttempt = lastMeta.promise_fulfillment_attempted_at as string | undefined;
       if (lastAttempt) {
         const sinceAttempt = (Date.now() - new Date(lastAttempt).getTime()) / 1000;
         if (sinceAttempt < COOLDOWN_SECONDS) {
-          // Already attempted once recently. If 2+ attempts → escalate to boss and stop.
-          const attemptCount = Object.keys(fulfillments).filter((k) => k === last.id).length;
-          console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (cooldown, attempts=${attemptCount})`);
+          console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (cooldown, attempted_at=${lastAttempt})`);
           stats.skipped += 1;
           continue;
         }
+
+        console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (already-attempted)`);
+        stats.skipped += 1;
+        continue;
+      }
+
+      if (userMeta.promise_fulfillment === true) {
+        console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} age=${ageSec}s action=skip (promise-generated-turn-stalled-again)`);
+        stats.escalated += 1;
+        continue;
       }
 
       console.log(`[PROMISE-WATCHDOG] conv=${conv.id} phone=${conv.phone} promise="${(last.content || '').slice(0, 60)}" age=${ageSec}s action=fulfill`);
 
       // 4. Mark the attempt BEFORE invoking, to avoid double-fire on slow runs.
-      fulfillments[last.id] = new Date().toISOString();
+      const attemptAt = new Date().toISOString();
       await supabase
-        .from("conversations")
-        .update({ metadata: { ...meta, promise_fulfillment_attempts: fulfillments } })
-        .eq("id", conv.id);
+        .from("messages")
+        .update({
+          message_metadata: {
+            ...lastMeta,
+            promise_fulfillment_attempted_at: attemptAt,
+            promise_watchdog: true,
+          },
+        })
+        .eq("id", last.id);
 
       // 5. Re-invoke whatsapp-messages with the original user question + fulfillment flag.
       try {
