@@ -4995,7 +4995,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
 
         // Notify boss about complete AI failure
         try {
-          const bossPhones = await getBossPhones(supabase, company.id, company.boss_phone);
+          const bossPhones = await getBossPhones(supabase, company.id);
           for (const bp of bossPhones) {
             await sendTwilioMessage(
               bp,
