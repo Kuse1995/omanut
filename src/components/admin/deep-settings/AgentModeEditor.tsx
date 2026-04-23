@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   HeadphonesIcon, TrendingUp, Crown, Briefcase, CalendarDays, Moon,
   Wrench, Receipt, MessageSquare, X, Plus, Trash2, ChevronDown, ChevronUp,
@@ -15,6 +16,20 @@ const ICONS: Record<string, any> = {
   HeadphonesIcon, TrendingUp, Crown, Briefcase, CalendarDays, Moon,
   Wrench, Receipt, MessageSquare,
 };
+
+// Direct providers only — no Lovable AI Gateway.
+// Value `__default__` is mapped to NULL in the DB → inherit company primary_model.
+const MODEL_OPTIONS: Array<{ value: string; label: string; hint: string }> = [
+  { value: "__default__", label: "Use company default", hint: "Inherits the company's primary model" },
+  { value: "glm-4.7", label: "GLM-4.7 (Zhipu)", hint: "Fast & cheap workhorse — strong tool calls" },
+  { value: "glm-4.6", label: "GLM-4.6 (Zhipu)", hint: "Slightly cheaper fallback" },
+  { value: "glm-4.5-air", label: "GLM-4.5 Air (Zhipu)", hint: "Fastest classification / routing" },
+  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Google)", hint: "Best reasoning, long context, escalation summaries" },
+  { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (Google)", hint: "Fast multimodal fallback" },
+  { value: "deepseek-chat", label: "DeepSeek Chat", hint: "Cheap general-purpose fallback" },
+  { value: "deepseek-reasoner", label: "DeepSeek Reasoner", hint: "Heavy reasoning when GLM unavailable" },
+  { value: "kimi-k2-0711-preview", label: "Kimi K2 (Moonshot)", hint: "Long-context, very cheap" },
+];
 
 export interface AgentMode {
   id: string;
@@ -31,6 +46,7 @@ export interface AgentMode {
   is_default: boolean;
   pauses_for_human: boolean;
   description: string | null;
+  model: string | null;
 }
 
 interface Props {
