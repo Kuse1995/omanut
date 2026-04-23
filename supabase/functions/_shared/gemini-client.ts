@@ -121,7 +121,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
   if (options.tools) body.tools = options.tools;
   if (options.tool_choice) body.tool_choice = options.tool_choice;
-  if (provider !== 'zhipu' && provider !== 'deepseek' && options.modalities) body.modalities = options.modalities;
+  if (provider === 'gemini' && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
 
   const fetchOptions: RequestInit = {
