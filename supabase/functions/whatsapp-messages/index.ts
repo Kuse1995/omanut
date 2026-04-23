@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat, geminiChatWithFallback } from "../_shared/gemini-client.ts";
+import { classifyAiError } from "../_shared/safe-error.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import {
   detectPendingAction,
@@ -704,6 +705,7 @@ interface AgentMode {
   is_default: boolean;
   pauses_for_human: boolean;
   description?: string | null;
+  model?: string | null;
 }
 
 async function routeToAgent(
@@ -1883,7 +1885,7 @@ async function _processAIResponseInner(
     // Load custom agent modes for this company (if any)
     const { data: agentModesRaw } = await supabase
       .from('company_agent_modes')
-      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description')
+      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description, model')
       .eq('company_id', companyId)
       .eq('enabled', true)
       .order('priority', { ascending: true });
@@ -2726,17 +2728,21 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    // Per-agent model override beats company-default. NULL → fall back to company primary_model, then hard default.
+    const primaryModel = (selectedMode?.model && selectedMode.model.trim().length > 0)
+      ? selectedMode.model
+      : (aiOverrides?.primary_model || 'glm-4.7');
 
-    // Always respect the company's configured primary model. Speed/complexity tradeoffs
-    // belong in the per-company model config, NOT a runtime hard-code.
+    // Always respect the resolved primary model. Speed/complexity tradeoffs
+    // belong in the per-company / per-agent model config, NOT a runtime hard-code.
     const selectedModel = primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
-    const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
-    
+    const fallbackMessage = aiOverrides?.fallback_message || "Let me get our owner involved — they'll respond shortly.";
+
+    console.log(`[AI] Using model=${selectedModel} agent=${selectedMode?.slug || selectedAgent || 'default'} (source=${selectedMode?.model ? 'agent_override' : 'company_default'})`);
     console.log(`[AI-CONFIG] Using database configuration:`, {
       primaryModel,
       selectedModel,
@@ -6814,16 +6820,38 @@ serve(async (req) => {
               }
             }
           } catch (error) {
-            console.error('[BOSS] Error in background processing:', error);
-            // Send error recovery message instead of silence
+            const kind = classifyAiError(error);
+            console.error(`[BOSS] Error in background processing (kind=${kind}):`, error);
+            // Log to ai_error_logs for visibility in AI Error Tracker (best-effort, never throws)
+            try {
+              await supabase.from('ai_error_logs').insert({
+                company_id: company.id,
+                error_type: kind === 'unknown' ? 'background_failure' : kind,
+                severity: kind === 'no_credits' ? 'warning' : 'high',
+                original_message: String(Body || '').slice(0, 2000),
+                ai_response: '',
+                fix_applied: null,
+                status: 'open',
+                analysis_details: {
+                  reasoning: error instanceof Error ? error.message : String(error),
+                  branch: 'boss',
+                },
+              });
+            } catch (_logErr) { /* non-fatal */ }
+            // Send a graceful recovery message — never the word "snag"
             try {
               const TWILIO_SID_ERR = Deno.env.get('TWILIO_ACCOUNT_SID');
               const TWILIO_TOKEN_ERR = Deno.env.get('TWILIO_AUTH_TOKEN');
               if (TWILIO_SID_ERR && TWILIO_TOKEN_ERR) {
+                const recoveryBody = kind === 'rate_limit'
+                  ? 'One sec — busy with another task, try that again in a moment.'
+                  : kind === 'timeout'
+                  ? 'That one took too long on my side. Mind sending it again?'
+                  : 'I couldn\'t complete that just now. Please try again.';
                 const errForm = new URLSearchParams();
                 errForm.append('From', To);
                 errForm.append('To', From);
-                errForm.append('Body', '⚠️ Sorry, I hit a snag processing that. Could you try again?');
+                errForm.append('Body', recoveryBody);
                 await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_ERR}/Messages.json`, {
                   method: 'POST',
                   headers: {

@@ -1016,6 +1016,7 @@ export type Database = {
           icon: string
           id: string
           is_default: boolean
+          model: string | null
           name: string
           pauses_for_human: boolean
           priority: number
@@ -1034,6 +1035,7 @@ export type Database = {
           icon?: string
           id?: string
           is_default?: boolean
+          model?: string | null
           name: string
           pauses_for_human?: boolean
           priority?: number
@@ -1052,6 +1054,7 @@ export type Database = {
           icon?: string
           id?: string
           is_default?: boolean
+          model?: string | null
           name?: string
           pauses_for_human?: boolean
           priority?: number

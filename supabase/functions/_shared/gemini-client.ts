@@ -1,30 +1,34 @@
 /**
  * Shared AI client for all edge functions.
  * ALL text/tool-calling models route through DIRECT provider APIs only:
- *   - glm-* / zai/* / zhipu/*  → Zhipu (open.bigmodel.cn)
- *   - deepseek*                → DeepSeek API
- *   - google/gemini-* / gpt-*  → Google Generative Language API (direct)
+ *   - glm-* / zai/* / zhipu/*       → Zhipu (open.bigmodel.cn)
+ *   - deepseek*                     → DeepSeek API
+ *   - kimi-* / moonshot-*           → Moonshot (api.moonshot.cn)
+ *   - google/gemini-* / gpt-*       → Google Generative Language API (direct)
  * The Lovable AI Gateway is NEVER called from this client.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
+const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
-  return model.replace(/^(google|openai|zai|zhipu|deepseek)\//, '');
+  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi)\//, '');
 }
 
 /** Determine provider from model name. No 'lovable' option — gateway is removed. */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' {
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
   if (lowered.startsWith('deepseek/')) return 'deepseek';
+  if (lowered.startsWith('kimi/') || lowered.startsWith('moonshot/')) return 'kimi';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
+  if (normalized.startsWith('kimi-') || normalized.startsWith('moonshot-')) return 'kimi';
   // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
@@ -83,6 +87,17 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
         if (!apiKey) throw new Error('No direct provider API keys configured (DEEPSEEK/GEMINI both missing)');
       }
       break;
+    case 'kimi':
+      apiUrl = KIMI_OPENAI_URL;
+      apiKey = Deno.env.get('KIMI_API_KEY');
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing KIMI_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/GEMINI both missing)');
+      }
+      break;
     case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
@@ -106,7 +121,7 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
   if (options.tools) body.tools = options.tools;
   if (options.tool_choice) body.tool_choice = options.tool_choice;
-  if (provider !== 'zhipu' && provider !== 'deepseek' && options.modalities) body.modalities = options.modalities;
+  if (provider === 'gemini' && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
 
   const fetchOptions: RequestInit = {
@@ -126,14 +141,19 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 }
 
 /**
- * Call AI with automatic fallback chain: primary model → GLM → DeepSeek.
+ * Call AI with automatic fallback chain: primary model → GLM → Gemini Flash → DeepSeek → Kimi.
  * Only for text/chat completions (not image gen). Returns the first successful response.
+ * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
+  const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
   const fallbackChain = [
     options.model,
+    ...(glm5Enabled ? ['glm-5'] : []),
     'glm-4.7',
+    'gemini-2.5-flash',
     'deepseek-chat',
+    'kimi-k2-0711-preview',
   ];
 
   // Deduplicate
