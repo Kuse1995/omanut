@@ -87,6 +87,17 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
         if (!apiKey) throw new Error('No direct provider API keys configured (DEEPSEEK/GEMINI both missing)');
       }
       break;
+    case 'kimi':
+      apiUrl = KIMI_OPENAI_URL;
+      apiKey = Deno.env.get('KIMI_API_KEY');
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing KIMI_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/GEMINI both missing)');
+      }
+      break;
     case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
