@@ -704,6 +704,7 @@ interface AgentMode {
   is_default: boolean;
   pauses_for_human: boolean;
   description?: string | null;
+  model?: string | null;
 }
 
 async function routeToAgent(
