@@ -6819,16 +6819,38 @@ serve(async (req) => {
               }
             }
           } catch (error) {
-            console.error('[BOSS] Error in background processing:', error);
-            // Send error recovery message instead of silence
+            const kind = classifyAiError(error);
+            console.error(`[BOSS] Error in background processing (kind=${kind}):`, error);
+            // Log to ai_error_logs for visibility in AI Error Tracker (best-effort, never throws)
+            try {
+              await supabase.from('ai_error_logs').insert({
+                company_id: company.id,
+                error_type: kind === 'unknown' ? 'background_failure' : kind,
+                severity: kind === 'no_credits' ? 'warning' : 'high',
+                original_message: String(Body || '').slice(0, 2000),
+                ai_response: '',
+                fix_applied: null,
+                status: 'open',
+                analysis_details: {
+                  reasoning: error instanceof Error ? error.message : String(error),
+                  branch: 'boss',
+                },
+              });
+            } catch (_logErr) { /* non-fatal */ }
+            // Send a graceful recovery message — never the word "snag"
             try {
               const TWILIO_SID_ERR = Deno.env.get('TWILIO_ACCOUNT_SID');
               const TWILIO_TOKEN_ERR = Deno.env.get('TWILIO_AUTH_TOKEN');
               if (TWILIO_SID_ERR && TWILIO_TOKEN_ERR) {
+                const recoveryBody = kind === 'rate_limit'
+                  ? 'One sec — busy with another task, try that again in a moment.'
+                  : kind === 'timeout'
+                  ? 'That one took too long on my side. Mind sending it again?'
+                  : 'I couldn\'t complete that just now. Please try again.';
                 const errForm = new URLSearchParams();
                 errForm.append('From', To);
                 errForm.append('To', From);
-                errForm.append('Body', '⚠️ Sorry, I hit a snag processing that. Could you try again?');
+                errForm.append('Body', recoveryBody);
                 await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_ERR}/Messages.json`, {
                   method: 'POST',
                   headers: {
