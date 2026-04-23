@@ -1,30 +1,34 @@
 /**
  * Shared AI client for all edge functions.
  * ALL text/tool-calling models route through DIRECT provider APIs only:
- *   - glm-* / zai/* / zhipu/*  → Zhipu (open.bigmodel.cn)
- *   - deepseek*                → DeepSeek API
- *   - google/gemini-* / gpt-*  → Google Generative Language API (direct)
+ *   - glm-* / zai/* / zhipu/*       → Zhipu (open.bigmodel.cn)
+ *   - deepseek*                     → DeepSeek API
+ *   - kimi-* / moonshot-*           → Moonshot (api.moonshot.cn)
+ *   - google/gemini-* / gpt-*       → Google Generative Language API (direct)
  * The Lovable AI Gateway is NEVER called from this client.
  */
 
 const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
+const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
-  return model.replace(/^(google|openai|zai|zhipu|deepseek)\//, '');
+  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi)\//, '');
 }
 
 /** Determine provider from model name. No 'lovable' option — gateway is removed. */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' {
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
   if (lowered.startsWith('deepseek/')) return 'deepseek';
+  if (lowered.startsWith('kimi/') || lowered.startsWith('moonshot/')) return 'kimi';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
+  if (normalized.startsWith('kimi-') || normalized.startsWith('moonshot-')) return 'kimi';
   // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
