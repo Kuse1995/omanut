@@ -125,6 +125,31 @@ export const AgentModeEditor = ({ mode, onChange, onDelete, defaultOpen }: Props
             </div>
 
             <div className="space-y-1">
+              <Label className="text-xs">AI Model</Label>
+              <Select
+                value={mode.model ?? "__default__"}
+                onValueChange={(v) => onChange({ model: v === "__default__" ? null : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      <div className="flex flex-col">
+                        <span>{opt.label}</span>
+                        <span className="text-xs text-muted-foreground">{opt.hint}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Pick the AI model that powers this agent. Leave on "Use company default" to inherit.
+              </p>
+            </div>
+
+            <div className="space-y-1">
               <Label className="text-xs">System Prompt</Label>
               <Textarea
                 rows={6}
