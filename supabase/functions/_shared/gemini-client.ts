@@ -141,14 +141,19 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 }
 
 /**
- * Call AI with automatic fallback chain: primary model → GLM → DeepSeek.
+ * Call AI with automatic fallback chain: primary model → GLM → Gemini Flash → DeepSeek → Kimi.
  * Only for text/chat completions (not image gen). Returns the first successful response.
+ * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
+  const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
   const fallbackChain = [
     options.model,
+    ...(glm5Enabled ? ['glm-5'] : []),
     'glm-4.7',
+    'gemini-2.5-flash',
     'deepseek-chat',
+    'kimi-k2-0711-preview',
   ];
 
   // Deduplicate
