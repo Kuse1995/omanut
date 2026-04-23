@@ -1884,7 +1884,7 @@ async function _processAIResponseInner(
     // Load custom agent modes for this company (if any)
     const { data: agentModesRaw } = await supabase
       .from('company_agent_modes')
-      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description')
+      .select('id, slug, name, system_prompt, trigger_keywords, trigger_examples, enabled_tools, enabled, priority, is_default, pauses_for_human, description, model')
       .eq('company_id', companyId)
       .eq('enabled', true)
       .order('priority', { ascending: true });
@@ -2727,17 +2727,21 @@ ${supervisorRecommendation.recommendedResponse}
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'google/gemini-2.5-flash';
+    // Per-agent model override beats company-default. NULL → fall back to company primary_model, then hard default.
+    const primaryModel = (selectedMode?.model && selectedMode.model.trim().length > 0)
+      ? selectedMode.model
+      : (aiOverrides?.primary_model || 'glm-4.7');
 
-    // Always respect the company's configured primary model. Speed/complexity tradeoffs
-    // belong in the per-company model config, NOT a runtime hard-code.
+    // Always respect the resolved primary model. Speed/complexity tradeoffs
+    // belong in the per-company / per-agent model config, NOT a runtime hard-code.
     const selectedModel = primaryModel;
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
-    const fallbackMessage = aiOverrides?.fallback_message || "Thank you for your message. I'm looking into that for you - someone will respond shortly. 🙏";
-    
+    const fallbackMessage = aiOverrides?.fallback_message || "Let me get our owner involved — they'll respond shortly.";
+
+    console.log(`[AI] Using model=${selectedModel} agent=${selectedMode?.slug || selectedAgent || 'default'} (source=${selectedMode?.model ? 'agent_override' : 'company_default'})`);
     console.log(`[AI-CONFIG] Using database configuration:`, {
       primaryModel,
       selectedModel,
