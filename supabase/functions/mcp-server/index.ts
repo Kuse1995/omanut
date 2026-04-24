@@ -773,7 +773,50 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "created", post: data }, null, 2) }] };
+
+      // Fire boss notification so the owner can approve. Non-fatal on failure.
+      let bossNotified = false;
+      try {
+        const notifyRes = await supabase.functions.invoke("send-boss-notification", {
+          body: {
+            companyId,
+            notificationType: "content_approval_request",
+            data: {
+              platform: params.platform,
+              scheduled_for: params.scheduled_time,
+              caption: params.caption,
+              pendingPostId: data?.id,
+            },
+            mediaUrl: params.image_url || undefined,
+          },
+        });
+        bossNotified = !notifyRes?.error;
+      } catch (notifyErr) {
+        console.error("[create_scheduled_post] boss notify failed:", notifyErr);
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                action: "draft_saved",
+                status: "pending_approval",
+                boss_will_be_notified: true,
+                boss_notification_sent: bossNotified,
+                post: data,
+                message:
+                  "Saved as a DRAFT awaiting boss approval. NOT yet published. The owner has been pinged on WhatsApp to review and approve.",
+                customer_facing_instruction:
+                  "Tell the customer the post has been queued for owner review and will go live once the owner approves it. Do NOT say it has been posted/published.",
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
     },
   });
 
