@@ -5419,16 +5419,114 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Knowledge search failed' }) });
             }
           } else if (fnName === 'notify_boss') {
-            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`);
+            console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`, JSON.stringify(args));
             try {
-              await supabase.from('boss_conversations').insert({
-                company_id: company.id, message_from: 'ai_agent',
-                message_content: `[${args.notification_type}] ${args.summary}\n${args.details || ''}`,
-              });
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: true, message: 'Boss notified successfully' }) });
-              toolExecutionContext.push(`[R${currentRound}] notify_boss: ${args.notification_type}`);
+              const explicitHumanReq = /\b(human|agent|person|manager|owner|representative|speak\s+to\s+(?:a\s+)?(?:real\s+)?(?:person|human))\b/i.test(userMessage || '');
+              const { data: recentNotif } = await supabase
+                .from('boss_conversations')
+                .select('id, created_at')
+                .eq('company_id', company.id)
+                .eq('message_from', 'ai_agent_handoff')
+                .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+                .ilike('message_content', `%${customerPhone}%`)
+                .limit(1)
+                .maybeSingle();
+
+              if (recentNotif && !explicitHumanReq) {
+                console.log('[TOOL-LOOP] notify_boss skipped — duplicate within 30min for', customerPhone);
+                toolResults.push({
+                  tool_call_id: toolCall.id, role: "tool",
+                  content: JSON.stringify({
+                    success: true,
+                    deduped: true,
+                    message: 'Owner already notified about this conversation within the last 30 minutes. Tell the customer the team will follow up shortly — do NOT claim a fresh escalation.',
+                  })
+                });
+                toolExecutionContext.push(`[R${currentRound}] notify_boss deduped`);
+              } else {
+                let sendErr: any = null;
+                try {
+                  await sendBossHandoffNotification(
+                    company,
+                    customerPhone,
+                    conversation.customer_name || 'Customer',
+                    `[${args.notification_type}] ${args.summary}${args.details ? `\n${args.details}` : ''}`,
+                    supabase,
+                    'ai_tool',
+                    {
+                      askingAbout: userMessage,
+                      stage: args.notification_type,
+                      triggerReason: args.summary,
+                      collectedInfo: args.collected_info || {},
+                    }
+                  );
+                } catch (e) {
+                  sendErr = e;
+                }
+
+                try {
+                  await supabase.from('boss_conversations').insert({
+                    company_id: company.id,
+                    message_from: 'ai_agent_handoff',
+                    message_content: `[${args.notification_type}] customer:${customerPhone} ${args.summary || ''}\n${args.details || ''}`,
+                  });
+                } catch (_) { /* non-fatal */ }
+
+                if (sendErr || !company.boss_phone) {
+                  console.error('[TOOL-LOOP] notify_boss WhatsApp send failed:', sendErr);
+                  try {
+                    await supabase.from('ai_error_logs').insert({
+                      company_id: company.id,
+                      conversation_id: conversationId,
+                      severity: 'critical',
+                      error_type: 'handoff_failed',
+                      original_message: (userMessage || '').substring(0, 500),
+                      ai_response: (args.summary || '').substring(0, 500),
+                      detected_flags: ['handoff_failed', 'boss_unreachable'],
+                      analysis_details: { reason: sendErr?.message || 'no_boss_phone', notification_type: args.notification_type },
+                    });
+                  } catch (_) {}
+
+                  toolResults.push({
+                    tool_call_id: toolCall.id, role: "tool",
+                    content: JSON.stringify({
+                      success: false,
+                      error: 'boss_unreachable',
+                      message: 'Could not reach the owner on WhatsApp. Tell the customer plainly: "I have logged your request and the team will follow up." Do NOT claim the owner has been notified.',
+                    })
+                  });
+                  toolExecutionContext.push(`[R${currentRound}] notify_boss FAILED (boss_unreachable)`);
+                } else {
+                  try {
+                    await supabase.from('ai_error_logs').insert({
+                      company_id: company.id,
+                      conversation_id: conversationId,
+                      severity: 'low',
+                      error_type: 'handoff_delivered',
+                      original_message: (userMessage || '').substring(0, 500),
+                      ai_response: (args.summary || '').substring(0, 500),
+                      detected_flags: ['handoff_delivered'],
+                      analysis_details: { notification_type: args.notification_type },
+                    });
+                  } catch (_) {}
+
+                  console.log('[HANDOFF] Boss notification sent successfully (notify_boss tool)');
+                  toolResults.push({
+                    tool_call_id: toolCall.id, role: "tool",
+                    content: JSON.stringify({
+                      success: true,
+                      message: 'Owner has been notified on WhatsApp with full context. You may tell the customer the owner has been alerted and will respond shortly.',
+                    })
+                  });
+                  toolExecutionContext.push(`[R${currentRound}] notify_boss DELIVERED: ${args.notification_type}`);
+                }
+              }
             } catch (err) {
-              toolResults.push({ tool_call_id: toolCall.id, role: "tool", content: JSON.stringify({ success: false, error: 'Notification failed' }) });
+              console.error('[TOOL-LOOP] notify_boss exception:', err);
+              toolResults.push({
+                tool_call_id: toolCall.id, role: "tool",
+                content: JSON.stringify({ success: false, error: 'notification_exception', message: 'Notification system error. Tell the customer the team will follow up shortly without claiming the owner has been notified.' })
+              });
             }
           } else {
             // Fallback for any other non-BMS tools
