@@ -1,89 +1,60 @@
 
 
-## Per-agent model assignment + snag elimination — direct providers only
+## Two real bugs, two real fixes
 
-Same goals as before, but **zero Lovable AI Gateway**. We use only the providers we already pay for: **Zhipu (GLM family), Gemini direct, DeepSeek, Kimi (Moonshot)**. The boss-chat / supervisor stays on whatever the company configured.
+### Bug A — AI says "posted!" but the post is sitting unpublished
 
-### Provider menu we'll expose in the UI
+**Customer-facing `create_scheduled_post` (used in WhatsApp/Meta DMs) inserts every post with `status: "pending_approval"`** (`supabase/functions/mcp-server/index.ts` line 770). It is then never auto-published. The cron (`cron-publisher`) only picks up rows with `status='approved'` — so the post sits forever.
 
-Pulled from configured secrets (`ZHIPU_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`):
+The boss-chat path is correct: when the boss says "publish now" or "post it", `boss-chat/index.ts` lines 1879–1909 actually inserts with `status='approved'` and immediately calls `publish-meta-post`. The bug is only on the customer/agent path.
 
-| Model id | Provider | Best for |
-|---|---|---|
-| `glm-4.7` | Zhipu (direct) | Default workhorse — fast, cheap, strong tool-calls. ANZ baseline. |
-| `glm-4.6` | Zhipu (direct) | Slightly cheaper fallback |
-| `glm-4.5-air` | Zhipu (direct) | Routing / classification (already used) |
-| `glm-5` *(if you confirm endpoint availability on Zhipu OpenAI-compat URL)* | Zhipu | Heaviest reasoning when GLM-5 is GA on `open.bigmodel.cn` — gated behind a feature flag so we don't ship a 404 |
-| `gemini-2.5-pro` | Gemini direct | Long context, vision, escalation summaries |
-| `gemini-2.5-flash` | Gemini direct | Fast multimodal fallback |
-| `deepseek-chat` | DeepSeek | Routing + cheap fallback (already in chain) |
-| `deepseek-reasoner` | DeepSeek | Heavy reasoning when low credits / GLM unavailable |
-| `kimi-k2-0711-preview` | Moonshot (`api.moonshot.cn`) | Long-context Chinese-style reasoning, very cheap |
+But the AI prompt cheerfully says "✅ posted!" because the tool returned `success: true` with `action: "created"`. The model can't tell that "created" ≠ "published".
 
-We add Kimi as a new provider in `_shared/gemini-client.ts` (`KIMI_OPENAI_URL = https://api.moonshot.cn/v1/chat/completions`) and extend `getProvider()` so any model starting with `kimi-` or `moonshot-` routes there. Existing fallback chain (`primary → glm-4.7 → deepseek-chat`) gets Kimi appended as the final tier.
+**Fix**
 
-### Recommended per-agent defaults (configurable per company)
+1. In `mcp-server/index.ts` `create_scheduled_post` handler, return a clearly-worded result the model can't misread:
+   ```
+   { action: "draft_saved", status: "pending_approval", message: "Saved as a draft awaiting boss approval. NOT yet published." }
+   ```
+   And include `boss_will_be_notified: true` in the payload.
+2. After insert, fire `send-boss-notification` (already exists) so the boss gets a WhatsApp ping: *"New AI-drafted post pending your approval — reply 'approve' to publish."* with the `pendingPostId`. This is the same flow as the boss-chat draft path.
+3. Tighten the customer-channel prompt block in `whatsapp-messages/index.ts` (search for the "scheduled_post" section in the system prompt assembly): replace any "say it's posted" wording with **"NEVER tell the customer the post is published. Say it's been queued for owner review and will go live once approved."** Add this same rule to the `meta-webhook` / DM prompt path if it surfaces this tool.
+4. (Optional, recommended) Split the tool: keep `create_scheduled_post` as the draft path, and make a separate `request_immediate_publish` that requires explicit boss approval token — so the AI can't accidentally claim immediate publish on a customer turn.
+5. Validation: customer asks "make a post about X" → AI replies "Drafted — waiting for owner approval"; boss receives WhatsApp preview; boss replies "approve" → existing `review_pending_post` flips it to `approved`; cron-publisher picks it up within 60s and publishes; boss gets confirmation.
 
-| Agent slug | Default model | Why |
-|---|---|---|
-| support | `glm-4.7` | Empathetic, fast, cheap |
-| sales | `glm-4.7` (Zhipu) — `gemini-2.5-flash` if GLM rate-limits | Strong on the tool chain we use |
-| boss / escalation | `gemini-2.5-pro` | Best summary quality for owner notifications |
-| router (still global, not per-agent) | `glm-4.5-air` | Already in ANZ baseline |
+### Bug B — Handoff fires the customer ack but never reaches the boss
 
-These are *defaults*; the per-agent dropdown lets each company override.
+In `whatsapp-messages/index.ts` lines **5421–5432**, the `notify_boss` tool handler does only this:
+```ts
+await supabase.from('boss_conversations').insert({ ... });
+return { success: true, message: 'Boss notified successfully' };
+```
+**It writes a row and lies to the model.** No WhatsApp message is sent to the boss. The model then tells the customer "the owner has been notified" — and the owner is not. Same broken assumption in the parallel handler at line 4108.
 
-### Layer 1 — Per-agent model column (DB + UI + runtime)
+The hybrid/human-first flow at line 1853–1871 *does* call `sendBossHandoffNotification` correctly. The bug is only in the autonomous-agent tool path — the most common path.
 
-- Migration: `ALTER TABLE company_agent_modes ADD COLUMN model text NULL;` Backfill `NULL` (means "use company default `primary_model`"). Update `seed_company_agent_modes()` so Boss agent rows get `gemini-2.5-pro` and Support/Sales stay `NULL` (inherit company default).
-- `whatsapp-messages/index.ts` line ~2729 — change to:
-  ```ts
-  const primaryModel = selectedMode?.model || aiOverrides?.primary_model || 'glm-4.7';
-  ```
-  And include `model` in the select at line ~1886. Log `[AI] Using model=<x> agent=<slug>` so we can verify in production.
-- `AgentModeEditor.tsx` — add Model dropdown populated from the menu above with short captions ("Fast & cheap", "Best reasoning", "Long context", etc.). Preserve "Use company default" as the first option (= `NULL`).
+**Fix**
 
-### Layer 2 — Kill "I hit a snag" with typed error handling
-
-Replace the catch-all at `whatsapp-messages/index.ts` line ~6816 with `handleAiTurnError(err, ctx)` that classifies and routes:
-
-- **`429` rate-limit** → `geminiChatWithFallback` already exists; ensure the catch path uses it once with `tools` stripped and `temperature=0.7`. If still 429 after fallback chain, send the company's `fallback_message` *and* fire `notify_boss` with `urgent_handoff`. Never the snag string.
-- **`402` no credits** on a single provider → fallback chain handles it (next provider in line). Add a one-liner alert into `ai_error_logs` with severity `warning` so admins know to top up that provider.
-- **Malformed/truncated JSON** → use a tolerant `repairJson(text)` helper in `_shared/safe-error.ts` (close braces, strip code fences). If repair fails, fall through to fallback chain.
-- **Tool-call exception** → wrap each tool execution in its own try/catch (currently only some tools are wrapped). On failure, push a synthetic tool result `{ error: "<tool_name> temporarily unavailable" }` so the model can recover within the same turn instead of throwing the whole loop.
-- **Hard timeout** → existing watchdog covers stalls; for true `AbortError`, send `fallback_message` + `notify_boss`. No snag.
-- **Anything else** → log to `ai_error_logs` with stack + last-tool context, send `fallback_message`, create boss handoff. Customer never sees the word "snag".
-
-Add `classifyAiError(err): 'rate_limit'|'no_credits'|'timeout'|'malformed'|'tool_failure'|'unknown'` to `_shared/safe-error.ts` and surface counts in `AIErrorTracker.tsx`.
-
-### Layer 3 — Bulletproof handoff (ads-ready)
-
-- Audit `notify_boss` so it always fires **before** the customer-facing fallback message returns (currently sometimes after). One synchronous `await` reorder.
-- Retry boss WhatsApp send up to 3× with exponential backoff (1s/3s/8s); on terminal failure, write `severity=critical` row to `ai_error_logs` so it lights up the AI Error Tracker.
-- Add a **"Handoff health"** badge in `AdminDashboard` showing 24h handoff success rate + count of failed boss notifications (clickable → AI Error Tracker filtered view).
-- Verify boss takeover-number un-pause flow end-to-end (already wired per memory; just confirm).
+1. Replace the `notify_boss` tool body in both locations (lines ~4108 and ~5421) to actually call `sendBossHandoffNotification(company, customerPhone, conversation.customer_name, summary, supabase, 'ai_tool', { askingAbout: userMessage, stage: args.notification_type, triggerReason: args.summary, collectedInfo })` — the function already exists (line 1102), already retries within the 24h service window, and already falls back to `boss_conversations` when the window is closed.
+2. If the WhatsApp send fails, return `{ success: false, error: 'boss_unreachable' }` so the model doesn't claim escalation succeeded — let it tell the customer plainly: *"I've logged your request and the team will follow up."*
+3. Log every `notify_boss` call to `ai_error_logs` with severity `info` if delivered, `critical` if WhatsApp send to boss failed 3× — surfaces in the AI Error Tracker so we can monitor handoff health before ads go live.
+4. Tighten handoff trigger coverage in the prompt: explicitly list when `notify_boss` MUST be called (severe complaint, refund request, legal/threat language, payment confusion, repeat frustration ≥2 turns, "speak to a human", bulk order ≥5 units, anything the AI tried 2× and failed). Currently it's vague — that's why customers report under-triggering.
+5. Add an idempotency guard: don't fire `notify_boss` for the same conversation more than once per 30 min unless the user explicitly re-asks for a human.
 
 ### Files
 
-- **DB migration** — add `model` column to `company_agent_modes`; update `seed_company_agent_modes()` to set Boss agent default to `gemini-2.5-pro`.
-- **`supabase/functions/_shared/gemini-client.ts`** — add Kimi provider (`KIMI_OPENAI_URL`, `kimi-*` routing in `getProvider`), extend fallback chain to include Kimi as final tier, optionally add `glm-5` to chain only if `ZHIPU_GLM5_ENABLED=true` env flag set.
-- **`supabase/functions/_shared/safe-error.ts`** — add `classifyAiError` + `repairJson` helpers.
-- **`supabase/functions/whatsapp-messages/index.ts`** — use `selectedMode?.model` (line ~2729); include `model` in agent-mode select (~1886); replace catch block (~6816) with `handleAiTurnError`; wrap each tool exec in local try/catch; reorder `notify_boss` to fire pre-fallback.
-- **`src/components/admin/deep-settings/AgentModeEditor.tsx`** — add Model dropdown (Zhipu / Gemini / DeepSeek / Kimi options + "Use company default").
-- **`src/components/admin/AIErrorTracker.tsx`** — surface new error categories with counts.
-- **`src/pages/admin/AdminDashboard.tsx`** — add "Handoff health" badge.
-- **`mem://architecture/per-agent-model-assignment.md`** — document the contract: agent.model → company.primary_model → `'glm-4.7'`.
-- Update **`mem://configurations/anz-baseline.md`** to include the new per-agent defaults section.
+- **`supabase/functions/mcp-server/index.ts`** — rewrite `create_scheduled_post` response shape; trigger `send-boss-notification` after insert.
+- **`supabase/functions/whatsapp-messages/index.ts`** — replace both `notify_boss` tool bodies (lines ~4108 & ~5421) to call `sendBossHandoffNotification`; expand handoff trigger list in system-prompt assembly; add 30-min idempotency guard.
+- (No new edge function needed — `send-boss-notification` and `publish-meta-post` already exist.)
+- **`mem://features/handoff-notification-contract.md`** — new memory documenting that `notify_boss` MUST send a real WhatsApp ping, not just write a row.
 
 ### Validation
 
-1. Set Boss agent → `gemini-2.5-pro` for ANZ in the UI → next boss-routed turn logs `[AI] Using model=gemini-2.5-pro agent=boss`.
-2. Mock a 429 from Zhipu → fallback chain hits Gemini direct → reply lands. No snag string in `messages` rows.
-3. Mock a malformed JSON response → `repairJson` succeeds → reply lands.
-4. Mock a tool throwing → only that tool's result is `{error}`, model still synthesises a customer reply.
-5. Force terminal failure (kill all 4 providers in sandbox env) → customer gets `fallback_message`, `notify_boss` fires, AI Error Tracker shows 1 critical row, "Handoff health" badge updates.
-6. Tail `whatsapp-messages` logs for 24h post-deploy → grep "I hit a snag" returns zero hits.
-7. Cross-check: no string `ai.gateway.lovable.dev` exists in `supabase/functions/_shared/*.ts` after changes.
+1. Customer says "make a Facebook post about our new arrivals" → tool returns `draft_saved`; AI replies "Drafted, sent to owner for approval"; boss WhatsApp shows preview; boss approves; cron publishes; Meta post live within 60s.
+2. Customer says "I want to speak to a human" → `notify_boss` runs → boss receives a real WhatsApp message with summary + collected info → AI tells customer truthfully.
+3. Force `boss_phone` empty for a test company → `notify_boss` returns `success:false` → AI gives a graceful fallback, not the false "owner notified" line.
+4. Tail logs for 24h post-deploy: every `[TOOL-LOOP] notify_boss` line is followed by a `[HANDOFF] Boss notification sent successfully` line. Zero "false escalation" reports.
+5. AI Error Tracker shows a new "handoff_failed" category with count = 0 in healthy state.
 
-No frontend routing changes. No RLS changes. No BMS code changes.
+No DB schema changes. No frontend changes. No RLS changes.
 
