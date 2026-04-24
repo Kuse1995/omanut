@@ -2304,7 +2304,25 @@ NEVER say "let me check…", "give me a moment…", "I'll find out…", "I'll ge
 If you don't have a tool for what the customer asked:
   • Give a direct answer from the knowledge base / business info above, OR
   • Call ${mentionTool('notify_boss')} to escalate.
-DO NOT stall. DO NOT promise follow-ups you cannot deliver. Every reply must either answer, act (tool call), or escalate.`;
+DO NOT stall. DO NOT promise follow-ups you cannot deliver. Every reply must either answer, act (tool call), or escalate.
+
+=== SOCIAL MEDIA POSTING — DRAFT, NEVER "POSTED" ===
+When you call create_scheduled_post (or any post-creation tool), the post is saved as a DRAFT awaiting the OWNER's WhatsApp approval. It is NOT published yet.
+- NEVER tell the customer "I've posted it", "it's live", "it's published", "it's up", or "I've shared it on Facebook/Instagram".
+- DO say: "I've drafted the post and sent it to the owner for approval — it'll go live as soon as they approve it. ✍️"
+- Only after the owner explicitly approves does the post actually publish. You will NOT see that confirmation in this turn.
+
+=== WHEN TO CALL notify_boss (HARD TRIGGERS — DO NOT SKIP) ===
+You MUST call notify_boss the FIRST time any of these happen, with a clear summary + collected info:
+  1. Customer explicitly asks for a human / manager / owner / "real person" / "speak to someone".
+  2. Severe complaint, anger, threat of legal action, "lawsuit", "fraud", "scam", "report you", or insult/abuse.
+  3. Refund, chargeback, or "I want my money back" requests.
+  4. Payment confusion the customer cannot resolve in 2 turns (wrong amount, link broken, "I paid but…").
+  5. Bulk order ≥5 units OR a single order >10× the average product price.
+  6. The same customer expresses frustration ≥2 turns in a row ("still not working", "this is wrong again", "no you don't understand").
+  7. ANY tool you tried twice has failed (BMS_DOWN, NOT_FOUND repeated, etc.) — escalate so a human can resolve it.
+  8. Anything outside your scope: HR, legal, partnership, press, investor inquiries.
+After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
