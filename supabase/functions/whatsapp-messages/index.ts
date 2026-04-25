@@ -5191,11 +5191,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         try {
           const bossPhones = await getBossPhones(supabase, company.id);
           for (const bp of bossPhones) {
-            await sendTwilioMessage(
-              bp,
-              `⚠️ AI completely failed for customer ${customerName || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
-              company.whatsapp_number || company.twilio_number || ''
+            await sendBossHandoffNotification(
+              company,
+              customerPhone,
+              conversation?.customer_name || customerPhone,
+              `⚠️ AI completely failed for customer ${conversation?.customer_name || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
+              supabase,
+              'ai_failure'
             );
+            break; // sendBossHandoffNotification fans out to all recipients itself
           }
         } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
       }
@@ -5699,12 +5703,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             { media_urls: toSend.map(t => t.url), category: 'auto', caption: '' },
             company, customerPhone, conversationId, supabase
           );
-          toolExecutionContext.push(`auto_send_media: ${autoResult.sent}/${autoResult.total} sent`);
+          toolExecutionContext.push(`auto_send_media: ${autoResult.result?.sent ?? 0}/${autoResult.result?.total ?? 0} sent`);
           // Surface a marker so synthesis knows photos were sent
           allToolResults.push({
             tool_call_id: 'auto-send',
             role: 'tool',
-            content: JSON.stringify({ success: true, sent: autoResult.sent, total: autoResult.total }),
+            content: JSON.stringify({ success: true, sent: autoResult.result?.sent ?? 0, total: autoResult.result?.total ?? 0 }),
             fn: 'send_media',
           });
         }

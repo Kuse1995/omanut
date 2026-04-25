@@ -34,12 +34,12 @@ serve(async (req) => {
     // Fetch company details
     const { data: company, error: compError } = await supabase
       .from('companies')
-      .select('name, test_mode')
+      .select('name, test_mode, boss_phone')
       .eq('id', reservation.company_id)
       .single();
 
     // Get boss phones with reservation notification preference
-    const bossPhones = await getBossPhones(supabase, reservation.company_id, { notify_reservations: true });
+    const bossPhones = await getBossPhones(supabase as any, reservation.company_id, { notify_reservations: true });
 
     if (compError || !company || bossPhones.length === 0) {
       console.log('[BOSS-REQUEST] No boss phones configured for reservations');
@@ -176,11 +176,7 @@ Reply with:
       }
     }
 
-    if (!twilioResponse.ok) {
-      const errorText = await twilioResponse.text();
-      console.error('[BOSS-REQUEST] Twilio error:', errorText);
-      throw new Error('Failed to send notification');
-    }
+    // Per-recipient errors are logged in the loop above.
 
     console.log('[BOSS-REQUEST] Notification sent successfully');
 
