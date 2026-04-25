@@ -90,7 +90,7 @@ serve(async (req) => {
           continue;
         }
 
-        const base64 = encodeBase64(new Uint8Array(await fileData.arrayBuffer()));
+        const base64 = encodeBase64(await fileData.arrayBuffer());
         const mimeType = fileData.type || 'image/png';
 
         const result = await analyzeImageBase64(base64, mimeType);
