@@ -1690,7 +1690,7 @@ async function _processAIResponseInner(
     // If user just replied "yes/sure/ok" to a pending offer the assistant made,
     // capture what the offer was so the router and the agent both have context.
     const pendingAction: PendingAction | null = detectPendingAction(
-      (messageHistory || []).map(m => ({ role: m.role, content: m.content })),
+      (messageHistory || []).map((m: any) => ({ role: m.role, content: m.content })),
       userMessage
     );
     if (pendingAction) {
@@ -2141,7 +2141,7 @@ async function _processAIResponseInner(
       .eq('company_id', company.id);
 
     // Construct full URLs for media
-    const mediaWithUrls = mediaLibrary?.map(media => ({
+    const mediaWithUrls = mediaLibrary?.map((media: any) => ({
       ...media,
       full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
     })) || [];
@@ -3522,7 +3522,7 @@ Trust ONLY the information provided in this system prompt.
 
       if (isBuyIntent && lastQuotedProduct && _salesMode === 'human_in_loop' && hintOverlapsQuoted) {
         const qtyText = quantity ? `${quantity} × ` : '';
-        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${customerName || customerPhone} wants to buy.`;
+        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${conversation?.customer_name || customerPhone} wants to buy.`;
         // Fire-and-forget boss notification
         try {
           await supabase.from('boss_conversations').insert({
@@ -3932,7 +3932,7 @@ Trust ONLY the information provided in this system prompt.
                     assistantReply = `Great news! ${args.time} on ${args.date} is available. Please note that reservations require team confirmation. Please provide your name, email, and number of guests.`;
                   }
                 } else {
-                  const conflictDetails = conflicts.map(c => `${c.time} (${c.guests} guests${c.status === 'pending_boss_approval' ? ' - pending' : ''})`).join(', ');
+                  const conflictDetails = conflicts.map((c: any) => `${c.time} (${c.guests} guests${c.status === 'pending_boss_approval' ? ' - pending' : ''})`).join(', ');
                   toolExecutionContext.push(`Time slot ${args.date} ${args.time} has ${conflicts.length} booking(s): ${conflictDetails}`);
                   assistantReply = `I checked our schedule and ${args.time} on ${args.date} has ${conflicts.length} booking(s) around that time. ` +
                     `Would you like to try a different time? I can suggest alternative slots for you.`;
@@ -5007,7 +5007,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                         company_id: company.id,
                         document_type: docType,
                         data: bmsResult,
-                        customer_name: args.customer_name || customerName || 'Customer',
+                        customer_name: args.customer_name || conversation?.customer_name || 'Customer',
                         customer_phone: customerPhone,
                       }),
                     }
@@ -5057,7 +5057,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                         console.log(`[AUTO-DOC] Notifying boss about ${docType}: ${bossPhone}`);
                         const itemsSummary = (args.items || []).map((it: any) => `${it.name || it.product_name} x${it.quantity || 1}`).join(', ');
                         const totalAmount = bmsResult.total || bmsResult.grand_total || 'N/A';
-                        const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || customerName || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
+                        const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || conversation?.customer_name || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
                         try {
                           const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
                           const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -5120,7 +5120,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           conversation_id: conversationId,
           error_type: 'ai_call_failed',
           severity: 'high',
-          original_message: lastUserMessage || '',
+          original_message: fullUserMessage || '',
           ai_response: '',
           analysis_details: { original_error: originalError, stage: 'primary_ai_call' },
         });
@@ -5191,11 +5191,15 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
         try {
           const bossPhones = await getBossPhones(supabase, company.id);
           for (const bp of bossPhones) {
-            await sendTwilioMessage(
-              bp,
-              `⚠️ AI completely failed for customer ${customerName || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
-              company.whatsapp_number || company.twilio_number || ''
+            await sendBossHandoffNotification(
+              company,
+              customerPhone,
+              conversation?.customer_name || customerPhone,
+              `⚠️ AI completely failed for customer ${conversation?.customer_name || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
+              supabase,
+              'ai_failure'
             );
+            break; // sendBossHandoffNotification fans out to all recipients itself
           }
         } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
       }
@@ -5349,7 +5353,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   const docResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-document`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ company_id: company.id, document_type: docType, data: bmsResult, customer_name: args.customer_name || customerName || 'Customer', customer_phone: customerPhone }),
+                    body: JSON.stringify({ company_id: company.id, document_type: docType, data: bmsResult, customer_name: args.customer_name || conversation?.customer_name || 'Customer', customer_phone: customerPhone }),
                   });
                   if (docResp.ok) {
                     const docResult = await docResp.json();
@@ -5369,7 +5373,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                         if (company.boss_phone) {
                           const itemsSummary = (args.items || []).map((it: any) => `${it.name || it.product_name} x${it.quantity || 1}`).join(', ');
                           const totalAmount = bmsResult.total || bmsResult.grand_total || 'N/A';
-                          const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || customerName || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
+                          const bossMsg = `📄 ${docType.toUpperCase()} SENT\nCustomer: ${args.customer_name || conversation?.customer_name || customerPhone}\nItems: ${itemsSummary || 'See document'}\nTotal: ${company.currency_prefix || 'K'}${totalAmount}\n[PDF attached]`;
                           await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
                             method: 'POST',
                             headers: { 'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`), 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -5699,12 +5703,12 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             { media_urls: toSend.map(t => t.url), category: 'auto', caption: '' },
             company, customerPhone, conversationId, supabase
           );
-          toolExecutionContext.push(`auto_send_media: ${autoResult.sent}/${autoResult.total} sent`);
+          toolExecutionContext.push(`auto_send_media: ${autoResult.result?.sent ?? 0}/${autoResult.result?.total ?? 0} sent`);
           // Surface a marker so synthesis knows photos were sent
           allToolResults.push({
             tool_call_id: 'auto-send',
             role: 'tool',
-            content: JSON.stringify({ success: true, sent: autoResult.sent, total: autoResult.total }),
+            content: JSON.stringify({ success: true, sent: autoResult.result?.sent ?? 0, total: autoResult.result?.total ?? 0 }),
             fn: 'send_media',
           });
         }

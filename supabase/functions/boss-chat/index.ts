@@ -1503,7 +1503,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
         console.log(`[BOSS-CHAT] Executing tool: ${functionName}`, args);
 
-        let result = { success: false, message: '' };
+        let result: { success: boolean; message: string; [key: string]: any } = { success: false, message: '' };
 
         try {
           switch (functionName) {

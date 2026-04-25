@@ -74,7 +74,7 @@ serve(async (req) => {
 
     if (dlError || !fileData) throw new Error(`Download failed: ${dlError?.message}`);
 
-    const base64 = encodeBase64(new Uint8Array(await fileData.arrayBuffer()));
+    const base64 = encodeBase64(await fileData.arrayBuffer());
     const mimeType = fileData.type || 'image/png';
     console.log(`[INDEX] Analyzing: ${media.file_name} (${(base64.length / 1024).toFixed(0)}KB)`);
 

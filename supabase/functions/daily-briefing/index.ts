@@ -330,7 +330,7 @@ Be specific with client names and phone numbers when flagging issues. Focus on a
         console.log('Formatted briefing message:', briefingMessage);
 
         // Send WhatsApp message to all boss phones
-        const bossPhones = await getBossPhones(supabase, company.id);
+        const bossPhones = await getBossPhones(supabase as any, company.id);
         
         if (bossPhones.length > 0 && company.whatsapp_number) {
           for (const bossPhone of bossPhones) {
