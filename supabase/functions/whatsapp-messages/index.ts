@@ -1099,6 +1099,14 @@ async function generateConversationSummary(
 }
 
 // Send boss handoff notification with formatted message
+// Sanitize a phone for Twilio (defensive — DB trigger should already do this)
+function sanitizePhoneForTwilio(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/^whatsapp:/i, '').replace(/[^+0-9]/g, '');
+  if (!/^\+\d{8,15}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 async function sendBossHandoffNotification(
   company: any,
   customerPhone: string,
@@ -1112,15 +1120,53 @@ async function sendBossHandoffNotification(
     triggerReason?: string;
     collectedInfo?: Record<string, string>;
   }
-) {
+): Promise<{ delivered: number; failed: number; recipients: Array<{ phone: string; ok: boolean; error?: string }> }> {
   const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-  
-  if (!company.boss_phone || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    console.log('[HANDOFF] Cannot send boss notification - missing config');
-    return;
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !company?.whatsapp_number) {
+    console.log('[HANDOFF] Cannot send boss notification - missing Twilio config or whatsapp_number');
+    return { delivered: 0, failed: 0, recipients: [] };
   }
-  
+
+  // ===== Fan-out: load all opted-in recipients from company_boss_phones =====
+  const recipients: Array<{ phone: string; label: string }> = [];
+  try {
+    const { data: bossPhoneRows } = await supabase
+      .from('company_boss_phones')
+      .select('phone, label, role, notify_alerts')
+      .eq('company_id', company.id)
+      .eq('notify_alerts', true);
+
+    if (bossPhoneRows && bossPhoneRows.length > 0) {
+      for (const row of bossPhoneRows) {
+        const clean = sanitizePhoneForTwilio(row.phone);
+        if (clean) recipients.push({ phone: clean, label: row.label || row.role || 'Boss' });
+      }
+    }
+  } catch (e) {
+    console.error('[HANDOFF] Failed to load company_boss_phones:', e);
+  }
+
+  // Fallback to legacy companies.boss_phone if table empty / no opted-in rows
+  if (recipients.length === 0 && company.boss_phone) {
+    const clean = sanitizePhoneForTwilio(company.boss_phone);
+    if (clean) recipients.push({ phone: clean, label: 'Owner' });
+  }
+
+  if (recipients.length === 0) {
+    console.log('[HANDOFF] No valid recipients found for company', company.id);
+    return { delivered: 0, failed: 0, recipients: [] };
+  }
+
+  // De-dupe by phone
+  const seen = new Set<string>();
+  const dedupedRecipients = recipients.filter(r => {
+    if (seen.has(r.phone)) return false;
+    seen.add(r.phone);
+    return true;
+  });
+
   // Format phone number for display (remove whatsapp: prefix)
   const displayPhone = customerPhone.replace('whatsapp:', '');
   
