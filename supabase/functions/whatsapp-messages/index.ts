@@ -5574,7 +5574,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                       original_message: (userMessage || '').substring(0, 500),
                       ai_response: (args.summary || '').substring(0, 500),
                       detected_flags: ['handoff_failed', 'boss_unreachable'],
-                      analysis_details: { reason: sendErr?.message || 'no_boss_phone', notification_type: args.notification_type },
+                      analysis_details: { reason: sendErr?.message || 'no_recipient_reachable', notification_type: args.notification_type, recipients: sendResult?.recipients || [] },
                     });
                   } catch (_) {}
 
