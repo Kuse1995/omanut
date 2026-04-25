@@ -1218,59 +1218,70 @@ ${summary}
 Reply with 'Unmute' to resume AI for this client.`;
     
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-    const formData = new URLSearchParams();
-    
-    const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
-      ? company.whatsapp_number 
+    const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
+      ? company.whatsapp_number
       : `whatsapp:${company.whatsapp_number}`;
-    const toNumber = company.boss_phone.startsWith('whatsapp:')
-      ? company.boss_phone
-      : `whatsapp:${company.boss_phone}`;
-    
-    formData.append('From', fromNumber);
-    formData.append('To', toNumber);
-    formData.append('Body', message);
-    
-    const response = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: formData.toString(),
-    });
-    
-    if (response.ok) {
-      console.log('[HANDOFF] Boss notification sent successfully (free-form)');
-    } else {
-      const errorText = await response.text();
-      console.error('[HANDOFF] Failed to send notification:', errorText);
-    }
-    
+
+    // ===== Fan out: send to every opted-in recipient in parallel =====
+    const sendResults = await Promise.all(dedupedRecipients.map(async (rec) => {
+      try {
+        const formData = new URLSearchParams();
+        formData.append('From', fromNumber);
+        formData.append('To', `whatsapp:${rec.phone}`);
+        formData.append('Body', message);
+
+        const response = await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+
+        if (response.ok) {
+          console.log(`[HANDOFF] ✓ Boss notification sent to ${rec.label} (${rec.phone})`);
+          return { phone: rec.phone, ok: true as const };
+        } else {
+          const errorText = await response.text();
+          console.error(`[HANDOFF] ✗ Twilio rejected send to ${rec.phone} [${response.status}]:`, errorText);
+          return { phone: rec.phone, ok: false as const, error: `twilio_${response.status}` };
+        }
+      } catch (err: any) {
+        console.error(`[HANDOFF] ✗ Exception sending to ${rec.phone}:`, err);
+        return { phone: rec.phone, ok: false as const, error: err?.message || 'fetch_failed' };
+      }
+    }));
+
+    const delivered = sendResults.filter(r => r.ok).length;
+    const failed = sendResults.length - delivered;
+
+    // Log notification in boss_conversations once
+    await supabase
+      .from('boss_conversations')
+      .insert({
+        company_id: company.id,
+        message_from: 'system',
+        message_content: `Handoff notification — delivered to ${delivered}/${sendResults.length} recipient(s) [${handedOffBy}]`,
+        response: `Client: ${customerName} (${displayPhone})\nSummary: ${summary}`,
+        handed_off_by: handedOffBy,
+      });
+
+    return { delivered, failed, recipients: sendResults };
   } else {
     // Service window expired
     console.log('[HANDOFF] Service window expired - storing pending notification');
-    
-    // Store notification for next admin wake-up
     await supabase
       .from('boss_conversations')
       .insert({
         company_id: company.id,
         message_from: 'system',
         message_content: `Pending handoff for ${customerName} (${displayPhone})`,
-        response: summary
+        response: summary,
+        handed_off_by: handedOffBy,
       });
+    return { delivered: 0, failed: dedupedRecipients.length, recipients: dedupedRecipients.map(r => ({ phone: r.phone, ok: false as const, error: 'window_expired' })) };
   }
-  
-  // Log notification in boss_conversations
-  await supabase
-    .from('boss_conversations')
-    .insert({
-      company_id: company.id,
-      message_from: 'system',
-      message_content: `Handoff notification sent to boss`,
-      response: `Client: ${customerName} (${displayPhone})\nSummary: ${summary}`
-    });
 }
 
 // Background processing function that handles AI response
