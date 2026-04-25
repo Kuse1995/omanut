@@ -2371,15 +2371,23 @@ When you call create_scheduled_post (or any post-creation tool), the post is sav
 
 === WHEN TO CALL notify_boss (HARD TRIGGERS — DO NOT SKIP) ===
 You MUST call notify_boss the FIRST time any of these happen, with a clear summary + collected info:
-  1. Customer explicitly asks for a human / manager / owner / "real person" / "speak to someone".
-  2. Severe complaint, anger, threat of legal action, "lawsuit", "fraud", "scam", "report you", or insult/abuse.
-  3. Refund, chargeback, or "I want my money back" requests.
-  4. Payment confusion the customer cannot resolve in 2 turns (wrong amount, link broken, "I paid but…").
-  5. Bulk order ≥5 units OR a single order >10× the average product price.
-  6. The same customer expresses frustration ≥2 turns in a row ("still not working", "this is wrong again", "no you don't understand").
-  7. ANY tool you tried twice has failed (BMS_DOWN, NOT_FOUND repeated, etc.) — escalate so a human can resolve it.
-  8. Anything outside your scope: HR, legal, partnership, press, investor inquiries.
-After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.`;
+  1. **PURCHASE INTENT** (HIGHEST PRIORITY — leads pay the bills):
+     - Quantity + product in same turn: "I want 3", "I'll take 2", "give me one", "I need 5 of those".
+     - Confirmation of a specific item you just quoted: "yes that one", "just this set", "I'll go with the navy blue", "this is what I want".
+     - Direct buy phrasing: "how do I pay", "send me payment details", "I'm ready to buy", "I want to order", "let me purchase".
+     - For these, set notification_type="purchase_handoff" and include product, quantity, price in the summary. Then reply briefly: "Perfect choice — I've asked the owner to confirm payment details with you shortly. 🙏" Do NOT skip this even for small orders. Every buying signal goes to the owner.
+  2. Customer explicitly asks for a human / manager / owner / "real person" / "speak to someone".
+  3. Severe complaint, anger, threat of legal action, "lawsuit", "fraud", "scam", "report you", or insult/abuse.
+  4. Refund, chargeback, or "I want my money back" requests.
+  5. Payment confusion the customer cannot resolve in 2 turns (wrong amount, link broken, "I paid but…").
+  6. Bulk order ≥5 units OR a single order >10× the average product price.
+  7. The same customer expresses frustration ≥2 turns in a row ("still not working", "this is wrong again", "no you don't understand").
+  8. ANY tool you tried twice has failed (BMS_DOWN, NOT_FOUND repeated, etc.) — escalate so a human can resolve it.
+  9. Anything outside your scope: HR, legal, partnership, press, investor inquiries.
+
+After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.
+
+⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
