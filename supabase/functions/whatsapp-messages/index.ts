@@ -1099,6 +1099,14 @@ async function generateConversationSummary(
 }
 
 // Send boss handoff notification with formatted message
+// Sanitize a phone for Twilio (defensive — DB trigger should already do this)
+function sanitizePhoneForTwilio(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.replace(/^whatsapp:/i, '').replace(/[^+0-9]/g, '');
+  if (!/^\+\d{8,15}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 async function sendBossHandoffNotification(
   company: any,
   customerPhone: string,
@@ -1112,15 +1120,53 @@ async function sendBossHandoffNotification(
     triggerReason?: string;
     collectedInfo?: Record<string, string>;
   }
-) {
+): Promise<{ delivered: number; failed: number; recipients: Array<{ phone: string; ok: boolean; error?: string }> }> {
   const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-  
-  if (!company.boss_phone || !TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    console.log('[HANDOFF] Cannot send boss notification - missing config');
-    return;
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !company?.whatsapp_number) {
+    console.log('[HANDOFF] Cannot send boss notification - missing Twilio config or whatsapp_number');
+    return { delivered: 0, failed: 0, recipients: [] };
   }
-  
+
+  // ===== Fan-out: load all opted-in recipients from company_boss_phones =====
+  const recipients: Array<{ phone: string; label: string }> = [];
+  try {
+    const { data: bossPhoneRows } = await supabase
+      .from('company_boss_phones')
+      .select('phone, label, role, notify_alerts')
+      .eq('company_id', company.id)
+      .eq('notify_alerts', true);
+
+    if (bossPhoneRows && bossPhoneRows.length > 0) {
+      for (const row of bossPhoneRows) {
+        const clean = sanitizePhoneForTwilio(row.phone);
+        if (clean) recipients.push({ phone: clean, label: row.label || row.role || 'Boss' });
+      }
+    }
+  } catch (e) {
+    console.error('[HANDOFF] Failed to load company_boss_phones:', e);
+  }
+
+  // Fallback to legacy companies.boss_phone if table empty / no opted-in rows
+  if (recipients.length === 0 && company.boss_phone) {
+    const clean = sanitizePhoneForTwilio(company.boss_phone);
+    if (clean) recipients.push({ phone: clean, label: 'Owner' });
+  }
+
+  if (recipients.length === 0) {
+    console.log('[HANDOFF] No valid recipients found for company', company.id);
+    return { delivered: 0, failed: 0, recipients: [] };
+  }
+
+  // De-dupe by phone
+  const seen = new Set<string>();
+  const dedupedRecipients = recipients.filter(r => {
+    if (seen.has(r.phone)) return false;
+    seen.add(r.phone);
+    return true;
+  });
+
   // Format phone number for display (remove whatsapp: prefix)
   const displayPhone = customerPhone.replace('whatsapp:', '');
   
@@ -1172,59 +1218,70 @@ ${summary}
 Reply with 'Unmute' to resume AI for this client.`;
     
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-    const formData = new URLSearchParams();
-    
-    const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
-      ? company.whatsapp_number 
+    const fromNumber = company.whatsapp_number.startsWith('whatsapp:')
+      ? company.whatsapp_number
       : `whatsapp:${company.whatsapp_number}`;
-    const toNumber = company.boss_phone.startsWith('whatsapp:')
-      ? company.boss_phone
-      : `whatsapp:${company.boss_phone}`;
-    
-    formData.append('From', fromNumber);
-    formData.append('To', toNumber);
-    formData.append('Body', message);
-    
-    const response = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: formData.toString(),
-    });
-    
-    if (response.ok) {
-      console.log('[HANDOFF] Boss notification sent successfully (free-form)');
-    } else {
-      const errorText = await response.text();
-      console.error('[HANDOFF] Failed to send notification:', errorText);
-    }
-    
+
+    // ===== Fan out: send to every opted-in recipient in parallel =====
+    const sendResults = await Promise.all(dedupedRecipients.map(async (rec) => {
+      try {
+        const formData = new URLSearchParams();
+        formData.append('From', fromNumber);
+        formData.append('To', `whatsapp:${rec.phone}`);
+        formData.append('Body', message);
+
+        const response = await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`),
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+
+        if (response.ok) {
+          console.log(`[HANDOFF] ✓ Boss notification sent to ${rec.label} (${rec.phone})`);
+          return { phone: rec.phone, ok: true as const };
+        } else {
+          const errorText = await response.text();
+          console.error(`[HANDOFF] ✗ Twilio rejected send to ${rec.phone} [${response.status}]:`, errorText);
+          return { phone: rec.phone, ok: false as const, error: `twilio_${response.status}` };
+        }
+      } catch (err: any) {
+        console.error(`[HANDOFF] ✗ Exception sending to ${rec.phone}:`, err);
+        return { phone: rec.phone, ok: false as const, error: err?.message || 'fetch_failed' };
+      }
+    }));
+
+    const delivered = sendResults.filter(r => r.ok).length;
+    const failed = sendResults.length - delivered;
+
+    // Log notification in boss_conversations once
+    await supabase
+      .from('boss_conversations')
+      .insert({
+        company_id: company.id,
+        message_from: 'system',
+        message_content: `Handoff notification — delivered to ${delivered}/${sendResults.length} recipient(s) [${handedOffBy}]`,
+        response: `Client: ${customerName} (${displayPhone})\nSummary: ${summary}`,
+        handed_off_by: handedOffBy,
+      });
+
+    return { delivered, failed, recipients: sendResults };
   } else {
     // Service window expired
     console.log('[HANDOFF] Service window expired - storing pending notification');
-    
-    // Store notification for next admin wake-up
     await supabase
       .from('boss_conversations')
       .insert({
         company_id: company.id,
         message_from: 'system',
         message_content: `Pending handoff for ${customerName} (${displayPhone})`,
-        response: summary
+        response: summary,
+        handed_off_by: handedOffBy,
       });
+    return { delivered: 0, failed: dedupedRecipients.length, recipients: dedupedRecipients.map(r => ({ phone: r.phone, ok: false as const, error: 'window_expired' })) };
   }
-  
-  // Log notification in boss_conversations
-  await supabase
-    .from('boss_conversations')
-    .insert({
-      company_id: company.id,
-      message_from: 'system',
-      message_content: `Handoff notification sent to boss`,
-      response: `Client: ${customerName} (${displayPhone})\nSummary: ${summary}`
-    });
 }
 
 // Background processing function that handles AI response
@@ -2314,15 +2371,23 @@ When you call create_scheduled_post (or any post-creation tool), the post is sav
 
 === WHEN TO CALL notify_boss (HARD TRIGGERS — DO NOT SKIP) ===
 You MUST call notify_boss the FIRST time any of these happen, with a clear summary + collected info:
-  1. Customer explicitly asks for a human / manager / owner / "real person" / "speak to someone".
-  2. Severe complaint, anger, threat of legal action, "lawsuit", "fraud", "scam", "report you", or insult/abuse.
-  3. Refund, chargeback, or "I want my money back" requests.
-  4. Payment confusion the customer cannot resolve in 2 turns (wrong amount, link broken, "I paid but…").
-  5. Bulk order ≥5 units OR a single order >10× the average product price.
-  6. The same customer expresses frustration ≥2 turns in a row ("still not working", "this is wrong again", "no you don't understand").
-  7. ANY tool you tried twice has failed (BMS_DOWN, NOT_FOUND repeated, etc.) — escalate so a human can resolve it.
-  8. Anything outside your scope: HR, legal, partnership, press, investor inquiries.
-After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.`;
+  1. **PURCHASE INTENT** (HIGHEST PRIORITY — leads pay the bills):
+     - Quantity + product in same turn: "I want 3", "I'll take 2", "give me one", "I need 5 of those".
+     - Confirmation of a specific item you just quoted: "yes that one", "just this set", "I'll go with the navy blue", "this is what I want".
+     - Direct buy phrasing: "how do I pay", "send me payment details", "I'm ready to buy", "I want to order", "let me purchase".
+     - For these, set notification_type="purchase_handoff" and include product, quantity, price in the summary. Then reply briefly: "Perfect choice — I've asked the owner to confirm payment details with you shortly. 🙏" Do NOT skip this even for small orders. Every buying signal goes to the owner.
+  2. Customer explicitly asks for a human / manager / owner / "real person" / "speak to someone".
+  3. Severe complaint, anger, threat of legal action, "lawsuit", "fraud", "scam", "report you", or insult/abuse.
+  4. Refund, chargeback, or "I want my money back" requests.
+  5. Payment confusion the customer cannot resolve in 2 turns (wrong amount, link broken, "I paid but…").
+  6. Bulk order ≥5 units OR a single order >10× the average product price.
+  7. The same customer expresses frustration ≥2 turns in a row ("still not working", "this is wrong again", "no you don't understand").
+  8. ANY tool you tried twice has failed (BMS_DOWN, NOT_FOUND repeated, etc.) — escalate so a human can resolve it.
+  9. Anything outside your scope: HR, legal, partnership, press, investor inquiries.
+
+After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.
+
+⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
@@ -5440,6 +5505,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`, JSON.stringify(args));
             try {
               const explicitHumanReq = /\b(human|agent|person|manager|owner|representative|speak\s+to\s+(?:a\s+)?(?:real\s+)?(?:person|human))\b/i.test(userMessage || '');
+              // Purchase-intent handoffs ALWAYS go through (every lead matters)
+              const isPurchaseHandoff = args.notification_type === 'purchase_handoff' || /purchase|buy|order|sale/i.test(args.notification_type || '');
+              const bypassDedupe = explicitHumanReq || isPurchaseHandoff;
+
               const { data: recentNotif } = await supabase
                 .from('boss_conversations')
                 .select('id, created_at')
@@ -5450,7 +5519,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 .limit(1)
                 .maybeSingle();
 
-              if (recentNotif && !explicitHumanReq) {
+              if (recentNotif && !bypassDedupe) {
                 console.log('[TOOL-LOOP] notify_boss skipped — duplicate within 30min for', customerPhone);
                 toolResults.push({
                   tool_call_id: toolCall.id, role: "tool",
@@ -5463,8 +5532,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 toolExecutionContext.push(`[R${currentRound}] notify_boss deduped`);
               } else {
                 let sendErr: any = null;
+                let sendResult: any = null;
                 try {
-                  await sendBossHandoffNotification(
+                  sendResult = await sendBossHandoffNotification(
                     company,
                     customerPhone,
                     conversation.customer_name || 'Customer',
@@ -5490,7 +5560,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   });
                 } catch (_) { /* non-fatal */ }
 
-                if (sendErr || !company.boss_phone) {
+                const delivered = sendResult?.delivered || 0;
+                const handoffFailed = !!sendErr || delivered === 0;
+
+                if (handoffFailed) {
                   console.error('[TOOL-LOOP] notify_boss WhatsApp send failed:', sendErr);
                   try {
                     await supabase.from('ai_error_logs').insert({
@@ -5501,7 +5574,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                       original_message: (userMessage || '').substring(0, 500),
                       ai_response: (args.summary || '').substring(0, 500),
                       detected_flags: ['handoff_failed', 'boss_unreachable'],
-                      analysis_details: { reason: sendErr?.message || 'no_boss_phone', notification_type: args.notification_type },
+                      analysis_details: { reason: sendErr?.message || 'no_recipient_reachable', notification_type: args.notification_type, recipients: sendResult?.recipients || [] },
                     });
                   } catch (_) {}
 
@@ -5524,19 +5597,20 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                       original_message: (userMessage || '').substring(0, 500),
                       ai_response: (args.summary || '').substring(0, 500),
                       detected_flags: ['handoff_delivered'],
-                      analysis_details: { notification_type: args.notification_type },
+                      analysis_details: { notification_type: args.notification_type, delivered, recipients: sendResult?.recipients || [] },
                     });
                   } catch (_) {}
 
-                  console.log('[HANDOFF] Boss notification sent successfully (notify_boss tool)');
+                  console.log(`[HANDOFF] Boss notification sent successfully (notify_boss tool) — delivered to ${delivered} recipient(s)`);
                   toolResults.push({
                     tool_call_id: toolCall.id, role: "tool",
                     content: JSON.stringify({
                       success: true,
-                      message: 'Owner has been notified on WhatsApp with full context. You may tell the customer the owner has been alerted and will respond shortly.',
+                      delivered_count: delivered,
+                      message: `Owner notified on WhatsApp (${delivered} recipient${delivered === 1 ? '' : 's'}). Tell the customer the owner has been alerted and will respond shortly.`,
                     })
                   });
-                  toolExecutionContext.push(`[R${currentRound}] notify_boss DELIVERED: ${args.notification_type}`);
+                  toolExecutionContext.push(`[R${currentRound}] notify_boss DELIVERED to ${delivered}: ${args.notification_type}`);
                 }
               }
             } catch (err) {
