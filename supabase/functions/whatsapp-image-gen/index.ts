@@ -761,7 +761,7 @@ async function runImagePipeline(
     console.log('[PIPELINE] Supervisor flagged prompt, using refined version');
   }
 
-  const pipelineData = {
+  const pipelineData: Record<string, any> = {
     original_prompt: userPrompt,
     optimizer_intent: intent,
     optimizer_brief: brief,

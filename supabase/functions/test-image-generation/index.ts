@@ -431,7 +431,7 @@ serve(async (req) => {
         .from("company_media").select("id, file_path, file_name, description, tags")
         .eq("company_id", companyId).eq("category", "products").eq("media_type", "image")
         .order("created_at", { ascending: false }).limit(1);
-      if (products?.length > 0) productImage = products[0];
+      if (products && products.length > 0) productImage = products[0];
     }
 
     console.log(`[test-image-gen] Company: ${company.name}, Prompt: ${prompt}, Product: ${productImage?.file_name || 'none'}`);

@@ -1690,7 +1690,7 @@ async function _processAIResponseInner(
     // If user just replied "yes/sure/ok" to a pending offer the assistant made,
     // capture what the offer was so the router and the agent both have context.
     const pendingAction: PendingAction | null = detectPendingAction(
-      (messageHistory || []).map(m => ({ role: m.role, content: m.content })),
+      (messageHistory || []).map((m: any) => ({ role: m.role, content: m.content })),
       userMessage
     );
     if (pendingAction) {
@@ -2141,7 +2141,7 @@ async function _processAIResponseInner(
       .eq('company_id', company.id);
 
     // Construct full URLs for media
-    const mediaWithUrls = mediaLibrary?.map(media => ({
+    const mediaWithUrls = mediaLibrary?.map((media: any) => ({
       ...media,
       full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
     })) || [];
@@ -3522,7 +3522,7 @@ Trust ONLY the information provided in this system prompt.
 
       if (isBuyIntent && lastQuotedProduct && _salesMode === 'human_in_loop' && hintOverlapsQuoted) {
         const qtyText = quantity ? `${quantity} × ` : '';
-        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${customerName || customerPhone} wants to buy.`;
+        const summary = `${qtyText}*${lastQuotedProduct}* — customer ${conversation?.customer_name || customerPhone} wants to buy.`;
         // Fire-and-forget boss notification
         try {
           await supabase.from('boss_conversations').insert({
