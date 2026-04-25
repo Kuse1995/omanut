@@ -5532,8 +5532,9 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 toolExecutionContext.push(`[R${currentRound}] notify_boss deduped`);
               } else {
                 let sendErr: any = null;
+                let sendResult: any = null;
                 try {
-                  await sendBossHandoffNotification(
+                  sendResult = await sendBossHandoffNotification(
                     company,
                     customerPhone,
                     conversation.customer_name || 'Customer',
@@ -5559,7 +5560,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                   });
                 } catch (_) { /* non-fatal */ }
 
-                if (sendErr || !company.boss_phone) {
+                const delivered = sendResult?.delivered || 0;
+                const handoffFailed = !!sendErr || delivered === 0;
+
+                if (handoffFailed) {
                   console.error('[TOOL-LOOP] notify_boss WhatsApp send failed:', sendErr);
                   try {
                     await supabase.from('ai_error_logs').insert({
