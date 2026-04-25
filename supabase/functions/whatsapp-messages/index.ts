@@ -5505,6 +5505,10 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`, JSON.stringify(args));
             try {
               const explicitHumanReq = /\b(human|agent|person|manager|owner|representative|speak\s+to\s+(?:a\s+)?(?:real\s+)?(?:person|human))\b/i.test(userMessage || '');
+              // Purchase-intent handoffs ALWAYS go through (every lead matters)
+              const isPurchaseHandoff = args.notification_type === 'purchase_handoff' || /purchase|buy|order|sale/i.test(args.notification_type || '');
+              const bypassDedupe = explicitHumanReq || isPurchaseHandoff;
+
               const { data: recentNotif } = await supabase
                 .from('boss_conversations')
                 .select('id, created_at')
@@ -5515,7 +5519,7 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                 .limit(1)
                 .maybeSingle();
 
-              if (recentNotif && !explicitHumanReq) {
+              if (recentNotif && !bypassDedupe) {
                 console.log('[TOOL-LOOP] notify_boss skipped — duplicate within 30min for', customerPhone);
                 toolResults.push({
                   tool_call_id: toolCall.id, role: "tool",
