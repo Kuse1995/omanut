@@ -5597,19 +5597,20 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
                       original_message: (userMessage || '').substring(0, 500),
                       ai_response: (args.summary || '').substring(0, 500),
                       detected_flags: ['handoff_delivered'],
-                      analysis_details: { notification_type: args.notification_type },
+                      analysis_details: { notification_type: args.notification_type, delivered, recipients: sendResult?.recipients || [] },
                     });
                   } catch (_) {}
 
-                  console.log('[HANDOFF] Boss notification sent successfully (notify_boss tool)');
+                  console.log(`[HANDOFF] Boss notification sent successfully (notify_boss tool) — delivered to ${delivered} recipient(s)`);
                   toolResults.push({
                     tool_call_id: toolCall.id, role: "tool",
                     content: JSON.stringify({
                       success: true,
-                      message: 'Owner has been notified on WhatsApp with full context. You may tell the customer the owner has been alerted and will respond shortly.',
+                      delivered_count: delivered,
+                      message: `Owner notified on WhatsApp (${delivered} recipient${delivered === 1 ? '' : 's'}). Tell the customer the owner has been alerted and will respond shortly.`,
                     })
                   });
-                  toolExecutionContext.push(`[R${currentRound}] notify_boss DELIVERED: ${args.notification_type}`);
+                  toolExecutionContext.push(`[R${currentRound}] notify_boss DELIVERED to ${delivered}: ${args.notification_type}`);
                 }
               }
             } catch (err) {
