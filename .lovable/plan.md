@@ -1,123 +1,96 @@
-# Make ANZ chats enterprise-ready for paid Facebook ads
+## Goal
 
-## What's actually broken (evidence from production data)
+Two related upgrades, framed around the real-world scenario: a customer sends a product photo on WhatsApp asking "do you have this in stock?".
 
-I pulled the last 7 days of ANZ chats. Three concrete problems are eating into the ad spend you're running:
-
-### 1. 59% of paid ad clicks are ghosting after one reply
-- 59 customers in 7 days clicked your Click-to-WhatsApp ad ("Send Message" button on a Facebook ad).
-- Meta auto-sends the message `"Hello! Can I get more info on this?"` on the customer's behalf.
-- Your AI replies with a generic `"Welcome to ANZ! Which product would you like info about?"`
-- 35 of those 59 customers (59%) **never sent another message**. They expected the AI to already know which product they tapped on. It didn't.
-
-Root cause: Meta forwards an `ad_referral` payload with every CTWA inbound (headline, body text, source URL, image URL, ad ID). Both our **Twilio webhook** and our **Meta Cloud API webhook** ignore those fields completely. So the AI literally has no idea the customer just clicked an ad for, say, "Whistling Kettle K720".
-
-### 2. AI is leaking raw tool-call syntax in Chinese to customers
-One conversation (Nox Sapilinya, Apr 25) received this as the reply:
-> `tool_calls参数（需要保持原语言不变）：[{"name": "notify_boss", "arguments": "{}"}]`
-
-That's the Zhipu `glm-4.7` model (currently set as ANZ's primary model) failing to format a function call and dumping it as plain text. Unacceptable in front of a paying customer.
-
-### 3. AI asks "yes to what?" instead of fulfilling the prior offer
-The contextual-affirmation memory rule exists, but in the Mwazanji chat the AI replied "Great! Would you like to come visit us, or are you interested in ordering online?" after the customer just said "Yes" to its own previous offer. It's still re-asking instead of acting.
-
-Also, when the customer fires two messages in quick succession ("Yes" + "Location"), the AI replies twice in 4 seconds instead of merging them into one coherent answer — feels robotic.
+1. **See customer images in the chat UI** (admin Conversations panel) — they're already stored in Supabase Storage but never render because of a metadata-shape mismatch.
+2. **Let the AI forward those images to the boss** via a new `forward_media_to_boss` tool, so the owner gets the actual product photo on WhatsApp instead of a text-only summary.
 
 ---
 
-## The fix (4 changes, in priority order)
+## What's broken today
 
-### Fix 1 — Capture Meta ad referral context (biggest revenue impact)
+| Layer | Current state |
+|---|---|
+| Inbound (WhatsApp) | `whatsapp-messages` downloads each `MediaUrl{i}` into the `conversation-media` bucket and saves it on the user message as `message_metadata.media_urls: string[]` + `media_types: string[]`. ✅ |
+| Chat UI (`ChatBubble.tsx`) | Reads `metadata.media_url` / `metadata.media_type` (singular). Inbound customer images are stored as **arrays**, so the bubble renders **nothing** — the photo is invisible to the operator. ❌ |
+| Boss notifications | `sendBossHandoffNotification` only sends a text WhatsApp ping. There is no path for the AI to attach the customer's image. ❌ |
+| `notify_boss` tool | Accepts only text fields (`summary`, `details`). No media param. ❌ |
+| `send-boss-notification` edge fn | Already supports an optional `mediaUrl` body field and forwards it to Twilio as `MediaUrl`. ✅ (we'll reuse this.) |
 
-Both inbound webhooks (Twilio + Meta Cloud) will extract and persist the `referral` payload that comes attached to the very first message of a CTWA conversation:
+---
 
-- `ReferralHeadline` — e.g. "Whistling Kettle - K720"
-- `ReferralBody` — the ad's body copy
-- `ReferralSourceUrl` — link to the FB post / ad
-- `ReferralSourceId` — Meta `ad_id` (joins to `meta_ad_campaigns`)
-- `ReferralMediaUrl` — the ad's image
-- `ctwa_clid` — click-to-WhatsApp tracking id
+## Plan
 
-We store this on the `conversations` row in a new `ad_context` JSONB column AND inject it into the AI's system prompt for the first ~3 turns:
+### 1. Render inbound customer media in the chat (frontend only)
+
+**File:** `src/components/conversations/ChatBubble.tsx`
+
+- Normalize incoming metadata at the top of the component:
+  - If `metadata.media_urls` (array) exists, treat it as the source of truth.
+  - Otherwise fall back to the existing singular `metadata.media_url`.
+- Render **all** media items in the bubble (multi-image WhatsApp messages currently lose every image after the first), each clickable to open the existing `MediaViewer`.
+- Keep current single-item behavior intact for assistant messages and historical data.
+
+**File:** `src/components/conversations/MediaGallery.tsx`
+
+- Same normalization in the `useMemo` that flattens messages → media items, so the gallery counts and lists every image in array-form messages, not just the first.
+
+No backend changes. No DB changes. Existing rows immediately display correctly because the data is already there.
+
+### 2. New tool: `forward_media_to_boss`
+
+**File:** `supabase/functions/whatsapp-messages/index.ts`
+
+Add a tool definition next to `notify_boss`:
 
 ```text
-[AD CONTEXT — customer just clicked your Facebook ad]
-Headline: Whistling Kettle K720 — copper finish
-Body: 4 colours available, lifetime warranty
-Image: <url>
-→ Open the conversation by referencing this product directly.
-   Do NOT ask "which product are you interested in?".
+forward_media_to_boss(
+  reason: string,             // e.g. "Customer asking if we stock this product"
+  caption?: string,           // short note to the boss, max 1 sentence
+  media_index?: number = 0    // which of the customer's just-sent images to forward
+)
 ```
 
-This single change should turn most of the 35 ghosted leads/week into engaged conversations.
+Behavior in the tool handler:
+1. Resolve the URL from the current turn's `storedMediaUrls[media_index]` (preferred) or, if absent, the most recent `messages` row from this customer with non-empty `message_metadata.media_urls`.
+2. Build a boss WhatsApp message that mirrors `sendBossHandoffNotification`'s style and adds the customer photo:
+   - `📸 Customer sent a product photo`
+   - Customer name + phone
+   - The AI's `reason` and `caption`
+   - The same paid-lead `📢 PAID LEAD` enrichment block (ad headline + today's spend) we already build in `sendBossHandoffNotification`, when `conversations.ad_context` is present.
+3. Call the existing `send-boss-notification` edge function with `notificationType: 'action_required'`, `data.message`, and the resolved `mediaUrl` so Twilio attaches it as MMS to every opted-in `company_boss_phones` row.
+4. Log the action via `boss_conversations` (already done by `send-boss-notification`).
 
-### Fix 2 — Switch ANZ's primary model away from Zhipu glm-4.7
+Prompt updates in the same file:
+- Add a hard rule under the existing handoff section: *"When the customer sends a product image and asks about stock, availability, price or fitment for that exact item, you MUST call `forward_media_to_boss` (not just `notify_boss`) so the boss can identify the product visually."*
+- Add the tool to the `alwaysEnabledTools` allow-list so it cannot be silently disabled per-company.
 
-`glm-4.7` is occasionally emitting raw Chinese tool-call syntax to customers. Two options:
+### 3. Mirror the same flow on Messenger / Instagram
 
-- **Recommended**: switch primary to `google/gemini-2.5-flash` (proven, fast, no leak history in our logs) and keep `glm-4.7` as a fallback only.
-- Add a defensive output filter: if assistant text matches `/tool_calls|参数|"name":\s*"\w+_\w+"/`, suppress, retry with backup model, and never deliver to customer.
+**File:** `supabase/functions/meta-webhook/index.ts`
 
-We'll do **both** — model swap + safety filter — so even if any model misbehaves the customer never sees JSON/Chinese leakage.
+Confirmed images from Meta DMs are already persisted into `message_metadata.media_urls`. The fix in step 1 + the new tool in step 2 automatically work for Messenger/IG too because the AI runs through the same processor. No additional change required beyond a code review pass.
 
-### Fix 3 — Strengthen affirmation + burst handling
+### 4. Memory
 
-- **Burst coalescing**: if a second customer message arrives within 6s of the first, queue + merge them before calling the AI (instead of firing two parallel runs). Already partly built in `pending-promise-watchdog`; we extend it for inbound bursts.
-- **Affirmation rule reinforcement**: tighten the contextual-affirmation prompt block so single-word replies ("Yes", "Ok", "Sure", "Show me") MUST trigger fulfilment of the assistant's last concrete offer, never a re-ask. Add a hard rule: if the previous assistant turn ended with `"Would you like…?"` and the user replies with an affirmation, the next assistant turn cannot be a question.
-
-### Fix 4 — Ad-aware lead alerts to the boss
-
-When a CTWA-sourced lead converts into intent (price asked, availability asked, "I want to buy"), the boss WhatsApp ping includes:
-
-```
-🔥 LEAD from FB ad "Whistling Kettle K720"
-Customer: Diane (+260964349486)
-Spent on this ad so far today: K42 / K100
-Status: asked about delivery
-```
-
-This pulls from `meta_ad_insights_daily` (already exists from the ads work) and closes the loop so you/the client can see which ads convert.
+Append a short rule file `mem://features/customer-media-forwarding.md` documenting:
+- Inbound customer media is stored as arrays on `messages.message_metadata`.
+- The AI has a dedicated `forward_media_to_boss` tool — `notify_boss` is text only.
+- Operators can see all customer-sent media in the chat thread and in the Media Gallery dialog.
 
 ---
 
-## Technical changes
+## Out of scope (intentional)
 
-### Database
-```sql
-ALTER TABLE conversations
-  ADD COLUMN ad_context jsonb,
-  ADD COLUMN ad_referral_id text,
-  ADD COLUMN ctwa_clid text;
-
-CREATE INDEX idx_conversations_ad_referral ON conversations(ad_referral_id) WHERE ad_referral_id IS NOT NULL;
-```
-
-### Edge functions
-- `whatsapp-messages/index.ts` — parse `ReferralHeadline`, `ReferralBody`, `ReferralSourceUrl`, `ReferralSourceId`, `ReferralMediaUrl`, `ReferralNumMedia`, `ReferralCtwaClid` from Twilio form data on first inbound; persist to `conversations.ad_context`.
-- `meta-webhook/index.ts` — same for the WhatsApp Cloud API `referral` object.
-- `whatsapp-messages/index.ts` (prompt builder) — when `conversations.ad_context` is set and the conversation has ≤3 assistant turns, inject the AD CONTEXT block at the top of the system prompt.
-- `whatsapp-messages/index.ts` (output guard) — regex filter on assistant text before send; on hit, log to `ai_error_logs`, retry once with `gemini-2.5-flash`, and if it still fails escalate to boss instead of replying.
-- `whatsapp-messages/index.ts` (burst coalescing) — short Redis-less debounce: if a new message arrives for the same `conversation_id` within 6s of an in-flight run, append to the run's input and abort the earlier reply.
-- `meta-lead-alert/index.ts` — include ad headline + today's ad spend on lead alerts when `conversations.ad_context` is set.
-
-### Config
-- Update `company_ai_overrides` for ANZ: set `primary_model = 'google/gemini-2.5-flash'`, keep current as fallback.
-- Tighten affirmation rule in the system instructions block.
-
-### Memory updates
-- New `mem://features/ctwa-ad-context-injection.md` documenting the referral capture contract.
-- Update `mem://features/contextual-affirmation-handling.md` with the "no re-question after affirmation" hard rule.
+- **Operator → customer** image sending from the chat UI (already exists via `send_media` tool / agent workspace).
+- Re-encoding or thumbnailing — the `conversation-media` bucket is already public and Twilio accepts the URL directly.
+- Changes to `boss-chat` flow: this is one-way customer→boss forwarding, the boss can already reply normally.
 
 ---
 
-## Out of scope for this round
-- Re-trying the 35 already-ghosted leads (we can do a one-off re-engagement campaign separately if you want).
-- Image recognition of the ad image to auto-attach product photo (nice-to-have, later).
-- Ad-spend attribution dashboard in the admin UI (Tier-2 ads UI already shows insights; per-conversation ROI view can be a follow-up).
+## Touch list
 
----
-
-## Expected outcome
-- CTWA ghost rate from ~59% → target <25% within a week of rollout.
-- Zero "tool_calls" / Chinese-character leaks to customers (hard guarantee via output filter).
-- Boss alerts now show *which ad* drove each lead, so you can pause losers and double down on winners.
+- `src/components/conversations/ChatBubble.tsx` — array-aware rendering
+- `src/components/conversations/MediaGallery.tsx` — array-aware extraction
+- `supabase/functions/whatsapp-messages/index.ts` — new tool, prompt rule, handler
+- `mem://features/customer-media-forwarding.md` — new memory file

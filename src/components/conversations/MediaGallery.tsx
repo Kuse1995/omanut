@@ -40,24 +40,31 @@ export const MediaGallery = ({
   const [filter, setFilter] = useState<FilterType>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Extract all media from messages
+  // Extract all media from messages (supports both legacy singular and array shapes)
   const mediaItems = useMemo(() => {
     const items: MediaItem[] = [];
-    
+
     messages.forEach(msg => {
-      const metadata = msg.message_metadata;
-      if (metadata?.media_url && metadata?.media_type) {
+      const metadata = msg.message_metadata || {};
+      const urls: string[] = Array.isArray(metadata.media_urls)
+        ? metadata.media_urls.filter(Boolean)
+        : (metadata.media_url ? [metadata.media_url] : []);
+      const types: string[] = Array.isArray(metadata.media_types)
+        ? metadata.media_types
+        : (metadata.media_type ? [metadata.media_type] : []);
+
+      urls.forEach((url, i) => {
         items.push({
-          id: msg.id,
-          url: metadata.media_url,
-          type: metadata.media_type,
+          id: urls.length > 1 ? `${msg.id}-${i}` : msg.id,
+          url,
+          type: types[i] || 'image/jpeg',
           fileName: metadata.file_name,
           timestamp: msg.created_at,
           sender: msg.role as 'user' | 'assistant'
         });
-      }
+      });
     });
-    
+
     return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [messages]);
 

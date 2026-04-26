@@ -2431,7 +2431,13 @@ You MUST call notify_boss the FIRST time any of these happen, with a clear summa
 
 After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.
 
-⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.`;
+⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.
+
+=== WHEN TO CALL forward_media_to_boss (NOT notify_boss) ===
+If the customer SENT AN IMAGE/PHOTO/VIDEO and is asking about THAT specific item — "do you have this?", "do you stock this brand?", "how much for this one?", "is this in stock?", "do you sell something like this?", "can you fix this?", "does this fit my…?" — you MUST call forward_media_to_boss with a short reason. The owner needs to SEE the product to identify it; a text summary is not enough.
+- forward_media_to_boss is in addition to (not instead of) any normal reply you give the customer ("Let me check with the owner and get right back to you").
+- Use notify_boss only when there is no relevant customer image to forward.
+- If the customer sent multiple images, forward the most relevant one with media_index (defaults to the first).`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
@@ -2968,6 +2974,22 @@ ${supervisorRecommendation.recommendedResponse}
           }
         }
       },
+      forward_media_to_boss: {
+        type: "function",
+        function: {
+          name: "forward_media_to_boss",
+          description: "Forward an image/photo/video the customer just sent to the boss on WhatsApp so the boss can identify the product visually. USE THIS (not notify_boss) whenever the customer sends a product photo and asks if you stock it, the price, fitment, or availability of THAT specific item shown.",
+          parameters: {
+            type: "object",
+            properties: {
+              reason: { type: "string", description: "Why the boss needs to see this image (e.g. 'Customer asking if we stock this exact product')" },
+              caption: { type: "string", description: "Short note for the boss, max 1 sentence (e.g. 'Do we carry this brand?')" },
+              media_index: { type: "number", description: "Index of the customer media to forward when multiple were sent in this turn (0 = first). Defaults to 0." }
+            },
+            required: ["reason"]
+          }
+        }
+      },
       send_media: {
         type: "function",
         function: {
@@ -3411,7 +3433,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     }
 
     // Auto-merge core search & notification tools — these are always safe and required
-    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss'];
+    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss', 'forward_media_to_boss'];
     for (const tool of alwaysEnabledTools) {
       if (!enabledToolNames.includes(tool)) {
         enabledToolNames.push(tool);
@@ -4364,6 +4386,138 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             } catch (error) {
               console.error('[BACKGROUND] Exception in notify_boss:', error);
               toolExecutionContext.push('boss notification exception');
+            }
+          } else if (toolCall.function.name === 'forward_media_to_boss') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[FORWARD-MEDIA] Tool called with:', JSON.stringify(args));
+            try {
+              // 1. Resolve the media URL the AI wants forwarded.
+              const idx = typeof args.media_index === 'number' ? args.media_index : 0;
+              let resolvedUrl: string | null = null;
+              let resolvedType: string | null = null;
+
+              if (storedMediaUrls && storedMediaUrls.length > 0) {
+                resolvedUrl = storedMediaUrls[idx] || storedMediaUrls[0];
+                resolvedType = storedMediaTypes?.[idx] || storedMediaTypes?.[0] || 'image/jpeg';
+              } else {
+                // Fall back to the most recent customer message with media in this conversation.
+                const { data: recent } = await supabase
+                  .from('messages')
+                  .select('message_metadata, created_at')
+                  .eq('conversation_id', conversationId)
+                  .eq('role', 'user')
+                  .order('created_at', { ascending: false })
+                  .limit(8);
+                for (const row of recent || []) {
+                  const md: any = row.message_metadata || {};
+                  const urls: string[] = Array.isArray(md.media_urls) ? md.media_urls.filter(Boolean) : [];
+                  if (urls.length > 0) {
+                    resolvedUrl = urls[Math.min(idx, urls.length - 1)] || urls[0];
+                    resolvedType = (Array.isArray(md.media_types) ? md.media_types[Math.min(idx, urls.length - 1)] : null) || 'image/jpeg';
+                    break;
+                  } else if (md.media_url) {
+                    resolvedUrl = md.media_url;
+                    resolvedType = md.media_type || 'image/jpeg';
+                    break;
+                  }
+                }
+              }
+
+              if (!resolvedUrl) {
+                console.warn('[FORWARD-MEDIA] No customer media found to forward');
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: false, error: 'no_customer_media_found' })
+                });
+                toolExecutionContext.push('forward_media_to_boss: no media to forward');
+                anyToolExecuted = true;
+                continue;
+              }
+
+              // 2. Build the boss-facing message (mirrors sendBossHandoffNotification style + paid-lead block).
+              const lines: string[] = [
+                '📸 Customer sent a photo',
+                '',
+                `Customer: ${conversation.customer_name || 'Unknown'}`,
+                `Phone: ${customerPhone.replace(/^whatsapp:/, '')}`,
+                '',
+                `Reason: ${args.reason}`,
+              ];
+              if (args.caption) lines.push(`Note: ${args.caption}`);
+
+              // Paid-lead enrichment
+              try {
+                const ac: any = (conversation as any)?.ad_context;
+                if (ac && (ac.headline || ac.body || ac.source_id)) {
+                  lines.push('');
+                  lines.push('📢 PAID LEAD (clicked your ad)');
+                  if (ac.headline) lines.push(`Ad: "${String(ac.headline).slice(0, 120)}"`);
+                  if (ac.source_id) lines.push(`Ref: ${ac.source_id}`);
+                  const today = new Date().toISOString().slice(0, 10);
+                  const { data: spendRows } = await supabase
+                    .from('meta_ad_insights_daily')
+                    .select('spend_cents')
+                    .eq('company_id', company.id)
+                    .eq('date', today);
+                  if (spendRows && spendRows.length > 0) {
+                    const totalCents = spendRows.reduce((s: number, r: any) => s + (r.spend_cents || 0), 0);
+                    if (totalCents > 0) lines.push(`Today's ad spend: $${(totalCents / 100).toFixed(2)}`);
+                  }
+                }
+              } catch (e) {
+                console.error('[FORWARD-MEDIA] ad_context enrichment failed:', e);
+              }
+
+              lines.push('');
+              lines.push(`Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`);
+
+              const bossMessage = lines.join('\n');
+
+              // 3. Dispatch via the existing send-boss-notification fn so MMS attachment + fan-out + logging are reused.
+              const { error: notifyErr } = await supabase.functions.invoke('send-boss-notification', {
+                body: {
+                  companyId: company.id,
+                  notificationType: 'action_required',
+                  data: {
+                    action_type: 'customer_image_forward',
+                    priority: 'high',
+                    description: bossMessage,
+                    customer_name: conversation.customer_name || 'Unknown',
+                    customer_phone: customerPhone.replace(/^whatsapp:/, ''),
+                    message: bossMessage,
+                  },
+                  mediaUrl: resolvedUrl,
+                },
+              });
+
+              if (notifyErr) {
+                console.error('[FORWARD-MEDIA] send-boss-notification error:', notifyErr);
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: false, error: 'notification_failed' })
+                });
+                toolExecutionContext.push('forward_media_to_boss: dispatch failed');
+              } else {
+                console.log('[FORWARD-MEDIA] Forwarded to boss:', resolvedUrl);
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: true, forwarded_url: resolvedUrl, media_type: resolvedType })
+                });
+                toolExecutionContext.push(`forward_media_to_boss: image sent to boss (${resolvedType})`);
+              }
+              anyToolExecuted = true;
+            } catch (error) {
+              console.error('[BACKGROUND] Exception in forward_media_to_boss:', error);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ success: false, error: 'exception' })
+              });
+              toolExecutionContext.push('forward_media_to_boss: exception');
+              anyToolExecuted = true;
             }
           } else if (toolCall.function.name === 'deliver_digital_product') {
             const args = JSON.parse(toolCall.function.arguments);
