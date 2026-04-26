@@ -7393,30 +7393,110 @@ serve(async (req) => {
         : 'text'
     };
     
-    await supabase
+    const { data: insertedMsg } = await supabase
       .from('messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
         content: Body || (storedMediaUrls.length > 0 ? 'Sent media' : ''),
         message_metadata: messageMetadata
-      });
+      })
+      .select('id, created_at')
+      .single();
 
-    console.log('User message stored, starting background AI processing');
+    console.log('User message stored, starting burst-coalesced background AI processing');
 
-    // Start background processing - THIS IS THE KEY CHANGE
+    // ─── BURST COALESCING ───
+    // If the user fires off multiple messages in quick succession (typical of
+    // ad-curious customers asking "is this available?", then "what's the price?",
+    // then "where are you?"), we want a single coherent AI reply, not three.
+    // Strategy: wait 6s; if a newer user message arrives in that window, exit
+    // silently — the later invocation will reply for the merged batch.
+    const myInsertedAt = insertedMsg?.created_at;
+    const myMessageId = insertedMsg?.id;
+    const conversationId = conversation.id;
+    const companyId = company.id;
+    const incomingBody = Body;
+    const incomingMediaUrls = storedMediaUrls;
+    const incomingMediaTypes = storedMediaTypes;
+    const incomingPromiseFulfillment = isPromiseFulfillment;
+
     // @ts-ignore - EdgeRuntime is a Deno Deploy global
-    EdgeRuntime.waitUntil(
-      processAIResponse(
-        conversation.id,
-        company.id,
-        Body,
-        storedMediaUrls,
-        storedMediaTypes,
-        customerPhone,
-        isPromiseFulfillment
-      )
-    );
+    EdgeRuntime.waitUntil((async () => {
+      try {
+        // Skip coalescing entirely for promise-fulfillment (urgent) or media-only.
+        const COALESCE_WINDOW_MS = (incomingPromiseFulfillment || incomingMediaUrls.length > 0) ? 0 : 6000;
+
+        if (COALESCE_WINDOW_MS > 0 && myInsertedAt) {
+          await new Promise((r) => setTimeout(r, COALESCE_WINDOW_MS));
+
+          // Did a newer user message arrive in this conversation?
+          const { data: newerUserMsgs } = await supabase
+            .from('messages')
+            .select('id, created_at')
+            .eq('conversation_id', conversationId)
+            .eq('role', 'user')
+            .gt('created_at', myInsertedAt)
+            .limit(1);
+
+          if (newerUserMsgs && newerUserMsgs.length > 0) {
+            console.log(`[BURST-COALESCE] Newer user message detected for conv ${conversationId} — yielding to later invocation`);
+            return;
+          }
+
+          // No newer message — gather all user messages since the last assistant
+          // reply and merge them into a single prompt body.
+          const { data: lastAssistant } = await supabase
+            .from('messages')
+            .select('created_at')
+            .eq('conversation_id', conversationId)
+            .eq('role', 'assistant')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const sinceTs = lastAssistant?.created_at || '1970-01-01T00:00:00Z';
+          const { data: pendingUserMsgs } = await supabase
+            .from('messages')
+            .select('content, created_at')
+            .eq('conversation_id', conversationId)
+            .eq('role', 'user')
+            .gt('created_at', sinceTs)
+            .order('created_at', { ascending: true });
+
+          if (pendingUserMsgs && pendingUserMsgs.length > 1) {
+            const merged = pendingUserMsgs
+              .map((m: any) => (m.content || '').trim())
+              .filter(Boolean)
+              .join('\n');
+            console.log(`[BURST-COALESCE] Merged ${pendingUserMsgs.length} user messages into one prompt for conv ${conversationId}`);
+            await processAIResponse(
+              conversationId,
+              companyId,
+              merged,
+              incomingMediaUrls,
+              incomingMediaTypes,
+              customerPhone,
+              incomingPromiseFulfillment,
+            );
+            return;
+          }
+        }
+
+        // Default path: single message, no coalescing needed.
+        await processAIResponse(
+          conversationId,
+          companyId,
+          incomingBody,
+          incomingMediaUrls,
+          incomingMediaTypes,
+          customerPhone,
+          incomingPromiseFulfillment,
+        );
+      } catch (err) {
+        console.error('[BURST-COALESCE] background error:', err);
+      }
+    })());
 
     // Return empty TwiML response (no immediate message to customer)
     const immediateTwiml = `<?xml version="1.0" encoding="UTF-8"?>
