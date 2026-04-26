@@ -921,6 +921,7 @@ export type Database = {
           voice_style: string | null
           whatsapp_number: string | null
           whatsapp_payment_flow_id: string | null
+          whatsapp_provider: string
           whatsapp_reservation_flow_id: string | null
           whatsapp_voice_enabled: boolean | null
         }
@@ -961,6 +962,7 @@ export type Database = {
           voice_style?: string | null
           whatsapp_number?: string | null
           whatsapp_payment_flow_id?: string | null
+          whatsapp_provider?: string
           whatsapp_reservation_flow_id?: string | null
           whatsapp_voice_enabled?: boolean | null
         }
@@ -1001,6 +1003,7 @@ export type Database = {
           voice_style?: string | null
           whatsapp_number?: string | null
           whatsapp_payment_flow_id?: string | null
+          whatsapp_provider?: string
           whatsapp_reservation_flow_id?: string | null
           whatsapp_voice_enabled?: boolean | null
         }
@@ -1622,6 +1625,59 @@ export type Database = {
             foreignKeyName: "company_users_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_whatsapp_cloud: {
+        Row: {
+          access_token: string
+          business_name: string | null
+          company_id: string
+          connected_via: string
+          created_at: string
+          display_phone_number: string
+          health_status: string
+          last_verified_at: string | null
+          phone_number_id: string
+          updated_at: string
+          waba_id: string
+          webhook_subscribed_at: string | null
+        }
+        Insert: {
+          access_token: string
+          business_name?: string | null
+          company_id: string
+          connected_via?: string
+          created_at?: string
+          display_phone_number: string
+          health_status?: string
+          last_verified_at?: string | null
+          phone_number_id: string
+          updated_at?: string
+          waba_id: string
+          webhook_subscribed_at?: string | null
+        }
+        Update: {
+          access_token?: string
+          business_name?: string | null
+          company_id?: string
+          connected_via?: string
+          created_at?: string
+          display_phone_number?: string
+          health_status?: string
+          last_verified_at?: string | null
+          phone_number_id?: string
+          updated_at?: string
+          waba_id?: string
+          webhook_subscribed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_whatsapp_cloud_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
             referencedRelation: "companies"
             referencedColumns: ["id"]
           },
