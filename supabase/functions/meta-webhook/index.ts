@@ -717,6 +717,7 @@ async function handleMessengerDM(
   pageId: string,
   senderId: string,
   messageText: string,
+  adContext: Record<string, any> | null = null,
 ) {
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
