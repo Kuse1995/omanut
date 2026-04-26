@@ -174,12 +174,13 @@ async function processWebhook(body: any) {
 
               const recipientId = event.recipient?.id;
               const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
+              const referral = normalizeMetaReferral(event.message?.referral || event.referral || null);
 
               try {
                 if (isInstagramDM) {
-                  await handleInstagramDM(supabase, String(linkedIgUserId), senderId, messageText);
+                  await handleInstagramDM(supabase, String(linkedIgUserId), senderId, messageText, referral);
                 } else {
-                  await handleMessengerDM(supabase, pageId, senderId, messageText);
+                  await handleMessengerDM(supabase, pageId, senderId, messageText, referral);
                 }
               } catch (err) {
                 console.error('Error handling message event from changes[]:', err);
@@ -205,23 +206,21 @@ async function processWebhook(body: any) {
           if (senderId === pageId) continue;
 
           // Detect if this is an Instagram-scoped DM arriving through the Page webhook.
-          // Instagram DMs via the Page subscription have the sender ID matching an IG-scoped user.
-          // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
-          // (Instagram messages use the ig_user_id as recipient, not the page_id).
           const recipientId = event.recipient?.id;
           const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
+          const referral = normalizeMetaReferral(event.message?.referral || event.referral || null);
 
           if (isInstagramDM) {
             console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
             try {
-              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText);
+              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText, referral);
             } catch (err) {
               console.error(`Error handling IG DM (via page) from ${senderId}:`, err);
             }
           } else {
             console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
             try {
-              await handleMessengerDM(supabase, pageId, senderId, messageText);
+              await handleMessengerDM(supabase, pageId, senderId, messageText, referral);
             } catch (err) {
               console.error(`Error handling Messenger DM from ${senderId}:`, err);
             }
@@ -539,6 +538,26 @@ async function triggerLeadAlert(
   }
 }
 
+// Normalize a Meta referral object (from messaging.referral or message.referral)
+// into the same shape we store for Twilio CTWA.
+function normalizeMetaReferral(ref: any): Record<string, any> | null {
+  if (!ref || typeof ref !== 'object') return null;
+  const headline = ref.headline || ref.ad_headline || ref.ad?.headline || null;
+  const body = ref.body || ref.ad_body || ref.ad?.body || null;
+  const sourceUrl = ref.source_url || ref.ref || null;
+  const sourceId = ref.ad_id || ref.source_id || ref.ref_ad_id || null;
+  const sourceType = ref.source || ref.type || null;
+  const mediaUrl = ref.image_url || ref.video_url || ref.thumbnail_url || null;
+  const mediaType = ref.video_url ? 'video' : (ref.image_url || ref.thumbnail_url) ? 'image' : null;
+  const ctwaClid = ref.ctwa_clid || ref.click_id || null;
+  if (!headline && !body && !sourceUrl && !sourceId) return null;
+  return {
+    headline, body, source_url: sourceUrl, source_id: sourceId,
+    source_type: sourceType, media_url: mediaUrl, media_type: mediaType,
+    ctwa_clid: ctwaClid,
+  };
+}
+
 // ── Upsert conversation & save messages ──
 async function saveInteraction(
   supabase: any,
@@ -550,10 +569,11 @@ async function saveInteraction(
   aiReply: string,
   userMeta: Record<string, any>,
   replyMeta: Record<string, any>,
+  adContext: Record<string, any> | null = null,
 ) {
   const { data: existingConv } = await supabase
     .from('conversations')
-    .select('id, unread_count')
+    .select('id, unread_count, ad_context')
     .eq('company_id', companyId)
     .eq('phone', phoneKey)
     .limit(1)
@@ -563,13 +583,20 @@ async function saveInteraction(
 
   if (existingConv) {
     conversationId = existingConv.id;
+    const updatePayload: Record<string, any> = {
+      last_message_preview: aiReply.slice(0, 100),
+      unread_count: (existingConv.unread_count || 0) + 1,
+      status: 'active',
+    };
+    // Persist ad_context the first time we see it for this conversation.
+    if (adContext && !existingConv.ad_context) {
+      updatePayload.ad_context = adContext;
+      updatePayload.ad_referral_id = adContext.source_id || null;
+      updatePayload.ctwa_clid = adContext.ctwa_clid || null;
+    }
     await supabase
       .from('conversations')
-      .update({
-        last_message_preview: aiReply.slice(0, 100),
-        unread_count: (existingConv.unread_count || 0) + 1,
-        status: 'active',
-      })
+      .update(updatePayload)
       .eq('id', conversationId);
   } else {
     const { data: newConv } = await supabase
@@ -582,6 +609,9 @@ async function saveInteraction(
         status: 'active',
         last_message_preview: aiReply.slice(0, 100),
         unread_count: 1,
+        ad_context: adContext,
+        ad_referral_id: adContext?.source_id || null,
+        ctwa_clid: adContext?.ctwa_clid || null,
       })
       .select('id')
       .single();
@@ -687,6 +717,7 @@ async function handleMessengerDM(
   pageId: string,
   senderId: string,
   messageText: string,
+  adContext: Record<string, any> | null = null,
 ) {
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
@@ -744,8 +775,9 @@ async function handleMessengerDM(
         'Messenger User',
         messageText,
         aiReply,
-        { source: 'facebook_messenger', sender_id: senderId },
+        { source: 'facebook_messenger', sender_id: senderId, ...(adContext ? { ad_context: adContext } : {}) },
         { source: 'facebook_messenger', message_id: result.message_id },
+        adContext,
       );
     }
   } catch (dbErr) {
@@ -831,6 +863,7 @@ async function handleInstagramDM(
   igUserId: string,
   senderId: string,
   messageText: string,
+  adContext: Record<string, any> | null = null,
 ) {
   console.log(`[IG DM] Received from ${senderId}: "${messageText.slice(0, 80)}" — auto-reply PAUSED (pending Meta App Review)`);
 
@@ -845,7 +878,7 @@ async function handleInstagramDM(
       const phoneKey = `igdm:${senderId}`;
       const { data: existingConv } = await supabase
         .from('conversations')
-        .select('id, unread_count')
+        .select('id, unread_count, ad_context')
         .eq('company_id', companyId)
         .eq('phone', phoneKey)
         .limit(1)
@@ -855,13 +888,19 @@ async function handleInstagramDM(
 
       if (existingConv) {
         conversationId = existingConv.id;
+        const updatePayload: Record<string, any> = {
+          last_message_preview: messageText.slice(0, 100),
+          unread_count: (existingConv.unread_count || 0) + 1,
+          status: 'active',
+        };
+        if (adContext && !existingConv.ad_context) {
+          updatePayload.ad_context = adContext;
+          updatePayload.ad_referral_id = adContext.source_id || null;
+          updatePayload.ctwa_clid = adContext.ctwa_clid || null;
+        }
         await supabase
           .from('conversations')
-          .update({
-            last_message_preview: messageText.slice(0, 100),
-            unread_count: (existingConv.unread_count || 0) + 1,
-            status: 'active',
-          })
+          .update(updatePayload)
           .eq('id', conversationId);
       } else {
         const { data: newConv } = await supabase
@@ -874,6 +913,9 @@ async function handleInstagramDM(
             status: 'active',
             last_message_preview: messageText.slice(0, 100),
             unread_count: 1,
+            ad_context: adContext,
+            ad_referral_id: adContext?.source_id || null,
+            ctwa_clid: adContext?.ctwa_clid || null,
           })
           .select('id')
           .single();
