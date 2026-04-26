@@ -59,7 +59,16 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (sessErr || !session) return jsonError(404, "OAuth session not found");
-    if (session.user_id !== user.id) return jsonError(403, "Session belongs to another user");
+    if (session.user_id !== user.id) {
+      // Global admins may finalize sessions they didn't open (rare, but consistent with exchange step)
+      const { data: adminRole } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .maybeSingle();
+      if (!adminRole) return jsonError(403, "Session belongs to another user");
+    }
     if (new Date(session.expires_at).getTime() < Date.now()) {
       return jsonError(410, "OAuth session expired. Please reconnect Facebook.");
     }
