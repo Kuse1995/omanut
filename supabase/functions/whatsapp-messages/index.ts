@@ -2528,6 +2528,36 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
 
+    // === FACEBOOK AD CONTEXT INJECTION (Click-to-WhatsApp) ===
+    // If the customer arrived via a paid Meta ad and we're still early in the convo,
+    // tell the AI which product they clicked on so it doesn't ask "what would you like info about?"
+    try {
+      if (conversation?.ad_context && (conversation.ad_context as any).headline) {
+        const ac: any = conversation.ad_context;
+        // Count assistant turns so far — only inject for the first ~3 replies
+        const { count: assistantTurnCount } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conversation.id)
+          .eq('role', 'assistant');
+        if ((assistantTurnCount ?? 0) <= 3) {
+          instructions = `\n=== 🔥 AD CONTEXT — CUSTOMER JUST CLICKED YOUR FACEBOOK AD ===\n` +
+            `Headline: ${ac.headline || '(none)'}\n` +
+            (ac.body ? `Body: ${ac.body}\n` : '') +
+            (ac.source_url ? `Source: ${ac.source_url}\n` : '') +
+            (ac.media_url ? `Ad image: ${ac.media_url}\n` : '') +
+            `\nThe automatic message "Hello! Can I get more info on this?" was sent by Meta on the customer's behalf when they tapped the ad.\n` +
+            `→ Open the conversation by referencing THIS PRODUCT specifically (price, key features, photo if you have one in your media library).\n` +
+            `→ DO NOT ask "which product would you like info about?" — you already know.\n` +
+            `→ DO NOT send a generic welcome. Be specific and warm.\n` +
+            `=== END AD CONTEXT ===\n\n` + instructions;
+          console.log('[CTWA-AD] Injected ad context into system prompt:', ac.headline);
+        }
+      }
+    } catch (adCtxErr) {
+      console.error('[CTWA-AD] Failed to inject ad context:', adCtxErr);
+    }
+
     instructions += `\n\nCONVERSATION MEMORY & CONTEXT - CRITICAL:
 - ALWAYS review the conversation history before asking questions
 - If customer already provided name, email, phone, or guest count, EXTRACT IT from conversation
@@ -2535,6 +2565,10 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 - Example: If customer says "John, john@email.com, 3 guests" → you have name, email, and guests
 - If customer provided partial info across multiple messages, extract ALL of it before proceeding
 - The customer's WhatsApp phone number is always available from the conversation
+
+AFFIRMATION HARD RULE — CRITICAL FOR ENTERPRISE CONVERSIONS:
+- If your previous assistant turn ended with an offer ("Would you like…?", "Should I…?", "Want me to send a photo?", "Shall I help you order?"), and the customer replies with a single-word affirmation ("Yes", "Yeah", "Ok", "Sure", "Please", "Send", "Show me", "Go ahead"), you MUST ACT on that offer in this turn. DO NOT re-ask "yes to what?" or pivot to a different question. That is the #1 reason customers ghost.
+- If two customer messages arrive close together (e.g. "Yes" + "Location"), MERGE them into one coherent reply that addresses both — never fire two parallel responses.
 
 AUTOMATIC BOSS NOTIFICATIONS:
 You have access to tools that automatically notify the boss in these situations:
@@ -5932,6 +5966,55 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     // Sanitize: strip any leaked storage URLs/file paths the model may have
     // inlined in its caption. The actual media is delivered as an attachment via send_media.
     assistantReply = stripLeakedMediaUrls(assistantReply);
+
+    // === ENTERPRISE SAFETY FILTER — block raw tool-call / foreign-language leaks ===
+    // Some models (notably Zhipu glm-4.x) occasionally dump raw tool_call JSON or
+    // Chinese tool-call instructions into the customer-facing text. This catches that
+    // before the customer ever sees it. We replace with a safe fallback and log to
+    // ai_error_logs for review. The boss is alerted so they can step in.
+    const leakPatterns: RegExp[] = [
+      /tool_calls\s*[（(]?参数/i,
+      /tool_calls?["']?\s*:\s*\[/i,
+      /\b参数\b.*[（(].*保持.*原语言/i,
+      /^\s*\[\s*\{\s*["']name["']\s*:\s*["']\w+["']\s*,\s*["']arguments["']/i,
+      /\bfunction_call\b\s*:\s*\{/i,
+    ];
+    const leaked = leakPatterns.some((re) => re.test(assistantReply));
+    if (leaked) {
+      console.error('[SAFETY-FILTER] Detected raw tool-call leak in assistant reply, suppressing:', assistantReply.slice(0, 200));
+      try {
+        await supabase.from('ai_error_logs').insert({
+          company_id: company.id,
+          conversation_id: conversationId,
+          error_type: 'tool_call_leak',
+          severity: 'high',
+          status: 'open',
+          original_message: userMessage?.slice(0, 500) || '',
+          ai_response: assistantReply.slice(0, 2000),
+          detected_flags: ['tool_call_leak', 'raw_json', 'foreign_language'],
+          analysis_details: { model: aiOverrides?.primary_model || null, agent: selectedAgent || null },
+        });
+      } catch (logErr) {
+        console.error('[SAFETY-FILTER] Failed to log leak:', logErr);
+      }
+      // Replace with a graceful fallback that doesn't expose internals
+      assistantReply = aiOverrides?.fallback_message?.trim()
+        || "Let me get our team to help you with that — they'll be in touch shortly. 🙏";
+      // Quietly notify boss so a human can take over
+      try {
+        await sendBossHandoffNotification(
+          company,
+          customerPhone,
+          conversation.customer_name || 'Unknown',
+          'AI safety filter triggered (tool-call leak suppressed). Please reply to this customer manually.',
+          supabase,
+          'safety_filter'
+        );
+      } catch (notifyErr) {
+        console.error('[SAFETY-FILTER] Boss notify failed:', notifyErr);
+      }
+    }
+
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
     // ========== FRUSTRATION SIGNAL DETECTION ==========
@@ -6072,6 +6155,38 @@ serve(async (req) => {
       if (mediaUrl && mediaContentType) {
         mediaFiles.push({ url: mediaUrl, contentType: mediaContentType });
       }
+    }
+
+    // === META CLICK-TO-WHATSAPP AD REFERRAL CAPTURE ===
+    // When a customer clicks "Send Message" on a Facebook ad, Twilio forwards the
+    // ad's headline/body/source url/image so the AI can open with product context
+    // instead of a generic "what would you like info about?" reply.
+    const referralHeadline = (formData.get('ReferralHeadline') as string) || '';
+    const referralBody = (formData.get('ReferralBody') as string) || '';
+    const referralSourceUrl = (formData.get('ReferralSourceUrl') as string) || '';
+    const referralSourceId = (formData.get('ReferralSourceId') as string) || '';
+    const referralSourceType = (formData.get('ReferralSourceType') as string) || '';
+    const referralMediaUrl = (formData.get('ReferralMediaUrl') as string) || '';
+    const referralMediaType = (formData.get('ReferralMediaType') as string) || '';
+    const referralCtwaClid = (formData.get('ReferralCtwaClid') as string) || '';
+    const adContextPayload = (referralHeadline || referralBody || referralSourceUrl || referralSourceId)
+      ? {
+          headline: referralHeadline || null,
+          body: referralBody || null,
+          source_url: referralSourceUrl || null,
+          source_id: referralSourceId || null,
+          source_type: referralSourceType || null,
+          media_url: referralMediaUrl || null,
+          media_type: referralMediaType || null,
+          ctwa_clid: referralCtwaClid || null,
+          captured_at: new Date().toISOString(),
+        }
+      : null;
+    if (adContextPayload) {
+      console.log('[CTWA-AD] Inbound from Facebook ad:', JSON.stringify({
+        headline: adContextPayload.headline,
+        source_id: adContextPayload.source_id,
+      }));
     }
 
     // Validate input
@@ -7111,7 +7226,10 @@ serve(async (req) => {
           phone: From,
           status: 'active',
           customer_name: ProfileName || null,
-          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`
+          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`,
+          ad_context: adContextPayload,
+          ad_referral_id: adContextPayload?.source_id || null,
+          ctwa_clid: adContextPayload?.ctwa_clid || null,
         })
         .select()
         .single();
@@ -7134,6 +7252,23 @@ serve(async (req) => {
           .eq('id', conversation.id);
         conversation.customer_name = ProfileName;
         console.log(`[CONVERSATION] 📛 Updated customer name to: ${ProfileName}`);
+      }
+
+      // If the customer arrived via a fresh ad click on an EXISTING conversation
+      // (rare — usually means they re-engaged with a different ad), backfill the
+      // newest ad context so the AI references the right product this turn.
+      if (adContextPayload && !conversation.ad_context) {
+        await supabase
+          .from('conversations')
+          .update({
+            ad_context: adContextPayload,
+            ad_referral_id: adContextPayload.source_id,
+            ctwa_clid: adContextPayload.ctwa_clid,
+          })
+          .eq('id', conversation.id);
+        conversation.ad_context = adContextPayload;
+        conversation.ad_referral_id = adContextPayload.source_id;
+        console.log('[CTWA-AD] Backfilled ad_context onto existing conversation');
       }
     }
 
