@@ -132,3 +132,6 @@ project_id = "dzheddvoiauevcayifev"
   [functions.poll-video-generation]
     timeout = 120
     verify_jwt = false
+  [functions.engagement-watchdog]
+    timeout = 120
+    verify_jwt = false
