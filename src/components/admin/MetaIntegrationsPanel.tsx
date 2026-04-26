@@ -489,16 +489,12 @@ export const MetaIntegrationsPanel = () => {
               </div>
               <Button
                 onClick={startFacebookConnect}
-                disabled={!fbReady || fbConnecting || !selectedCompany?.id || !!fbSdkError}
+                disabled={fbConnecting || !selectedCompany?.id || !metaConfig?.app_id}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 {fbConnecting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
-                  </>
-                ) : !fbReady && !fbSdkError ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading SDK…
                   </>
                 ) : (
                   <>
@@ -509,36 +505,45 @@ export const MetaIntegrationsPanel = () => {
             </CardContent>
           </Card>
 
-          {fbSdkError && (
+          {/* Show the redirect URI the admin needs to whitelist in Meta */}
+          <Card className="border-dashed">
+            <CardContent className="py-4 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground">
+                One-time setup in Meta App Dashboard
+              </p>
+              <p>
+                Add this exact URL under{' '}
+                <span className="font-mono">Facebook Login for Business → Settings → Valid OAuth Redirect URIs</span>:
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
+                  {oauthRedirectUri}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(oauthRedirectUri);
+                    toast.success('Redirect URI copied');
+                  }}
+                >
+                  <Copy className="w-3 h-3" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {fbConfigError && (
             <Card className="border-destructive/40 bg-destructive/5">
-              <CardContent className="py-4 text-sm space-y-2">
+              <CardContent className="py-4 text-sm">
                 <div className="flex items-start gap-2 text-destructive">
                   <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <p className="font-medium">{fbSdkError}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  If the issue persists, the current domain may not be whitelisted in your Meta App.
-                  Add the domain shown below under <span className="font-mono">App settings → Basic → App Domains</span>{' '}
-                  and <span className="font-mono">Facebook Login → Settings → Allowed Domains for the JavaScript SDK</span>.
-                </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
-                    {typeof window !== 'undefined' ? window.location.hostname : ''}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      navigator.clipboard.writeText(window.location.hostname);
-                      toast.success('Domain copied');
-                    }}
-                  >
-                    <Copy className="w-3 h-3" />
-                  </Button>
+                  <p className="font-medium">{fbConfigError}</p>
                 </div>
               </CardContent>
             </Card>
           )}
+
         </>
       ) : (
         <Card className="border-dashed border-yellow-500/50 bg-yellow-500/5">
