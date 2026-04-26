@@ -353,6 +353,75 @@ Be strategic, data-driven, and focus on ${focusAreasText}.`;
         response: JSON.stringify(recommendation)
       });
 
+    // === Auto-escalate to boss when supervisor detects high-value or risk signals ===
+    try {
+      const recText = JSON.stringify(recommendation).toLowerCase();
+      const urgency = (recommendation?.urgency || recommendation?.urgencyLevel || '').toString().toLowerCase();
+      const conversionProb = Number(recommendation?.conversionProbability ?? recommendation?.conversion_probability ?? 0);
+      const distrustHit = /distrust|don'?t trust|scam|legit|credibility|skeptic|suspicious/.test(recText);
+      const churnHit = /churn|leaving|will leave|frustrat|angry|complaint/.test(recText);
+      const buyingHit = /buying signal|ready to buy|purchase intent|wants to purchase|high intent/.test(recText);
+
+      const shouldEscalate =
+        urgency === 'high' || urgency === 'critical' ||
+        conversionProb >= 70 ||
+        distrustHit || churnHit || (buyingHit && conversionProb >= 50);
+
+      if (shouldEscalate && conversationId) {
+        // Dedupe: skip if any non-supervisor boss_conversations row mentions this conversationId in last 30 min
+        const { data: recentAlert } = await supabase
+          .from('boss_conversations')
+          .select('id')
+          .eq('company_id', companyId)
+          .ilike('message_content', `%${conversationId}%`)
+          .neq('message_from', 'supervisor_agent')
+          .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+          .limit(1)
+          .maybeSingle();
+
+        if (!recentAlert) {
+          const reasonTags = [
+            urgency === 'high' || urgency === 'critical' ? 'high_urgency' : null,
+            conversionProb >= 70 ? `conv_${conversionProb}%` : null,
+            distrustHit ? 'distrust' : null,
+            churnHit ? 'churn_risk' : null,
+            buyingHit ? 'buying_signal' : null,
+          ].filter(Boolean).join(', ');
+
+          console.log('[Supervisor] Auto-escalating to boss:', reasonTags);
+
+          const summary = (recommendation?.analysis || recommendation?.summary || '').toString().slice(0, 400);
+          const strategy = (recommendation?.strategy || recommendation?.recommendedResponse || '').toString().slice(0, 300);
+
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId,
+              notificationType: 'high_value_opportunity',
+              data: {
+                customer_name: customerData?.name || 'Unknown',
+                customer_phone: customerPhone || 'unknown',
+                opportunity_type: `Supervisor flagged [${reasonTags}]`,
+                details: `Analysis: ${summary}\n\nSuggested strategy: ${strategy}\n\nLast message: "${(customerMessage || '').slice(0, 200)}"\n\nConv: ${conversationId.slice(0, 8)}`,
+                estimated_value: conversionProb ? `${conversionProb}% conversion` : 'TBD',
+              }
+            }
+          });
+
+          // Marker for dedupe across watchdog + supervisor
+          await supabase.from('boss_conversations').insert({
+            company_id: companyId,
+            message_from: 'system',
+            message_content: `Supervisor auto-alert [${conversationId}]: ${reasonTags}`,
+            response: summary,
+          });
+        } else {
+          console.log('[Supervisor] Skipping auto-escalation — already alerted within 30min');
+        }
+      }
+    } catch (escErr) {
+      console.error('[Supervisor] Auto-escalation failed (non-fatal):', escErr);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
