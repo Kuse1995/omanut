@@ -2968,6 +2968,22 @@ ${supervisorRecommendation.recommendedResponse}
           }
         }
       },
+      forward_media_to_boss: {
+        type: "function",
+        function: {
+          name: "forward_media_to_boss",
+          description: "Forward an image/photo/video the customer just sent to the boss on WhatsApp so the boss can identify the product visually. USE THIS (not notify_boss) whenever the customer sends a product photo and asks if you stock it, the price, fitment, or availability of THAT specific item shown.",
+          parameters: {
+            type: "object",
+            properties: {
+              reason: { type: "string", description: "Why the boss needs to see this image (e.g. 'Customer asking if we stock this exact product')" },
+              caption: { type: "string", description: "Short note for the boss, max 1 sentence (e.g. 'Do we carry this brand?')" },
+              media_index: { type: "number", description: "Index of the customer media to forward when multiple were sent in this turn (0 = first). Defaults to 0." }
+            },
+            required: ["reason"]
+          }
+        }
+      },
       send_media: {
         type: "function",
         function: {
