@@ -192,7 +192,56 @@ serve(async (req) => {
       );
     }
 
-    // Send message via Twilio WhatsApp API
+    // === PROVIDER ROUTING ===
+    // If this company has opted into the direct Meta WhatsApp Cloud API,
+    // delegate to send-whatsapp-cloud. Otherwise fall through to Twilio (default).
+    const { data: companyRow } = await supabase
+      .from('companies')
+      .select('whatsapp_provider')
+      .eq('id', conversation.company_id)
+      .maybeSingle();
+
+    if (companyRow?.whatsapp_provider === 'meta_cloud') {
+      console.log('[send-whatsapp-message] Routing via Meta WhatsApp Cloud for company', conversation.company_id);
+      try {
+        const cloudRes = await fetch(
+          `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-whatsapp-cloud`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              company_id: conversation.company_id,
+              to: conversation.phone,
+              body: message || undefined,
+              media_url: effectiveMediaUrl || undefined,
+            }),
+          }
+        );
+        const cloudJson = await cloudRes.json().catch(() => ({}));
+        if (!cloudRes.ok) {
+          console.error('[send-whatsapp-message] Cloud send failed:', cloudJson);
+          return new Response(
+            JSON.stringify({ error: cloudJson?.error || 'Cloud send failed', meta: cloudJson }),
+            { status: cloudRes.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, provider: 'meta_cloud', message_id: cloudJson?.message_id }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e) {
+        console.error('[send-whatsapp-message] Cloud delegation error:', e);
+        return new Response(
+          JSON.stringify({ error: 'Cloud delegation failed' }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // Send message via Twilio WhatsApp API (default)
     const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
     const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
