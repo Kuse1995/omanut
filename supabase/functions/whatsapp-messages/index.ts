@@ -6074,6 +6074,38 @@ serve(async (req) => {
       }
     }
 
+    // === META CLICK-TO-WHATSAPP AD REFERRAL CAPTURE ===
+    // When a customer clicks "Send Message" on a Facebook ad, Twilio forwards the
+    // ad's headline/body/source url/image so the AI can open with product context
+    // instead of a generic "what would you like info about?" reply.
+    const referralHeadline = (formData.get('ReferralHeadline') as string) || '';
+    const referralBody = (formData.get('ReferralBody') as string) || '';
+    const referralSourceUrl = (formData.get('ReferralSourceUrl') as string) || '';
+    const referralSourceId = (formData.get('ReferralSourceId') as string) || '';
+    const referralSourceType = (formData.get('ReferralSourceType') as string) || '';
+    const referralMediaUrl = (formData.get('ReferralMediaUrl') as string) || '';
+    const referralMediaType = (formData.get('ReferralMediaType') as string) || '';
+    const referralCtwaClid = (formData.get('ReferralCtwaClid') as string) || '';
+    const adContextPayload = (referralHeadline || referralBody || referralSourceUrl || referralSourceId)
+      ? {
+          headline: referralHeadline || null,
+          body: referralBody || null,
+          source_url: referralSourceUrl || null,
+          source_id: referralSourceId || null,
+          source_type: referralSourceType || null,
+          media_url: referralMediaUrl || null,
+          media_type: referralMediaType || null,
+          ctwa_clid: referralCtwaClid || null,
+          captured_at: new Date().toISOString(),
+        }
+      : null;
+    if (adContextPayload) {
+      console.log('[CTWA-AD] Inbound from Facebook ad:', JSON.stringify({
+        headline: adContextPayload.headline,
+        source_id: adContextPayload.source_id,
+      }));
+    }
+
     // Validate input
     const messageSchema = z.object({
       From: z.string().min(1).max(255),
