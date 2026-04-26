@@ -775,8 +775,9 @@ async function handleMessengerDM(
         'Messenger User',
         messageText,
         aiReply,
-        { source: 'facebook_messenger', sender_id: senderId },
+        { source: 'facebook_messenger', sender_id: senderId, ...(adContext ? { ad_context: adContext } : {}) },
         { source: 'facebook_messenger', message_id: result.message_id },
+        adContext,
       );
     }
   } catch (dbErr) {
