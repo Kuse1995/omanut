@@ -11,6 +11,8 @@ interface ChatBubbleProps {
   metadata?: {
     media_url?: string;
     media_type?: string;
+    media_urls?: string[];
+    media_types?: string[];
     file_name?: string;
     source?: string;
     comment_id?: string;
