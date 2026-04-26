@@ -642,6 +642,167 @@ export const MetaIntegrationsPanel = () => {
         )
       )}
 
+      {/* WhatsApp section — direct Meta Cloud, parallel to existing Twilio */}
+      <div className="space-y-3 pt-2">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          WhatsApp
+        </h3>
+
+        {waLoading ? (
+          <p className="text-muted-foreground text-sm">Loading WhatsApp settings…</p>
+        ) : waCloud ? (
+          <Card>
+            <CardContent className="flex items-center justify-between py-4 px-5">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                  <MessageCircle className="w-5 h-5 text-green-600" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-foreground text-sm truncate">
+                      {waCloud.business_name || waCloud.display_phone_number}
+                    </span>
+                    <Badge variant="secondary" className="text-xs">Direct WhatsApp</Badge>
+                    {healthBadge(waCloud.health_status)}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {waCloud.display_phone_number} • Phone ID {waCloud.phone_number_id}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-1 flex-shrink-0">
+                <Button variant="ghost" size="icon" onClick={startWaEdit} title="Edit WhatsApp credentials">
+                  <Edit2 className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => waDeleteMutation.mutate()}
+                  className="text-destructive hover:text-destructive"
+                  title="Disconnect and revert to Twilio"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : !waShowForm ? (
+          <Card>
+            <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-5">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                  <MessageCircle className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Connect WhatsApp directly via Meta</p>
+                  <p className="text-xs text-muted-foreground max-w-md">
+                    Existing clients keep using Twilio — nothing changes. New clients can connect their own
+                    WhatsApp Business number through Meta for lower per-message cost.
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" onClick={() => setWaShowForm(true)}>
+                <Plus className="w-4 h-4 mr-1" /> Add credentials
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {waShowForm && (
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">
+                {waCloud ? 'Edit WhatsApp Cloud credentials' : 'Connect WhatsApp Cloud'}
+              </CardTitle>
+              <CardDescription>
+                Find these values in Meta Business Manager → WhatsApp → API Setup. While set, this company
+                routes outbound WhatsApp through Meta directly instead of Twilio.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>WhatsApp Business Account ID (WABA)</Label>
+                  <Input
+                    placeholder="e.g. 102290129340398"
+                    value={waForm.waba_id}
+                    onChange={(e) => setWaForm({ ...waForm, waba_id: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Phone Number ID</Label>
+                  <Input
+                    placeholder="e.g. 106540352242922"
+                    value={waForm.phone_number_id}
+                    onChange={(e) => setWaForm({ ...waForm, phone_number_id: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Display phone number</Label>
+                  <Input
+                    placeholder="+260 977 123456"
+                    value={waForm.display_phone_number}
+                    onChange={(e) => setWaForm({ ...waForm, display_phone_number: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    Business name <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <Input
+                    placeholder="Shown in admin only"
+                    value={waForm.business_name}
+                    onChange={(e) => setWaForm({ ...waForm, business_name: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>System User access token</Label>
+                <div className="relative">
+                  <Input
+                    type={waShowToken ? 'text' : 'password'}
+                    placeholder="EAA…"
+                    value={waForm.access_token}
+                    onChange={(e) => setWaForm({ ...waForm, access_token: e.target.value })}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setWaShowToken(!waShowToken)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {waShowToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Generate a permanent System User token in Meta Business Manager with the{' '}
+                  <span className="font-mono">whatsapp_business_messaging</span> and{' '}
+                  <span className="font-mono">whatsapp_business_management</span> scopes.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  onClick={() => waSaveMutation.mutate()}
+                  disabled={
+                    !waForm.waba_id ||
+                    !waForm.phone_number_id ||
+                    !waForm.display_phone_number ||
+                    !waForm.access_token ||
+                    waSaveMutation.isPending
+                  }
+                >
+                  <Save className="w-4 h-4 mr-1" />
+                  {waSaveMutation.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button variant="outline" onClick={() => { setWaShowForm(false); setWaShowToken(false); }}>
+                  <X className="w-4 h-4 mr-1" /> Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
       {/* Edit form (used by both edit and Advanced manual add) */}
       {showForm && (
         <Card>
