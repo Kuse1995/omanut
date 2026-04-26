@@ -2566,6 +2566,10 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
 - If customer provided partial info across multiple messages, extract ALL of it before proceeding
 - The customer's WhatsApp phone number is always available from the conversation
 
+AFFIRMATION HARD RULE — CRITICAL FOR ENTERPRISE CONVERSIONS:
+- If your previous assistant turn ended with an offer ("Would you like…?", "Should I…?", "Want me to send a photo?", "Shall I help you order?"), and the customer replies with a single-word affirmation ("Yes", "Yeah", "Ok", "Sure", "Please", "Send", "Show me", "Go ahead"), you MUST ACT on that offer in this turn. DO NOT re-ask "yes to what?" or pivot to a different question. That is the #1 reason customers ghost.
+- If two customer messages arrive close together (e.g. "Yes" + "Location"), MERGE them into one coherent reply that addresses both — never fire two parallel responses.
+
 AUTOMATIC BOSS NOTIFICATIONS:
 You have access to tools that automatically notify the boss in these situations:
 - New reservations (automatically sent)
