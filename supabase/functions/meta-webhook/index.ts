@@ -206,23 +206,21 @@ async function processWebhook(body: any) {
           if (senderId === pageId) continue;
 
           // Detect if this is an Instagram-scoped DM arriving through the Page webhook.
-          // Instagram DMs via the Page subscription have the sender ID matching an IG-scoped user.
-          // We check: does the page have an ig_user_id, and does the recipient differ from the page ID
-          // (Instagram messages use the ig_user_id as recipient, not the page_id).
           const recipientId = event.recipient?.id;
           const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
+          const referral = normalizeMetaReferral(event.message?.referral || event.referral || null);
 
           if (isInstagramDM) {
             console.log(`[meta-webhook] Detected Instagram DM (via page webhook) from ${senderId}: "${messageText.slice(0, 80)}"`);
             try {
-              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText);
+              await handleInstagramDM(supabase, linkedIgUserId, senderId, messageText, referral);
             } catch (err) {
               console.error(`Error handling IG DM (via page) from ${senderId}:`, err);
             }
           } else {
             console.log(`Processing Messenger DM from ${senderId}: "${messageText.slice(0, 80)}"`);
             try {
-              await handleMessengerDM(supabase, pageId, senderId, messageText);
+              await handleMessengerDM(supabase, pageId, senderId, messageText, referral);
             } catch (err) {
               console.error(`Error handling Messenger DM from ${senderId}:`, err);
             }
