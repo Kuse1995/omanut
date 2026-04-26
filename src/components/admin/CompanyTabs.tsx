@@ -6,7 +6,8 @@ import { CompanySettingsPanel } from './CompanySettingsPanel';
 import { BillingPanel } from './BillingPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 import { AIControlPanel } from './AIControlPanel';
-import { MessageSquare, Info, Calendar, Settings, CreditCard, DollarSign, Bot } from 'lucide-react';
+import { AdsPanel } from './AdsPanel';
+import { MessageSquare, Info, Calendar, Settings, CreditCard, DollarSign, Bot, Megaphone } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
 
 export const CompanyTabs = () => {
@@ -64,6 +65,13 @@ export const CompanyTabs = () => {
           <DollarSign className="w-4 h-4 mr-2" />
           Products & Payments
         </TabsTrigger>
+        <TabsTrigger 
+          value="ads" 
+          className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#84CC16] data-[state=active]:bg-transparent px-6 py-4"
+        >
+          <Megaphone className="w-4 h-4 mr-2" />
+          Ads
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="conversations" className="flex-1 m-0">
@@ -98,6 +106,10 @@ export const CompanyTabs = () => {
 
       <TabsContent value="payments" className="flex-1 m-0">
         <PaymentsPanel />
+      </TabsContent>
+
+      <TabsContent value="ads" className="flex-1 m-0">
+        <AdsPanel />
       </TabsContent>
     </Tabs>
   );
