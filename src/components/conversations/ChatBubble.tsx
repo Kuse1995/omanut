@@ -63,22 +63,34 @@ export const ChatBubble = ({
   const isFacebook = metadata?.source === 'facebook';
   const urls = content?.match(URL_REGEX) || [];
 
-  const renderMedia = () => {
-    if (!metadata?.media_url) return null;
+  // Normalize: prefer arrays (inbound WhatsApp/Meta media), fall back to singular legacy fields.
+  const mediaList: Array<{ url: string; type: string }> = (() => {
+    if (!metadata) return [];
+    const urls = Array.isArray(metadata.media_urls) ? metadata.media_urls.filter(Boolean) : [];
+    const types = Array.isArray(metadata.media_types) ? metadata.media_types : [];
+    if (urls.length > 0) {
+      return urls.map((u, i) => ({ url: u, type: types[i] || 'image/jpeg' }));
+    }
+    if (metadata.media_url) {
+      return [{ url: metadata.media_url, type: metadata.media_type || 'image/jpeg' }];
+    }
+    return [];
+  })();
 
-    const mediaType = metadata.media_type || 'image/jpeg';
-    const fileName = metadata.file_name || 'file';
+  const renderSingleMedia = (mediaUrl: string, mediaType: string, idx: number) => {
+    const fileName = metadata?.file_name || `file-${idx + 1}`;
 
     if (mediaType.startsWith('image')) {
       return (
-        <div 
+        <div
+          key={idx}
           className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5 group relative overflow-hidden rounded-lg"
-          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'image/jpeg', fileName)}
+          onClick={() => onMediaClick?.(mediaUrl, mediaType.includes('/') ? mediaType : 'image/jpeg', fileName)}
         >
-          <img 
-            src={metadata.media_url} 
-            alt="Shared" 
-            className="max-w-full rounded-lg max-h-64 object-cover w-full" 
+          <img
+            src={mediaUrl}
+            alt="Shared"
+            className="max-w-full rounded-lg max-h-64 object-cover w-full"
             loading="lazy"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 group-hover:opacity-100 rounded-lg transition-opacity flex items-end justify-center pb-2">
@@ -90,9 +102,10 @@ export const ChatBubble = ({
       );
     } else if (mediaType.startsWith('video')) {
       return (
-        <div 
+        <div
+          key={idx}
           className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
-          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'video/mp4', fileName)}
+          onClick={() => onMediaClick?.(mediaUrl, mediaType.includes('/') ? mediaType : 'video/mp4', fileName)}
         >
           <div className="flex items-center gap-2.5 p-2.5 bg-black/5 rounded-lg border border-black/5">
             <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
@@ -107,9 +120,10 @@ export const ChatBubble = ({
       );
     } else if (mediaType === 'application/pdf' || mediaType === 'pdf') {
       return (
-        <div 
+        <div
+          key={idx}
           className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
-          onClick={() => onMediaClick?.(metadata.media_url!, 'application/pdf', fileName)}
+          onClick={() => onMediaClick?.(mediaUrl, 'application/pdf', fileName)}
         >
           <div className="flex items-center gap-2.5 p-2.5 bg-black/5 rounded-lg border border-black/5">
             <div className="h-8 w-8 rounded-md bg-destructive/10 flex items-center justify-center shrink-0">
@@ -124,9 +138,10 @@ export const ChatBubble = ({
       );
     } else if (mediaType.startsWith('audio')) {
       return (
-        <div 
+        <div
+          key={idx}
           className="cursor-pointer hover:opacity-90 transition-opacity mb-1.5"
-          onClick={() => onMediaClick?.(metadata.media_url!, mediaType.includes('/') ? mediaType : 'audio/mpeg', fileName)}
+          onClick={() => onMediaClick?.(mediaUrl, mediaType.includes('/') ? mediaType : 'audio/mpeg', fileName)}
         >
           <div className="flex items-center gap-2.5 p-2.5 bg-black/5 rounded-lg border border-black/5">
             <div className="h-8 w-8 rounded-md bg-accent/10 flex items-center justify-center shrink-0">
@@ -142,6 +157,11 @@ export const ChatBubble = ({
     }
 
     return null;
+  };
+
+  const renderMedia = () => {
+    if (mediaList.length === 0) return null;
+    return <>{mediaList.map((m, i) => renderSingleMedia(m.url, m.type, i))}</>;
   };
 
   const getBorderRadius = () => {
