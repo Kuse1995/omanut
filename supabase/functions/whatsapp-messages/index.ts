@@ -6311,19 +6311,38 @@ serve(async (req) => {
     if (contentType.includes('application/json')) {
       let jsonBody: any;
       try { jsonBody = await req.json(); } catch { jsonBody = {}; }
-      if (!jsonBody?.isPromiseFulfillment) {
-        console.log('[SKIP] Non-promise JSON request');
+
+      // Two JSON entry modes:
+      //   1. Promise-fulfillment re-entry (from pending-promise-watchdog)
+      //   2. Meta WhatsApp Cloud inbound bridge (from meta-webhook)
+      const isCloudInbound = jsonBody?.source === 'meta_cloud_webhook';
+
+      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound) {
+        console.log('[SKIP] Non-promise / non-cloud JSON request');
         return new Response('OK', { status: 200, headers: corsHeaders });
       }
-      isPromiseFulfillment = true;
-      const origQ = jsonBody.Body || jsonBody.original_question || '';
-      console.log('[PROMISE-FULFILL] Re-entry From=', jsonBody.From, 'To=', jsonBody.To, 'q=', origQ.slice(0, 80));
+
+      if (isCloudInbound) {
+        console.log('[CLOUD-INBOUND] From=', jsonBody.From, 'To=', jsonBody.To, 'q=', String(jsonBody.Body || '').slice(0, 80));
+      } else {
+        isPromiseFulfillment = true;
+        const origQ = jsonBody.Body || jsonBody.original_question || '';
+        console.log('[PROMISE-FULFILL] Re-entry From=', jsonBody.From, 'To=', jsonBody.To, 'q=', origQ.slice(0, 80));
+      }
+
       formData = new FormData();
       formData.append('From', jsonBody.From || '');
       formData.append('To', jsonBody.To || '');
-      formData.append('Body', origQ);
+      formData.append('Body', jsonBody.Body || jsonBody.original_question || '');
       formData.append('ProfileName', jsonBody.ProfileName || '');
-      formData.append('NumMedia', '0');
+      formData.append('NumMedia', String(jsonBody.NumMedia ?? 0));
+
+      // Forward any Cloud media entries
+      const mediaList: Array<{ url: string; contentType: string }> = Array.isArray(jsonBody.media) ? jsonBody.media : [];
+      mediaList.forEach((m, i) => {
+        if (m?.url) formData.append(`MediaUrl${i}`, m.url);
+        if (m?.contentType) formData.append(`MediaContentType${i}`, m.contentType);
+      });
     } else {
       if (!contentType.includes('form') && req.method === 'POST') {
         console.log('[SKIP] Non-form-data request, content-type:', contentType);
