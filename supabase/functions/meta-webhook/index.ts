@@ -878,7 +878,7 @@ async function handleInstagramDM(
       const phoneKey = `igdm:${senderId}`;
       const { data: existingConv } = await supabase
         .from('conversations')
-        .select('id, unread_count')
+        .select('id, unread_count, ad_context')
         .eq('company_id', companyId)
         .eq('phone', phoneKey)
         .limit(1)
@@ -888,13 +888,19 @@ async function handleInstagramDM(
 
       if (existingConv) {
         conversationId = existingConv.id;
+        const updatePayload: Record<string, any> = {
+          last_message_preview: messageText.slice(0, 100),
+          unread_count: (existingConv.unread_count || 0) + 1,
+          status: 'active',
+        };
+        if (adContext && !existingConv.ad_context) {
+          updatePayload.ad_context = adContext;
+          updatePayload.ad_referral_id = adContext.source_id || null;
+          updatePayload.ctwa_clid = adContext.ctwa_clid || null;
+        }
         await supabase
           .from('conversations')
-          .update({
-            last_message_preview: messageText.slice(0, 100),
-            unread_count: (existingConv.unread_count || 0) + 1,
-            status: 'active',
-          })
+          .update(updatePayload)
           .eq('id', conversationId);
       } else {
         const { data: newConv } = await supabase
@@ -907,6 +913,9 @@ async function handleInstagramDM(
             status: 'active',
             last_message_preview: messageText.slice(0, 100),
             unread_count: 1,
+            ad_context: adContext,
+            ad_referral_id: adContext?.source_id || null,
+            ctwa_clid: adContext?.ctwa_clid || null,
           })
           .select('id')
           .single();
