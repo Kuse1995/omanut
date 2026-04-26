@@ -2645,10 +2645,15 @@ export type Database = {
           ad_account_id: string | null
           ai_system_prompt: string | null
           company_id: string | null
+          connected_via: string
           created_at: string | null
+          health_status: string
           id: string
           ig_user_id: string | null
+          last_verified_at: string | null
           page_id: string
+          page_name: string | null
+          page_picture_url: string | null
           platform: string
           updated_at: string | null
           user_id: string
@@ -2658,10 +2663,15 @@ export type Database = {
           ad_account_id?: string | null
           ai_system_prompt?: string | null
           company_id?: string | null
+          connected_via?: string
           created_at?: string | null
+          health_status?: string
           id?: string
           ig_user_id?: string | null
+          last_verified_at?: string | null
           page_id: string
+          page_name?: string | null
+          page_picture_url?: string | null
           platform: string
           updated_at?: string | null
           user_id: string
@@ -2671,10 +2681,15 @@ export type Database = {
           ad_account_id?: string | null
           ai_system_prompt?: string | null
           company_id?: string | null
+          connected_via?: string
           created_at?: string | null
+          health_status?: string
           id?: string
           ig_user_id?: string | null
+          last_verified_at?: string | null
           page_id?: string
+          page_name?: string | null
+          page_picture_url?: string | null
           platform?: string
           updated_at?: string | null
           user_id?: string
@@ -2688,6 +2703,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      meta_oauth_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          pages: Json
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          pages?: Json
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          pages?: Json
+          user_id?: string
+        }
+        Relationships: []
       }
       onboarding_sessions: {
         Row: {
