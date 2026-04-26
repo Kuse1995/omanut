@@ -155,46 +155,87 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const startFacebookConnect = useCallback(() => {
-    if (!fbReady || !window.FB || !selectedCompany?.id) return;
+    if (!fbReady || !window.FB || !selectedCompany?.id) {
+      console.warn('[MetaPanel] Connect clicked but not ready', {
+        fbReady,
+        hasFB: !!window.FB,
+        hasCompany: !!selectedCompany?.id,
+      });
+      return;
+    }
     setFbConnecting(true);
 
     const loginOpts: Record<string, unknown> = {
       scope:
         'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,pages_manage_posts,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,business_management',
+      return_scopes: true,
     };
     if (metaConfig?.config_id) {
       loginOpts.config_id = metaConfig.config_id;
     }
 
-    window.FB.login(async (resp) => {
-      if (!resp.authResponse?.accessToken) {
+    // 90s safety net — if the popup is closed/blocked and FB never calls back, free the UI
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
         setFbConnecting(false);
-        toast.error('Facebook login was cancelled');
-        return;
+        toast.error(
+          'Facebook login window timed out. If a popup was blocked, allow popups for this site and try again.'
+        );
       }
-      try {
-        const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
-          body: {
-            short_lived_token: resp.authResponse.accessToken,
-            company_id: selectedCompany.id,
-          },
-        });
-        if (error) throw error;
-        if (!data?.pages?.length) {
-          toast.error('No Facebook Pages were found on this account');
+    }, 90000);
+
+    try {
+      window.FB.login(async (resp) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        console.log('[MetaPanel] FB.login response', { status: resp.status });
+
+        if (!resp.authResponse?.accessToken) {
+          setFbConnecting(false);
+          if (resp.status === 'not_authorized') {
+            toast.error('You declined the permissions required to connect.');
+          } else if (resp.status === 'unknown') {
+            toast.error(
+              'Facebook login was cancelled or blocked. Make sure popups are allowed and this domain is whitelisted in the Meta App.'
+            );
+          } else {
+            toast.error('Facebook login was cancelled');
+          }
           return;
         }
-        setDiscoveredPages(data.pages);
-        setSessionId(data.session_id);
-        setSelectedPageIds(data.pages.map((p: { id: string }) => p.id));
-        setPickerOpen(true);
-      } catch (err) {
-        console.error(err);
-        toast.error(err instanceof Error ? err.message : 'Failed to load your Pages');
-      } finally {
-        setFbConnecting(false);
-      }
-    }, loginOpts);
+        try {
+          const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
+            body: {
+              short_lived_token: resp.authResponse.accessToken,
+              company_id: selectedCompany.id,
+            },
+          });
+          if (error) throw error;
+          if (!data?.pages?.length) {
+            toast.error('No Facebook Pages were found on this account');
+            return;
+          }
+          setDiscoveredPages(data.pages);
+          setSessionId(data.session_id);
+          setSelectedPageIds(data.pages.map((p: { id: string }) => p.id));
+          setPickerOpen(true);
+        } catch (err) {
+          console.error('[MetaPanel] meta-oauth-exchange failed', err);
+          toast.error(err instanceof Error ? err.message : 'Failed to load your Pages');
+        } finally {
+          setFbConnecting(false);
+        }
+      }, loginOpts);
+    } catch (e) {
+      settled = true;
+      window.clearTimeout(timeoutId);
+      setFbConnecting(false);
+      console.error('[MetaPanel] FB.login threw', e);
+      toast.error('Failed to open Facebook login window');
+    }
   }, [fbReady, selectedCompany?.id, metaConfig?.config_id]);
 
   const confirmConnect = async () => {
