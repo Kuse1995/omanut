@@ -383,41 +383,83 @@ export const MetaIntegrationsPanel = () => {
 
       {/* Primary CTA */}
       {metaConfig?.configured ? (
-        <Card>
-          <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Facebook className="w-5 h-5 text-blue-500" />
+        <>
+          <Card>
+            <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <Facebook className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Connect with Facebook</p>
+                  <p className="text-xs text-muted-foreground">
+                    We'll auto-detect your Pages, Instagram accounts, and set up webhooks.
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-medium text-foreground">Connect with Facebook</p>
+              <Button
+                onClick={startFacebookConnect}
+                disabled={!fbReady || fbConnecting || !selectedCompany?.id || !!fbSdkError}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {fbConnecting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
+                  </>
+                ) : !fbReady && !fbSdkError ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading SDK…
+                  </>
+                ) : (
+                  <>
+                    <Facebook className="w-4 h-4 mr-2" /> Connect Facebook & Instagram
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {fbSdkError && (
+            <Card className="border-destructive/40 bg-destructive/5">
+              <CardContent className="py-4 text-sm space-y-2">
+                <div className="flex items-start gap-2 text-destructive">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <p className="font-medium">{fbSdkError}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  We'll auto-detect your Pages, Instagram accounts, and set up webhooks.
+                  If the issue persists, the current domain may not be whitelisted in your Meta App.
+                  Add the domain shown below under <span className="font-mono">App settings → Basic → App Domains</span>{' '}
+                  and <span className="font-mono">Facebook Login → Settings → Allowed Domains for the JavaScript SDK</span>.
                 </p>
-              </div>
-            </div>
-            <Button
-              onClick={startFacebookConnect}
-              disabled={!fbReady || fbConnecting || !selectedCompany?.id}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {fbConnecting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
-                </>
-              ) : (
-                <>
-                  <Facebook className="w-4 h-4 mr-2" /> Connect Facebook & Instagram
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
+                <div className="flex items-center gap-2 mt-2">
+                  <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
+                    {typeof window !== 'undefined' ? window.location.hostname : ''}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.hostname);
+                      toast.success('Domain copied');
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       ) : (
         <Card className="border-dashed border-yellow-500/50 bg-yellow-500/5">
-          <CardContent className="py-4 text-sm text-muted-foreground">
-            One-click Facebook connect is not configured yet. Use the manual option below for now,
-            or contact your administrator to enable Meta App credentials.
+          <CardContent className="py-4 text-sm text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground">Meta App not configured</p>
+            <p>
+              The platform's Meta App ID isn't set yet, so one-click Facebook connect is unavailable.
+              Use the manual option below, or ask your administrator to add{' '}
+              <span className="font-mono">META_APP_ID</span> and{' '}
+              <span className="font-mono">META_CONFIG_ID</span> in backend settings.
+            </p>
           </CardContent>
         </Card>
       )}
