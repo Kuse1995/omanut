@@ -2435,9 +2435,205 @@ export type Database = {
         }
         Relationships: []
       }
+      meta_ad_audit_log: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          after_state: Json | null
+          before_state: Json | null
+          campaign_id: string | null
+          company_id: string
+          created_at: string
+          id: string
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          after_state?: Json | null
+          before_state?: Json | null
+          campaign_id?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          after_state?: Json | null
+          before_state?: Json | null
+          campaign_id?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_ad_audit_log_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "meta_ad_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_ad_audit_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meta_ad_campaigns: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          creative_payload: Json
+          credential_id: string
+          currency: string
+          daily_budget_cents: number | null
+          end_at: string | null
+          id: string
+          last_error: string | null
+          lifetime_budget_cents: number | null
+          meta_ad_id: string | null
+          meta_adset_id: string | null
+          meta_campaign_id: string | null
+          meta_creative_id: string | null
+          name: string
+          objective: string
+          start_at: string | null
+          status: string
+          targeting: Json
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          creative_payload?: Json
+          credential_id: string
+          currency?: string
+          daily_budget_cents?: number | null
+          end_at?: string | null
+          id?: string
+          last_error?: string | null
+          lifetime_budget_cents?: number | null
+          meta_ad_id?: string | null
+          meta_adset_id?: string | null
+          meta_campaign_id?: string | null
+          meta_creative_id?: string | null
+          name: string
+          objective: string
+          start_at?: string | null
+          status?: string
+          targeting?: Json
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          creative_payload?: Json
+          credential_id?: string
+          currency?: string
+          daily_budget_cents?: number | null
+          end_at?: string | null
+          id?: string
+          last_error?: string | null
+          lifetime_budget_cents?: number | null
+          meta_ad_id?: string | null
+          meta_adset_id?: string | null
+          meta_campaign_id?: string | null
+          meta_creative_id?: string | null
+          name?: string
+          objective?: string
+          start_at?: string | null
+          status?: string
+          targeting?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_ad_campaigns_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_ad_campaigns_credential_id_fkey"
+            columns: ["credential_id"]
+            isOneToOne: false
+            referencedRelation: "meta_credentials"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meta_ad_insights_daily: {
+        Row: {
+          campaign_id: string
+          clicks: number
+          company_id: string
+          cost_per_result_cents: number | null
+          created_at: string
+          date: string
+          id: string
+          impressions: number
+          raw: Json | null
+          reach: number
+          results: number
+          spend_cents: number
+        }
+        Insert: {
+          campaign_id: string
+          clicks?: number
+          company_id: string
+          cost_per_result_cents?: number | null
+          created_at?: string
+          date: string
+          id?: string
+          impressions?: number
+          raw?: Json | null
+          reach?: number
+          results?: number
+          spend_cents?: number
+        }
+        Update: {
+          campaign_id?: string
+          clicks?: number
+          company_id?: string
+          cost_per_result_cents?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          impressions?: number
+          raw?: Json | null
+          reach?: number
+          results?: number
+          spend_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_ad_insights_daily_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "meta_ad_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_ad_insights_daily_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meta_credentials: {
         Row: {
           access_token: string
+          ad_account_id: string | null
           ai_system_prompt: string | null
           company_id: string | null
           created_at: string | null
@@ -2450,6 +2646,7 @@ export type Database = {
         }
         Insert: {
           access_token: string
+          ad_account_id?: string | null
           ai_system_prompt?: string | null
           company_id?: string | null
           created_at?: string | null
@@ -2462,6 +2659,7 @@ export type Database = {
         }
         Update: {
           access_token?: string
+          ad_account_id?: string | null
           ai_system_prompt?: string | null
           company_id?: string | null
           created_at?: string | null
@@ -3405,6 +3603,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_company_owner: { Args: { _company_id: string }; Returns: boolean }
       match_conversations: {
         Args: {
           match_company_id: string
