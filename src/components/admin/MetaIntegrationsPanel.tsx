@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
 
 interface MetaCredential {
@@ -57,6 +57,7 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const [fbReady, setFbReady] = useState(false);
+  const [fbSdkError, setFbSdkError] = useState<string | null>(null);
   const [fbConnecting, setFbConnecting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState<
@@ -82,21 +83,60 @@ export const MetaIntegrationsPanel = () => {
       setFbReady(true);
       return;
     }
+    let timeoutId: number | undefined;
+    let settled = false;
+
     window.fbAsyncInit = () => {
-      window.FB!.init({
-        appId: metaConfig.app_id,
-        cookie: true,
-        xfbml: false,
-        version: 'v19.0',
-      });
-      setFbReady(true);
+      try {
+        window.FB!.init({
+          appId: metaConfig.app_id!,
+          cookie: true,
+          xfbml: false,
+          version: 'v19.0',
+        });
+        settled = true;
+        if (timeoutId) window.clearTimeout(timeoutId);
+        setFbReady(true);
+        setFbSdkError(null);
+      } catch (e) {
+        console.error('[MetaPanel] FB.init failed', e);
+        setFbSdkError('Facebook SDK failed to initialize. Refresh the page.');
+      }
     };
-    const script = document.createElement('script');
-    script.src = 'https://connect.facebook.net/en_US/sdk.js';
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = 'anonymous';
-    document.body.appendChild(script);
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src*="connect.facebook.net"]'
+    );
+    if (existing) {
+      // Script already present (e.g. hot reload) — just wait for init
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://connect.facebook.net/en_US/sdk.js';
+      script.async = true;
+      script.defer = true;
+      script.crossOrigin = 'anonymous';
+      script.onerror = () => {
+        console.error('[MetaPanel] Failed to load Facebook SDK script');
+        setFbSdkError(
+          "Couldn't load the Facebook SDK. Disable ad blockers / privacy extensions and reload."
+        );
+      };
+      document.body.appendChild(script);
+    }
+
+    // 10s safety net — if init never fires, surface a clear error
+    timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        console.warn('[MetaPanel] FB SDK init timed out after 10s');
+        setFbSdkError(
+          'Facebook SDK took too long to load. Check your network or ad blockers and reload.'
+        );
+      }
+    }, 10000);
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, [metaConfig?.app_id]);
 
   const { data: credentials, isLoading } = useQuery({
@@ -115,46 +155,87 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const startFacebookConnect = useCallback(() => {
-    if (!fbReady || !window.FB || !selectedCompany?.id) return;
+    if (!fbReady || !window.FB || !selectedCompany?.id) {
+      console.warn('[MetaPanel] Connect clicked but not ready', {
+        fbReady,
+        hasFB: !!window.FB,
+        hasCompany: !!selectedCompany?.id,
+      });
+      return;
+    }
     setFbConnecting(true);
 
     const loginOpts: Record<string, unknown> = {
       scope:
         'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,pages_manage_posts,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,business_management',
+      return_scopes: true,
     };
     if (metaConfig?.config_id) {
       loginOpts.config_id = metaConfig.config_id;
     }
 
-    window.FB.login(async (resp) => {
-      if (!resp.authResponse?.accessToken) {
+    // 90s safety net — if the popup is closed/blocked and FB never calls back, free the UI
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
         setFbConnecting(false);
-        toast.error('Facebook login was cancelled');
-        return;
+        toast.error(
+          'Facebook login window timed out. If a popup was blocked, allow popups for this site and try again.'
+        );
       }
-      try {
-        const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
-          body: {
-            short_lived_token: resp.authResponse.accessToken,
-            company_id: selectedCompany.id,
-          },
-        });
-        if (error) throw error;
-        if (!data?.pages?.length) {
-          toast.error('No Facebook Pages were found on this account');
+    }, 90000);
+
+    try {
+      window.FB.login(async (resp) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        console.log('[MetaPanel] FB.login response', { status: resp.status });
+
+        if (!resp.authResponse?.accessToken) {
+          setFbConnecting(false);
+          if (resp.status === 'not_authorized') {
+            toast.error('You declined the permissions required to connect.');
+          } else if (resp.status === 'unknown') {
+            toast.error(
+              'Facebook login was cancelled or blocked. Make sure popups are allowed and this domain is whitelisted in the Meta App.'
+            );
+          } else {
+            toast.error('Facebook login was cancelled');
+          }
           return;
         }
-        setDiscoveredPages(data.pages);
-        setSessionId(data.session_id);
-        setSelectedPageIds(data.pages.map((p: { id: string }) => p.id));
-        setPickerOpen(true);
-      } catch (err) {
-        console.error(err);
-        toast.error(err instanceof Error ? err.message : 'Failed to load your Pages');
-      } finally {
-        setFbConnecting(false);
-      }
-    }, loginOpts);
+        try {
+          const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
+            body: {
+              short_lived_token: resp.authResponse.accessToken,
+              company_id: selectedCompany.id,
+            },
+          });
+          if (error) throw error;
+          if (!data?.pages?.length) {
+            toast.error('No Facebook Pages were found on this account');
+            return;
+          }
+          setDiscoveredPages(data.pages);
+          setSessionId(data.session_id);
+          setSelectedPageIds(data.pages.map((p: { id: string }) => p.id));
+          setPickerOpen(true);
+        } catch (err) {
+          console.error('[MetaPanel] meta-oauth-exchange failed', err);
+          toast.error(err instanceof Error ? err.message : 'Failed to load your Pages');
+        } finally {
+          setFbConnecting(false);
+        }
+      }, loginOpts);
+    } catch (e) {
+      settled = true;
+      window.clearTimeout(timeoutId);
+      setFbConnecting(false);
+      console.error('[MetaPanel] FB.login threw', e);
+      toast.error('Failed to open Facebook login window');
+    }
   }, [fbReady, selectedCompany?.id, metaConfig?.config_id]);
 
   const confirmConnect = async () => {
@@ -302,41 +383,83 @@ export const MetaIntegrationsPanel = () => {
 
       {/* Primary CTA */}
       {metaConfig?.configured ? (
-        <Card>
-          <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <Facebook className="w-5 h-5 text-blue-500" />
+        <>
+          <Card>
+            <CardContent className="flex flex-col sm:flex-row items-center justify-between gap-4 py-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <Facebook className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">Connect with Facebook</p>
+                  <p className="text-xs text-muted-foreground">
+                    We'll auto-detect your Pages, Instagram accounts, and set up webhooks.
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="font-medium text-foreground">Connect with Facebook</p>
+              <Button
+                onClick={startFacebookConnect}
+                disabled={!fbReady || fbConnecting || !selectedCompany?.id || !!fbSdkError}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {fbConnecting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
+                  </>
+                ) : !fbReady && !fbSdkError ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading SDK…
+                  </>
+                ) : (
+                  <>
+                    <Facebook className="w-4 h-4 mr-2" /> Connect Facebook & Instagram
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {fbSdkError && (
+            <Card className="border-destructive/40 bg-destructive/5">
+              <CardContent className="py-4 text-sm space-y-2">
+                <div className="flex items-start gap-2 text-destructive">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <p className="font-medium">{fbSdkError}</p>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  We'll auto-detect your Pages, Instagram accounts, and set up webhooks.
+                  If the issue persists, the current domain may not be whitelisted in your Meta App.
+                  Add the domain shown below under <span className="font-mono">App settings → Basic → App Domains</span>{' '}
+                  and <span className="font-mono">Facebook Login → Settings → Allowed Domains for the JavaScript SDK</span>.
                 </p>
-              </div>
-            </div>
-            <Button
-              onClick={startFacebookConnect}
-              disabled={!fbReady || fbConnecting || !selectedCompany?.id}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {fbConnecting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
-                </>
-              ) : (
-                <>
-                  <Facebook className="w-4 h-4 mr-2" /> Connect Facebook & Instagram
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
+                <div className="flex items-center gap-2 mt-2">
+                  <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
+                    {typeof window !== 'undefined' ? window.location.hostname : ''}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.hostname);
+                      toast.success('Domain copied');
+                    }}
+                  >
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       ) : (
         <Card className="border-dashed border-yellow-500/50 bg-yellow-500/5">
-          <CardContent className="py-4 text-sm text-muted-foreground">
-            One-click Facebook connect is not configured yet. Use the manual option below for now,
-            or contact your administrator to enable Meta App credentials.
+          <CardContent className="py-4 text-sm text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground">Meta App not configured</p>
+            <p>
+              The platform's Meta App ID isn't set yet, so one-click Facebook connect is unavailable.
+              Use the manual option below, or ask your administrator to add{' '}
+              <span className="font-mono">META_APP_ID</span> and{' '}
+              <span className="font-mono">META_CONFIG_ID</span> in backend settings.
+            </p>
           </CardContent>
         </Card>
       )}
