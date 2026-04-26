@@ -257,6 +257,7 @@ export const MetaIntegrationsPanel = () => {
     setWaShowForm(true);
   };
 
+  const startFacebookConnect = useCallback(() => {
     if (!fbReady || !window.FB || !selectedCompany?.id) {
       console.warn('[MetaPanel] Connect clicked but not ready', {
         fbReady,
