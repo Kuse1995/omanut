@@ -5966,6 +5966,55 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
     // Sanitize: strip any leaked storage URLs/file paths the model may have
     // inlined in its caption. The actual media is delivered as an attachment via send_media.
     assistantReply = stripLeakedMediaUrls(assistantReply);
+
+    // === ENTERPRISE SAFETY FILTER — block raw tool-call / foreign-language leaks ===
+    // Some models (notably Zhipu glm-4.x) occasionally dump raw tool_call JSON or
+    // Chinese tool-call instructions into the customer-facing text. This catches that
+    // before the customer ever sees it. We replace with a safe fallback and log to
+    // ai_error_logs for review. The boss is alerted so they can step in.
+    const leakPatterns: RegExp[] = [
+      /tool_calls\s*[（(]?参数/i,
+      /tool_calls?["']?\s*:\s*\[/i,
+      /\b参数\b.*[（(].*保持.*原语言/i,
+      /^\s*\[\s*\{\s*["']name["']\s*:\s*["']\w+["']\s*,\s*["']arguments["']/i,
+      /\bfunction_call\b\s*:\s*\{/i,
+    ];
+    const leaked = leakPatterns.some((re) => re.test(assistantReply));
+    if (leaked) {
+      console.error('[SAFETY-FILTER] Detected raw tool-call leak in assistant reply, suppressing:', assistantReply.slice(0, 200));
+      try {
+        await supabase.from('ai_error_logs').insert({
+          company_id: company.id,
+          conversation_id: conversationId,
+          error_type: 'tool_call_leak',
+          severity: 'high',
+          status: 'open',
+          original_message: userMessage?.slice(0, 500) || '',
+          ai_response: assistantReply.slice(0, 2000),
+          detected_flags: ['tool_call_leak', 'raw_json', 'foreign_language'],
+          analysis_details: { model: aiOverrides?.primary_model || null, agent: selectedAgent || null },
+        });
+      } catch (logErr) {
+        console.error('[SAFETY-FILTER] Failed to log leak:', logErr);
+      }
+      // Replace with a graceful fallback that doesn't expose internals
+      assistantReply = aiOverrides?.fallback_message?.trim()
+        || "Let me get our team to help you with that — they'll be in touch shortly. 🙏";
+      // Quietly notify boss so a human can take over
+      try {
+        await sendBossHandoffNotification(
+          company,
+          customerPhone,
+          conversation.customer_name || 'Unknown',
+          'AI safety filter triggered (tool-call leak suppressed). Please reply to this customer manually.',
+          supabase,
+          'safety_filter'
+        );
+      } catch (notifyErr) {
+        console.error('[SAFETY-FILTER] Boss notify failed:', notifyErr);
+      }
+    }
+
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
     // ========== FRUSTRATION SIGNAL DETECTION ==========
