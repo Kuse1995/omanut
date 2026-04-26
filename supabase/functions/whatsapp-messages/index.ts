@@ -2431,7 +2431,13 @@ You MUST call notify_boss the FIRST time any of these happen, with a clear summa
 
 After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.
 
-⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.`;
+⚠️ CRITICAL: Purchase intent (#1 above) is the most expensive signal to miss. When in doubt, call notify_boss. The owner can always mute. A missed lead is lost revenue.
+
+=== WHEN TO CALL forward_media_to_boss (NOT notify_boss) ===
+If the customer SENT AN IMAGE/PHOTO/VIDEO and is asking about THAT specific item — "do you have this?", "do you stock this brand?", "how much for this one?", "is this in stock?", "do you sell something like this?", "can you fix this?", "does this fit my…?" — you MUST call forward_media_to_boss with a short reason. The owner needs to SEE the product to identify it; a text summary is not enough.
+- forward_media_to_boss is in addition to (not instead of) any normal reply you give the customer ("Let me check with the owner and get right back to you").
+- Use notify_boss only when there is no relevant customer image to forward.
+- If the customer sent multiple images, forward the most relevant one with media_index (defaults to the first).`;
 
     // Add business-type-specific behavioral rules
     if (isSchool) {
