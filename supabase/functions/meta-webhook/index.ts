@@ -539,6 +539,26 @@ async function triggerLeadAlert(
   }
 }
 
+// Normalize a Meta referral object (from messaging.referral or message.referral)
+// into the same shape we store for Twilio CTWA.
+function normalizeMetaReferral(ref: any): Record<string, any> | null {
+  if (!ref || typeof ref !== 'object') return null;
+  const headline = ref.headline || ref.ad_headline || ref.ad?.headline || null;
+  const body = ref.body || ref.ad_body || ref.ad?.body || null;
+  const sourceUrl = ref.source_url || ref.ref || null;
+  const sourceId = ref.ad_id || ref.source_id || ref.ref_ad_id || null;
+  const sourceType = ref.source || ref.type || null;
+  const mediaUrl = ref.image_url || ref.video_url || ref.thumbnail_url || null;
+  const mediaType = ref.video_url ? 'video' : (ref.image_url || ref.thumbnail_url) ? 'image' : null;
+  const ctwaClid = ref.ctwa_clid || ref.click_id || null;
+  if (!headline && !body && !sourceUrl && !sourceId) return null;
+  return {
+    headline, body, source_url: sourceUrl, source_id: sourceId,
+    source_type: sourceType, media_url: mediaUrl, media_type: mediaType,
+    ctwa_clid: ctwaClid,
+  };
+}
+
 // ── Upsert conversation & save messages ──
 async function saveInteraction(
   supabase: any,
@@ -550,10 +570,11 @@ async function saveInteraction(
   aiReply: string,
   userMeta: Record<string, any>,
   replyMeta: Record<string, any>,
+  adContext: Record<string, any> | null = null,
 ) {
   const { data: existingConv } = await supabase
     .from('conversations')
-    .select('id, unread_count')
+    .select('id, unread_count, ad_context')
     .eq('company_id', companyId)
     .eq('phone', phoneKey)
     .limit(1)
@@ -563,13 +584,20 @@ async function saveInteraction(
 
   if (existingConv) {
     conversationId = existingConv.id;
+    const updatePayload: Record<string, any> = {
+      last_message_preview: aiReply.slice(0, 100),
+      unread_count: (existingConv.unread_count || 0) + 1,
+      status: 'active',
+    };
+    // Persist ad_context the first time we see it for this conversation.
+    if (adContext && !existingConv.ad_context) {
+      updatePayload.ad_context = adContext;
+      updatePayload.ad_referral_id = adContext.source_id || null;
+      updatePayload.ctwa_clid = adContext.ctwa_clid || null;
+    }
     await supabase
       .from('conversations')
-      .update({
-        last_message_preview: aiReply.slice(0, 100),
-        unread_count: (existingConv.unread_count || 0) + 1,
-        status: 'active',
-      })
+      .update(updatePayload)
       .eq('id', conversationId);
   } else {
     const { data: newConv } = await supabase
@@ -582,6 +610,9 @@ async function saveInteraction(
         status: 'active',
         last_message_preview: aiReply.slice(0, 100),
         unread_count: 1,
+        ad_context: adContext,
+        ad_referral_id: adContext?.source_id || null,
+        ctwa_clid: adContext?.ctwa_clid || null,
       })
       .select('id')
       .single();
