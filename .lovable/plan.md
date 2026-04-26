@@ -1,16 +1,34 @@
-## Plan
+I found the current Facebook Connect failure shown in your screenshot:
 
-Phased migration to direct Meta WhatsApp Cloud API alongside the existing Twilio integration. **Status: shipped.**
+`Expression is of type asyncfunction, not function`
 
-### What's live
+This is a known Facebook JavaScript SDK limitation: `FB.login` rejects an `async` callback directly. Our current code passes `async (resp) => { ... }`, so the popup fails before login can continue.
 
-1. **DB** — `companies.whatsapp_provider` (default `twilio`), `company_whatsapp_cloud` table for opt-in creds.
-2. **Outbound** — `send-whatsapp-message` checks the provider flag; if `meta_cloud`, delegates to `send-whatsapp-cloud` (Meta Graph `/{phone_number_id}/messages`). Twilio path is the default.
-3. **Inbound** — `meta-webhook` handles `object === 'whatsapp_business_account'`, resolves the company by `phone_number_id`, normalizes text/media/interactive payloads, and bridges them as JSON into `whatsapp-messages` (which now accepts a `source: 'meta_cloud_webhook'` mode alongside the existing promise-fulfillment mode).
-4. **Admin UI** — `MetaIntegrationsPanel` exposes a manual WhatsApp Cloud setup card; saving creds flips `whatsapp_provider` to `meta_cloud`, deleting reverts it.
-5. **Facebook Connect hang** — SDK timeout shortened, diagnostic toasts added.
+Plan:
 
-### Known follow-ups (not blocking)
+1. Fix the Facebook Connect button
+   - Change the `FB.login` callback in `MetaIntegrationsPanel.tsx` from an async function to a plain `function(resp) { ... }`.
+   - Move the existing async exchange logic into a separate helper/inner promise so Facebook receives a normal callback.
+   - Keep the timeout, loading reset, and clear error handling already added.
+   - Update the visible error copy so this specific SDK bug no longer gets mislabeled as popup/ad-blocker failure.
 
-- Internal Twilio fan-outs inside `whatsapp-messages` (boss handoff, multi-image dispatch) still call Twilio's API directly. They work fine for Twilio clients but won't fire correctly for `meta_cloud` clients. Refactor those helpers to use `send-whatsapp-message` (which already routes per-provider) before the first `meta_cloud` client is onboarded in production.
-- Embedded Signup flow (Facebook Login → auto-create WABA) can replace the manual creds form once Meta App review is approved.
+2. Add a safer fallback path if Facebook popup still fails
+   - Keep the manual WhatsApp Cloud credential card as the non-breaking path.
+   - Add clearer instructions near the error panel: if popup login is blocked, the user can still use manual WABA ID / Phone Number ID setup without disturbing Twilio clients.
+
+3. Finish the remaining WhatsApp Cloud provider gap
+   - Refactor the internal sends inside `whatsapp-messages` that still call Twilio directly.
+   - Route those sends through the existing `send-whatsapp-message` gateway so each company uses its selected provider:
+     - `twilio` remains unchanged for existing clients.
+     - `meta_cloud` sends through the new direct Meta WhatsApp Cloud function.
+   - This covers boss handoff fan-out and multi-media/image dispatch paths that were previously documented as the known gap.
+
+4. Validate the implementation
+   - Run a type/build check after edits.
+   - Deploy the changed backend functions if needed.
+   - Confirm that the code no longer passes async callbacks to `FB.login`.
+
+Technical notes:
+- No database migration should be needed for this fix because the provider toggle tables/columns already exist.
+- I will not edit the auto-generated backend client/types files.
+- Twilio stays the default provider, so current customers remain protected while Meta Cloud can be enabled company-by-company.

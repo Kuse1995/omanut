@@ -307,30 +307,35 @@ export const MetaIntegrationsPanel = () => {
       }
     }, 30000);
 
-    try {
-      window.FB.login(async (resp) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timeoutId);
-        console.log('[MetaPanel] FB.login response', { status: resp.status });
+    // IMPORTANT: FB.login REJECTS async callbacks ("Expression is of type
+    // asyncfunction, not function"). We MUST pass a plain function and run
+    // any async work inside it without awaiting it at the top level.
+    const handleFbResponse = (resp: { authResponse?: { accessToken: string; userID: string }; status: string }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      console.log('[MetaPanel] FB.login response', { status: resp.status });
 
-        if (!resp.authResponse?.accessToken) {
-          setFbConnecting(false);
-          if (resp.status === 'not_authorized') {
-            toast.error('You declined the permissions required to connect.');
-          } else if (resp.status === 'unknown') {
-            toast.error(
-              'Facebook login was cancelled or blocked. Make sure popups are allowed and this domain is whitelisted in the Meta App.'
-            );
-          } else {
-            toast.error('Facebook login was cancelled');
-          }
-          return;
+      if (!resp.authResponse?.accessToken) {
+        setFbConnecting(false);
+        if (resp.status === 'not_authorized') {
+          toast.error('You declined the permissions required to connect.');
+        } else if (resp.status === 'unknown') {
+          toast.error(
+            'Facebook login was cancelled or blocked. Make sure popups are allowed and this domain is whitelisted in the Meta App.'
+          );
+        } else {
+          toast.error('Facebook login was cancelled');
         }
+        return;
+      }
+
+      // Fire-and-handle async exchange inside an IIFE so FB only sees a sync callback.
+      (async () => {
         try {
           const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
             body: {
-              short_lived_token: resp.authResponse.accessToken,
+              short_lived_token: resp.authResponse!.accessToken,
               company_id: selectedCompany.id,
             },
           });
@@ -349,7 +354,11 @@ export const MetaIntegrationsPanel = () => {
         } finally {
           setFbConnecting(false);
         }
-      }, loginOpts);
+      })();
+    };
+
+    try {
+      window.FB.login(handleFbResponse, loginOpts);
     } catch (e) {
       settled = true;
       window.clearTimeout(timeoutId);
