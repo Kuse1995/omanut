@@ -79,15 +79,16 @@ Deno.serve(async (req) => {
     let userToken: string;
 
     if (code) {
-      // For Facebook Login for Business via the JS SDK, the popup mints the
-      // code via postMessage and there is no real redirect_uri. The exchange
-      // call must be made with an EMPTY redirect_uri to match what the SDK
-      // used internally. If a caller passes one explicitly (server-side OAuth
-      // redirect flow), respect it.
+      // Code from our /auth/meta/callback popup. The redirect_uri sent here
+      // MUST exactly match the one used to obtain the code, otherwise Meta
+      // returns "redirect_uri isn't an absolute URI" or a mismatch error.
+      if (!redirect_uri) {
+        return jsonError(400, "redirect_uri is required when exchanging a code");
+      }
       const tokenUrl = new URL(`${FB_GRAPH}/oauth/access_token`);
       tokenUrl.searchParams.set("client_id", APP_ID);
       tokenUrl.searchParams.set("client_secret", APP_SECRET);
-      tokenUrl.searchParams.set("redirect_uri", redirect_uri ?? "");
+      tokenUrl.searchParams.set("redirect_uri", redirect_uri);
       tokenUrl.searchParams.set("code", code);
 
       const tokenRes = await fetch(tokenUrl.toString());

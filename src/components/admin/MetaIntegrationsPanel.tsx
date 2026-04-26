@@ -30,18 +30,10 @@ interface MetaCredential {
   connected_via: string;
 }
 
-interface FbWindow extends Window {
-  FB?: {
-    init: (config: Record<string, unknown>) => void;
-    login: (
-      cb: (resp: { authResponse?: { accessToken?: string; userID?: string; code?: string }; status: string }) => void,
-      opts: Record<string, unknown>
-    ) => void;
-  };
-  fbAsyncInit?: () => void;
-}
+// Manual OAuth flow: no Facebook JS SDK. We open Meta's dialog/oauth in a popup
+// and receive the authorization code on our /auth/meta/callback page, which
+// posts it back via window.postMessage.
 
-declare const window: FbWindow;
 
 export const MetaIntegrationsPanel = () => {
   const { selectedCompany } = useCompany();
@@ -56,8 +48,7 @@ export const MetaIntegrationsPanel = () => {
     ai_system_prompt: '',
   });
 
-  const [fbReady, setFbReady] = useState(false);
-  const [fbSdkError, setFbSdkError] = useState<string | null>(null);
+  const [fbConfigError, setFbConfigError] = useState<string | null>(null);
   const [fbConnecting, setFbConnecting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState<
@@ -78,7 +69,10 @@ export const MetaIntegrationsPanel = () => {
   });
   const [waShowToken, setWaShowToken] = useState(false);
 
-  // Load public Meta config (App ID + Login Config ID) and the FB JS SDK
+  // Load public Meta config (App ID + Login Config ID). The frontend uses
+  // these to build the OAuth dialog URL itself — no Facebook JS SDK required
+  // (FB.login() is incompatible with Facebook Login for Business because it
+  // hardcodes response_type=token).
   const { data: metaConfig } = useQuery({
     queryKey: ['meta-public-config'],
     queryFn: async () => {
@@ -88,67 +82,11 @@ export const MetaIntegrationsPanel = () => {
     },
   });
 
-  useEffect(() => {
-    if (!metaConfig?.app_id) return;
-    if (window.FB) {
-      setFbReady(true);
-      return;
-    }
-    let timeoutId: number | undefined;
-    let settled = false;
+  // The redirect URI we register with Meta. Must be added to the Meta App's
+  // "Valid OAuth Redirect URIs" list under Facebook Login for Business → Settings.
+  const oauthRedirectUri =
+    typeof window !== 'undefined' ? `${window.location.origin}/auth/meta/callback` : '';
 
-    window.fbAsyncInit = () => {
-      try {
-        window.FB!.init({
-          appId: metaConfig.app_id!,
-          cookie: true,
-          xfbml: false,
-          version: 'v19.0',
-        });
-        settled = true;
-        if (timeoutId) window.clearTimeout(timeoutId);
-        setFbReady(true);
-        setFbSdkError(null);
-      } catch (e) {
-        console.error('[MetaPanel] FB.init failed', e);
-        setFbSdkError('Facebook SDK failed to initialize. Refresh the page.');
-      }
-    };
-
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src*="connect.facebook.net"]'
-    );
-    if (existing) {
-      // Script already present (e.g. hot reload) — just wait for init
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://connect.facebook.net/en_US/sdk.js';
-      script.async = true;
-      script.defer = true;
-      script.crossOrigin = 'anonymous';
-      script.onerror = () => {
-        console.error('[MetaPanel] Failed to load Facebook SDK script');
-        setFbSdkError(
-          "Couldn't load the Facebook SDK. Disable ad blockers / privacy extensions and reload."
-        );
-      };
-      document.body.appendChild(script);
-    }
-
-    // 10s safety net — if init never fires, surface a clear error
-    timeoutId = window.setTimeout(() => {
-      if (!settled) {
-        console.warn('[MetaPanel] FB SDK init timed out after 10s');
-        setFbSdkError(
-          'Facebook SDK took too long to load. Check your network or ad blockers and reload.'
-        );
-      }
-    }, 10000);
-
-    return () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
-    };
-  }, [metaConfig?.app_id]);
 
   const { data: credentials, isLoading } = useQuery({
     queryKey: ['meta-credentials', selectedCompany?.id],
@@ -258,89 +196,93 @@ export const MetaIntegrationsPanel = () => {
   };
 
   const startFacebookConnect = useCallback(() => {
-    // Hard-verify SDK + login function are actually callable.
-    // fbReady can be true while window.FB.login is undefined if a privacy
-    // extension blocks part of the SDK after init.
-    const fb = window.FB as (typeof window.FB & { login?: unknown }) | undefined;
-    if (!fbReady || !fb || typeof fb.login !== 'function' || !selectedCompany?.id) {
-      console.warn('[MetaPanel] Connect clicked but not ready', {
-        fbReady,
-        hasFB: !!fb,
-        hasLogin: typeof fb?.login,
-        hasCompany: !!selectedCompany?.id,
-      });
-      if (!selectedCompany?.id) {
-        toast.error('Pick a company first.');
-      } else if (!fb || typeof fb?.login !== 'function') {
-        toast.error(
-          "Facebook SDK loaded incompletely — likely blocked by a privacy extension. Disable shields/ad blockers for this site, then reload.",
-          { duration: 8000 }
-        );
-        setFbSdkError(
-          'Facebook SDK is loaded but FB.login is unavailable. A browser extension (uBlock, Privacy Badger, Brave shields, etc.) is blocking part of the SDK.'
-        );
-      } else {
-        toast.error("Facebook SDK isn't ready yet. Please wait a moment or reload.");
-      }
+    if (!metaConfig?.app_id) {
+      toast.error('Meta App is not configured yet. Add META_APP_ID in backend settings.');
       return;
     }
-    setFbConnecting(true);
-
-    const loginOpts: Record<string, unknown> = {
-      scope:
-        'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,pages_manage_posts,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,business_management',
-      return_scopes: true,
-      // Facebook Login for Business REQUIRES the authorization-code flow.
-      // The popup rejects response_type=token (the SDK's default) with
-      // "Invalid parameter: response_type must be a valid enum".
-      response_type: 'code',
-    };
-    if (metaConfig?.config_id) {
-      loginOpts.config_id = metaConfig.config_id;
+    if (!selectedCompany?.id) {
+      toast.error('Pick a company first.');
+      return;
     }
 
-    // 30s safety net — if the popup is closed/blocked and FB never calls back, free the UI
-    let settled = false;
-    const timeoutId = window.setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        setFbConnecting(false);
-        toast.error(
-          'Facebook login window timed out. If a popup was blocked, allow popups for this site and try again.'
-        );
-      }
-    }, 30000);
+    setFbConnecting(true);
+    setFbConfigError(null);
 
-    // IMPORTANT: FB.login REJECTS async callbacks ("Expression is of type
-    // asyncfunction, not function"). We MUST pass a plain function and run
-    // any async work inside it without awaiting it at the top level.
-    const handleFbResponse = (resp: { authResponse?: { accessToken?: string; userID?: string; code?: string }; status: string }) => {
+    // Random state nonce for CSRF protection on the OAuth roundtrip.
+    const state = crypto.randomUUID();
+    sessionStorage.setItem('meta_oauth_state', state);
+
+    // Build Meta's OAuth dialog URL ourselves. Facebook Login for Business
+    // ONLY supports response_type=code, and FB.login() (the JS SDK) silently
+    // forces response_type=token, so we cannot use the SDK at all.
+    const url = new URL('https://www.facebook.com/v19.0/dialog/oauth');
+    url.searchParams.set('client_id', metaConfig.app_id);
+    if (metaConfig.config_id) url.searchParams.set('config_id', metaConfig.config_id);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('redirect_uri', oauthRedirectUri);
+    url.searchParams.set('state', state);
+    url.searchParams.set(
+      'scope',
+      'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,' +
+        'pages_manage_posts,instagram_basic,instagram_manage_messages,' +
+        'instagram_manage_comments,instagram_content_publish,business_management'
+    );
+
+    const popup = window.open(
+      url.toString(),
+      'meta-oauth',
+      'width=600,height=720,menubar=no,toolbar=no,location=no'
+    );
+
+    if (!popup) {
+      setFbConnecting(false);
+      toast.error(
+        'Could not open the Facebook login window. Allow popups for this site and try again.',
+        { duration: 8000 }
+      );
+      return;
+    }
+
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      window.clearInterval(closedPoll);
+      window.clearTimeout(timeoutId);
+    };
+
+    const onMessage = (ev: MessageEvent) => {
+      if (ev.origin !== window.location.origin) return;
+      if (!ev.data || ev.data.source !== 'meta-oauth') return;
       if (settled) return;
       settled = true;
-      window.clearTimeout(timeoutId);
-      console.log('[MetaPanel] FB.login response', { status: resp.status, hasCode: Boolean(resp.authResponse?.code) });
+      cleanup();
 
-      const code = resp.authResponse?.code;
-      if (!code) {
+      const expected = sessionStorage.getItem('meta_oauth_state');
+      sessionStorage.removeItem('meta_oauth_state');
+
+      if (ev.data.error) {
         setFbConnecting(false);
-        if (resp.status === 'not_authorized') {
-          toast.error('You declined the permissions required to connect.');
-        } else if (resp.status === 'unknown') {
-          toast.error(
-            'Facebook login was cancelled or blocked. Make sure popups are allowed and this domain is whitelisted in the Meta App.'
-          );
-        } else {
-          toast.error('Facebook login was cancelled');
-        }
+        toast.error(`Facebook login failed: ${ev.data.error}`, { duration: 8000 });
+        return;
+      }
+      if (!ev.data.code) {
+        setFbConnecting(false);
+        toast.error('Facebook login was cancelled.');
+        return;
+      }
+      if (ev.data.state !== expected) {
+        setFbConnecting(false);
+        toast.error('Security check failed (state mismatch). Please try again.');
         return;
       }
 
-      // Fire-and-handle async exchange inside an IIFE so FB only sees a sync callback.
+      // Exchange the code on the backend.
       (async () => {
         try {
           const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
             body: {
-              code,
+              code: ev.data.code,
+              redirect_uri: oauthRedirectUri,
               company_id: selectedCompany.id,
             },
           });
@@ -362,24 +304,29 @@ export const MetaIntegrationsPanel = () => {
       })();
     };
 
-    try {
-      window.FB.login(handleFbResponse, loginOpts);
-    } catch (e) {
-      settled = true;
-      window.clearTimeout(timeoutId);
-      setFbConnecting(false);
-      console.error('[MetaPanel] FB.login threw', e);
-      const msg = e instanceof Error ? e.message : String(e);
-      // Most common reasons: SDK partially blocked, popup blocker, or third-party cookies disabled.
-      toast.error(
-        `Failed to open Facebook login: ${msg || 'unknown error'}. Try: (1) allow popups for this site, (2) disable ad/privacy blockers, (3) enable third-party cookies for facebook.com.`,
-        { duration: 8000 }
-      );
-      setFbSdkError(
-        'Facebook login window failed to open. This is usually caused by an ad blocker, popup blocker, or third-party cookies being disabled for facebook.com.'
-      );
-    }
-  }, [fbReady, selectedCompany?.id, metaConfig?.config_id]);
+    // If the user closes the popup without completing, free the UI.
+    const closedPoll = window.setInterval(() => {
+      if (popup.closed && !settled) {
+        settled = true;
+        cleanup();
+        setFbConnecting(false);
+      }
+    }, 700);
+
+    // Hard 5-minute safety net.
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        setFbConnecting(false);
+        try { popup.close(); } catch { /* ignore */ }
+        toast.error('Facebook login timed out. Please try again.');
+      }
+    }, 5 * 60 * 1000);
+
+    window.addEventListener('message', onMessage);
+  }, [metaConfig?.app_id, metaConfig?.config_id, oauthRedirectUri, selectedCompany?.id]);
+
 
   const confirmConnect = async () => {
     if (!sessionId || selectedPageIds.length === 0) return;
@@ -542,16 +489,12 @@ export const MetaIntegrationsPanel = () => {
               </div>
               <Button
                 onClick={startFacebookConnect}
-                disabled={!fbReady || fbConnecting || !selectedCompany?.id || !!fbSdkError}
+                disabled={fbConnecting || !selectedCompany?.id || !metaConfig?.app_id}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 {fbConnecting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Connecting…
-                  </>
-                ) : !fbReady && !fbSdkError ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading SDK…
                   </>
                 ) : (
                   <>
@@ -562,36 +505,45 @@ export const MetaIntegrationsPanel = () => {
             </CardContent>
           </Card>
 
-          {fbSdkError && (
+          {/* Show the redirect URI the admin needs to whitelist in Meta */}
+          <Card className="border-dashed">
+            <CardContent className="py-4 text-xs text-muted-foreground space-y-2">
+              <p className="font-medium text-foreground">
+                One-time setup in Meta App Dashboard
+              </p>
+              <p>
+                Add this exact URL under{' '}
+                <span className="font-mono">Facebook Login for Business → Settings → Valid OAuth Redirect URIs</span>:
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
+                  {oauthRedirectUri}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(oauthRedirectUri);
+                    toast.success('Redirect URI copied');
+                  }}
+                >
+                  <Copy className="w-3 h-3" />
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {fbConfigError && (
             <Card className="border-destructive/40 bg-destructive/5">
-              <CardContent className="py-4 text-sm space-y-2">
+              <CardContent className="py-4 text-sm">
                 <div className="flex items-start gap-2 text-destructive">
                   <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <p className="font-medium">{fbSdkError}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  If the issue persists, the current domain may not be whitelisted in your Meta App.
-                  Add the domain shown below under <span className="font-mono">App settings → Basic → App Domains</span>{' '}
-                  and <span className="font-mono">Facebook Login → Settings → Allowed Domains for the JavaScript SDK</span>.
-                </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate">
-                    {typeof window !== 'undefined' ? window.location.hostname : ''}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      navigator.clipboard.writeText(window.location.hostname);
-                      toast.success('Domain copied');
-                    }}
-                  >
-                    <Copy className="w-3 h-3" />
-                  </Button>
+                  <p className="font-medium">{fbConfigError}</p>
                 </div>
               </CardContent>
             </Card>
           )}
+
         </>
       ) : (
         <Card className="border-dashed border-yellow-500/50 bg-yellow-500/5">
