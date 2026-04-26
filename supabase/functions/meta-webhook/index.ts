@@ -282,8 +282,148 @@ async function processWebhook(body: any) {
         }
       }
     }
+  } else if (objectType === 'whatsapp_business_account') {
+    // ── Direct Meta WhatsApp Cloud API events ──
+    // Only fires for companies that opted into provider=meta_cloud and connected a WABA.
+    // Twilio-based companies remain unaffected — their inbound traffic still hits whatsapp-messages directly.
+    for (const entry of body.entry) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        if (change.field !== 'messages') continue;
+        const value = change.value || {};
+        const phoneNumberId: string | undefined = value.metadata?.phone_number_id;
+        const displayPhone: string | undefined = value.metadata?.display_phone_number;
+        const incomingMessages: any[] = Array.isArray(value.messages) ? value.messages : [];
+        const contacts: any[] = Array.isArray(value.contacts) ? value.contacts : [];
+
+        if (!phoneNumberId || incomingMessages.length === 0) continue;
+
+        // Resolve company by phone_number_id
+        const { data: cred, error: credErr } = await supabase
+          .from('company_whatsapp_cloud')
+          .select('company_id, access_token')
+          .eq('phone_number_id', phoneNumberId)
+          .maybeSingle();
+
+        if (credErr || !cred) {
+          console.warn(`[meta-webhook][wa-cloud] No company for phone_number_id=${phoneNumberId}`);
+          continue;
+        }
+
+        for (const msg of incomingMessages) {
+          try {
+            await handleWhatsAppCloudMessage(supabase, cred, msg, contacts, displayPhone || '');
+          } catch (err) {
+            console.error('[meta-webhook][wa-cloud] handler error:', err);
+          }
+        }
+      }
+    }
   } else {
     console.log(`Unhandled object type: ${objectType}, ignoring`);
+  }
+}
+
+// ── Direct WhatsApp Cloud API: normalize one inbound message and bridge into whatsapp-messages ──
+async function handleWhatsAppCloudMessage(
+  supabase: any,
+  cred: { company_id: string; access_token: string },
+  msg: any,
+  contacts: any[],
+  displayPhone: string
+) {
+  const fromRaw: string = msg.from || '';
+  if (!fromRaw) return;
+  const fromE164 = fromRaw.startsWith('+') ? fromRaw : `+${fromRaw}`;
+  const profileName = contacts?.[0]?.profile?.name || '';
+
+  // Extract body text from the various message types Cloud emits
+  let body = '';
+  const media: Array<{ url: string; contentType: string }> = [];
+
+  const downloadMedia = async (mediaId: string, mimeType: string) => {
+    try {
+      // Step 1: resolve media URL
+      const metaRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+        headers: { Authorization: `Bearer ${cred.access_token}` },
+      });
+      const metaJson = await metaRes.json();
+      if (!metaRes.ok || !metaJson?.url) {
+        console.warn('[wa-cloud] media lookup failed:', metaJson);
+        return;
+      }
+      // Step 2: pass through the Graph media URL — whatsapp-messages will fetch it.
+      // We tag the contentType so downstream handlers treat it correctly.
+      media.push({ url: metaJson.url, contentType: mimeType || metaJson.mime_type || 'application/octet-stream' });
+    } catch (e) {
+      console.warn('[wa-cloud] media fetch error:', e);
+    }
+  };
+
+  switch (msg.type) {
+    case 'text':
+      body = msg.text?.body || '';
+      break;
+    case 'image':
+      body = msg.image?.caption || '';
+      if (msg.image?.id) await downloadMedia(msg.image.id, msg.image.mime_type);
+      break;
+    case 'video':
+      body = msg.video?.caption || '';
+      if (msg.video?.id) await downloadMedia(msg.video.id, msg.video.mime_type);
+      break;
+    case 'audio':
+    case 'voice':
+      if (msg.audio?.id) await downloadMedia(msg.audio.id, msg.audio.mime_type);
+      break;
+    case 'document':
+      body = msg.document?.caption || msg.document?.filename || '';
+      if (msg.document?.id) await downloadMedia(msg.document.id, msg.document.mime_type);
+      break;
+    case 'button':
+      body = msg.button?.text || '';
+      break;
+    case 'interactive':
+      body = msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || '';
+      break;
+    default:
+      console.log('[wa-cloud] unhandled msg.type:', msg.type);
+      return;
+  }
+
+  // Use whatsapp:+E164 prefix to stay consistent with Twilio's existing convention,
+  // so the existing pipeline's phone normalization keeps working.
+  const From = `whatsapp:${fromE164}`;
+  const To = displayPhone ? `whatsapp:${displayPhone.startsWith('+') ? displayPhone : `+${displayPhone}`}` : '';
+
+  const payload = {
+    source: 'meta_cloud_webhook',
+    From,
+    To,
+    Body: body,
+    ProfileName: profileName,
+    NumMedia: media.length,
+    media,
+  };
+
+  // Fire-and-forget into whatsapp-messages JSON entry
+  const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-messages`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      console.error('[wa-cloud] whatsapp-messages bridge non-2xx:', res.status, await res.text().catch(() => ''));
+    } else {
+      console.log(`[wa-cloud] bridged inbound from ${fromE164} for company ${cred.company_id}`);
+    }
+  } catch (e) {
+    console.error('[wa-cloud] whatsapp-messages bridge error:', e);
   }
 }
 
