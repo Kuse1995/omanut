@@ -7143,7 +7143,10 @@ serve(async (req) => {
           phone: From,
           status: 'active',
           customer_name: ProfileName || null,
-          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`
+          transcript: `CUSTOMER PHONE: ${customerPhone}\nCUSTOMER NAME: ${ProfileName || 'Unknown'}\n`,
+          ad_context: adContextPayload,
+          ad_referral_id: adContextPayload?.source_id || null,
+          ctwa_clid: adContextPayload?.ctwa_clid || null,
         })
         .select()
         .single();
@@ -7166,6 +7169,23 @@ serve(async (req) => {
           .eq('id', conversation.id);
         conversation.customer_name = ProfileName;
         console.log(`[CONVERSATION] 📛 Updated customer name to: ${ProfileName}`);
+      }
+
+      // If the customer arrived via a fresh ad click on an EXISTING conversation
+      // (rare — usually means they re-engaged with a different ad), backfill the
+      // newest ad context so the AI references the right product this turn.
+      if (adContextPayload && !conversation.ad_context) {
+        await supabase
+          .from('conversations')
+          .update({
+            ad_context: adContextPayload,
+            ad_referral_id: adContextPayload.source_id,
+            ctwa_clid: adContextPayload.ctwa_clid,
+          })
+          .eq('id', conversation.id);
+        conversation.ad_context = adContextPayload;
+        conversation.ad_referral_id = adContextPayload.source_id;
+        console.log('[CTWA-AD] Backfilled ad_context onto existing conversation');
       }
     }
 
