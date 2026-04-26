@@ -79,6 +79,12 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.subscribe-meta-page]
     verify_jwt = true
+  [functions.meta-public-config]
+    verify_jwt = false
+  [functions.meta-oauth-exchange]
+    verify_jwt = true
+  [functions.meta-oauth-connect-pages]
+    verify_jwt = true
   [functions.supervisor-agent]
     verify_jwt = true
   [functions.test-image-generation]
