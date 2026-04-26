@@ -174,12 +174,13 @@ async function processWebhook(body: any) {
 
               const recipientId = event.recipient?.id;
               const isInstagramDM = !!linkedIgUserId && String(recipientId) === String(linkedIgUserId);
+              const referral = normalizeMetaReferral(event.message?.referral || event.referral || null);
 
               try {
                 if (isInstagramDM) {
-                  await handleInstagramDM(supabase, String(linkedIgUserId), senderId, messageText);
+                  await handleInstagramDM(supabase, String(linkedIgUserId), senderId, messageText, referral);
                 } else {
-                  await handleMessengerDM(supabase, pageId, senderId, messageText);
+                  await handleMessengerDM(supabase, pageId, senderId, messageText, referral);
                 }
               } catch (err) {
                 console.error('Error handling message event from changes[]:', err);
