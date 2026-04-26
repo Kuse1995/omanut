@@ -3427,7 +3427,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     }
 
     // Auto-merge core search & notification tools — these are always safe and required
-    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss'];
+    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss', 'forward_media_to_boss'];
     for (const tool of alwaysEnabledTools) {
       if (!enabledToolNames.includes(tool)) {
         enabledToolNames.push(tool);
