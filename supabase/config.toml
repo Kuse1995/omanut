@@ -85,6 +85,8 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = true
   [functions.meta-oauth-connect-pages]
     verify_jwt = true
+  [functions.send-whatsapp-cloud]
+    verify_jwt = false
   [functions.supervisor-agent]
     verify_jwt = true
   [functions.test-image-generation]
