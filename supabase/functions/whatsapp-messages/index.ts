@@ -1206,11 +1206,55 @@ async function sendBossHandoffNotification(
     }
   }
 
+  // ── Ad-aware enrichment: if this lead came from a Meta ad, surface the ad
+  //    headline + today's spend so the boss knows it's a paid lead, not organic.
+  let adBlock = '';
+  try {
+    const { data: convRow } = await supabase
+      .from('conversations')
+      .select('ad_context, ad_referral_id, ctwa_clid')
+      .eq('company_id', company.id)
+      .eq('phone', customerPhone.replace(/^whatsapp:/, ''))
+      .order('last_message_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const ac: any = convRow?.ad_context;
+    if (ac && (ac.headline || ac.body || ac.source_id)) {
+      const adLines: string[] = ['📢 PAID LEAD (clicked your ad)'];
+      if (ac.headline) adLines.push(`Ad: "${String(ac.headline).slice(0, 120)}"`);
+      if (ac.body) adLines.push(`Body: "${String(ac.body).slice(0, 160)}"`);
+      if (ac.source_id) adLines.push(`Ref: ${ac.source_id}`);
+
+      // Today's spend for this company (across all active campaigns)
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const { data: spendRows } = await supabase
+          .from('meta_ad_insights_daily')
+          .select('spend_cents')
+          .eq('company_id', company.id)
+          .eq('date', today);
+        if (spendRows && spendRows.length > 0) {
+          const totalCents = spendRows.reduce((s: number, r: any) => s + (r.spend_cents || 0), 0);
+          if (totalCents > 0) {
+            adLines.push(`Today's ad spend: $${(totalCents / 100).toFixed(2)}`);
+          }
+        }
+      } catch (spendErr) {
+        console.warn('[HANDOFF] Could not load ad spend:', spendErr);
+      }
+
+      adBlock = `\n\n${adLines.join('\n')}`;
+    }
+  } catch (adErr) {
+    console.warn('[HANDOFF] Could not load ad_context:', adErr);
+  }
+
   const message = `🔔 ACTION REQUIRED
 
 Client Name: ${customerName}
 Client Number: ${displayPhone}
-Handed off by: ${agentLabel}${contextBlock}
+Handed off by: ${agentLabel}${contextBlock}${adBlock}
 
 Summary:
 ${summary}
