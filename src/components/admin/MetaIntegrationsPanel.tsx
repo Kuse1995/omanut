@@ -161,6 +161,11 @@ export const MetaIntegrationsPanel = () => {
         hasFB: !!window.FB,
         hasCompany: !!selectedCompany?.id,
       });
+      toast.error(
+        !selectedCompany?.id
+          ? 'Pick a company first.'
+          : "Facebook SDK isn't ready yet. Please wait a moment or reload."
+      );
       return;
     }
     setFbConnecting(true);
@@ -174,7 +179,7 @@ export const MetaIntegrationsPanel = () => {
       loginOpts.config_id = metaConfig.config_id;
     }
 
-    // 90s safety net — if the popup is closed/blocked and FB never calls back, free the UI
+    // 30s safety net — if the popup is closed/blocked and FB never calls back, free the UI
     let settled = false;
     const timeoutId = window.setTimeout(() => {
       if (!settled) {
@@ -184,7 +189,7 @@ export const MetaIntegrationsPanel = () => {
           'Facebook login window timed out. If a popup was blocked, allow popups for this site and try again.'
         );
       }
-    }, 90000);
+    }, 30000);
 
     try {
       window.FB.login(async (resp) => {
