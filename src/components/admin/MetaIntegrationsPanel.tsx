@@ -30,18 +30,10 @@ interface MetaCredential {
   connected_via: string;
 }
 
-interface FbWindow extends Window {
-  FB?: {
-    init: (config: Record<string, unknown>) => void;
-    login: (
-      cb: (resp: { authResponse?: { accessToken?: string; userID?: string; code?: string }; status: string }) => void,
-      opts: Record<string, unknown>
-    ) => void;
-  };
-  fbAsyncInit?: () => void;
-}
+// Manual OAuth flow: no Facebook JS SDK. We open Meta's dialog/oauth in a popup
+// and receive the authorization code on our /auth/meta/callback page, which
+// posts it back via window.postMessage.
 
-declare const window: FbWindow;
 
 export const MetaIntegrationsPanel = () => {
   const { selectedCompany } = useCompany();
