@@ -862,6 +862,7 @@ async function handleInstagramDM(
   igUserId: string,
   senderId: string,
   messageText: string,
+  adContext: Record<string, any> | null = null,
 ) {
   console.log(`[IG DM] Received from ${senderId}: "${messageText.slice(0, 80)}" — auto-reply PAUSED (pending Meta App Review)`);
 
