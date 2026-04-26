@@ -1,96 +1,140 @@
-## Goal
+# One-Click Meta Connect (Facebook Login for Business)
 
-Two related upgrades, framed around the real-world scenario: a customer sends a product photo on WhatsApp asking "do you have this in stock?".
+## The problem today
 
-1. **See customer images in the chat UI** (admin Conversations panel) — they're already stored in Supabase Storage but never render because of a metadata-shape mismatch.
-2. **Let the AI forward those images to the boss** via a new `forward_media_to_boss` tool, so the owner gets the actual product photo on WhatsApp instead of a text-only summary.
+Onboarding to Meta currently requires the customer to:
+1. Open Facebook Business Manager
+2. Find their Page ID (15-digit number)
+3. Generate a long-lived Page Access Token (developer-mode steps)
+4. If they want Instagram, find the IG Business Account ID
+5. Paste all three into the Meta Integrations panel
 
----
+This is acceptable for a single agency client, but for SaaS it is the #1 onboarding drop-off. Customers do not know what a "Page Access Token" is, tokens leak in screenshots, and tokens can expire silently.
 
-## What's broken today
+## The fix: Facebook Login + auto-discovery
 
-| Layer | Current state |
-|---|---|
-| Inbound (WhatsApp) | `whatsapp-messages` downloads each `MediaUrl{i}` into the `conversation-media` bucket and saves it on the user message as `message_metadata.media_urls: string[]` + `media_types: string[]`. ✅ |
-| Chat UI (`ChatBubble.tsx`) | Reads `metadata.media_url` / `metadata.media_type` (singular). Inbound customer images are stored as **arrays**, so the bubble renders **nothing** — the photo is invisible to the operator. ❌ |
-| Boss notifications | `sendBossHandoffNotification` only sends a text WhatsApp ping. There is no path for the AI to attach the customer's image. ❌ |
-| `notify_boss` tool | Accepts only text fields (`summary`, `details`). No media param. ❌ |
-| `send-boss-notification` edge fn | Already supports an optional `mediaUrl` body field and forwards it to Twilio as `MediaUrl`. ✅ (we'll reuse this.) |
+We add a single **"Connect Facebook & Instagram"** button. The user logs in with their Facebook account, picks which Page(s) to connect, and we do the rest behind the scenes:
 
----
+- Exchange the short-lived user token for a long-lived user token
+- List the Pages they manage and let them pick (multi-select)
+- For each chosen Page, fetch the **never-expiring Page Access Token** automatically
+- Auto-detect the linked **Instagram Business Account** (no copy-pasting IDs)
+- Subscribe the Page + IG to our webhook automatically (existing `subscribe-meta-page` logic)
+- Save everything to `meta_credentials` with no manual fields
 
-## Plan
+The existing manual "paste token" form stays as an **Advanced** fallback (for power users / edge cases / agencies installing on behalf of a client).
 
-### 1. Render inbound customer media in the chat (frontend only)
-
-**File:** `src/components/conversations/ChatBubble.tsx`
-
-- Normalize incoming metadata at the top of the component:
-  - If `metadata.media_urls` (array) exists, treat it as the source of truth.
-  - Otherwise fall back to the existing singular `metadata.media_url`.
-- Render **all** media items in the bubble (multi-image WhatsApp messages currently lose every image after the first), each clickable to open the existing `MediaViewer`.
-- Keep current single-item behavior intact for assistant messages and historical data.
-
-**File:** `src/components/conversations/MediaGallery.tsx`
-
-- Same normalization in the `useMemo` that flattens messages → media items, so the gallery counts and lists every image in array-form messages, not just the first.
-
-No backend changes. No DB changes. Existing rows immediately display correctly because the data is already there.
-
-### 2. New tool: `forward_media_to_boss`
-
-**File:** `supabase/functions/whatsapp-messages/index.ts`
-
-Add a tool definition next to `notify_boss`:
+## User flow
 
 ```text
-forward_media_to_boss(
-  reason: string,             // e.g. "Customer asking if we stock this product"
-  caption?: string,           // short note to the boss, max 1 sentence
-  media_index?: number = 0    // which of the customer's just-sent images to forward
-)
+Meta Integrations panel
+┌─────────────────────────────────────────────────┐
+│  [ Connect with Facebook ]   ← big primary CTA  │
+│                                                  │
+│  Already connected:                              │
+│   • Page: ANZ Kitchenware  [FB] [IG] [⚙][🗑]    │
+│   • Page: Demo Lodge       [FB]      [⚙][🗑]    │
+│                                                  │
+│  ▸ Advanced: paste credentials manually         │
+└─────────────────────────────────────────────────┘
+
+Click "Connect with Facebook"
+  → Facebook popup (login + consent)
+  → "Pick the Pages to connect" dialog (checkboxes)
+  → Auto-discovers IG Business ID for each
+  → Auto-subscribes webhooks
+  → Done. Cards appear with green "Live" badges.
 ```
 
-Behavior in the tool handler:
-1. Resolve the URL from the current turn's `storedMediaUrls[media_index]` (preferred) or, if absent, the most recent `messages` row from this customer with non-empty `message_metadata.media_urls`.
-2. Build a boss WhatsApp message that mirrors `sendBossHandoffNotification`'s style and adds the customer photo:
-   - `📸 Customer sent a product photo`
-   - Customer name + phone
-   - The AI's `reason` and `caption`
-   - The same paid-lead `📢 PAID LEAD` enrichment block (ad headline + today's spend) we already build in `sendBossHandoffNotification`, when `conversations.ad_context` is present.
-3. Call the existing `send-boss-notification` edge function with `notificationType: 'action_required'`, `data.message`, and the resolved `mediaUrl` so Twilio attaches it as MMS to every opted-in `company_boss_phones` row.
-4. Log the action via `boss_conversations` (already done by `send-boss-notification`).
+Tokens, Page IDs, and IG IDs are never shown to the user during the happy path.
 
-Prompt updates in the same file:
-- Add a hard rule under the existing handoff section: *"When the customer sends a product image and asks about stock, availability, price or fitment for that exact item, you MUST call `forward_media_to_boss` (not just `notify_boss`) so the boss can identify the product visually."*
-- Add the tool to the `alwaysEnabledTools` allow-list so it cannot be silently disabled per-company.
+## What we need from the user (one-time, platform-level)
 
-### 3. Mirror the same flow on Messenger / Instagram
+To use Facebook Login we need a **Meta App** configured with the right products and permissions. This is a one-time setup the platform owner does in developers.facebook.com — customers never see this.
 
-**File:** `supabase/functions/meta-webhook/index.ts`
+We will require these secrets (added via Lovable Cloud secrets):
+- `META_APP_ID` (public, also used in frontend SDK init)
+- `META_APP_SECRET` (server-only, used for token exchange)
+- `META_CONFIG_ID` (Facebook Login for Business config — recommended modern flow)
 
-Confirmed images from Meta DMs are already persisted into `message_metadata.media_urls`. The fix in step 1 + the new tool in step 2 automatically work for Messenger/IG too because the AI runs through the same processor. No additional change required beyond a code review pass.
+Permissions the app must request (already standard for this use case):
+`pages_show_list`, `pages_manage_metadata`, `pages_read_engagement`, `pages_messaging`, `pages_manage_posts`, `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`, `instagram_content_publish`, `business_management`.
 
-### 4. Memory
+These are the same permissions we use today via the manually-pasted token, so no new App Review is needed if the app is already approved. If not yet approved, the Connect button works for whitelisted test users immediately and goes live after Meta App Review (a separate, one-time submission).
 
-Append a short rule file `mem://features/customer-media-forwarding.md` documenting:
-- Inbound customer media is stored as arrays on `messages.message_metadata`.
-- The AI has a dedicated `forward_media_to_boss` tool — `notify_boss` is text only.
-- Operators can see all customer-sent media in the chat thread and in the Media Gallery dialog.
+## Technical implementation
 
----
+### Frontend (`src/components/admin/MetaIntegrationsPanel.tsx`)
 
-## Out of scope (intentional)
+1. Load the Facebook JS SDK on mount, initialised with `META_APP_ID` exposed via a small `meta-public-config` edge function (so the App ID isn't hardcoded).
+2. New primary button → `FB.login({ config_id: META_CONFIG_ID, response_type: 'code' })`.
+3. On success, send the returned `code` (or short-lived token) to a new edge function `meta-oauth-exchange`.
+4. Backend returns `{ pages: [{ id, name, picture, ig_user_id }] }`.
+5. Show a "Pick Pages to connect" dialog with checkboxes + Page picture/name.
+6. On confirm, call `meta-oauth-connect-pages` with the chosen page IDs.
+7. Invalidate `['meta-credentials']` query and show success.
+8. Existing manual form is moved into a collapsed `<Accordion>` labelled "Advanced: paste token manually".
 
-- **Operator → customer** image sending from the chat UI (already exists via `send_media` tool / agent workspace).
-- Re-encoding or thumbnailing — the `conversation-media` bucket is already public and Twilio accepts the URL directly.
-- Changes to `boss-chat` flow: this is one-way customer→boss forwarding, the boss can already reply normally.
+### New edge functions
 
----
+**`meta-oauth-exchange`** (verify_jwt = true)
+- Input: `{ code }` or `{ short_lived_token }` from FB SDK.
+- Exchanges code → short-lived user token → long-lived user token via `oauth/access_token` using `META_APP_SECRET`.
+- Calls `GET /me/accounts?fields=id,name,picture,access_token,instagram_business_account` with the long-lived user token.
+- Returns sanitized `{ pages: [{ id, name, picture_url, ig_user_id, _server_token_ref }] }`. The actual Page tokens are cached server-side in a short-lived `meta_oauth_sessions` row keyed by a UUID, so they never touch the browser.
 
-## Touch list
+**`meta-oauth-connect-pages`** (verify_jwt = true)
+- Input: `{ session_id, page_ids: string[], company_id }`.
+- For each chosen page: read the cached Page token + ig_user_id from the session, upsert into `meta_credentials` (one row per page, scoped to the user's company via existing RLS).
+- Invokes existing `subscribe-meta-page` to wire webhooks.
+- Deletes the temp session row.
+- Returns `{ connected: [{ page_id, page_name, ig_linked: bool, webhook_subscribed: bool }] }`.
 
-- `src/components/conversations/ChatBubble.tsx` — array-aware rendering
-- `src/components/conversations/MediaGallery.tsx` — array-aware extraction
-- `supabase/functions/whatsapp-messages/index.ts` — new tool, prompt rule, handler
-- `mem://features/customer-media-forwarding.md` — new memory file
+**`meta-public-config`** (verify_jwt = false)
+- Returns `{ app_id, config_id }` — public values, safe to expose.
+
+### Database
+
+New tiny table `meta_oauth_sessions` to bridge the two function calls without leaking Page tokens to the browser:
+
+```text
+meta_oauth_sessions
+  id             uuid pk
+  user_id        uuid  (= auth.uid())
+  company_id     uuid
+  pages          jsonb  -- [{id, name, picture_url, access_token, ig_user_id}]
+  created_at     timestamptz default now()
+  expires_at     timestamptz default now() + interval '15 min'
+RLS: owner-only select/delete. Service role full access.
+Cron: delete where expires_at < now() (re-uses existing cleanup pattern).
+```
+
+No changes needed to `meta_credentials` schema — we still write the same `page_id`, `access_token`, `ig_user_id`, `platform`. The "Additional Instructions" prompt field stays editable from the card's edit button.
+
+### Token health & expiry UX
+
+Page Access Tokens obtained via this flow are long-lived (no expiry) **as long as** the underlying user token stays valid (60 days, auto-refreshed on each FB login). To make this visible:
+- Add a nightly cron `meta-token-health` that pings `/me?access_token=...` for each credential and writes `last_verified_at` + `health_status` to `meta_credentials`.
+- The card shows `🟢 Healthy`, `🟡 Expires soon`, or `🔴 Reconnect needed`.
+- A `🔴` card replaces its edit button with a one-click "Reconnect" that re-runs the same FB Login flow and overwrites the row in place.
+
+(Two new nullable columns on `meta_credentials`: `last_verified_at timestamptz`, `health_status text default 'unknown'`. Backwards compatible.)
+
+## What stays the same
+
+- `meta_credentials` table shape, RLS, and all downstream consumers (`meta-webhook`, `publish-meta-post`, `publish-facebook-post`, `send-meta-dm`, `send-facebook-message-reply`, `send-facebook-comment-reply`, `meta-ads-*`) — they keep reading `page_id` + `access_token` exactly as today.
+- The existing "paste manually" form — kept under Advanced for agencies and edge cases.
+- `subscribe-meta-page` — re-used by the new flow.
+
+## Out of scope (call out for later)
+
+- WhatsApp Business onboarding via Embedded Signup (different flow, different App product). We can add `whatsapp-oauth-*` later using the same pattern.
+- Meta App Review submission — that's a one-time platform task done outside this codebase.
+
+## Deliverables
+
+1. Migration: `meta_oauth_sessions` table + 2 nullable columns on `meta_credentials`.
+2. Edge functions: `meta-public-config`, `meta-oauth-exchange`, `meta-oauth-connect-pages`, `meta-token-health` (cron).
+3. Updated `MetaIntegrationsPanel.tsx` with Facebook Login button, page picker dialog, health badges, reconnect action, and Advanced fallback.
+4. Add secrets prompt for `META_APP_ID`, `META_APP_SECRET`, `META_CONFIG_ID` (you provide these once from your Meta App dashboard; I'll walk you through exactly where to find them after you approve this plan).
+5. Memory file `mem://features/meta-oauth-onboarding.md` documenting the flow.
