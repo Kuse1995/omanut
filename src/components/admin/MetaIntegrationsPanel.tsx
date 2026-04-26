@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
 
 interface MetaCredential {
@@ -57,6 +57,7 @@ export const MetaIntegrationsPanel = () => {
   });
 
   const [fbReady, setFbReady] = useState(false);
+  const [fbSdkError, setFbSdkError] = useState<string | null>(null);
   const [fbConnecting, setFbConnecting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState<
@@ -82,21 +83,60 @@ export const MetaIntegrationsPanel = () => {
       setFbReady(true);
       return;
     }
+    let timeoutId: number | undefined;
+    let settled = false;
+
     window.fbAsyncInit = () => {
-      window.FB!.init({
-        appId: metaConfig.app_id,
-        cookie: true,
-        xfbml: false,
-        version: 'v19.0',
-      });
-      setFbReady(true);
+      try {
+        window.FB!.init({
+          appId: metaConfig.app_id!,
+          cookie: true,
+          xfbml: false,
+          version: 'v19.0',
+        });
+        settled = true;
+        if (timeoutId) window.clearTimeout(timeoutId);
+        setFbReady(true);
+        setFbSdkError(null);
+      } catch (e) {
+        console.error('[MetaPanel] FB.init failed', e);
+        setFbSdkError('Facebook SDK failed to initialize. Refresh the page.');
+      }
     };
-    const script = document.createElement('script');
-    script.src = 'https://connect.facebook.net/en_US/sdk.js';
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = 'anonymous';
-    document.body.appendChild(script);
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src*="connect.facebook.net"]'
+    );
+    if (existing) {
+      // Script already present (e.g. hot reload) — just wait for init
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://connect.facebook.net/en_US/sdk.js';
+      script.async = true;
+      script.defer = true;
+      script.crossOrigin = 'anonymous';
+      script.onerror = () => {
+        console.error('[MetaPanel] Failed to load Facebook SDK script');
+        setFbSdkError(
+          "Couldn't load the Facebook SDK. Disable ad blockers / privacy extensions and reload."
+        );
+      };
+      document.body.appendChild(script);
+    }
+
+    // 10s safety net — if init never fires, surface a clear error
+    timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        console.warn('[MetaPanel] FB SDK init timed out after 10s');
+        setFbSdkError(
+          'Facebook SDK took too long to load. Check your network or ad blockers and reload.'
+        );
+      }
+    }, 10000);
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, [metaConfig?.app_id]);
 
   const { data: credentials, isLoading } = useQuery({
