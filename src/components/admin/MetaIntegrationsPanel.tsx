@@ -48,8 +48,7 @@ export const MetaIntegrationsPanel = () => {
     ai_system_prompt: '',
   });
 
-  const [fbReady, setFbReady] = useState(false);
-  const [fbSdkError, setFbSdkError] = useState<string | null>(null);
+  const [fbConfigError, setFbConfigError] = useState<string | null>(null);
   const [fbConnecting, setFbConnecting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discoveredPages, setDiscoveredPages] = useState<
@@ -70,7 +69,10 @@ export const MetaIntegrationsPanel = () => {
   });
   const [waShowToken, setWaShowToken] = useState(false);
 
-  // Load public Meta config (App ID + Login Config ID) and the FB JS SDK
+  // Load public Meta config (App ID + Login Config ID). The frontend uses
+  // these to build the OAuth dialog URL itself — no Facebook JS SDK required
+  // (FB.login() is incompatible with Facebook Login for Business because it
+  // hardcodes response_type=token).
   const { data: metaConfig } = useQuery({
     queryKey: ['meta-public-config'],
     queryFn: async () => {
@@ -80,67 +82,11 @@ export const MetaIntegrationsPanel = () => {
     },
   });
 
-  useEffect(() => {
-    if (!metaConfig?.app_id) return;
-    if (window.FB) {
-      setFbReady(true);
-      return;
-    }
-    let timeoutId: number | undefined;
-    let settled = false;
+  // The redirect URI we register with Meta. Must be added to the Meta App's
+  // "Valid OAuth Redirect URIs" list under Facebook Login for Business → Settings.
+  const oauthRedirectUri =
+    typeof window !== 'undefined' ? `${window.location.origin}/auth/meta/callback` : '';
 
-    window.fbAsyncInit = () => {
-      try {
-        window.FB!.init({
-          appId: metaConfig.app_id!,
-          cookie: true,
-          xfbml: false,
-          version: 'v19.0',
-        });
-        settled = true;
-        if (timeoutId) window.clearTimeout(timeoutId);
-        setFbReady(true);
-        setFbSdkError(null);
-      } catch (e) {
-        console.error('[MetaPanel] FB.init failed', e);
-        setFbSdkError('Facebook SDK failed to initialize. Refresh the page.');
-      }
-    };
-
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src*="connect.facebook.net"]'
-    );
-    if (existing) {
-      // Script already present (e.g. hot reload) — just wait for init
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://connect.facebook.net/en_US/sdk.js';
-      script.async = true;
-      script.defer = true;
-      script.crossOrigin = 'anonymous';
-      script.onerror = () => {
-        console.error('[MetaPanel] Failed to load Facebook SDK script');
-        setFbSdkError(
-          "Couldn't load the Facebook SDK. Disable ad blockers / privacy extensions and reload."
-        );
-      };
-      document.body.appendChild(script);
-    }
-
-    // 10s safety net — if init never fires, surface a clear error
-    timeoutId = window.setTimeout(() => {
-      if (!settled) {
-        console.warn('[MetaPanel] FB SDK init timed out after 10s');
-        setFbSdkError(
-          'Facebook SDK took too long to load. Check your network or ad blockers and reload.'
-        );
-      }
-    }, 10000);
-
-    return () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
-    };
-  }, [metaConfig?.app_id]);
 
   const { data: credentials, isLoading } = useQuery({
     queryKey: ['meta-credentials', selectedCompany?.id],
