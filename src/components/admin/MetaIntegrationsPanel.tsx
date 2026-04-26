@@ -34,7 +34,7 @@ interface FbWindow extends Window {
   FB?: {
     init: (config: Record<string, unknown>) => void;
     login: (
-      cb: (resp: { authResponse?: { accessToken: string; userID: string }; status: string }) => void,
+      cb: (resp: { authResponse?: { accessToken?: string; userID?: string; code?: string }; status: string }) => void,
       opts: Record<string, unknown>
     ) => void;
   };
