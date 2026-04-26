@@ -258,17 +258,30 @@ export const MetaIntegrationsPanel = () => {
   };
 
   const startFacebookConnect = useCallback(() => {
-    if (!fbReady || !window.FB || !selectedCompany?.id) {
+    // Hard-verify SDK + login function are actually callable.
+    // fbReady can be true while window.FB.login is undefined if a privacy
+    // extension blocks part of the SDK after init.
+    const fb = window.FB as (typeof window.FB & { login?: unknown }) | undefined;
+    if (!fbReady || !fb || typeof fb.login !== 'function' || !selectedCompany?.id) {
       console.warn('[MetaPanel] Connect clicked but not ready', {
         fbReady,
-        hasFB: !!window.FB,
+        hasFB: !!fb,
+        hasLogin: typeof fb?.login,
         hasCompany: !!selectedCompany?.id,
       });
-      toast.error(
-        !selectedCompany?.id
-          ? 'Pick a company first.'
-          : "Facebook SDK isn't ready yet. Please wait a moment or reload."
-      );
+      if (!selectedCompany?.id) {
+        toast.error('Pick a company first.');
+      } else if (!fb || typeof fb?.login !== 'function') {
+        toast.error(
+          "Facebook SDK loaded incompletely — likely blocked by a privacy extension. Disable shields/ad blockers for this site, then reload.",
+          { duration: 8000 }
+        );
+        setFbSdkError(
+          'Facebook SDK is loaded but FB.login is unavailable. A browser extension (uBlock, Privacy Badger, Brave shields, etc.) is blocking part of the SDK.'
+        );
+      } else {
+        toast.error("Facebook SDK isn't ready yet. Please wait a moment or reload.");
+      }
       return;
     }
     setFbConnecting(true);
@@ -342,7 +355,15 @@ export const MetaIntegrationsPanel = () => {
       window.clearTimeout(timeoutId);
       setFbConnecting(false);
       console.error('[MetaPanel] FB.login threw', e);
-      toast.error('Failed to open Facebook login window');
+      const msg = e instanceof Error ? e.message : String(e);
+      // Most common reasons: SDK partially blocked, popup blocker, or third-party cookies disabled.
+      toast.error(
+        `Failed to open Facebook login: ${msg || 'unknown error'}. Try: (1) allow popups for this site, (2) disable ad/privacy blockers, (3) enable third-party cookies for facebook.com.`,
+        { duration: 8000 }
+      );
+      setFbSdkError(
+        'Facebook login window failed to open. This is usually caused by an ad blocker, popup blocker, or third-party cookies being disabled for facebook.com.'
+      );
     }
   }, [fbReady, selectedCompany?.id, metaConfig?.config_id]);
 
