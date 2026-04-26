@@ -4381,6 +4381,138 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
               console.error('[BACKGROUND] Exception in notify_boss:', error);
               toolExecutionContext.push('boss notification exception');
             }
+          } else if (toolCall.function.name === 'forward_media_to_boss') {
+            const args = JSON.parse(toolCall.function.arguments);
+            console.log('[FORWARD-MEDIA] Tool called with:', JSON.stringify(args));
+            try {
+              // 1. Resolve the media URL the AI wants forwarded.
+              const idx = typeof args.media_index === 'number' ? args.media_index : 0;
+              let resolvedUrl: string | null = null;
+              let resolvedType: string | null = null;
+
+              if (storedMediaUrls && storedMediaUrls.length > 0) {
+                resolvedUrl = storedMediaUrls[idx] || storedMediaUrls[0];
+                resolvedType = storedMediaTypes?.[idx] || storedMediaTypes?.[0] || 'image/jpeg';
+              } else {
+                // Fall back to the most recent customer message with media in this conversation.
+                const { data: recent } = await supabase
+                  .from('messages')
+                  .select('message_metadata, created_at')
+                  .eq('conversation_id', conversationId)
+                  .eq('role', 'user')
+                  .order('created_at', { ascending: false })
+                  .limit(8);
+                for (const row of recent || []) {
+                  const md: any = row.message_metadata || {};
+                  const urls: string[] = Array.isArray(md.media_urls) ? md.media_urls.filter(Boolean) : [];
+                  if (urls.length > 0) {
+                    resolvedUrl = urls[Math.min(idx, urls.length - 1)] || urls[0];
+                    resolvedType = (Array.isArray(md.media_types) ? md.media_types[Math.min(idx, urls.length - 1)] : null) || 'image/jpeg';
+                    break;
+                  } else if (md.media_url) {
+                    resolvedUrl = md.media_url;
+                    resolvedType = md.media_type || 'image/jpeg';
+                    break;
+                  }
+                }
+              }
+
+              if (!resolvedUrl) {
+                console.warn('[FORWARD-MEDIA] No customer media found to forward');
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: false, error: 'no_customer_media_found' })
+                });
+                toolExecutionContext.push('forward_media_to_boss: no media to forward');
+                anyToolExecuted = true;
+                continue;
+              }
+
+              // 2. Build the boss-facing message (mirrors sendBossHandoffNotification style + paid-lead block).
+              const lines: string[] = [
+                '📸 Customer sent a photo',
+                '',
+                `Customer: ${conversation.customer_name || 'Unknown'}`,
+                `Phone: ${customerPhone.replace(/^whatsapp:/, '')}`,
+                '',
+                `Reason: ${args.reason}`,
+              ];
+              if (args.caption) lines.push(`Note: ${args.caption}`);
+
+              // Paid-lead enrichment
+              try {
+                const ac: any = (conversation as any)?.ad_context;
+                if (ac && (ac.headline || ac.body || ac.source_id)) {
+                  lines.push('');
+                  lines.push('📢 PAID LEAD (clicked your ad)');
+                  if (ac.headline) lines.push(`Ad: "${String(ac.headline).slice(0, 120)}"`);
+                  if (ac.source_id) lines.push(`Ref: ${ac.source_id}`);
+                  const today = new Date().toISOString().slice(0, 10);
+                  const { data: spendRows } = await supabase
+                    .from('meta_ad_insights_daily')
+                    .select('spend_cents')
+                    .eq('company_id', company.id)
+                    .eq('date', today);
+                  if (spendRows && spendRows.length > 0) {
+                    const totalCents = spendRows.reduce((s: number, r: any) => s + (r.spend_cents || 0), 0);
+                    if (totalCents > 0) lines.push(`Today's ad spend: $${(totalCents / 100).toFixed(2)}`);
+                  }
+                }
+              } catch (e) {
+                console.error('[FORWARD-MEDIA] ad_context enrichment failed:', e);
+              }
+
+              lines.push('');
+              lines.push(`Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`);
+
+              const bossMessage = lines.join('\n');
+
+              // 3. Dispatch via the existing send-boss-notification fn so MMS attachment + fan-out + logging are reused.
+              const { error: notifyErr } = await supabase.functions.invoke('send-boss-notification', {
+                body: {
+                  companyId: company.id,
+                  notificationType: 'action_required',
+                  data: {
+                    action_type: 'customer_image_forward',
+                    priority: 'high',
+                    description: bossMessage,
+                    customer_name: conversation.customer_name || 'Unknown',
+                    customer_phone: customerPhone.replace(/^whatsapp:/, ''),
+                    message: bossMessage,
+                  },
+                  mediaUrl: resolvedUrl,
+                },
+              });
+
+              if (notifyErr) {
+                console.error('[FORWARD-MEDIA] send-boss-notification error:', notifyErr);
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: false, error: 'notification_failed' })
+                });
+                toolExecutionContext.push('forward_media_to_boss: dispatch failed');
+              } else {
+                console.log('[FORWARD-MEDIA] Forwarded to boss:', resolvedUrl);
+                toolResults.push({
+                  tool_call_id: toolCall.id,
+                  role: "tool",
+                  content: JSON.stringify({ success: true, forwarded_url: resolvedUrl, media_type: resolvedType })
+                });
+                toolExecutionContext.push(`forward_media_to_boss: image sent to boss (${resolvedType})`);
+              }
+              anyToolExecuted = true;
+            } catch (error) {
+              console.error('[BACKGROUND] Exception in forward_media_to_boss:', error);
+              toolResults.push({
+                tool_call_id: toolCall.id,
+                role: "tool",
+                content: JSON.stringify({ success: false, error: 'exception' })
+              });
+              toolExecutionContext.push('forward_media_to_boss: exception');
+              anyToolExecuted = true;
+            }
           } else if (toolCall.function.name === 'deliver_digital_product') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[DELIVER-PRODUCT] Tool called with:', JSON.stringify(args));
