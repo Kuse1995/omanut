@@ -2528,6 +2528,36 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       instructions += '\n\n⚠️ NO MEDIA LIBRARY: You have no media files to share. If customer asks for samples, apologize and explain you can create custom designs for them.\n';
     }
 
+    // === FACEBOOK AD CONTEXT INJECTION (Click-to-WhatsApp) ===
+    // If the customer arrived via a paid Meta ad and we're still early in the convo,
+    // tell the AI which product they clicked on so it doesn't ask "what would you like info about?"
+    try {
+      if (conversation?.ad_context && (conversation.ad_context as any).headline) {
+        const ac: any = conversation.ad_context;
+        // Count assistant turns so far — only inject for the first ~3 replies
+        const { count: assistantTurnCount } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conversation.id)
+          .eq('role', 'assistant');
+        if ((assistantTurnCount ?? 0) <= 3) {
+          instructions = `\n=== 🔥 AD CONTEXT — CUSTOMER JUST CLICKED YOUR FACEBOOK AD ===\n` +
+            `Headline: ${ac.headline || '(none)'}\n` +
+            (ac.body ? `Body: ${ac.body}\n` : '') +
+            (ac.source_url ? `Source: ${ac.source_url}\n` : '') +
+            (ac.media_url ? `Ad image: ${ac.media_url}\n` : '') +
+            `\nThe automatic message "Hello! Can I get more info on this?" was sent by Meta on the customer's behalf when they tapped the ad.\n` +
+            `→ Open the conversation by referencing THIS PRODUCT specifically (price, key features, photo if you have one in your media library).\n` +
+            `→ DO NOT ask "which product would you like info about?" — you already know.\n` +
+            `→ DO NOT send a generic welcome. Be specific and warm.\n` +
+            `=== END AD CONTEXT ===\n\n` + instructions;
+          console.log('[CTWA-AD] Injected ad context into system prompt:', ac.headline);
+        }
+      }
+    } catch (adCtxErr) {
+      console.error('[CTWA-AD] Failed to inject ad context:', adCtxErr);
+    }
+
     instructions += `\n\nCONVERSATION MEMORY & CONTEXT - CRITICAL:
 - ALWAYS review the conversation history before asking questions
 - If customer already provided name, email, phone, or guest count, EXTRACT IT from conversation
