@@ -1,68 +1,123 @@
+# Make ANZ chats enterprise-ready for paid Facebook ads
 
-# Facebook Ads — Campaign Manager (Tier 2)
+## What's actually broken (evidence from production data)
 
-Owner-only UI inside the admin panel to create, list, pause/resume, and monitor Facebook (and Instagram) ad campaigns through the Meta Marketing API, reusing the brand's existing AI-generated creatives and approved posts.
+I pulled the last 7 days of ANZ chats. Three concrete problems are eating into the ad spend you're running:
 
-## What the owner will see
+### 1. 59% of paid ad clicks are ghosting after one reply
+- 59 customers in 7 days clicked your Click-to-WhatsApp ad ("Send Message" button on a Facebook ad).
+- Meta auto-sends the message `"Hello! Can I get more info on this?"` on the customer's behalf.
+- Your AI replies with a generic `"Welcome to ANZ! Which product would you like info about?"`
+- 35 of those 59 customers (59%) **never sent another message**. They expected the AI to already know which product they tapped on. It didn't.
 
-A new **"Ads"** tab on each company workspace with:
+Root cause: Meta forwards an `ad_referral` payload with every CTWA inbound (headline, body text, source URL, image URL, ad ID). Both our **Twilio webhook** and our **Meta Cloud API webhook** ignore those fields completely. So the AI literally has no idea the customer just clicked an ad for, say, "Whistling Kettle K720".
 
-1. **Ad Account setup card** — paste the Ad Account ID once per company. A "Verify access" button checks the token actually has `ads_management` + `ads_read` and the account is active and billable. Clear red/green status with the exact missing scope if it fails.
-2. **"New Campaign" wizard** (4 steps):
-   - **Goal**: Traffic / Messages (WhatsApp/Messenger) / Leads / Engagement / Sales (link clicks to a product)
-   - **Creative**: pick from approved scheduled posts, the brand asset library, AI-generated images, or upload new. Headline + primary text + CTA button. Live preview.
-   - **Audience**: location (default to company's country), age range, gender, interests (searchable Meta interest picker), or "Lookalike of my customers".
-   - **Budget & schedule**: daily or lifetime budget in the company's currency, start date, end date (or ongoing), then a confirmation screen showing total spend cap before launch.
-3. **Campaign list** — every campaign with status (Active / Paused / Ended / In review), spend so far, impressions, clicks, CTR, results (messages / leads / purchases), and cost per result. Pause / Resume / Duplicate / End buttons.
-4. **Insights drawer** — daily breakdown chart, top-performing creatives, audience age/gender split.
+### 2. AI is leaking raw tool-call syntax in Chinese to customers
+One conversation (Nox Sapilinya, Apr 25) received this as the reply:
+> `tool_calls参数（需要保持原语言不变）：[{"name": "notify_boss", "arguments": "{}"}]`
 
-## How it fits with what's already there
+That's the Zhipu `glm-4.7` model (currently set as ANZ's primary model) failing to format a function call and dumping it as plain text. Unacceptable in front of a paying customer.
 
-- Reuses `meta_credentials` (Page token + new `ad_account_id` field).
-- Pulls creatives from existing `scheduled_posts`, `company_media`, and `generated_images`.
-- Pause/resume/end actions log to the existing audit pattern.
-- Spend metrics show in the Dashboard alongside conversation stats.
+### 3. AI asks "yes to what?" instead of fulfilling the prior offer
+The contextual-affirmation memory rule exists, but in the Mwazanji chat the AI replied "Great! Would you like to come visit us, or are you interested in ordering online?" after the customer just said "Yes" to its own previous offer. It's still re-asking instead of acting.
 
-## Permissions
+Also, when the customer fires two messages in quick succession ("Yes" + "Location"), the AI replies twice in 4 seconds instead of merging them into one coherent answer — feels robotic.
 
-Only company role = **owner** can open the Ads tab, launch, pause, or end campaigns. Managers can view read-only insights. Enforced both in UI (route guard) and in the edge functions (server-side role check before any Marketing API call).
+---
 
-## Technical plan
+## The fix (4 changes, in priority order)
 
-**1. Database (one migration)**
-- `ALTER TABLE meta_credentials ADD COLUMN ad_account_id text` (format `act_XXXX`)
-- New table `meta_ad_campaigns`: `id, company_id, credential_id, meta_campaign_id, meta_adset_id, meta_ad_id, name, objective, status, daily_budget_cents, lifetime_budget_cents, currency, start_at, end_at, creative_payload jsonb, targeting jsonb, created_by, created_at, updated_at`
-- New table `meta_ad_insights_daily`: `id, campaign_id, company_id, date, spend_cents, impressions, reach, clicks, results, cost_per_result, raw jsonb` (one row per campaign per day, upserted by cron)
-- RLS: SELECT for any company member, INSERT/UPDATE/DELETE only via security-definer functions called from edge functions (which check `owner` role).
+### Fix 1 — Capture Meta ad referral context (biggest revenue impact)
 
-**2. Edge functions**
-- `meta-ads-verify` — pings `/me/permissions` + `/{ad_account_id}?fields=account_status,currency,funding_source` and returns a clean status object. Used by the "Verify access" button.
-- `meta-ads-launch` — owner-only. Creates Campaign → AdSet → Creative → Ad in Meta, persists IDs to `meta_ad_campaigns`. Validates input with Zod. Handles Meta error codes (`100`, `190`, `200`, `2635`) with human-readable messages.
-- `meta-ads-control` — owner-only. Pause / resume / end an existing campaign (updates Meta status + local row).
-- `meta-ads-list` — returns campaigns + latest insights for the UI (uses cached `meta_ad_insights_daily`, falls back to live fetch).
-- `meta-ads-sync-insights` — cron-triggered every 2h. For every active campaign, fetches `/{campaign_id}/insights` for the last 7 days and upserts into `meta_ad_insights_daily`.
-- `meta-ads-targeting-search` — proxy to `/search?type=adinterest` for the interest picker (rate-limited per company).
+Both inbound webhooks (Twilio + Meta Cloud) will extract and persist the `referral` payload that comes attached to the very first message of a CTWA conversation:
 
-**3. Cron job**
-`pg_cron` schedule running `meta-ads-sync-insights` every 2 hours.
+- `ReferralHeadline` — e.g. "Whistling Kettle - K720"
+- `ReferralBody` — the ad's body copy
+- `ReferralSourceUrl` — link to the FB post / ad
+- `ReferralSourceId` — Meta `ad_id` (joins to `meta_ad_campaigns`)
+- `ReferralMediaUrl` — the ad's image
+- `ctwa_clid` — click-to-WhatsApp tracking id
 
-**4. Frontend**
-- New tab in `CompanyTabs.tsx` (icon: Megaphone) gated by `useCompanyRole() === 'owner'`.
-- Components in `src/components/admin/ads/`: `AdsPanel.tsx`, `AdAccountSetupCard.tsx`, `NewCampaignWizard.tsx` (with `GoalStep`, `CreativeStep`, `AudienceStep`, `BudgetStep`), `CampaignList.tsx`, `CampaignInsightsDrawer.tsx`, `InterestPicker.tsx`.
-- React Query for list/insights with realtime invalidation on launch/pause.
+We store this on the `conversations` row in a new `ad_context` JSONB column AND inject it into the AI's system prompt for the first ~3 turns:
 
-**5. Safety rails**
-- Hard-cap on daily budget per company (configurable, default 10,000 in company currency) to prevent runaway spend from a typo.
-- Confirmation modal showing "You will spend up to X over Y days" before any launch call.
-- Every launch/pause/end action writes to a `meta_ad_audit_log` (campaign_id, action, actor user_id, before/after status).
+```text
+[AD CONTEXT — customer just clicked your Facebook ad]
+Headline: Whistling Kettle K720 — copper finish
+Body: 4 colours available, lifetime warranty
+Image: <url>
+→ Open the conversation by referencing this product directly.
+   Do NOT ask "which product are you interested in?".
+```
 
-## What this build does NOT include
+This single change should turn most of the 35 ghosted leads/week into engaged conversations.
 
-- Tier 1 (one-click boost button on a single post) — can be added quickly later as a shortcut into the same wizard.
-- Tier 3 (WhatsApp AI autopilot for the boss) — separate follow-up.
-- Custom audiences from uploaded customer lists, A/B split tests, dynamic product ads from a catalog feed — all possible later, not in this slice.
-- Ad payment method management (must be set up in Meta Business Manager by the owner — we surface a clear error if missing).
+### Fix 2 — Switch ANZ's primary model away from Zhipu glm-4.7
 
-## Open dependency
+`glm-4.7` is occasionally emitting raw Chinese tool-call syntax to customers. Two options:
 
-If `ads_management` turns out NOT to be on the stored Page token (Page tokens normally don't carry it — you usually need a User token or System User token), we'll need a one-time reconnect flow with the right scopes. The "Verify access" button will tell us this on the first try per company; if it fails I'll add a guided reconnect step before any campaign can be launched.
+- **Recommended**: switch primary to `google/gemini-2.5-flash` (proven, fast, no leak history in our logs) and keep `glm-4.7` as a fallback only.
+- Add a defensive output filter: if assistant text matches `/tool_calls|参数|"name":\s*"\w+_\w+"/`, suppress, retry with backup model, and never deliver to customer.
+
+We'll do **both** — model swap + safety filter — so even if any model misbehaves the customer never sees JSON/Chinese leakage.
+
+### Fix 3 — Strengthen affirmation + burst handling
+
+- **Burst coalescing**: if a second customer message arrives within 6s of the first, queue + merge them before calling the AI (instead of firing two parallel runs). Already partly built in `pending-promise-watchdog`; we extend it for inbound bursts.
+- **Affirmation rule reinforcement**: tighten the contextual-affirmation prompt block so single-word replies ("Yes", "Ok", "Sure", "Show me") MUST trigger fulfilment of the assistant's last concrete offer, never a re-ask. Add a hard rule: if the previous assistant turn ended with `"Would you like…?"` and the user replies with an affirmation, the next assistant turn cannot be a question.
+
+### Fix 4 — Ad-aware lead alerts to the boss
+
+When a CTWA-sourced lead converts into intent (price asked, availability asked, "I want to buy"), the boss WhatsApp ping includes:
+
+```
+🔥 LEAD from FB ad "Whistling Kettle K720"
+Customer: Diane (+260964349486)
+Spent on this ad so far today: K42 / K100
+Status: asked about delivery
+```
+
+This pulls from `meta_ad_insights_daily` (already exists from the ads work) and closes the loop so you/the client can see which ads convert.
+
+---
+
+## Technical changes
+
+### Database
+```sql
+ALTER TABLE conversations
+  ADD COLUMN ad_context jsonb,
+  ADD COLUMN ad_referral_id text,
+  ADD COLUMN ctwa_clid text;
+
+CREATE INDEX idx_conversations_ad_referral ON conversations(ad_referral_id) WHERE ad_referral_id IS NOT NULL;
+```
+
+### Edge functions
+- `whatsapp-messages/index.ts` — parse `ReferralHeadline`, `ReferralBody`, `ReferralSourceUrl`, `ReferralSourceId`, `ReferralMediaUrl`, `ReferralNumMedia`, `ReferralCtwaClid` from Twilio form data on first inbound; persist to `conversations.ad_context`.
+- `meta-webhook/index.ts` — same for the WhatsApp Cloud API `referral` object.
+- `whatsapp-messages/index.ts` (prompt builder) — when `conversations.ad_context` is set and the conversation has ≤3 assistant turns, inject the AD CONTEXT block at the top of the system prompt.
+- `whatsapp-messages/index.ts` (output guard) — regex filter on assistant text before send; on hit, log to `ai_error_logs`, retry once with `gemini-2.5-flash`, and if it still fails escalate to boss instead of replying.
+- `whatsapp-messages/index.ts` (burst coalescing) — short Redis-less debounce: if a new message arrives for the same `conversation_id` within 6s of an in-flight run, append to the run's input and abort the earlier reply.
+- `meta-lead-alert/index.ts` — include ad headline + today's ad spend on lead alerts when `conversations.ad_context` is set.
+
+### Config
+- Update `company_ai_overrides` for ANZ: set `primary_model = 'google/gemini-2.5-flash'`, keep current as fallback.
+- Tighten affirmation rule in the system instructions block.
+
+### Memory updates
+- New `mem://features/ctwa-ad-context-injection.md` documenting the referral capture contract.
+- Update `mem://features/contextual-affirmation-handling.md` with the "no re-question after affirmation" hard rule.
+
+---
+
+## Out of scope for this round
+- Re-trying the 35 already-ghosted leads (we can do a one-off re-engagement campaign separately if you want).
+- Image recognition of the ad image to auto-attach product photo (nice-to-have, later).
+- Ad-spend attribution dashboard in the admin UI (Tier-2 ads UI already shows insights; per-conversation ROI view can be a follow-up).
+
+---
+
+## Expected outcome
+- CTWA ghost rate from ~59% → target <25% within a week of rollout.
+- Zero "tool_calls" / Chinese-character leaks to customers (hard guarantee via output filter).
+- Boss alerts now show *which ad* drove each lead, so you can pause losers and double down on winners.

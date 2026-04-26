@@ -1630,10 +1630,13 @@ export type Database = {
       conversations: {
         Row: {
           active_agent: string | null
+          ad_context: Json | null
+          ad_referral_id: string | null
           archived: boolean | null
           assigned_to: string | null
           company_id: string | null
           created_at: string
+          ctwa_clid: string | null
           customer_name: string | null
           duration_seconds: number | null
           ended_at: string | null
@@ -1659,10 +1662,13 @@ export type Database = {
         }
         Insert: {
           active_agent?: string | null
+          ad_context?: Json | null
+          ad_referral_id?: string | null
           archived?: boolean | null
           assigned_to?: string | null
           company_id?: string | null
           created_at?: string
+          ctwa_clid?: string | null
           customer_name?: string | null
           duration_seconds?: number | null
           ended_at?: string | null
@@ -1688,10 +1694,13 @@ export type Database = {
         }
         Update: {
           active_agent?: string | null
+          ad_context?: Json | null
+          ad_referral_id?: string | null
           archived?: boolean | null
           assigned_to?: string | null
           company_id?: string | null
           created_at?: string
+          ctwa_clid?: string | null
           customer_name?: string | null
           duration_seconds?: number | null
           ended_at?: string | null
