@@ -290,6 +290,10 @@ export const MetaIntegrationsPanel = () => {
       scope:
         'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,pages_manage_posts,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish,business_management',
       return_scopes: true,
+      // Facebook Login for Business REQUIRES the authorization-code flow.
+      // The popup rejects response_type=token (the SDK's default) with
+      // "Invalid parameter: response_type must be a valid enum".
+      response_type: 'code',
     };
     if (metaConfig?.config_id) {
       loginOpts.config_id = metaConfig.config_id;
@@ -310,13 +314,14 @@ export const MetaIntegrationsPanel = () => {
     // IMPORTANT: FB.login REJECTS async callbacks ("Expression is of type
     // asyncfunction, not function"). We MUST pass a plain function and run
     // any async work inside it without awaiting it at the top level.
-    const handleFbResponse = (resp: { authResponse?: { accessToken: string; userID: string }; status: string }) => {
+    const handleFbResponse = (resp: { authResponse?: { accessToken?: string; userID?: string; code?: string }; status: string }) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timeoutId);
-      console.log('[MetaPanel] FB.login response', { status: resp.status });
+      console.log('[MetaPanel] FB.login response', { status: resp.status, hasCode: Boolean(resp.authResponse?.code) });
 
-      if (!resp.authResponse?.accessToken) {
+      const code = resp.authResponse?.code;
+      if (!code) {
         setFbConnecting(false);
         if (resp.status === 'not_authorized') {
           toast.error('You declined the permissions required to connect.');
@@ -335,7 +340,7 @@ export const MetaIntegrationsPanel = () => {
         try {
           const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
             body: {
-              short_lived_token: resp.authResponse!.accessToken,
+              code,
               company_id: selectedCompany.id,
             },
           });
