@@ -165,7 +165,98 @@ export const MetaIntegrationsPanel = () => {
     enabled: !!selectedCompany?.id,
   });
 
-  const startFacebookConnect = useCallback(() => {
+  // WhatsApp Cloud direct credentials
+  const { data: waCloud, isLoading: waLoading } = useQuery({
+    queryKey: ['company-whatsapp-cloud', selectedCompany?.id],
+    queryFn: async () => {
+      if (!selectedCompany?.id) return null;
+      const { data, error } = await supabase
+        .from('company_whatsapp_cloud')
+        .select('*')
+        .eq('company_id', selectedCompany.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!selectedCompany?.id,
+  });
+
+  const waSaveMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedCompany?.id) throw new Error('No company selected');
+      const payload = {
+        company_id: selectedCompany.id,
+        waba_id: waForm.waba_id.trim(),
+        phone_number_id: waForm.phone_number_id.trim(),
+        display_phone_number: waForm.display_phone_number.trim(),
+        business_name: waForm.business_name.trim() || null,
+        access_token: waForm.access_token.trim(),
+        connected_via: 'manual',
+        health_status: 'pending',
+        updated_at: new Date().toISOString(),
+      };
+      if (waCloud) {
+        const { error } = await supabase
+          .from('company_whatsapp_cloud')
+          .update(payload)
+          .eq('company_id', selectedCompany.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('company_whatsapp_cloud')
+          .insert(payload);
+        if (error) throw error;
+      }
+      // Switch the provider toggle on the company
+      await supabase
+        .from('companies')
+        .update({ whatsapp_provider: 'meta_cloud' })
+        .eq('id', selectedCompany.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-whatsapp-cloud'] });
+      toast.success('WhatsApp Cloud connected. Twilio is now bypassed for this company.');
+      setWaShowForm(false);
+      setWaShowToken(false);
+      setWaForm({ waba_id: '', phone_number_id: '', display_phone_number: '', business_name: '', access_token: '' });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const waDeleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedCompany?.id) return;
+      const { error } = await supabase
+        .from('company_whatsapp_cloud')
+        .delete()
+        .eq('company_id', selectedCompany.id);
+      if (error) throw error;
+      // Revert to Twilio
+      await supabase
+        .from('companies')
+        .update({ whatsapp_provider: 'twilio' })
+        .eq('id', selectedCompany.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-whatsapp-cloud'] });
+      toast.success('Reverted to Twilio for this company.');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const startWaEdit = () => {
+    if (waCloud) {
+      setWaForm({
+        waba_id: waCloud.waba_id ?? '',
+        phone_number_id: waCloud.phone_number_id ?? '',
+        display_phone_number: waCloud.display_phone_number ?? '',
+        business_name: waCloud.business_name ?? '',
+        access_token: waCloud.access_token ?? '',
+      });
+    }
+    setWaShowForm(true);
+  };
+
     if (!fbReady || !window.FB || !selectedCompany?.id) {
       console.warn('[MetaPanel] Connect clicked but not ready', {
         fbReady,
