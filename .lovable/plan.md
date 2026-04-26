@@ -1,140 +1,139 @@
-# One-Click Meta Connect (Facebook Login for Business)
+## Two things, in order
 
-## The problem today
+### Part 1 — Fix the "Connect to Facebook" hang first
 
-Onboarding to Meta currently requires the customer to:
-1. Open Facebook Business Manager
-2. Find their Page ID (15-digit number)
-3. Generate a long-lived Page Access Token (developer-mode steps)
-4. If they want Instagram, find the IG Business Account ID
-5. Paste all three into the Meta Integrations panel
+The button starts the FB SDK, but `meta-oauth-exchange` has zero logs — meaning the popup never returned a token. Three likely culprits, all fixable from our side or yours:
 
-This is acceptable for a single agency client, but for SaaS it is the #1 onboarding drop-off. Customers do not know what a "Page Access Token" is, tokens leak in screenshots, and tokens can expire silently.
+**A. App ID / Config ID may not be loading**
+If `META_APP_ID` is empty in env, `metaConfig.app_id` is `null`, the SDK script never runs, and the button silently does nothing. Fix: show a clear error state when `metaConfig.configured === false`, so we know immediately instead of seeing a spinner forever.
 
-## The fix: Facebook Login + auto-discovery
+**B. Domain not whitelisted in Meta App Dashboard**
+For `FB.login` to even open, your **App Domain** and **Allowed Domains for the JavaScript SDK** must include the URL you're testing on:
+- `id-preview--c3a1fe70-ae1b-4186-8abe-4d6d55f532d6.lovable.app` (preview)
+- `omanut.lovable.app` (published)
 
-We add a single **"Connect Facebook & Instagram"** button. The user logs in with their Facebook account, picks which Page(s) to connect, and we do the rest behind the scenes:
+Without this, FB returns `status: 'unknown'` instantly and our `if (!resp.authResponse?.accessToken)` triggers a toast — but if the script itself fails to load, the spinner just hangs.
 
-- Exchange the short-lived user token for a long-lived user token
-- List the Pages they manage and let them pick (multi-select)
-- For each chosen Page, fetch the **never-expiring Page Access Token** automatically
-- Auto-detect the linked **Instagram Business Account** (no copy-pasting IDs)
-- Subscribe the Page + IG to our webhook automatically (existing `subscribe-meta-page` logic)
-- Save everything to `meta_credentials` with no manual fields
+**C. SDK script load failure / popup blocker**
+We don't currently detect script load failure. If `connect.facebook.net` is blocked or slow, `fbReady` never flips true and the button is forever disabled with no feedback.
 
-The existing manual "paste token" form stays as an **Advanced** fallback (for power users / edge cases / agencies installing on behalf of a client).
+**Fixes I'll ship:**
+1. `meta-public-config` returns clear `configured: false` if either secret is missing — UI shows an admin-only "Meta App not configured" warning card instead of a dead button
+2. Add `script.onerror` and a 10s timeout to SDK loader → toast "Couldn't load Facebook SDK. Check ad blocker / domain whitelist"
+3. Add a 60s timeout around `FB.login` → toast "Login window timed out. Please try again"
+4. Add a small inline note under the button listing the exact domains that must be whitelisted in the Meta App, with a copy-to-clipboard button
+5. Console-log the full FB response so we can see `status: 'not_authorized'` vs `unknown` vs `connected` when debugging
 
-## User flow
+### Part 2 — Add WhatsApp Cloud API alongside Twilio (zero disruption)
 
-```text
-Meta Integrations panel
-┌─────────────────────────────────────────────────┐
-│  [ Connect with Facebook ]   ← big primary CTA  │
-│                                                  │
-│  Already connected:                              │
-│   • Page: ANZ Kitchenware  [FB] [IG] [⚙][🗑]    │
-│   • Page: Demo Lodge       [FB]      [⚙][🗑]    │
-│                                                  │
-│  ▸ Advanced: paste credentials manually         │
-└─────────────────────────────────────────────────┘
-
-Click "Connect with Facebook"
-  → Facebook popup (login + consent)
-  → "Pick the Pages to connect" dialog (checkboxes)
-  → Auto-discovers IG Business ID for each
-  → Auto-subscribes webhooks
-  → Done. Cards appear with green "Live" badges.
-```
-
-Tokens, Page IDs, and IG IDs are never shown to the user during the happy path.
-
-## What we need from the user (one-time, platform-level)
-
-To use Facebook Login we need a **Meta App** configured with the right products and permissions. This is a one-time setup the platform owner does in developers.facebook.com — customers never see this.
-
-We will require these secrets (added via Lovable Cloud secrets):
-- `META_APP_ID` (public, also used in frontend SDK init)
-- `META_APP_SECRET` (server-only, used for token exchange)
-- `META_CONFIG_ID` (Facebook Login for Business config — recommended modern flow)
-
-Permissions the app must request (already standard for this use case):
-`pages_show_list`, `pages_manage_metadata`, `pages_read_engagement`, `pages_messaging`, `pages_manage_posts`, `instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`, `instagram_content_publish`, `business_management`.
-
-These are the same permissions we use today via the manually-pasted token, so no new App Review is needed if the app is already approved. If not yet approved, the Connect button works for whitelisted test users immediately and goes live after Meta App Review (a separate, one-time submission).
-
-## Technical implementation
-
-### Frontend (`src/components/admin/MetaIntegrationsPanel.tsx`)
-
-1. Load the Facebook JS SDK on mount, initialised with `META_APP_ID` exposed via a small `meta-public-config` edge function (so the App ID isn't hardcoded).
-2. New primary button → `FB.login({ config_id: META_CONFIG_ID, response_type: 'code' })`.
-3. On success, send the returned `code` (or short-lived token) to a new edge function `meta-oauth-exchange`.
-4. Backend returns `{ pages: [{ id, name, picture, ig_user_id }] }`.
-5. Show a "Pick Pages to connect" dialog with checkboxes + Page picture/name.
-6. On confirm, call `meta-oauth-connect-pages` with the chosen page IDs.
-7. Invalidate `['meta-credentials']` query and show success.
-8. Existing manual form is moved into a collapsed `<Accordion>` labelled "Advanced: paste token manually".
-
-### New edge functions
-
-**`meta-oauth-exchange`** (verify_jwt = true)
-- Input: `{ code }` or `{ short_lived_token }` from FB SDK.
-- Exchanges code → short-lived user token → long-lived user token via `oauth/access_token` using `META_APP_SECRET`.
-- Calls `GET /me/accounts?fields=id,name,picture,access_token,instagram_business_account` with the long-lived user token.
-- Returns sanitized `{ pages: [{ id, name, picture_url, ig_user_id, _server_token_ref }] }`. The actual Page tokens are cached server-side in a short-lived `meta_oauth_sessions` row keyed by a UUID, so they never touch the browser.
-
-**`meta-oauth-connect-pages`** (verify_jwt = true)
-- Input: `{ session_id, page_ids: string[], company_id }`.
-- For each chosen page: read the cached Page token + ig_user_id from the session, upsert into `meta_credentials` (one row per page, scoped to the user's company via existing RLS).
-- Invokes existing `subscribe-meta-page` to wire webhooks.
-- Deletes the temp session row.
-- Returns `{ connected: [{ page_id, page_name, ig_linked: bool, webhook_subscribed: bool }] }`.
-
-**`meta-public-config`** (verify_jwt = false)
-- Returns `{ app_id, config_id }` — public values, safe to expose.
-
-### Database
-
-New tiny table `meta_oauth_sessions` to bridge the two function calls without leaking Page tokens to the browser:
+The provider-toggle approach. Existing companies keep Twilio untouched. New connections opt into Meta Cloud. Switching is per-company and reversible.
 
 ```text
-meta_oauth_sessions
-  id             uuid pk
-  user_id        uuid  (= auth.uid())
-  company_id     uuid
-  pages          jsonb  -- [{id, name, picture_url, access_token, ig_user_id}]
-  created_at     timestamptz default now()
-  expires_at     timestamptz default now() + interval '15 min'
-RLS: owner-only select/delete. Service role full access.
-Cron: delete where expires_at < now() (re-uses existing cleanup pattern).
+companies.whatsapp_provider:
+  'twilio'      → keep using existing Twilio path (default for all current rows)
+  'meta_cloud'  → use new Graph API path
 ```
 
-No changes needed to `meta_credentials` schema — we still write the same `page_id`, `access_token`, `ig_user_id`, `platform`. The "Additional Instructions" prompt field stays editable from the card's edit button.
+#### Database
 
-### Token health & expiry UX
+```sql
+-- Per-company WhatsApp Cloud credentials (only populated for opt-in companies)
+create table company_whatsapp_cloud (
+  company_id uuid primary key references companies(id) on delete cascade,
+  waba_id text not null,
+  phone_number_id text not null unique,
+  display_phone_number text not null,
+  business_name text,
+  access_token text not null,            -- system user token (long-lived)
+  webhook_subscribed_at timestamptz,
+  health_status text default 'pending',  -- pending|live|suspended
+  connected_via text default 'embedded_signup',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
 
-Page Access Tokens obtained via this flow are long-lived (no expiry) **as long as** the underlying user token stays valid (60 days, auto-refreshed on each FB login). To make this visible:
-- Add a nightly cron `meta-token-health` that pings `/me?access_token=...` for each credential and writes `last_verified_at` + `health_status` to `meta_credentials`.
-- The card shows `🟢 Healthy`, `🟡 Expires soon`, or `🔴 Reconnect needed`.
-- A `🔴` card replaces its edit button with a one-click "Reconnect" that re-runs the same FB Login flow and overwrites the row in place.
+-- Provider switch — defaults to 'twilio' so nothing breaks
+alter table companies add column whatsapp_provider text default 'twilio'
+  check (whatsapp_provider in ('twilio', 'meta_cloud'));
+```
 
-(Two new nullable columns on `meta_credentials`: `last_verified_at timestamptz`, `health_status text default 'unknown'`. Backwards compatible.)
+RLS: same ownership/manager pattern as `meta_credentials`. Token never leaves edge functions.
 
-## What stays the same
+#### New edge functions (additive — zero impact on Twilio code)
 
-- `meta_credentials` table shape, RLS, and all downstream consumers (`meta-webhook`, `publish-meta-post`, `publish-facebook-post`, `send-meta-dm`, `send-facebook-message-reply`, `send-facebook-comment-reply`, `meta-ads-*`) — they keep reading `page_id` + `access_token` exactly as today.
-- The existing "paste manually" form — kept under Advanced for agencies and edge cases.
-- `subscribe-meta-page` — re-used by the new flow.
+| Function | Purpose |
+|---|---|
+| `whatsapp-cloud-signup` | Embedded Signup token exchange → fetches WABA + phone_number_id, stores in `company_whatsapp_cloud` |
+| `whatsapp-cloud-subscribe` | POSTs to `/{phone_number_id}/subscribed_apps` so Meta forwards inbound to our webhook |
+| `send-whatsapp-cloud` | Sends via `https://graph.facebook.com/v21.0/{phone_number_id}/messages` |
 
-## Out of scope (call out for later)
+#### Webhook routing (additive)
 
-- WhatsApp Business onboarding via Embedded Signup (different flow, different App product). We can add `whatsapp-oauth-*` later using the same pattern.
-- Meta App Review submission — that's a one-time platform task done outside this codebase.
+`meta-webhook` already handles FB + IG. We add a `messages` field handler that:
+1. Recognizes WhatsApp Cloud payloads (`entry[].changes[].field === 'messages'`)
+2. Resolves `phone_number_id` → company via `company_whatsapp_cloud`
+3. Normalizes the payload into the same shape the existing `whatsapp-messages` core processor expects
+4. Hands off to the **same** AI/BMS/boss-notification pipeline
 
-## Deliverables
+Twilio inbound (`/whatsapp-messages`) stays exactly as it is. No code in that function changes.
 
-1. Migration: `meta_oauth_sessions` table + 2 nullable columns on `meta_credentials`.
-2. Edge functions: `meta-public-config`, `meta-oauth-exchange`, `meta-oauth-connect-pages`, `meta-token-health` (cron).
-3. Updated `MetaIntegrationsPanel.tsx` with Facebook Login button, page picker dialog, health badges, reconnect action, and Advanced fallback.
-4. Add secrets prompt for `META_APP_ID`, `META_APP_SECRET`, `META_CONFIG_ID` (you provide these once from your Meta App dashboard; I'll walk you through exactly where to find them after you approve this plan).
-5. Memory file `mem://features/meta-oauth-onboarding.md` documenting the flow.
+#### Outbound dispatcher (the only "shared" change)
+
+Create `_shared/whatsappSender.ts`:
+
+```ts
+export async function sendWhatsApp(supabase, company, to, body, mediaUrls?) {
+  if (company.whatsapp_provider === 'meta_cloud') {
+    return sendViaMetaCloud(supabase, company.id, to, body, mediaUrls);
+  }
+  return sendViaTwilio(company, to, body, mediaUrls);  // existing logic, untouched
+}
+```
+
+Then in each of the ~7 places that call Twilio directly, swap the inline fetch for `sendWhatsApp(...)`. The Twilio path is identical bytes — just relocated. No behavior change for Twilio companies.
+
+#### UI
+
+New "WhatsApp Provider" card in the existing Meta Integrations panel:
+- Status: shows current provider + connected number + health
+- "Connect WhatsApp directly via Meta" button → opens Embedded Signup popup
+- After successful signup, shows a toggle: **Use this for WhatsApp** (flips `whatsapp_provider` to `meta_cloud`)
+- Big yellow note: "Switching will route all future WhatsApp traffic through Meta. Your Twilio number will stop receiving messages until you switch back."
+- "Switch back to Twilio" button always available
+
+#### Migration safety net
+
+- `whatsapp_provider` defaults to `'twilio'` → every existing row is unaffected
+- New companies created today still get `'twilio'` until they explicitly opt in
+- If `company_whatsapp_cloud` row is missing for a `meta_cloud` company, we **fall back to Twilio** with a console warning instead of failing — belt and suspenders
+- A "Test message" button on the WhatsApp panel sends a real ping through whichever provider is active so the boss can verify before going live
+
+#### Required Meta App setup (one-time, on your side)
+
+- Add **WhatsApp** product to your existing Meta App in App Dashboard
+- Submit `whatsapp_business_management` + `whatsapp_business_messaging` for App Review (3–7 days, only blocks public rollout — internal testing works without it)
+- Set the WhatsApp webhook to: `https://dzheddvoiauevcayifev.supabase.co/functions/v1/meta-webhook`
+- Subscribe to the `messages` field
+
+#### What stays untouched
+
+- `whatsapp-messages` (Twilio inbound webhook) — not modified
+- `send-whatsapp-message` (Twilio outbound) — not modified, just wrapped by the dispatcher
+- All AI flows, BMS hooks, boss notifications, conversation history, frustration detection
+- Twilio voice (`twilio-voice`, `whatsapp-voice`) — out of scope, stays as is
+- Every existing company's `whatsapp_number` value
+
+#### Out of scope for this round
+
+- Voice over Meta (not GA)
+- Migrating existing Twilio companies (they stay until they choose to switch)
+- Removing Twilio code (we keep it indefinitely as the fallback)
+
+## Order of work
+
+1. **Fix FB Connect hang** (Part 1) — small, isolated, ships first so you can actually use what we already built
+2. **Migration + edge functions for WhatsApp Cloud** (Part 2 backend)
+3. **WhatsApp panel UI + provider toggle** (Part 2 frontend)
+4. **Wire the dispatcher into the ~7 Twilio call sites** (Part 2 wiring, last because it touches many files)
+
+Each step is independently shippable. We can stop after step 1 if you want to test the Facebook connect first.
