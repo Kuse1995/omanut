@@ -67,6 +67,17 @@ export const MetaIntegrationsPanel = () => {
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
 
+  // WhatsApp Cloud (direct Meta) state
+  const [waShowForm, setWaShowForm] = useState(false);
+  const [waForm, setWaForm] = useState({
+    waba_id: '',
+    phone_number_id: '',
+    display_phone_number: '',
+    business_name: '',
+    access_token: '',
+  });
+  const [waShowToken, setWaShowToken] = useState(false);
+
   // Load public Meta config (App ID + Login Config ID) and the FB JS SDK
   const { data: metaConfig } = useQuery({
     queryKey: ['meta-public-config'],
