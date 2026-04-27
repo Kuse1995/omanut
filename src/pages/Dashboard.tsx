@@ -19,6 +19,7 @@ import NotificationBell from "@/components/dashboard/NotificationBell";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 import SetupChecklist from "@/components/dashboard/SetupChecklist";
 import AiDigest from "@/components/dashboard/AiDigest";
+import WhatsAppNumberBanner from "@/components/dashboard/WhatsAppNumberBanner";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Dashboard = () => {
@@ -153,6 +154,7 @@ const Dashboard = () => {
           </div>
         </header>
 
+        <WhatsAppNumberBanner companyName={company?.name} />
         <SetupChecklist />
         <AiDigest companyId={companyId || undefined} />
 
@@ -268,7 +270,7 @@ const Dashboard = () => {
                   <span className="text-sm text-muted-foreground">WhatsApp</span>
                   <span className="flex items-center gap-2 text-sm">
                     <span className={`w-2 h-2 rounded-full ${company?.whatsapp_number ? "bg-green-500" : "bg-muted"}`} />
-                    {company?.whatsapp_number ? "Connected" : "Not configured"}
+                    {company?.whatsapp_number ? "Connected" : "Pending setup"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
