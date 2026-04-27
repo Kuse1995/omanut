@@ -127,7 +127,7 @@ const Dashboard = () => {
 
   return (
     <ClientLayout>
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
         {/* Header */}
         <header className="flex items-center justify-between mb-8">
           <div>
