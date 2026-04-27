@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft } from "lucide-react";
+import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,12 +10,33 @@ import { MetaIntegrationsPanel } from "@/components/admin/MetaIntegrationsPanel"
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useCompany } from "@/context/CompanyContext";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 
 const Setup = () => {
   const navigate = useNavigate();
   const { selectedCompany } = useCompany();
   const { data: status, isLoading } = useSetupStatus();
+  const { toast } = useToast();
   const [metaOpen, setMetaOpen] = useState(false);
+  const [waCopied, setWaCopied] = useState(false);
+
+  const waNumber = status?.whatsappLabel?.split("·").pop()?.trim() ?? "";
+  const copyWa = async () => {
+    try {
+      await navigator.clipboard.writeText(waNumber);
+      setWaCopied(true);
+      toast({ title: "Copied", description: "WhatsApp number copied" });
+      setTimeout(() => setWaCopied(false), 2000);
+    } catch {
+      toast({ title: "Copy failed", variant: "destructive" });
+    }
+  };
+  const requestNumber = () => {
+    const msg = encodeURIComponent(
+      `Hi Omanut, please provision a WhatsApp number for ${selectedCompany?.name ?? "my business"}.`,
+    );
+    window.open(`https://wa.me/260977000000?text=${msg}`, "_blank");
+  };
 
   const completed = status
     ? [status.whatsapp, status.meta, status.payments, status.bms, status.ai, status.brand].filter(
