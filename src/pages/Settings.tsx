@@ -4,19 +4,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import BackButton from '@/components/BackButton';
 import { CompanyDocuments } from '@/components/CompanyDocuments';
 import CompanyMedia from '@/components/CompanyMedia';
 import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
+import ClientLayout from '@/components/dashboard/ClientLayout';
+import PhoneInput from '@/components/setup/PhoneInput';
+import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save } from 'lucide-react';
 
 const Settings = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<any>({
     id: '',
     name: '',
     business_type: '',
@@ -32,35 +36,24 @@ const Settings = () => {
     takeover_number: '',
     google_calendar_id: '',
     calendar_sync_enabled: false,
-    booking_buffer_minutes: 15
+    booking_buffer_minutes: 15,
   });
 
-  useEffect(() => {
-    fetchConfig();
-  }, []);
+  useEffect(() => { fetchConfig(); }, []);
 
   const fetchConfig = async () => {
     try {
-      // First get the authenticated user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) {
-        throw new Error('Not authenticated');
-      }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
 
-      // Get the user's company_id from the users table
-      const { data: userData, error: userDataError } = await supabase
+      const { data: userData } = await supabase
         .from('users')
         .select('company_id')
         .eq('id', user.id)
         .single();
 
-      if (userDataError) throw userDataError;
-      if (!userData?.company_id) {
-        throw new Error('User has no associated company');
-      }
+      if (!userData?.company_id) throw new Error('User has no associated company');
 
-      // Fetch the user's company
       const { data, error } = await supabase
         .from('companies')
         .select('*')
@@ -68,17 +61,10 @@ const Settings = () => {
         .single();
 
       if (error) throw error;
-
-      if (data) {
-        setConfig(data);
-      }
+      if (data) setConfig(data);
     } catch (error) {
       console.error('Error fetching config:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load settings',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to load settings', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -104,263 +90,206 @@ const Settings = () => {
           takeover_number: config.takeover_number,
           google_calendar_id: config.google_calendar_id,
           calendar_sync_enabled: config.calendar_sync_enabled,
-          booking_buffer_minutes: config.booking_buffer_minutes
+          booking_buffer_minutes: config.booking_buffer_minutes,
         })
         .eq('id', config.id);
 
       if (error) throw error;
-
-      toast({
-        title: 'Success',
-        description: 'Company settings saved successfully'
-      });
+      toast({ title: 'Saved', description: 'Your settings have been updated' });
     } catch (error) {
       console.error('Error saving config:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to save settings',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to save settings', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
   };
 
+  const update = (patch: Partial<typeof config>) => setConfig({ ...config, ...patch });
+
   return (
-    <div className="min-h-screen bg-app p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <BackButton />
-          <ThemeToggle />
-        </div>
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gradient mb-2">Company Settings</h1>
-          <p className="text-muted-foreground">Configure your AI receptionist's persona and behavior</p>
-        </div>
-
-        <Card className="card-glass">
-          <CardHeader>
-            <CardTitle className="text-foreground">Business Profile</CardTitle>
-            <CardDescription>Define your company's identity and AI personality</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="name">Company Name</Label>
-              <Input
-                id="name"
-                value={config.name}
-                onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                placeholder="e.g., Your Business Name"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="business_type">Business Type</Label>
-              <Input
-                id="business_type"
-                value={config.business_type}
-                onChange={(e) => setConfig({ ...config, business_type: e.target.value })}
-                placeholder="e.g., restaurant, hotel, spa"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="voice_style">Voice Style</Label>
-              <Textarea
-                id="voice_style"
-                value={config.voice_style}
-                onChange={(e) => setConfig({ ...config, voice_style: e.target.value })}
-                placeholder="Describe how the AI should speak..."
-                className="min-h-[80px]"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                e.g., "Warm, polite receptionist" or "Professional and concise"
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="hours">Hours of Operation</Label>
-              <Input
-                id="hours"
-                value={config.hours}
-                onChange={(e) => setConfig({ ...config, hours: e.target.value })}
-                placeholder="e.g., Mon-Sun: 10:00 - 23:00"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="services">Services / Offerings</Label>
-              <Textarea
-                id="services"
-                value={config.services}
-                onChange={(e) => setConfig({ ...config, services: e.target.value })}
-                placeholder="List your main offerings, services, or menu items..."
-                className="min-h-[100px]"
-                disabled={loading}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="branches">Branches</Label>
-                <Input
-                  id="branches"
-                  value={config.branches}
-                  onChange={(e) => setConfig({ ...config, branches: e.target.value })}
-                  placeholder="e.g., Main, Downtown"
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="currency_prefix">Currency</Label>
-                <Input
-                  id="currency_prefix"
-                  value={config.currency_prefix}
-                  onChange={(e) => setConfig({ ...config, currency_prefix: e.target.value })}
-                  placeholder="e.g., K, $, €"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="service_locations">Service Locations / Areas</Label>
-              <Input
-                id="service_locations"
-                value={config.service_locations}
-                onChange={(e) => setConfig({ ...config, service_locations: e.target.value })}
-                placeholder="e.g., main area,consultation room,studio"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="twilio_number">Phone Number (PSTN)</Label>
-              <Input
-                id="twilio_number"
-                value={config.twilio_number || ''}
-                onChange={(e) => setConfig({ ...config, twilio_number: e.target.value })}
-                placeholder="e.g., +1234567890"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                For regular phone calls
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="whatsapp_number">WhatsApp Number</Label>
-              <Input
-                id="whatsapp_number"
-                value={config.whatsapp_number || ''}
-                onChange={(e) => setConfig({ ...config, whatsapp_number: e.target.value })}
-                placeholder="whatsapp:+1234567890"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Your customers can WhatsApp us and our AI will answer automatically
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor="takeover_number">Takeover Number (WhatsApp)</Label>
-              <Input
-                id="takeover_number"
-                value={config.takeover_number || ''}
-                onChange={(e) => setConfig({ ...config, takeover_number: e.target.value })}
-                placeholder="+1234567890"
-                disabled={loading}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Boss/Manager WhatsApp number that will receive customer messages during human takeover. Reply from this number to respond to customers directly.
-              </p>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="whatsapp_voice_enabled"
-                checked={config.whatsapp_voice_enabled || false}
-                onChange={(e) => setConfig({ ...config, whatsapp_voice_enabled: e.target.checked })}
-                disabled={loading}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              <Label htmlFor="whatsapp_voice_enabled" className="font-normal">
-                Enable WhatsApp voice calls
-              </Label>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Google Calendar Integration</h3>
-              
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="calendar_sync_enabled"
-                  checked={config.calendar_sync_enabled || false}
-                  onChange={(e) => setConfig({ ...config, calendar_sync_enabled: e.target.checked })}
-                  disabled={loading}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <Label htmlFor="calendar_sync_enabled" className="font-normal">
-                  Enable calendar sync for reservations
-                </Label>
-              </div>
-
-              <div>
-                <Label htmlFor="google_calendar_id">Google Calendar ID</Label>
-                <Input
-                  id="google_calendar_id"
-                  value={config.google_calendar_id || ''}
-                  onChange={(e) => setConfig({ ...config, google_calendar_id: e.target.value })}
-                  placeholder="your-calendar@gmail.com"
-                  disabled={loading}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Calendar ID from Google Calendar settings (typically your email)
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="booking_buffer_minutes">Booking Buffer (minutes)</Label>
-                <Input
-                  type="number"
-                  id="booking_buffer_minutes"
-                  value={config.booking_buffer_minutes || 15}
-                  onChange={(e) => setConfig({ ...config, booking_buffer_minutes: parseInt(e.target.value) })}
-                  disabled={loading}
-                  min="0"
-                  max="60"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Time buffer before/after reservations to prevent back-to-back bookings
-                </p>
-              </div>
-            </div>
-
-          </CardContent>
-        </Card>
-
-        <div className="flex justify-end mt-6">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save Settings"}
-          </Button>
-        </div>
-
-        {config.id && (
-          <div className="mt-6 space-y-6">
-            <CompanyMedia companyId={config.id} />
-            <CompanyDocuments companyId={config.id} />
-            <ImageGenerationSettings companyId={config.id} />
+    <ClientLayout>
+      <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
+        <header className="flex items-start sm:items-center justify-between mb-6 gap-4 flex-col sm:flex-row">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+            <p className="text-muted-foreground mt-1">
+              Manage your business profile, AI personality, and channels.
+            </p>
           </div>
-        )}
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <ThemeToggle />
+            <Button onClick={handleSave} disabled={saving || loading} className="gap-2">
+              <Save className="w-4 h-4" />
+              {saving ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
+        </header>
+
+        <Tabs defaultValue="business" className="w-full">
+          <TabsList className="grid grid-cols-2 sm:grid-cols-5 w-full sm:w-auto h-auto sm:h-10 mb-6">
+            <TabsTrigger value="business" className="gap-1.5"><Building2 className="w-4 h-4" />Business</TabsTrigger>
+            <TabsTrigger value="numbers" className="gap-1.5"><Phone className="w-4 h-4" />Numbers</TabsTrigger>
+            <TabsTrigger value="calendar" className="gap-1.5"><CalendarIcon className="w-4 h-4" />Calendar</TabsTrigger>
+            <TabsTrigger value="media" className="gap-1.5"><ImageIcon className="w-4 h-4" />Media</TabsTrigger>
+            <TabsTrigger value="documents" className="gap-1.5"><FileText className="w-4 h-4" />Knowledge</TabsTrigger>
+          </TabsList>
+
+          {/* Business */}
+          <TabsContent value="business" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Business profile</CardTitle>
+                <CardDescription>How your AI introduces itself and what it knows about your business.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="name">Company name</Label>
+                  <Input id="name" value={config.name || ''} onChange={(e) => update({ name: e.target.value })} disabled={loading} />
+                </div>
+                <div>
+                  <Label htmlFor="business_type">Business type</Label>
+                  <Input id="business_type" value={config.business_type || ''} onChange={(e) => update({ business_type: e.target.value })} placeholder="e.g. restaurant, hotel, retail" disabled={loading} />
+                </div>
+                <div>
+                  <Label htmlFor="voice_style">AI voice & tone</Label>
+                  <Textarea id="voice_style" value={config.voice_style || ''} onChange={(e) => update({ voice_style: e.target.value })} className="min-h-[80px]" disabled={loading} />
+                  <p className="text-xs text-muted-foreground mt-1">e.g. "Warm, polite receptionist" or "Direct and professional".</p>
+                </div>
+                <div>
+                  <Label htmlFor="hours">Hours of operation</Label>
+                  <Input id="hours" value={config.hours || ''} onChange={(e) => update({ hours: e.target.value })} placeholder="Mon–Sat: 08:00 – 18:00" disabled={loading} />
+                </div>
+                <div>
+                  <Label htmlFor="services">Services / offerings</Label>
+                  <Textarea id="services" value={config.services || ''} onChange={(e) => update({ services: e.target.value })} className="min-h-[100px]" disabled={loading} />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="branches">Branches</Label>
+                    <Input id="branches" value={config.branches || ''} onChange={(e) => update({ branches: e.target.value })} placeholder="Main, Cairo Road" disabled={loading} />
+                  </div>
+                  <div>
+                    <Label htmlFor="currency_prefix">Currency symbol</Label>
+                    <Input id="currency_prefix" value={config.currency_prefix || 'K'} onChange={(e) => update({ currency_prefix: e.target.value })} placeholder="K, $, €" disabled={loading} />
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="service_locations">Service locations / areas</Label>
+                  <Input id="service_locations" value={config.service_locations || ''} onChange={(e) => update({ service_locations: e.target.value })} placeholder="main hall, consultation room" disabled={loading} />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Numbers */}
+          <TabsContent value="numbers" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Phone & WhatsApp</CardTitle>
+                <CardDescription>The numbers your customers reach and the number we ping when the AI needs you.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <PhoneInput
+                  id="twilio_number"
+                  label="Phone number (calls)"
+                  value={config.twilio_number || ''}
+                  onChange={(v) => update({ twilio_number: v })}
+                  helper="The number customers call. Leave empty if you only use WhatsApp."
+                />
+                <div>
+                  <Label htmlFor="whatsapp_number">WhatsApp number</Label>
+                  <Input
+                    id="whatsapp_number"
+                    value={config.whatsapp_number || ''}
+                    onChange={(e) => update({ whatsapp_number: e.target.value })}
+                    placeholder="whatsapp:+260971234567"
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Customers WhatsApp this number; the AI replies automatically.
+                  </p>
+                </div>
+                <PhoneInput
+                  id="takeover_number"
+                  label="Boss / Takeover WhatsApp"
+                  value={config.takeover_number || ''}
+                  onChange={(v) => update({ takeover_number: v })}
+                  helper="Where the AI escalates urgent customer messages. You can reply directly from this number."
+                />
+                <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Enable WhatsApp voice calls</p>
+                    <p className="text-xs text-muted-foreground">Let customers call your AI through WhatsApp.</p>
+                  </div>
+                  <Switch
+                    checked={!!config.whatsapp_voice_enabled}
+                    onCheckedChange={(v) => update({ whatsapp_voice_enabled: v })}
+                    disabled={loading}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Calendar */}
+          <TabsContent value="calendar" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Google Calendar</CardTitle>
+                <CardDescription>Optional — sync confirmed reservations into a Google Calendar.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                  <div>
+                    <p className="text-sm font-medium">Calendar sync</p>
+                    <p className="text-xs text-muted-foreground">Push approved reservations to Google Calendar.</p>
+                  </div>
+                  <Switch
+                    checked={!!config.calendar_sync_enabled}
+                    onCheckedChange={(v) => update({ calendar_sync_enabled: v })}
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="google_calendar_id">Google Calendar ID</Label>
+                  <Input
+                    id="google_calendar_id"
+                    value={config.google_calendar_id || ''}
+                    onChange={(e) => update({ google_calendar_id: e.target.value })}
+                    placeholder="your-calendar@gmail.com"
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="booking_buffer_minutes">Booking buffer (minutes)</Label>
+                  <Input
+                    id="booking_buffer_minutes"
+                    type="number"
+                    min={0}
+                    max={120}
+                    value={config.booking_buffer_minutes ?? 15}
+                    onChange={(e) => update({ booking_buffer_minutes: parseInt(e.target.value || '0', 10) })}
+                    disabled={loading}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Time blocked before/after each booking.</p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Media */}
+          <TabsContent value="media" className="space-y-6">
+            {config.id && <CompanyMedia companyId={config.id} />}
+            {config.id && <ImageGenerationSettings companyId={config.id} />}
+          </TabsContent>
+
+          {/* Documents / KB */}
+          <TabsContent value="documents" className="space-y-6">
+            {config.id && <CompanyDocuments companyId={config.id} />}
+          </TabsContent>
+        </Tabs>
       </div>
-    </div>
+    </ClientLayout>
   );
 };
 
