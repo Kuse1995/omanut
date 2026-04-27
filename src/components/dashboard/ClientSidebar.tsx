@@ -12,7 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Info
+  Info,
+  Plug
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ interface ClientSidebarProps {
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Setup", href: "/setup", icon: Plug },
   { name: "Conversations", href: "/conversations", icon: MessageSquare },
   { name: "Reservations", href: "/reservations", icon: Calendar },
   { name: "Supervisor AI", href: "/supervisor-insights", icon: Brain },

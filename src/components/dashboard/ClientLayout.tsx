@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
 import ClientSidebar from "./ClientSidebar";
+import MobileBottomNav from "./MobileBottomNav";
 import { cn } from "@/lib/utils";
 
 const ClientLayout = ({ children }: { children: React.ReactNode }) => {
@@ -8,20 +8,26 @@ const ClientLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="min-h-screen bg-background">
-      <ClientSidebar 
-        collapsed={sidebarCollapsed} 
-        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
-      />
+      {/* Sidebar hidden on mobile, bottom nav takes over */}
+      <div className="hidden md:block">
+        <ClientSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+      </div>
       <main
         className={cn(
           "min-h-screen transition-all duration-300",
-          sidebarCollapsed ? "ml-16" : "ml-60"
+          "md:ml-60",
+          sidebarCollapsed && "md:ml-16",
         )}
       >
         {children}
       </main>
+      <MobileBottomNav />
     </div>
   );
 };
 
 export default ClientLayout;
+

@@ -17,6 +17,7 @@ import ClientLayout from "@/components/dashboard/ClientLayout";
 import StatCard from "@/components/dashboard/StatCard";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
+import SetupChecklist from "@/components/dashboard/SetupChecklist";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Dashboard = () => {
@@ -126,7 +127,7 @@ const Dashboard = () => {
 
   return (
     <ClientLayout>
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
         {/* Header */}
         <header className="flex items-center justify-between mb-8">
           <div>
@@ -150,6 +151,8 @@ const Dashboard = () => {
             <ThemeToggle />
           </div>
         </header>
+
+        <SetupChecklist />
 
         {/* Credit Warning */}
         {company?.credit_balance < 50 && (

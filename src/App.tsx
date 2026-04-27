@@ -30,6 +30,8 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import DataDeletion from "./pages/DataDeletion";
 import MetaOAuthCallback from "./pages/MetaOAuthCallback";
+import Setup from "./pages/Setup";
+import { CompanyProvider } from "./context/CompanyContext";
 
 const queryClient = new QueryClient();
 
@@ -39,35 +41,38 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/pitch/banking" element={<PitchBanking />} />
-          <Route path="/pitch/banking/agent" element={<PitchAgentDemo />} />
-          <Route path="/demo" element={<Demo />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/request-access" element={<RequestAccess />} />
-          <Route path="/admin/verify" element={<AdminVerify />} />
-          <Route path="/admin/dashboard" element={<AdminDashboard />} />
-          <Route path="/admin/companies" element={<Companies />} />
-          <Route path="/admin/companies/new" element={<NewCompany />} />
-          <Route path="/admin/company/:id" element={<EditCompany />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/live-demo" element={<LiveDemo />} />
-          <Route path="/conversations" element={<Conversations />} />
-          <Route path="/client-insights" element={<ClientInsights />} />
-          <Route path="/customer-segments" element={<CustomerSegments />} />
-          <Route path="/supervisor-insights" element={<SupervisorInsights />} />
-          <Route path="/reservations" element={<Reservations />} />
-          <Route path="/billing" element={<Billing />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
-          <Route path="/privacy" element={<PrivacyPolicy />} />
-          <Route path="/terms" element={<TermsOfService />} />
-          <Route path="/data-deletion" element={<DataDeletion />} />
-          <Route path="/auth/meta/callback" element={<MetaOAuthCallback />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <CompanyProvider>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/pitch/banking" element={<PitchBanking />} />
+            <Route path="/pitch/banking/agent" element={<PitchAgentDemo />} />
+            <Route path="/demo" element={<Demo />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/request-access" element={<RequestAccess />} />
+            <Route path="/admin/verify" element={<AdminVerify />} />
+            <Route path="/admin/dashboard" element={<AdminDashboard />} />
+            <Route path="/admin/companies" element={<Companies />} />
+            <Route path="/admin/companies/new" element={<NewCompany />} />
+            <Route path="/admin/company/:id" element={<EditCompany />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/setup" element={<Setup />} />
+            <Route path="/live-demo" element={<LiveDemo />} />
+            <Route path="/conversations" element={<Conversations />} />
+            <Route path="/client-insights" element={<ClientInsights />} />
+            <Route path="/customer-segments" element={<CustomerSegments />} />
+            <Route path="/supervisor-insights" element={<SupervisorInsights />} />
+            <Route path="/reservations" element={<Reservations />} />
+            <Route path="/billing" element={<Billing />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
+            <Route path="/auth/meta/callback" element={<MetaOAuthCallback />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </CompanyProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
