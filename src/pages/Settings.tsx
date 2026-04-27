@@ -14,12 +14,16 @@ import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
 import ClientLayout from '@/components/dashboard/ClientLayout';
 import PhoneInput from '@/components/setup/PhoneInput';
-import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save } from 'lucide-react';
+import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check } from 'lucide-react';
+import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
+import { formatPhone } from '@/lib/format';
 
 const Settings = () => {
   const { toast } = useToast();
+  const { data: isAdmin } = useIsPlatformAdmin();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [config, setConfig] = useState<any>({
     id: '',
     name: '',
@@ -186,47 +190,108 @@ const Settings = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Phone & WhatsApp</CardTitle>
-                <CardDescription>The numbers your customers reach and the number we ping when the AI needs you.</CardDescription>
+                <CardDescription>
+                  Your assigned WhatsApp number. Provisioning and routing are managed by the Omanut team.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <PhoneInput
-                  id="twilio_number"
-                  label="Phone number (calls)"
-                  value={config.twilio_number || ''}
-                  onChange={(v) => update({ twilio_number: v })}
-                  helper="The number customers call. Leave empty if you only use WhatsApp."
-                />
-                <div>
-                  <Label htmlFor="whatsapp_number">WhatsApp number</Label>
-                  <Input
-                    id="whatsapp_number"
-                    value={config.whatsapp_number || ''}
-                    onChange={(e) => update({ whatsapp_number: e.target.value })}
-                    placeholder="whatsapp:+260971234567"
-                    disabled={loading}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Customers WhatsApp this number; the AI replies automatically.
-                  </p>
+                {/* Read-only WhatsApp number for everyone */}
+                <div className="rounded-lg border border-border bg-card/40 p-4 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">
+                      Your WhatsApp number
+                    </p>
+                    <p className="text-base font-mono font-semibold mt-0.5 truncate">
+                      {config.whatsapp_number
+                        ? formatPhone(config.whatsapp_number.replace('whatsapp:', '')) ||
+                          config.whatsapp_number.replace('whatsapp:', '')
+                        : 'Pending — being provisioned by Omanut'}
+                    </p>
+                  </div>
+                  {config.whatsapp_number && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        const v = config.whatsapp_number.replace('whatsapp:', '');
+                        try {
+                          await navigator.clipboard.writeText(v);
+                          setCopied(true);
+                          toast({ title: 'Copied' });
+                          setTimeout(() => setCopied(false), 2000);
+                        } catch {
+                          toast({ title: 'Copy failed', variant: 'destructive' });
+                        }
+                      }}
+                      className="gap-1.5"
+                    >
+                      {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {copied ? 'Copied' : 'Copy'}
+                    </Button>
+                  )}
                 </div>
+
+                {/* Boss takeover — clients control this */}
                 <PhoneInput
                   id="takeover_number"
-                  label="Boss / Takeover WhatsApp"
+                  label="Your WhatsApp (for AI alerts)"
                   value={config.takeover_number || ''}
                   onChange={(v) => update({ takeover_number: v })}
                   helper="Where the AI escalates urgent customer messages. You can reply directly from this number."
                 />
-                <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                  <div>
-                    <p className="text-sm font-medium">Enable WhatsApp voice calls</p>
-                    <p className="text-xs text-muted-foreground">Let customers call your AI through WhatsApp.</p>
+
+                {/* Admin-only: raw infrastructure controls */}
+                {isAdmin ? (
+                  <div className="border-t border-border pt-4 mt-4 space-y-4">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Lock className="w-3.5 h-3.5" /> Admin-only infrastructure
+                    </div>
+                    <PhoneInput
+                      id="twilio_number"
+                      label="Twilio phone number (calls)"
+                      value={config.twilio_number || ''}
+                      onChange={(v) => update({ twilio_number: v })}
+                      helper="The Twilio number customers call. Leave empty if WhatsApp-only."
+                    />
+                    <div>
+                      <Label htmlFor="whatsapp_number">WhatsApp number (Twilio format)</Label>
+                      <Input
+                        id="whatsapp_number"
+                        value={config.whatsapp_number || ''}
+                        onChange={(e) => update({ whatsapp_number: e.target.value })}
+                        placeholder="whatsapp:+260971234567"
+                        disabled={loading}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Format: <code>whatsapp:+260…</code>
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <div>
+                        <p className="text-sm font-medium">Enable WhatsApp voice calls</p>
+                        <p className="text-xs text-muted-foreground">Let customers call your AI through WhatsApp.</p>
+                      </div>
+                      <Switch
+                        checked={!!config.whatsapp_voice_enabled}
+                        onCheckedChange={(v) => update({ whatsapp_voice_enabled: v })}
+                        disabled={loading}
+                      />
+                    </div>
                   </div>
-                  <Switch
-                    checked={!!config.whatsapp_voice_enabled}
-                    onCheckedChange={(v) => update({ whatsapp_voice_enabled: v })}
-                    disabled={loading}
-                  />
-                </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground border-t border-border pt-3">
+                    Need a different number or call routing?{' '}
+                    <a
+                      href="https://wa.me/260977000000"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline"
+                    >
+                      Chat with Omanut support
+                    </a>
+                    .
+                  </p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
