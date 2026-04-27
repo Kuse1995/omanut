@@ -17,6 +17,7 @@ import ClientLayout from "@/components/dashboard/ClientLayout";
 import StatCard from "@/components/dashboard/StatCard";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
+import SetupChecklist from "@/components/dashboard/SetupChecklist";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Dashboard = () => {
@@ -150,6 +151,8 @@ const Dashboard = () => {
             <ThemeToggle />
           </div>
         </header>
+
+        <SetupChecklist />
 
         {/* Credit Warning */}
         {company?.credit_balance < 50 && (
