@@ -1,12 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, MessageSquare, Calendar, Settings, Plug } from "lucide-react";
+import { LayoutDashboard, MessageSquare, Inbox as InboxIcon, Plug, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { name: "Home", href: "/dashboard", icon: LayoutDashboard },
   { name: "Chats", href: "/conversations", icon: MessageSquare },
+  { name: "Inbox", href: "/inbox", icon: InboxIcon },
   { name: "Setup", href: "/setup", icon: Plug },
-  { name: "Bookings", href: "/reservations", icon: Calendar },
   { name: "More", href: "/settings", icon: Settings },
 ];
 

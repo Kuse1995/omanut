@@ -18,6 +18,7 @@ import StatCard from "@/components/dashboard/StatCard";
 import NotificationBell from "@/components/dashboard/NotificationBell";
 import ActivityTimeline from "@/components/dashboard/ActivityTimeline";
 import SetupChecklist from "@/components/dashboard/SetupChecklist";
+import AiDigest from "@/components/dashboard/AiDigest";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Dashboard = () => {
@@ -153,6 +154,7 @@ const Dashboard = () => {
         </header>
 
         <SetupChecklist />
+        <AiDigest companyId={companyId || undefined} />
 
         {/* Credit Warning */}
         {company?.credit_balance < 50 && (
