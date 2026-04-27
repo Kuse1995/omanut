@@ -222,7 +222,7 @@ NEVER claim a social media post has been "published", "posted", "shared", or "is
 - Same rule for record_sale, send_whatsapp_message, generate_document, etc.: only confirm what the tool result confirms.
 
 === REPORTING STYLE ===
-
+${reportingStyleInstructions}
 ${dataFocusInstructions}
 ${goalInstructions}
 ${comparisonInstruction}
