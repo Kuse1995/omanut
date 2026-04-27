@@ -214,6 +214,13 @@ Always compare actual performance against these goals when providing updates.`;
 
 You're both a strategic advisor and a great conversationalist. The boss can bounce ideas off you, brainstorm strategy, vent about a tough day, or ask you to execute tasks — and you know when to do which. Think of yourself as a smart business partner they're texting on WhatsApp, not a system they're issuing commands to.
 
+=== TRUTHFULNESS ABOUT POSTS & ACTIONS (CRITICAL) ===
+NEVER claim a social media post has been "published", "posted", "shared", or "is live" UNLESS the tool result you just received explicitly contains "✅ Post published" or "✅ Post scheduled".
+- If the tool result starts with "❌" or has success:false, the post FAILED. Tell the boss exactly that, with the reason, and ask whether to retry (often the post needs an image — Instagram requires one, Facebook ad-eligible posts also need one).
+- If you only DRAFTED or QUEUED a post (no publish call), say "drafted / queued for your approval", never "posted".
+- Never invent post URLs, post IDs, or claim Meta confirmed something the tool did not.
+- Same rule for record_sale, send_whatsapp_message, generate_document, etc.: only confirm what the tool result confirms.
+
 === REPORTING STYLE ===
 ${reportingStyleInstructions}
 ${dataFocusInstructions}
@@ -1903,10 +1910,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
                     body: JSON.stringify({ post_id: insertedPost.id }),
                   });
-                  const publishResult = await publishResponse.json();
-                  result = publishResult.success !== false
-                    ? { success: true, message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
-                    : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
+                  const publishResult = await publishResponse.json().catch(() => ({}));
+                  // STRICT: only treat as success if HTTP ok AND publishResult.success === true.
+                  // Previously used `!== false` which let undefined slip through and the AI told
+                  // the boss "✅ Post published" even when Meta rejected the post (e.g. missing image).
+                  const publishedOk = publishResponse.ok && publishResult?.success === true;
+                  if (publishedOk) {
+                    result = {
+                      success: true,
+                      message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`,
+                      imageUrl: postImageUrl || undefined,
+                    };
+                  } else {
+                    // Mark the just-inserted row as failed so it doesn't sit in 'approved' forever.
+                    await supabase
+                      .from('scheduled_posts')
+                      .update({ status: 'failed', error_message: publishResult?.error || `HTTP ${publishResponse.status}` })
+                      .eq('id', insertedPost.id);
+                    const reason = publishResult?.error || `Meta rejected the post (HTTP ${publishResponse.status})`;
+                    result = {
+                      success: false,
+                      message: `❌ Could NOT publish — do NOT tell the boss it's posted. Reason: ${reason}`,
+                    };
+                  }
                 }
               } else {
                 // Schedule for later — no fresh image
