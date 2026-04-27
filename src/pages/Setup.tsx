@@ -107,11 +107,24 @@ const Setup = () => {
                 iconColor="text-green-600"
                 title="WhatsApp"
                 description={
-                  status.whatsappLabel ??
-                  "Connect a WhatsApp number so customers can chat with your AI 24/7."
+                  status.whatsapp === "connected"
+                    ? `${status.whatsappLabel ?? "Live"} — managed by Omanut. Share with your customers.`
+                    : "We'll provision and manage a WhatsApp number for your business. Tap below to request one."
                 }
                 status={status.whatsapp}
-                onClick={() => navigate("/settings")}
+                statusLabel={status.whatsapp === "not_set_up" ? "Pending" : undefined}
+                rightSlot={
+                  status.whatsapp === "connected" ? (
+                    <Button size="sm" variant="outline" onClick={copyWa} className="gap-1.5 flex-shrink-0">
+                      {waCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {waCopied ? "Copied" : "Copy"}
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={requestNumber} className="flex-shrink-0">
+                      Request a number
+                    </Button>
+                  )
+                }
               />
               <IntegrationCard
                 icon={Facebook}
