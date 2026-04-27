@@ -65,16 +65,14 @@ export const useSetupStatus = () => {
       const waCloud = waCloudRes.data;
       const paymentsCount = paymentsRes.count ?? 0;
 
-      // BMS: stored on companies.metadata.bms or companies.bms_tenant_id (varies)
+      // BMS: stored on companies.metadata.bms.tenant_id
       const { data: bmsRes } = await supabase
         .from("companies")
-        .select("metadata, bms_enabled")
+        .select("metadata")
         .eq("id", companyId)
         .maybeSingle();
-      const bmsConfigured =
-        Boolean((bmsRes as any)?.bms_enabled) ||
-        Boolean((bmsRes?.metadata as any)?.bms_tenant_id) ||
-        Boolean((bmsRes?.metadata as any)?.bms?.tenant_id);
+      const meta = (bmsRes?.metadata as any) ?? {};
+      const bmsConfigured = Boolean(meta?.bms_tenant_id) || Boolean(meta?.bms?.tenant_id);
 
       const whatsappConnected = Boolean(company?.whatsapp_number) || Boolean(waCloud?.display_phone_number);
       const whatsappLabel = waCloud?.display_phone_number
