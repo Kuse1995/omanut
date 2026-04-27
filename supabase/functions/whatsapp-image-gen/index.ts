@@ -1695,9 +1695,11 @@ async function handleHeavyRequest(supabase: any, supabaseUrl: string, body: any,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${srkKey}` },
           body: JSON.stringify({ post_id: scheduledPostId }),
         });
+        const publishBody: any = await publishRes.json().catch(() => ({}));
+        const publishedOk = publishRes.ok && publishBody?.success === true;
 
-        if (publishRes.ok) {
-          console.log(`[IMAGE-GEN] Auto-publish triggered for post ${scheduledPostId}`);
+        if (publishedOk) {
+          console.log(`[IMAGE-GEN] Auto-publish succeeded for post ${scheduledPostId}`);
           if (bossPhone) {
             try {
               const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
@@ -1723,8 +1725,36 @@ async function handleHeavyRequest(supabase: any, supabaseUrl: string, body: any,
             }
           }
         } else {
-          console.error(`[IMAGE-GEN] Auto-publish failed for post ${scheduledPostId}:`, await publishRes.text());
-          await supabase.from('scheduled_posts').update({ status: 'pending_image' }).eq('id', scheduledPostId);
+          const reason = publishBody?.error || `HTTP ${publishRes.status}`;
+          console.error(`[IMAGE-GEN] Auto-publish failed for post ${scheduledPostId}:`, reason);
+          await supabase
+            .from('scheduled_posts')
+            .update({ status: 'failed', error_message: reason })
+            .eq('id', scheduledPostId);
+          // Tell the boss the truth instead of silently leaving them thinking it's live.
+          if (bossPhone) {
+            try {
+              const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN');
+              const { data: postCompany } = await supabase.from('companies').select('whatsapp_number').eq('id', companyId).single();
+              if (twilioSid && twilioAuth && postCompany?.whatsapp_number) {
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+                const failMsg = `❌ Could not publish that post to Facebook/Instagram.\nReason: ${reason}\n\nReply "retry" to try again or send a new image.`;
+                const formData = new URLSearchParams();
+                formData.append('To', normalizeBossPhone(bossPhone));
+                const fromNum = postCompany.whatsapp_number.startsWith('whatsapp:') ? postCompany.whatsapp_number : `whatsapp:${postCompany.whatsapp_number}`;
+                formData.append('From', fromNum);
+                formData.append('Body', failMsg);
+                await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Basic ${btoa(`${twilioSid}:${twilioAuth}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: formData.toString(),
+                });
+              }
+            } catch (notifyErr: any) {
+              console.error('[IMAGE-GEN] Failed to notify boss of failure:', notifyErr.message);
+            }
+          }
         }
       } catch (publishErr: any) {
         console.error('[IMAGE-GEN] Auto-publish error:', publishErr.message);
