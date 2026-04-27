@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check } from "lucide-react";
+import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -87,6 +87,27 @@ const Setup = () => {
                   />
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Business profile wizard — shown until all required fields are filled */}
+        {status && !status.profileComplete && (
+          <Card
+            onClick={() => navigate("/setup/wizard")}
+            className="mb-6 cursor-pointer border-primary/30 bg-gradient-to-br from-primary/10 to-transparent hover:border-primary/50 transition-colors"
+          >
+            <CardContent className="flex items-center gap-4 p-5">
+              <div className="w-11 h-11 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+                <Wand2 className="w-5 h-5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold">Tell us about your business</p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Quick Q&amp;A — takes about 2 minutes. We'll use it to train your AI.
+                </p>
+              </div>
+              <Button size="sm" className="flex-shrink-0">Start</Button>
             </CardContent>
           </Card>
         )}

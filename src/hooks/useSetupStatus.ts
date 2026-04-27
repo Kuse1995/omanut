@@ -12,6 +12,7 @@ export interface SetupStatus {
   whatsappLabel?: string;
   metaCount: number;
   paymentsCount: number;
+  profileComplete: boolean;
 }
 
 /**
@@ -31,7 +32,7 @@ export const useSetupStatus = () => {
       const [companyRes, metaRes, waCloudRes, paymentsRes, aiRes, brandRes] = await Promise.all([
         supabase
           .from("companies")
-          .select("whatsapp_number, twilio_number, whatsapp_provider, business_type, voice_style")
+          .select("whatsapp_number, twilio_number, whatsapp_provider, name, business_type, voice_style, services, hours, currency_prefix")
           .eq("id", companyId)
           .single(),
         supabase
@@ -81,7 +82,17 @@ export const useSetupStatus = () => {
           ? `via Twilio · ${company.whatsapp_number.replace("whatsapp:", "")}`
           : undefined;
 
+      const profileComplete = Boolean(
+        company?.name &&
+        company?.business_type &&
+        company?.services &&
+        company?.hours &&
+        company?.currency_prefix &&
+        company?.voice_style,
+      );
+
       return {
+        profileComplete,
         whatsapp: whatsappConnected ? "connected" : "not_set_up",
         meta:
           metaCount === 0

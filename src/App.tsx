@@ -31,6 +31,7 @@ import TermsOfService from "./pages/TermsOfService";
 import DataDeletion from "./pages/DataDeletion";
 import MetaOAuthCallback from "./pages/MetaOAuthCallback";
 import Setup from "./pages/Setup";
+import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
 import { CompanyProvider } from "./context/CompanyContext";
 
@@ -58,6 +59,7 @@ const App = () => (
             <Route path="/admin/company/:id" element={<EditCompany />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/setup" element={<Setup />} />
+            <Route path="/setup/wizard" element={<SetupWizard />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/live-demo" element={<LiveDemo />} />
             <Route path="/conversations" element={<Conversations />} />
