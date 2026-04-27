@@ -1903,10 +1903,29 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_SRK}` },
                     body: JSON.stringify({ post_id: insertedPost.id }),
                   });
-                  const publishResult = await publishResponse.json();
-                  result = publishResult.success !== false
-                    ? { success: true, message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`, imageUrl: postImageUrl || undefined }
-                    : { success: false, message: `❌ Failed to publish: ${publishResult.error || 'Unknown error'}` };
+                  const publishResult = await publishResponse.json().catch(() => ({}));
+                  // STRICT: only treat as success if HTTP ok AND publishResult.success === true.
+                  // Previously used `!== false` which let undefined slip through and the AI told
+                  // the boss "✅ Post published" even when Meta rejected the post (e.g. missing image).
+                  const publishedOk = publishResponse.ok && publishResult?.success === true;
+                  if (publishedOk) {
+                    result = {
+                      success: true,
+                      message: `✅ Post published now!\n${postVideoUrl ? '🎬 With video' : postImageUrl ? '🖼️ With brand image' : '📝 Text only'}`,
+                      imageUrl: postImageUrl || undefined,
+                    };
+                  } else {
+                    // Mark the just-inserted row as failed so it doesn't sit in 'approved' forever.
+                    await supabase
+                      .from('scheduled_posts')
+                      .update({ status: 'failed', error_message: publishResult?.error || `HTTP ${publishResponse.status}` })
+                      .eq('id', insertedPost.id);
+                    const reason = publishResult?.error || `Meta rejected the post (HTTP ${publishResponse.status})`;
+                    result = {
+                      success: false,
+                      message: `❌ Could NOT publish — do NOT tell the boss it's posted. Reason: ${reason}`,
+                    };
+                  }
                 }
               } else {
                 // Schedule for later — no fresh image
