@@ -14,12 +14,16 @@ import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
 import ClientLayout from '@/components/dashboard/ClientLayout';
 import PhoneInput from '@/components/setup/PhoneInput';
-import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save } from 'lucide-react';
+import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check } from 'lucide-react';
+import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
+import { formatPhone } from '@/lib/format';
 
 const Settings = () => {
   const { toast } = useToast();
+  const { data: isAdmin } = useIsPlatformAdmin();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [config, setConfig] = useState<any>({
     id: '',
     name: '',
