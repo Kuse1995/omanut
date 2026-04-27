@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check } from "lucide-react";
+import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
