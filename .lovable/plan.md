@@ -1,70 +1,92 @@
-## Goal
+# Conversational Setup Wizard
 
-Stop exposing Twilio/WhatsApp setup controls to clients. The admin owns the Twilio account, so clients should only **see** their assigned number and be able to **copy/share** it — never reconfigure it. Add a memory rule so future work doesn't regress this.
+Replace the wall-of-fields company form (and the static `/setup` cards) with a friendly, one-question-at-a-time wizard. Think Typeform / iOS onboarding: big question, focused input, progress dots, "Back" + "Next", auto-save as you go.
 
-## Changes
+The existing `CompanyForm` stays for admins (Omanut staff editing companies in the back office). Clients get the wizard.
 
-### 1. Read-only WhatsApp card on `/setup`
-File: `src/pages/Setup.tsx`
+## What the user sees
 
-- Remove the `onClick={() => navigate("/settings")}` from the WhatsApp `IntegrationCard`.
-- When `status.whatsapp === "connected"`: pass a `rightSlot` with a small "Copy number" button (uses `navigator.clipboard`, toast on success). No chevron, no navigation.
-- When not connected: replace the chevron CTA with a muted helper line + a "Request a number" button that opens `https://wa.me/260977000000?text=Hi%20Omanut%2C%20please%20provision%20a%20WhatsApp%20number%20for%20{companyName}`.
-- Update description copy so it never implies the client configures Twilio:
-  - Connected: `"Your customers reach you on this number. Managed by Omanut."`
-  - Not connected: `"We'll provision and manage a WhatsApp number for your business. Tap below to request one."`
-
-### 2. New "Your WhatsApp number" banner on Dashboard
-File: `src/components/dashboard/WhatsAppNumberBanner.tsx` (new) + wire into `src/pages/Dashboard.tsx` directly under the header (above `SetupChecklist`).
-
-- Reads `useSetupStatus()` for `whatsappLabel` / number.
-- Compact card showing:
-  - Label: "Share this with your customers"
-  - The number in large mono text (e.g. `+260 97 700 0000`, formatted via `src/lib/format.ts`)
-  - Two buttons: **Copy** and **Share via WhatsApp** (`https://wa.me/?text=Chat%20with%20{companyName}%20on%20WhatsApp%3A%20{number}`)
-- Hidden when no number is provisioned yet (renders a dimmed "WhatsApp number pending — we're setting it up" instead).
-
-### 3. Settings page: hide WhatsApp/Twilio tab from clients
-File: `src/pages/Settings.tsx`
-
-- The "Numbers" tab currently lets clients edit `whatsapp_number`/`twilio_number` via `PhoneInput`. Gate that tab behind the admin role using `useCompanyRole()` — clients see a read-only display of their assigned number with the same Copy / Share affordances; only admins see the editable inputs.
-- Keep Business / Calendar / Media / Knowledge tabs unchanged for clients.
-
-### 4. System Status card on Dashboard
-File: `src/pages/Dashboard.tsx`
-
-- Replace "Not configured" wording with "Pending setup" when `whatsapp_number` is empty (clients shouldn't think they did something wrong).
-
-### 5. Lock the rule in memory
-New file: `mem://constraints/whatsapp-setup-admin-only.md`
-
-```
----
-name: WhatsApp setup is admin-only
-description: Twilio/WhatsApp number provisioning is owned by the Omanut admin team. Client UI must be read-only.
-type: constraint
----
-Clients use Omanut's Twilio account. They MUST NOT see editable Twilio fields, account SIDs, auth tokens, or webhook URLs.
-- /setup WhatsApp card: status + copy/share only, no navigation to edit forms.
-- Dashboard: surface the assigned number prominently for sharing with customers.
-- Settings "Numbers" tab: gated behind admin role via useCompanyRole().
-Why: support burden, billing security, and Twilio credentials are ours.
-How to apply: when adding any WhatsApp/Twilio UI, check role first; otherwise render read-only.
+```text
+┌─────────────────────────────────────┐
+│  ●●●○○○○○○○         step 3 of 10    │
+│                                     │
+│  What does your business sell?      │
+│  We'll use this to train your AI.   │
+│                                     │
+│  ┌─────────────────────────────┐    │
+│  │ e.g. Grilled fish, steaks…  │    │
+│  └─────────────────────────────┘    │
+│                                     │
+│  💡 Tip: list your top sellers      │
+│                                     │
+│  [ Back ]            [ Continue → ] │
+└─────────────────────────────────────┘
 ```
 
-Update `mem://index.md` Memories list to add this entry.
+- One question per screen, large input, helper text + example.
+- Progress dots at top, "step X of Y".
+- Auto-saves after each step (so a refresh resumes where they left off).
+- "Skip for now" on optional steps.
+- Final step: summary card → "Looks good, finish" → returns them to `/dashboard` with the Setup Checklist updated.
 
-## Files touched
+## Question flow (10 steps)
 
-- `src/pages/Setup.tsx` — read-only WhatsApp card + request-number CTA
-- `src/components/dashboard/WhatsAppNumberBanner.tsx` — new
-- `src/pages/Dashboard.tsx` — mount banner, soften System Status copy
-- `src/pages/Settings.tsx` — admin-gated Numbers tab
-- `src/lib/format.ts` — add `formatPhoneDisplay()` helper if not present
-- `mem://constraints/whatsapp-setup-admin-only.md` + `mem://index.md`
+Grouped so the most important things come first:
 
-## Out of scope
+1. **Business name** — text
+2. **Business type** — chips (Restaurant, Clinic, Retail, Salon, Hotel, School, Other) → auto-fills sensible defaults for steps 4–7
+3. **What you sell / services offered** — textarea, prefilled from type
+4. **Operating hours** — quick presets (24/7, Mon-Fri 9-5, Custom)
+5. **Branches / locations** — text, default "Main"
+6. **Currency** — chips (K, $, R, KSh, Other)
+7. **Voice & tone** — chips (Warm, Professional, Playful, Direct) → maps to `voice_style`
+8. **Who should we notify?** — phone + role chip (Owner / Manager / Accountant); can add more later
+9. **Anything else the AI should know?** — free textarea → `quick_reference_info` (skippable)
+10. **Review & finish** — summary list with inline edit links
 
-- No DB migrations.
-- No edge function changes.
-- Admin-side Twilio config (under `/admin/...`) stays exactly as-is.
+Steps 4–7 use the existing `industryConfig` presets from `CompanyForm.tsx` so picking "Restaurant" instantly fills realistic defaults the user can tweak.
+
+## Where it lives
+
+- Route: `/setup/wizard` (Setup hub gets a new "Complete business profile" card that launches it).
+- First-time clients (any required field empty) are auto-routed there from `/dashboard` once, with a dismissible banner on subsequent visits.
+
+## Files
+
+**New**
+- `src/pages/SetupWizard.tsx` — page shell, step state, progress, navigation
+- `src/components/setup/wizard/WizardStep.tsx` — shared layout (question, helper, input slot, footer buttons)
+- `src/components/setup/wizard/steps/` — one file per step (`StepName.tsx`, `StepBusinessType.tsx`, …)
+- `src/hooks/useWizardDraft.ts` — loads/saves draft to `companies` row + `localStorage` fallback for resume
+- `src/lib/wizardSteps.ts` — step list, validation per step, industry presets (lifted from `CompanyForm.tsx`)
+
+**Edited**
+- `src/App.tsx` — add `/setup/wizard` route inside `CompanyProtectedRoutes`
+- `src/pages/Setup.tsx` — add a top-of-page "Complete your business profile" card that links to the wizard, hidden once profile is complete
+- `src/pages/Dashboard.tsx` — first-load redirect when profile is incomplete (one-shot, then dismissible)
+- `src/hooks/useSetupStatus.ts` — add a `profileComplete` boolean derived from required fields (name, business_type, services, hours, currency_prefix, voice_style)
+
+**Untouched** (intentionally)
+- `src/components/CompanyForm.tsx` — admin-only back-office form stays as-is
+- WhatsApp/Twilio fields — wizard never asks (per the admin-only constraint we just locked in)
+
+## Persistence
+
+- On every "Continue", `update companies set <field> = …` for the selected company (uses existing RLS — owner can edit own company).
+- Boss phones written via existing `company_boss_phones` insert with role presets (matching `CompanyForm` logic).
+- Draft state mirrored to `localStorage` keyed by `company_id` so a mid-flow refresh resumes on the same step.
+
+## Validation
+
+- Per-step zod schemas (name max 100, services max 1000, phone E.164, etc.), inline error under the input. Continue button disabled until valid (except on skippable steps).
+
+## Mobile
+
+- Full-bleed on `<768px`, single column, sticky footer with Back/Continue. Designed first for the 745px viewport the user is on right now.
+
+## Out of scope (for this pass)
+
+- Editing answers later via the wizard (they'll use Settings tabs as today).
+- AI-suggested answers ("we noticed your website says X — use that?"). Could add later if desired.
+
+Approve and I'll build it.
