@@ -31,6 +31,7 @@ import TermsOfService from "./pages/TermsOfService";
 import DataDeletion from "./pages/DataDeletion";
 import MetaOAuthCallback from "./pages/MetaOAuthCallback";
 import Setup from "./pages/Setup";
+import Inbox from "./pages/Inbox";
 import { CompanyProvider } from "./context/CompanyContext";
 
 const queryClient = new QueryClient();
@@ -57,6 +58,7 @@ const App = () => (
             <Route path="/admin/company/:id" element={<EditCompany />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/setup" element={<Setup />} />
+            <Route path="/inbox" element={<Inbox />} />
             <Route path="/live-demo" element={<LiveDemo />} />
             <Route path="/conversations" element={<Conversations />} />
             <Route path="/client-insights" element={<ClientInsights />} />
