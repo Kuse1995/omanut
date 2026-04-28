@@ -37,6 +37,7 @@ import MetaOAuthCallback from "./pages/MetaOAuthCallback";
 import Setup from "./pages/Setup";
 import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
+import MediaStudio from "./pages/MediaStudio";
 import { CompanyProvider } from "./context/CompanyContext";
 
 const queryClient = new QueryClient();
@@ -69,6 +70,7 @@ const App = () => (
             <Route path="/setup" element={<Setup />} />
             <Route path="/setup/wizard" element={<SetupWizard />} />
             <Route path="/inbox" element={<Inbox />} />
+            <Route path="/media" element={<MediaStudio />} />
             <Route path="/live-demo" element={<LiveDemo />} />
             <Route path="/conversations" element={<Conversations />} />
             <Route path="/client-insights" element={<ClientInsights />} />

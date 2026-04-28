@@ -344,6 +344,16 @@ const Settings = () => {
 
           {/* Media */}
           <TabsContent value="media" className="space-y-6">
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="flex items-center justify-between p-4">
+                <p className="text-sm">
+                  Media & AI image generation now have a dedicated page.
+                </p>
+                <Button size="sm" onClick={() => navigate('/media')}>
+                  Open Media Studio
+                </Button>
+              </CardContent>
+            </Card>
             {config.id && <CompanyMedia companyId={config.id} />}
             {config.id && <ImageGenerationSettings companyId={config.id} />}
           </TabsContent>
