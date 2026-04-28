@@ -17,19 +17,13 @@ serve(async (req) => {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // Track resources created so we can roll back on failure
-  let createdAuthUserId: string | null = null;
   let createdCompanyId: string | null = null;
 
   try {
-    // Verify the requesting user is an admin
     const authHeader = req.headers.get('Authorization')!;
     const token = authHeader.replace('Bearer ', '');
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-
-    if (userError || !user) {
-      throw new Error('Unauthorized');
-    }
+    if (userError || !user) throw new Error('Unauthorized');
 
     const { data: isAdmin } = await supabaseAdmin
       .from('user_roles')
@@ -37,10 +31,7 @@ serve(async (req) => {
       .eq('user_id', user.id)
       .eq('role', 'admin')
       .single();
-
-    if (!isAdmin) {
-      throw new Error('Unauthorized: Admin access required');
-    }
+    if (!isAdmin) throw new Error('Unauthorized: Admin access required');
 
     const {
       name,
@@ -57,56 +48,17 @@ serve(async (req) => {
       test_mode,
       credit_balance,
       quick_reference_info,
-      admin_email,
-      admin_password,
       system_instructions,
       qa_style,
       banned_topics,
     } = await req.json();
 
-    if (!name || !admin_email || !admin_password) {
-      throw new Error('Missing required fields: name, admin_email, admin_password');
-    }
-
-    // Check for orphaned auth user (exists in auth but not in public schema)
-    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-    const orphanUser = existingUsers?.users?.find(u => u.email === admin_email);
-
-    if (orphanUser) {
-      const { count: cuCount } = await supabaseAdmin
-        .from('company_users')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', orphanUser.id);
-
-      const { count: uCount } = await supabaseAdmin
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .eq('id', orphanUser.id);
-
-      if ((cuCount ?? 0) === 0 && (uCount ?? 0) === 0) {
-        console.log(`Deleting orphaned auth user: ${orphanUser.id} (${admin_email})`);
-        await supabaseAdmin.auth.admin.deleteUser(orphanUser.id);
-      } else {
-        throw new Error('Email already in use by an active user');
-      }
-    }
-
-    // 1. Create auth user
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: admin_email,
-      password: admin_password,
-      email_confirm: true,
-      user_metadata: { company_name: name },
-    });
-
-    if (authError) throw authError;
-    if (!authData.user) throw new Error('Failed to create user');
-    createdAuthUserId = authData.user.id;
+    if (!name) throw new Error('Missing required field: name');
 
     const normalizedTwilio = twilio_number?.trim() || null;
     const normalizedWhatsapp = whatsapp_number?.trim() || null;
 
-    // 2. Create company (trigger will auto-seed company_ai_overrides)
+    // 1. Create company (triggers auto-seed company_ai_overrides AND company_claim_codes)
     const { data: company, error: companyError } = await supabaseAdmin
       .from('companies')
       .insert({
@@ -131,42 +83,7 @@ serve(async (req) => {
     if (companyError) throw companyError;
     createdCompanyId = company.id;
 
-    // 3. Link user to company (legacy table)
-    const { error: userError2 } = await supabaseAdmin
-      .from('users')
-      .insert({
-        id: authData.user.id,
-        email: admin_email,
-        company_id: company.id,
-        role: 'admin',
-      });
-
-    if (userError2) throw userError2;
-
-    // 4. Add user to company_users as owner
-    const { error: companyUserError } = await supabaseAdmin
-      .from('company_users')
-      .insert({
-        user_id: authData.user.id,
-        company_id: company.id,
-        role: 'owner',
-        is_default: true,
-        accepted_at: new Date().toISOString(),
-      });
-
-    if (companyUserError) throw companyUserError;
-
-    // 5. Give user client role for RLS
-    const { error: roleError } = await supabaseAdmin
-      .from('user_roles')
-      .insert({
-        user_id: authData.user.id,
-        role: 'client',
-      });
-
-    if (roleError) throw roleError;
-
-    // 6. Update (NOT insert) company_ai_overrides — trigger already seeded the row
+    // 2. Update AI overrides if provided
     if (system_instructions || qa_style || banned_topics) {
       const { error: aiError } = await supabaseAdmin
         .from('company_ai_overrides')
@@ -176,15 +93,22 @@ serve(async (req) => {
           banned_topics: banned_topics || '',
         })
         .eq('company_id', company.id);
-
       if (aiError) throw aiError;
     }
+
+    // 3. Fetch the auto-generated claim code so admin can copy it
+    const { data: claim } = await supabaseAdmin
+      .from('company_claim_codes')
+      .select('code')
+      .eq('company_id', company.id)
+      .single();
 
     return new Response(
       JSON.stringify({
         success: true,
         company_id: company.id,
-        message: 'Company created successfully'
+        claim_code: claim?.code ?? null,
+        message: 'Company created. Share the claim code with the client so they can sign up at /signup and claim it.',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
@@ -192,27 +116,13 @@ serve(async (req) => {
   } catch (error: any) {
     console.error('Error creating company:', error?.message || error);
 
-    // Rollback any partial state so the next retry starts clean
     if (createdCompanyId) {
       try {
         await supabaseAdmin.from('company_ai_overrides').delete().eq('company_id', createdCompanyId);
-        if (createdAuthUserId) {
-          await supabaseAdmin.from('user_roles').delete().eq('user_id', createdAuthUserId);
-          await supabaseAdmin.from('company_users').delete().eq('user_id', createdAuthUserId).eq('company_id', createdCompanyId);
-          await supabaseAdmin.from('users').delete().eq('id', createdAuthUserId);
-        }
+        await supabaseAdmin.from('company_claim_codes').delete().eq('company_id', createdCompanyId);
         await supabaseAdmin.from('companies').delete().eq('id', createdCompanyId);
-        console.log(`Rolled back company ${createdCompanyId}`);
       } catch (rbErr) {
-        console.error('Rollback error (company):', rbErr);
-      }
-    }
-    if (createdAuthUserId) {
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId);
-        console.log(`Rolled back auth user ${createdAuthUserId}`);
-      } catch (rbErr) {
-        console.error('Rollback error (auth user):', rbErr);
+        console.error('Rollback error:', rbErr);
       }
     }
 
