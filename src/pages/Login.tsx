@@ -107,7 +107,21 @@ const Login = () => {
           </div>
         </CardHeader>
         
-        <CardContent>
+        <CardContent className="space-y-5">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-11"
+            onClick={handleGoogle}
+            disabled={googleLoading}
+          >
+            {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue with Google"}
+          </Button>
+
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px bg-border flex-1" /> or <div className="h-px bg-border flex-1" />
+          </div>
+
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email" className="text-foreground">Email</Label>
@@ -121,9 +135,12 @@ const Login = () => {
                 className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-foreground">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password" className="text-foreground">Password</Label>
+                <Link to="/forgot-password" className="text-xs text-primary hover:underline">Forgot?</Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -133,23 +150,18 @@ const Login = () => {
                 className="h-11"
               />
             </div>
-            
-            <Button 
-              type="submit" 
-              className="w-full bg-gradient-primary hover-glow h-11 text-base font-medium" 
+
+            <Button
+              type="submit"
+              className="w-full bg-gradient-primary hover-glow h-11 text-base font-medium"
               disabled={loading}
             >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
             </Button>
           </form>
-          
-          <div className="mt-8 pt-6 border-t border-border/40 text-center space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Don't have an account?
-            </p>
-            <p className="text-sm text-foreground font-medium">
-              Contact your administrator for access
-            </p>
+
+          <div className="pt-4 border-t border-border/40 text-center text-sm text-muted-foreground">
+            New here? <Link to="/signup" className="text-primary hover:underline">Create an account</Link>
           </div>
         </CardContent>
       </Card>
