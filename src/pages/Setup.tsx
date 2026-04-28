@@ -212,7 +212,7 @@ const Setup = () => {
                     : "Upload your logo and product photos for branded social content."
                 }
                 status={status.brand}
-                onClick={() => navigate("/settings")}
+                onClick={() => navigate("/media")}
               />
             </>
           )}

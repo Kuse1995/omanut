@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +20,7 @@ import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
 import { formatPhone } from '@/lib/format';
 
 const Settings = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { data: isAdmin } = useIsPlatformAdmin();
   const [loading, setLoading] = useState(true);
@@ -344,6 +346,16 @@ const Settings = () => {
 
           {/* Media */}
           <TabsContent value="media" className="space-y-6">
+            <Card className="border-primary/30 bg-primary/5">
+              <CardContent className="flex items-center justify-between p-4">
+                <p className="text-sm">
+                  Media & AI image generation now have a dedicated page.
+                </p>
+                <Button size="sm" onClick={() => navigate('/media')}>
+                  Open Media Studio
+                </Button>
+              </CardContent>
+            </Card>
             {config.id && <CompanyMedia companyId={config.id} />}
             {config.id && <ImageGenerationSettings companyId={config.id} />}
           </TabsContent>
