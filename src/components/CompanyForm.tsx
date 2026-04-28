@@ -484,11 +484,7 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
         
         if (onSuccess) onSuccess();
       } else {
-        // Create new company with admin user via edge function
-        if (!formData.admin_email || !formData.admin_password) {
-          throw new Error('Admin email and password are required for new companies');
-        }
-
+        // Create new company (no admin user — clients self-serve via /signup + claim code)
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) throw new Error('Not authenticated');
 
@@ -516,8 +512,6 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
               test_mode: formData.test_mode,
               credit_balance: formData.credit_balance,
               quick_reference_info: formData.quick_reference_info,
-              admin_email: formData.admin_email,
-              admin_password: formData.admin_password,
               system_instructions: aiInstructions.system_instructions,
               qa_style: aiInstructions.qa_style,
               banned_topics: aiInstructions.banned_topics,
@@ -529,16 +523,18 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
         );
 
         const result = await response.json();
-        
+
         if (!response.ok) {
           throw new Error(result.error || 'Failed to create company');
         }
 
         toast({
-          title: "Success",
-          description: `Company created successfully. Admin login: ${formData.admin_email}`,
+          title: "Company created",
+          description: result.claim_code
+            ? `Claim code: ${result.claim_code} — share it with the client.`
+            : "Company created successfully.",
         });
-        
+
         if (onSuccess) onSuccess();
         else navigate('/admin/companies');
       }
@@ -1150,36 +1146,15 @@ const CompanyForm = ({ companyId, onSuccess, onCancel }: CompanyFormProps) => {
             </div>
           </div>
 
-          {/* Admin Account (only for new companies) */}
+          {/* Initial credits (only for new companies) */}
           {!companyId && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold">Admin Account</h3>
-              
-              <div>
-                <Label htmlFor="admin_email">Admin Email *</Label>
-                <Input
-                  id="admin_email"
-                  type="email"
-                  value={formData.admin_email}
-                  onChange={(e) => setFormData({ ...formData, admin_email: e.target.value })}
-                  placeholder="admin@company.com"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="admin_password">Admin Password *</Label>
-                <Input
-                  id="admin_password"
-                  type="password"
-                  value={formData.admin_password}
-                  onChange={(e) => setFormData({ ...formData, admin_password: e.target.value })}
-                  placeholder="••••••••"
-                  required
-                  minLength={6}
-                />
-              </div>
-
+              <h3 className="text-lg font-semibold">Account Setup</h3>
+              <p className="text-sm text-muted-foreground">
+                The client will sign up themselves at <code>/signup</code> and claim this company
+                using a one-time <strong>claim code</strong> shown in the company list after creation.
+                You no longer need to set their email or password.
+              </p>
               <div>
                 <Label htmlFor="credit_balance">Initial Credit Balance</Label>
                 <Input
