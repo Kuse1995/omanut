@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ClaimCodesPanel } from "@/components/admin/ClaimCodesPanel";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -168,6 +169,8 @@ const Companies = () => {
               Create Company
             </Button>
           </div>
+
+          <ClaimCodesPanel />
 
           <Card className="card-glass">
             <Table>
