@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,85 +15,60 @@ const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: isAdmin } = await supabase.rpc('has_role', {
-          _user_id: session.user.id,
-          _role: 'admin'
-        });
-        navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
-      }
-    };
-    
-    checkSession();
+  const routeAfterAuth = async (userId: string) => {
+    const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
+    if (isAdmin) {
+      navigate("/admin/dashboard");
+      return;
+    }
+    const { data: companies } = await supabase.rpc("get_user_companies");
+    if (companies && companies.length > 0) navigate("/dashboard");
+    else navigate("/claim-company");
+  };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        // Defer async calls to prevent deadlock
-        setTimeout(async () => {
-          const { data: isAdmin } = await supabase.rpc('has_role', {
-            _user_id: session.user.id,
-            _role: 'admin'
-          });
-          navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
-        }, 0);
-      }
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) routeAfterAuth(session.user.id);
     });
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) setTimeout(() => routeAfterAuth(session.user.id), 0);
+    });
     return () => subscription.unsubscribe();
-  }, [navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-
-      const { data: isClient } = await supabase.rpc('has_role', {
-        _user_id: data.user.id,
-        _role: 'client'
-      });
-
-      if (!isClient) {
-        const { data: isAdmin } = await supabase.rpc('has_role', {
-          _user_id: data.user.id,
-          _role: 'admin'
-        });
-        
-        await supabase.auth.signOut();
-        
-        if (isAdmin) {
-          throw new Error("Admin users must login at /admin/login");
-        } else {
-          throw new Error("Your account does not have access to this portal. Please contact your administrator.");
-        }
-      }
-
-      toast({
-        title: "Success",
-        description: "Logged in successfully",
-      });
+      // Routing handled by onAuthStateChange
     } catch (error: any) {
-      toast({
-        title: "Login Failed",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Login failed", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
+
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: `${window.location.origin}/login`,
+      });
+      if (result.error) throw result.error;
+    } catch (e: any) {
+      toast({ title: "Google sign-in failed", description: e.message, variant: "destructive" });
+      setGoogleLoading(false);
+    }
+  };
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-app p-6 relative overflow-hidden">
