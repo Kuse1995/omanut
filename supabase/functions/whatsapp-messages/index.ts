@@ -1360,6 +1360,33 @@ async function sendFallbackToCustomer(
     const fallbackMsg = aiOverrides?.fallback_message || 
       "I'm experiencing a brief delay. Let me get back to you shortly — or feel free to send your message again.";
 
+    // ── IDEMPOTENCY GUARD ──
+    // Concurrent watchdog/coalesce paths can each call this fn for the same user
+    // turn, producing 2-3 identical fallback messages within a second. If an
+    // identical assistant message already landed in this conversation in the
+    // last 30s, skip silently. Also skip if any assistant reply (even a real
+    // one) was just inserted — the customer doesn't need a stale "owner is
+    // coming" line on top of a fresh real answer.
+    const sinceTs = new Date(Date.now() - 30_000).toISOString();
+    const { data: recent } = await supabase
+      .from('messages')
+      .select('id, content, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'assistant')
+      .gt('created_at', sinceTs)
+      .order('created_at', { ascending: false })
+      .limit(3);
+    if (recent && recent.length > 0) {
+      const dup = recent.find((m: any) => (m.content || '').trim() === fallbackMsg.trim());
+      if (dup) {
+        console.warn(`[WATCHDOG-DEDUP] Identical fallback already sent ${dup.created_at} for conv ${conversationId} — suppressing duplicate (${reason})`);
+        return;
+      }
+      // Real assistant reply just landed — don't tack on a fallback.
+      console.warn(`[WATCHDOG-DEDUP] Recent assistant reply exists for conv ${conversationId} — suppressing fallback (${reason})`);
+      return;
+    }
+
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
     const fromNumber = company.whatsapp_number.startsWith('whatsapp:') 
       ? company.whatsapp_number 
