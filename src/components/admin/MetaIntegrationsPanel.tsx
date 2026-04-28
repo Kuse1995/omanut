@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle } from 'lucide-react';
+import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle, RefreshCw } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
 
 interface MetaCredential {
@@ -420,6 +420,23 @@ export const MetaIntegrationsPanel = () => {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const resubscribeMutation = useMutation({
+    mutationFn: async (credentialId: string) => {
+      const { data, error } = await supabase.functions.invoke('subscribe-meta-page', {
+        body: { credential_id: credentialId },
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Re-subscribe failed');
+      return data;
+    },
+    onSuccess: (data) => {
+      const fields = (data?.subscribed_fields || []).join(', ');
+      toast.success(`Re-subscribed to ${fields || 'webhook events'}. Comments should flow within ~1 min.`);
+      queryClient.invalidateQueries({ queryKey: ['meta-credentials'] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const resetForm = () => {
     setForm({ page_id: '', access_token: '', ig_user_id: '', ai_system_prompt: '' });
     setEditingId(null);
@@ -602,6 +619,19 @@ export const MetaIntegrationsPanel = () => {
                   </div>
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => resubscribeMutation.mutate(cred.id)}
+                    disabled={resubscribeMutation.isPending && resubscribeMutation.variables === cred.id}
+                    title="Re-subscribe to comment & message webhooks (use if AI stopped replying to FB comments)"
+                  >
+                    {resubscribeMutation.isPending && resubscribeMutation.variables === cred.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                  </Button>
                   <Button variant="ghost" size="icon" onClick={() => startEdit(cred)} title="Edit AI instructions">
                     <Edit2 className="w-4 h-4" />
                   </Button>
