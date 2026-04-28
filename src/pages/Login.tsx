@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,85 +15,60 @@ const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: isAdmin } = await supabase.rpc('has_role', {
-          _user_id: session.user.id,
-          _role: 'admin'
-        });
-        navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
-      }
-    };
-    
-    checkSession();
+  const routeAfterAuth = async (userId: string) => {
+    const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
+    if (isAdmin) {
+      navigate("/admin/dashboard");
+      return;
+    }
+    const { data: companies } = await supabase.rpc("get_user_companies");
+    if (companies && companies.length > 0) navigate("/dashboard");
+    else navigate("/claim-company");
+  };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        // Defer async calls to prevent deadlock
-        setTimeout(async () => {
-          const { data: isAdmin } = await supabase.rpc('has_role', {
-            _user_id: session.user.id,
-            _role: 'admin'
-          });
-          navigate(isAdmin ? '/admin/dashboard' : '/dashboard');
-        }, 0);
-      }
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) routeAfterAuth(session.user.id);
     });
 
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) setTimeout(() => routeAfterAuth(session.user.id), 0);
+    });
     return () => subscription.unsubscribe();
-  }, [navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-
-      const { data: isClient } = await supabase.rpc('has_role', {
-        _user_id: data.user.id,
-        _role: 'client'
-      });
-
-      if (!isClient) {
-        const { data: isAdmin } = await supabase.rpc('has_role', {
-          _user_id: data.user.id,
-          _role: 'admin'
-        });
-        
-        await supabase.auth.signOut();
-        
-        if (isAdmin) {
-          throw new Error("Admin users must login at /admin/login");
-        } else {
-          throw new Error("Your account does not have access to this portal. Please contact your administrator.");
-        }
-      }
-
-      toast({
-        title: "Success",
-        description: "Logged in successfully",
-      });
+      // Routing handled by onAuthStateChange
     } catch (error: any) {
-      toast({
-        title: "Login Failed",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Login failed", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
+
+  const handleGoogle = async () => {
+    setGoogleLoading(true);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: `${window.location.origin}/login`,
+      });
+      if (result.error) throw result.error;
+    } catch (e: any) {
+      toast({ title: "Google sign-in failed", description: e.message, variant: "destructive" });
+      setGoogleLoading(false);
+    }
+  };
+
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-app p-6 relative overflow-hidden">
@@ -131,7 +107,21 @@ const Login = () => {
           </div>
         </CardHeader>
         
-        <CardContent>
+        <CardContent className="space-y-5">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-11"
+            onClick={handleGoogle}
+            disabled={googleLoading}
+          >
+            {googleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue with Google"}
+          </Button>
+
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px bg-border flex-1" /> or <div className="h-px bg-border flex-1" />
+          </div>
+
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
               <Label htmlFor="email" className="text-foreground">Email</Label>
@@ -145,9 +135,12 @@ const Login = () => {
                 className="h-11"
               />
             </div>
-            
+
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-foreground">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password" className="text-foreground">Password</Label>
+                <Link to="/forgot-password" className="text-xs text-primary hover:underline">Forgot?</Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -157,23 +150,18 @@ const Login = () => {
                 className="h-11"
               />
             </div>
-            
-            <Button 
-              type="submit" 
-              className="w-full bg-gradient-primary hover-glow h-11 text-base font-medium" 
+
+            <Button
+              type="submit"
+              className="w-full bg-gradient-primary hover-glow h-11 text-base font-medium"
               disabled={loading}
             >
               {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
             </Button>
           </form>
-          
-          <div className="mt-8 pt-6 border-t border-border/40 text-center space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Don't have an account?
-            </p>
-            <p className="text-sm text-foreground font-medium">
-              Contact your administrator for access
-            </p>
+
+          <div className="pt-4 border-t border-border/40 text-center text-sm text-muted-foreground">
+            New here? <Link to="/signup" className="text-primary hover:underline">Create an account</Link>
           </div>
         </CardContent>
       </Card>

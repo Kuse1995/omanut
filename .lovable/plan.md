@@ -1,92 +1,85 @@
-# Conversational Setup Wizard
+## Goal
 
-Replace the wall-of-fields company form (and the static `/setup` cards) with a friendly, one-question-at-a-time wizard. Think Typeform / iOS onboarding: big question, focused input, progress dots, "Back" + "Next", auto-save as you go.
+Stop having admins create client passwords. Let clients:
+1. **Sign themselves up** (email+password or Google) at `/signup`.
+2. **Claim an existing company** that was pre-created by the admin, so the 7 companies already in the system (ANZ, GreenGrid, Finch, E Library, etc.) get linked to a real client login the owner controls.
+3. **Reset forgotten passwords** via email link.
 
-The existing `CompanyForm` stays for admins (Omanut staff editing companies in the back office). Clients get the wizard.
+Admins keep creating company *records*, but never touch passwords again.
 
-## What the user sees
+---
 
-```text
-┌─────────────────────────────────────┐
-│  ●●●○○○○○○○         step 3 of 10    │
-│                                     │
-│  What does your business sell?      │
-│  We'll use this to train your AI.   │
-│                                     │
-│  ┌─────────────────────────────┐    │
-│  │ e.g. Grilled fish, steaks…  │    │
-│  └─────────────────────────────┘    │
-│                                     │
-│  💡 Tip: list your top sellers      │
-│                                     │
-│  [ Back ]            [ Continue → ] │
-└─────────────────────────────────────┘
+## What changes for the user
+
+### New client-facing pages
+- **`/signup`** — Email+password form **+ "Continue with Google"** button. After signup, sends them to `/claim-company` if they have no company yet.
+- **`/claim-company`** — Conversational step: "Which business is this?" Shows a searchable list of unclaimed companies. Client picks theirs → enters a one-time **claim code** (admin gives it to them, or it's auto-emailed) → they become the owner of that company.
+- **`/forgot-password`** + **`/reset-password`** — Standard reset flow (currently missing).
+
+### Login page (`/login`)
+- Adds **"Continue with Google"** button.
+- Adds **"Forgot password?"** link.
+- Adds **"New here? Create an account"** link → `/signup`.
+
+### Admin side (NewCompany / CompanyForm)
+- **Remove** the `admin_email` and `admin_password` fields entirely.
+- Replace with a single read-only **"Claim code"** that's auto-generated when the company is created (e.g. `ANZ-7K3F-92QX`). Admin copies this and shares it with the client over WhatsApp.
+- Existing 7 companies get a claim code backfilled so you can hand them out today.
+
+### Existing companies (the 7 already in the DB)
+- A one-time migration generates a claim code for each.
+- You'll see them in `/admin/companies` with a **"Copy claim code"** button.
+- Send the code to each company owner; they sign up at `/signup`, claim, done. The old forgotten admin password becomes irrelevant.
+
+---
+
+## Technical details
+
+### Database
+New table `company_claim_codes`:
+- `company_id` (FK, unique)
+- `code` (text, unique, format `XXXX-XXXX-XXXX`)
+- `claimed_by` (uuid, nullable — auth user who claimed it)
+- `claimed_at` (timestamptz, nullable)
+- `created_at`
+
+RLS: only admins can SELECT/INSERT; the claim itself happens via a SECURITY DEFINER RPC `claim_company(_code text)` that:
+- Looks up the code, errors if already claimed.
+- Inserts the caller into `company_users` with role `owner`.
+- Marks the code as claimed.
+- Returns the `company_id`.
+
+Backfill migration: insert one row per existing company in `companies`.
+
+### Google auth
+Uses Lovable Cloud's managed Google OAuth (no client ID/secret needed). On `/signup` and `/login`:
+```ts
+import { lovable } from "@/integrations/lovable";
+await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/claim-company" });
 ```
+After Google returns, if the user has no `company_users` row, route them to `/claim-company`. If they do, route to `/dashboard`.
 
-- One question per screen, large input, helper text + example.
-- Progress dots at top, "step X of Y".
-- Auto-saves after each step (so a refresh resumes where they left off).
-- "Skip for now" on optional steps.
-- Final step: summary card → "Looks good, finish" → returns them to `/dashboard` with the Setup Checklist updated.
+### Password reset
+- `/forgot-password`: calls `supabase.auth.resetPasswordForEmail(email, { redirectTo: origin + "/reset-password" })`.
+- `/reset-password`: detects `type=recovery` in URL hash, shows new-password form, calls `supabase.auth.updateUser({ password })`.
 
-## Question flow (10 steps)
+### CompanyForm cleanup
+Remove `admin_email` / `admin_password` state, validation, and the entire "Admin login" section. The `create-company` edge function stops accepting those fields and instead generates a claim code.
 
-Grouped so the most important things come first:
+### Routing guard update
+`Login.tsx` currently rejects users that aren't `client` role. Loosen this: if the user has a `company_users` row, treat them as a client (no need for the `client` role rpc). If they have no company, push to `/claim-company` instead of signing them out.
 
-1. **Business name** — text
-2. **Business type** — chips (Restaurant, Clinic, Retail, Salon, Hotel, School, Other) → auto-fills sensible defaults for steps 4–7
-3. **What you sell / services offered** — textarea, prefilled from type
-4. **Operating hours** — quick presets (24/7, Mon-Fri 9-5, Custom)
-5. **Branches / locations** — text, default "Main"
-6. **Currency** — chips (K, $, R, KSh, Other)
-7. **Voice & tone** — chips (Warm, Professional, Playful, Direct) → maps to `voice_style`
-8. **Who should we notify?** — phone + role chip (Owner / Manager / Accountant); can add more later
-9. **Anything else the AI should know?** — free textarea → `quick_reference_info` (skippable)
-10. **Review & finish** — summary list with inline edit links
+### Files touched
+- **New**: `src/pages/Signup.tsx`, `src/pages/ClaimCompany.tsx`, `src/pages/ForgotPassword.tsx`, `src/pages/ResetPassword.tsx`
+- **Modified**: `src/App.tsx` (4 routes), `src/pages/Login.tsx` (Google + forgot link + signup link, looser role check), `src/components/CompanyForm.tsx` (drop admin email/password), `supabase/functions/create-company/index.ts` (generate claim code, no auth user)
+- **DB migration**: create `company_claim_codes` + `claim_company` RPC + backfill for the 7 existing companies
+- **Memory**: update `mem://constraints/whatsapp-setup-admin-only` companion or add `mem://features/client-self-serve-signup` describing the claim-code flow
 
-Steps 4–7 use the existing `industryConfig` presets from `CompanyForm.tsx` so picking "Restaurant" instantly fills realistic defaults the user can tweak.
+---
 
-## Where it lives
+## Out of scope (ask if you want them)
+- Magic-link-only signup (no password at all).
+- SSO with Apple / Microsoft.
+- Auto-emailing the claim code to a contact on the company record (we can add later — for now admin copies it manually).
 
-- Route: `/setup/wizard` (Setup hub gets a new "Complete business profile" card that launches it).
-- First-time clients (any required field empty) are auto-routed there from `/dashboard` once, with a dismissible banner on subsequent visits.
-
-## Files
-
-**New**
-- `src/pages/SetupWizard.tsx` — page shell, step state, progress, navigation
-- `src/components/setup/wizard/WizardStep.tsx` — shared layout (question, helper, input slot, footer buttons)
-- `src/components/setup/wizard/steps/` — one file per step (`StepName.tsx`, `StepBusinessType.tsx`, …)
-- `src/hooks/useWizardDraft.ts` — loads/saves draft to `companies` row + `localStorage` fallback for resume
-- `src/lib/wizardSteps.ts` — step list, validation per step, industry presets (lifted from `CompanyForm.tsx`)
-
-**Edited**
-- `src/App.tsx` — add `/setup/wizard` route inside `CompanyProtectedRoutes`
-- `src/pages/Setup.tsx` — add a top-of-page "Complete your business profile" card that links to the wizard, hidden once profile is complete
-- `src/pages/Dashboard.tsx` — first-load redirect when profile is incomplete (one-shot, then dismissible)
-- `src/hooks/useSetupStatus.ts` — add a `profileComplete` boolean derived from required fields (name, business_type, services, hours, currency_prefix, voice_style)
-
-**Untouched** (intentionally)
-- `src/components/CompanyForm.tsx` — admin-only back-office form stays as-is
-- WhatsApp/Twilio fields — wizard never asks (per the admin-only constraint we just locked in)
-
-## Persistence
-
-- On every "Continue", `update companies set <field> = …` for the selected company (uses existing RLS — owner can edit own company).
-- Boss phones written via existing `company_boss_phones` insert with role presets (matching `CompanyForm` logic).
-- Draft state mirrored to `localStorage` keyed by `company_id` so a mid-flow refresh resumes on the same step.
-
-## Validation
-
-- Per-step zod schemas (name max 100, services max 1000, phone E.164, etc.), inline error under the input. Continue button disabled until valid (except on skippable steps).
-
-## Mobile
-
-- Full-bleed on `<768px`, single column, sticky footer with Back/Continue. Designed first for the 745px viewport the user is on right now.
-
-## Out of scope (for this pass)
-
-- Editing answers later via the wizard (they'll use Settings tabs as today).
-- AI-suggested answers ("we noticed your website says X — use that?"). Could add later if desired.
-
-Approve and I'll build it.
+Approve to build, or tell me what to change.

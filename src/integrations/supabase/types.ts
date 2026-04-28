@@ -1371,6 +1371,41 @@ export type Database = {
           },
         ]
       }
+      company_claim_codes: {
+        Row: {
+          claimed_at: string | null
+          claimed_by: string | null
+          code: string
+          company_id: string
+          created_at: string
+          id: string
+        }
+        Insert: {
+          claimed_at?: string | null
+          claimed_by?: string | null
+          code: string
+          company_id: string
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          claimed_at?: string | null
+          claimed_by?: string | null
+          code?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_claim_codes_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_departments: {
         Row: {
           company_id: string
@@ -3655,6 +3690,16 @@ export type Database = {
         Args: { p_amount: number; p_company_id: string; p_reason: string }
         Returns: undefined
       }
+      admin_list_claim_codes: {
+        Args: never
+        Returns: {
+          claimed_at: string
+          claimed_by: string
+          code: string
+          company_id: string
+          company_name: string
+        }[]
+      }
       admin_reset_password: {
         Args: { new_password: string; target_user_id: string }
         Returns: Json
@@ -3663,6 +3708,7 @@ export type Database = {
         Args: { company_uuid: string }
         Returns: boolean
       }
+      claim_company: { Args: { _code: string }; Returns: Json }
       deduct_credits: {
         Args: {
           p_amount: number
@@ -3683,6 +3729,7 @@ export type Database = {
           phone: string
         }[]
       }
+      generate_claim_code: { Args: never; Returns: string }
       get_user_companies: {
         Args: never
         Returns: {
