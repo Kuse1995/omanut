@@ -20,6 +20,7 @@ import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
 import { formatPhone } from '@/lib/format';
 
 const Settings = () => {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const { data: isAdmin } = useIsPlatformAdmin();
   const [loading, setLoading] = useState(true);
