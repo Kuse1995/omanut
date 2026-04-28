@@ -2103,8 +2103,51 @@ export type Database = {
           },
         ]
       }
+      facebook_comments: {
+        Row: {
+          comment_id: string
+          comment_text: string | null
+          commenter_id: string | null
+          commenter_name: string | null
+          company_id: string | null
+          created_at: string
+          id: string
+          is_processed: boolean | null
+          page_id: string
+          parent_comment_id: string | null
+          post_id: string | null
+        }
+        Insert: {
+          comment_id: string
+          comment_text?: string | null
+          commenter_id?: string | null
+          commenter_name?: string | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          is_processed?: boolean | null
+          page_id: string
+          parent_comment_id?: string | null
+          post_id?: string | null
+        }
+        Update: {
+          comment_id?: string
+          comment_text?: string | null
+          commenter_id?: string | null
+          commenter_name?: string | null
+          company_id?: string | null
+          created_at?: string
+          id?: string
+          is_processed?: boolean | null
+          page_id?: string
+          parent_comment_id?: string | null
+          post_id?: string | null
+        }
+        Relationships: []
+      }
       facebook_messages: {
         Row: {
+          company_id: string | null
           created_at: string
           id: string
           is_processed: boolean
@@ -2113,6 +2156,7 @@ export type Database = {
           sender_psid: string
         }
         Insert: {
+          company_id?: string | null
           created_at?: string
           id?: string
           is_processed?: boolean
@@ -2121,6 +2165,7 @@ export type Database = {
           sender_psid: string
         }
         Update: {
+          company_id?: string | null
           created_at?: string
           id?: string
           is_processed?: boolean

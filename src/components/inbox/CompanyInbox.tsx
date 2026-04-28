@@ -57,21 +57,27 @@ export function CompanyInbox() {
     
     setIsLoading(true);
     try {
-      // Fetch Facebook messages - these are stored in facebook_messages table
-      // which gets populated by the meta-webhook
+      // Fetch Facebook messages scoped to this company (RLS also enforces this)
       const { data: messagesData, error: messagesError } = await supabase
         .from('facebook_messages')
         .select('*')
+        .eq('company_id', selectedCompany.id)
         .order('created_at', { ascending: false })
         .limit(50);
 
-      if (!messagesError && messagesData) {
-        setMessages(messagesData as FacebookMessage[]);
-      }
+      if (messagesError) console.error('messages error', messagesError);
+      if (messagesData) setMessages(messagesData as FacebookMessage[]);
 
-      // Note: facebook_comments table needs to be created separately
-      // For now, we'll set empty array
-      setComments([]);
+      // Fetch Facebook comments scoped to this company
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('facebook_comments' as any)
+        .select('*')
+        .eq('company_id', selectedCompany.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (commentsError) console.error('comments error', commentsError);
+      setComments((commentsData as any) || []);
 
       // Fetch reply drafts for this company
       const { data: draftsData, error: draftsError } = await supabase
