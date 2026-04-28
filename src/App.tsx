@@ -6,6 +6,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Demo from "./pages/Demo";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import ClaimCompany from "./pages/ClaimCompany";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import LiveDemo from "./pages/LiveDemo";
 import Conversations from "./pages/Conversations";
@@ -50,6 +54,10 @@ const App = () => (
             <Route path="/pitch/banking/agent" element={<PitchAgentDemo />} />
             <Route path="/demo" element={<Demo />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/claim-company" element={<ClaimCompany />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin/request-access" element={<RequestAccess />} />
             <Route path="/admin/verify" element={<AdminVerify />} />
