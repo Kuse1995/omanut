@@ -1993,6 +1993,74 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ═══════════════════════════════════════════════════════════
+  // OPENCLAW EVENT COORDINATION
+  // ═══════════════════════════════════════════════════════════
+
+  server.tool("list_pending_events", {
+    description: "List OpenClaw events that are still pending (not yet handled). Use this to find inbound customer messages or skill requests waiting for OpenClaw to act on them.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("Max results (default 50)"),
+      channel: z.string().optional().describe("Filter by channel: whatsapp, meta_dm, comments, bms, content, handoff"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      let q = supabase
+        .from("openclaw_events")
+        .select("id, conversation_id, channel, event_type, skill, payload, dispatch_status, created_at")
+        .eq("company_id", companyId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(params?.limit || 50);
+      if (params?.channel) q = q.eq("channel", params.channel);
+      const { data, error } = await q;
+      if (error) throw error;
+      return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, count: data?.length || 0, events: data ?? [] }, null, 2) }] };
+    },
+  });
+
+  server.tool("mark_event_handled", {
+    description: "Close an OpenClaw event after acting on it. Set action to 'answered' (you replied/handled it), 'declined' (intentionally ignored), or 'escalated' (passed to boss). Bumps heartbeat.",
+    inputSchema: z.object({
+      event_id: z.string().describe("UUID of the openclaw_events row"),
+      action: z.enum(["answered", "declined", "escalated"]).describe("How you closed it"),
+      note: z.string().optional().describe("Optional free-text note stored in payload.handler_note"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      // Verify event belongs to this company before mutating
+      const { data: ev, error: evErr } = await supabase
+        .from("openclaw_events")
+        .select("id, company_id, payload, status")
+        .eq("id", params.event_id)
+        .maybeSingle();
+      if (evErr) throw evErr;
+      if (!ev) throw new Error(`Event not found: ${params.event_id}`);
+      if (ev.company_id !== companyId) throw new Error(`Event ${params.event_id} does not belong to active company`);
+
+      const nextPayload = { ...(ev.payload || {}) };
+      if (params.note) nextPayload.handler_note = params.note;
+
+      const { error: updErr } = await supabase
+        .from("openclaw_events")
+        .update({
+          status: params.action,
+          answered_at: new Date().toISOString(),
+          answered_by: `openclaw:${auth.keyPrefix}`,
+          payload: nextPayload,
+        })
+        .eq("id", params.event_id);
+      if (updErr) throw updErr;
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        event_id: params.event_id,
+        new_status: params.action,
+        company_id: companyId,
+      }, null, 2) }] };
+    },
+  });
+
   return server;
 }
 
