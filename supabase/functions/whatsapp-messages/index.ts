@@ -5791,6 +5791,28 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
             }
           } else if (fnName === 'notify_boss') {
             console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`, JSON.stringify(args));
+
+            // OpenClaw skill gating
+            try {
+              const { gateSkill } = await import('../_shared/openclaw-gate.ts');
+              const gate = await gateSkill(supabase, company.id, 'handoff', {
+                conversation_id: conversationId ?? undefined,
+                channel: 'handoff',
+                event_type: 'notify_boss',
+                payload: args,
+              });
+              if (gate.delegated) {
+                console.log('[TOOL-LOOP] notify_boss delegated to OpenClaw');
+                toolResults.push({
+                  tool_call_id: toolCall.id, role: "tool",
+                  content: JSON.stringify({ success: true, delegated_to_openclaw: true, event_id: gate.response?.event_id, message: 'OpenClaw owns handoffs for this company. Tell the customer the team will follow up shortly.' }),
+                });
+                continue;
+              }
+            } catch (e) {
+              console.error('[TOOL-LOOP] openclaw-gate failed for notify_boss:', e);
+            }
+
             try {
               const explicitHumanReq = /\b(human|agent|person|manager|owner|representative|speak\s+to\s+(?:a\s+)?(?:real\s+)?(?:person|human))\b/i.test(userMessage || '');
               // Purchase-intent handoffs ALWAYS go through (every lead matters)
