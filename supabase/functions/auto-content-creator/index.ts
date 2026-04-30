@@ -49,6 +49,26 @@ serve(async (req) => {
 
     const supabaseService = createClient(supabaseUrl, supabaseServiceKey);
 
+    // OpenClaw skill gating
+    try {
+      const { gateSkill } = await import('../_shared/openclaw-gate.ts');
+      const gate = await gateSkill(supabaseService, company_id, 'content', {
+        channel: 'content',
+        event_type: 'auto_content_request',
+        payload: {},
+      });
+      if (gate.delegated) {
+        return new Response(JSON.stringify({
+          success: true,
+          delegated_to_openclaw: true,
+          event_id: gate.response?.event_id,
+          message: 'Content creation is owned by OpenClaw for this company.',
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } catch (e) {
+      console.error('[auto-content-creator] openclaw-gate failed:', e);
+    }
+
     // Resolve userId for system/cron calls
     if (!userId) {
       const { data: ownerRow } = await supabaseService

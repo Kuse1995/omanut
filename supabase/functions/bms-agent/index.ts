@@ -262,6 +262,11 @@ async function callBMS(
   return { ...result, latency_ms, attempts };
 }
 
+function restParamsForLog(p: Record<string, unknown>): Record<string, unknown> {
+  const { company_id: _c, conversation_id: _cv, ...rest } = p || {};
+  return rest;
+}
+
 function respond(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -301,6 +306,28 @@ Deno.serve(async (req) => {
 
     const companyId: string | null = params.company_id ?? null;
     let connection: BmsConnection | null = null;
+
+    // OpenClaw skill gating: if this company has handed BMS to OpenClaw, bail.
+    if (companyId && !health_check) {
+      try {
+        const { gateSkill } = await import("../_shared/openclaw-gate.ts");
+        const supabase = createClient(
+          Deno.env.get("SUPABASE_URL")!,
+          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+        );
+        const gate = await gateSkill(supabase, companyId, "bms", {
+          conversation_id: conversation_id ?? undefined,
+          channel: "bms",
+          event_type: "skill_request",
+          payload: { action, params: restParamsForLog(params) },
+        });
+        if (gate.delegated) {
+          return respond({ success: true, ...gate.response, message: "Delegated to OpenClaw — internal AI did not call BMS." }, 200);
+        }
+      } catch (e) {
+        console.error("[BMS-AGENT] openclaw-gate threw, falling through:", e);
+      }
+    }
 
     if (companyId) {
       const supabase = createClient(

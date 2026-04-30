@@ -1471,6 +1471,28 @@ serve(async (req) => {
       );
     }
 
+    // OpenClaw skill gating — image gen falls under the "content" skill
+    try {
+      const { gateSkill } = await import('../_shared/openclaw-gate.ts');
+      const gate = await gateSkill(supabase, companyId, 'content', {
+        conversation_id: conversationId,
+        channel: 'content',
+        event_type: 'image_generation_request',
+        payload: { prompt, messageType, customerPhone },
+      });
+      if (gate.delegated) {
+        return new Response(JSON.stringify({
+          success: true,
+          delegated_to_openclaw: true,
+          event_id: gate.response?.event_id,
+          message: 'Image generation owned by OpenClaw for this company.',
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } catch (e) {
+      console.error('[IMAGE-GEN] openclaw-gate failed:', e);
+    }
+
+
     const { data: settings } = await supabase.from('image_generation_settings').select('enabled').eq('company_id', companyId).single();
     if (!settings?.enabled) {
       return new Response(
