@@ -910,8 +910,14 @@ async function handleMessengerDM(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  const systemPrompt = companyId
-    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'meta_dm')) {
+    console.log(`[OPENCLAW-PRIMARY] Messenger DM from ${senderId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'meta_dm', 'inbound_dm', {
+      platform: 'messenger', page_id: pageId, sender_id: senderId, text: messageText, ad_context: adContext,
+    });
+    return;
+  }
+
     : ai_system_prompt || '';
 
   // Load conversation history for context
