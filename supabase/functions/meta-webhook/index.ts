@@ -1071,7 +1071,14 @@ async function handleInstagramDM(
 
   const { company_id: companyId } = cred;
 
-  // Save the incoming message for visibility in the dashboard, but do NOT generate or send a reply
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'meta_dm')) {
+    console.log(`[OPENCLAW-PRIMARY] IG DM from ${senderId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'meta_dm', 'inbound_dm', {
+      platform: 'instagram', ig_user_id: igUserId, sender_id: senderId, text: messageText, ad_context: adContext,
+    });
+    return;
+  }
+
   if (companyId) {
     try {
       const phoneKey = `igdm:${senderId}`;
