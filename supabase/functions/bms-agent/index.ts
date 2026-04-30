@@ -262,6 +262,11 @@ async function callBMS(
   return { ...result, latency_ms, attempts };
 }
 
+function restParamsForLog(p: Record<string, unknown>): Record<string, unknown> {
+  const { company_id: _c, conversation_id: _cv, ...rest } = p || {};
+  return rest;
+}
+
 function respond(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
