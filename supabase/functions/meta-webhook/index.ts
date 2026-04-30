@@ -1003,6 +1003,8 @@ async function handleInstagramComment(
     return;
   }
 
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
     : ai_system_prompt || '';
 
   const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment');
