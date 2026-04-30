@@ -905,7 +905,11 @@ export type Database = {
           meta_phone_number_id: string | null
           metadata: Json | null
           name: string
+          openclaw_last_heartbeat: string | null
+          openclaw_mode: Database["public"]["Enums"]["openclaw_mode_t"]
+          openclaw_owns: Json
           openclaw_takeover_enabled: boolean
+          openclaw_webhook_url: string | null
           payment_instructions: string | null
           payment_number_airtel: string | null
           payment_number_mtn: string | null
@@ -946,7 +950,11 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name: string
+          openclaw_last_heartbeat?: string | null
+          openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
+          openclaw_owns?: Json
           openclaw_takeover_enabled?: boolean
+          openclaw_webhook_url?: string | null
           payment_instructions?: string | null
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
@@ -987,7 +995,11 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name?: string
+          openclaw_last_heartbeat?: string | null
+          openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
+          openclaw_owns?: Json
           openclaw_takeover_enabled?: boolean
+          openclaw_webhook_url?: string | null
           payment_instructions?: string | null
           payment_number_airtel?: string | null
           payment_number_mtn?: string | null
@@ -2914,6 +2926,65 @@ export type Database = {
           },
         ]
       }
+      openclaw_events: {
+        Row: {
+          answered_action: string | null
+          answered_at: string | null
+          answered_by: string | null
+          channel: string
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          dispatch_error: string | null
+          dispatch_status: string | null
+          event_type: string
+          id: string
+          payload: Json
+          skill: string | null
+          status: string
+        }
+        Insert: {
+          answered_action?: string | null
+          answered_at?: string | null
+          answered_by?: string | null
+          channel: string
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          dispatch_error?: string | null
+          dispatch_status?: string | null
+          event_type: string
+          id?: string
+          payload?: Json
+          skill?: string | null
+          status?: string
+        }
+        Update: {
+          answered_action?: string | null
+          answered_at?: string | null
+          answered_by?: string | null
+          channel?: string
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          dispatch_error?: string | null
+          dispatch_status?: string | null
+          event_type?: string
+          id?: string
+          payload?: Json
+          skill?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "openclaw_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_products: {
         Row: {
           category: string | null
@@ -3898,6 +3969,7 @@ export type Database = {
         | "events"
         | "facilities"
         | "other"
+      openclaw_mode_t: "off" | "assist" | "primary"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -4039,6 +4111,7 @@ export const Constants = {
         "facilities",
         "other",
       ],
+      openclaw_mode_t: ["off", "assist", "primary"],
     },
   },
 } as const
