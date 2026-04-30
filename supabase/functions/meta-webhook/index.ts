@@ -9,6 +9,42 @@ const corsHeaders = {
 
 const SAFE_CLIENT_FALLBACK_REPLY = "Thanks for your message — I can help with products, pricing, orders, and support. What would you like to know?";
 
+// ── OPENCLAW PRIMARY GUARD ──
+// Returns true if OpenClaw should handle this channel for this company. When true,
+// the caller MUST dispatch the event and return WITHOUT generating an AI reply.
+async function openclawPrimaryFor(
+  supabase: any,
+  companyId: string,
+  channel: 'meta_dm' | 'comments',
+): Promise<boolean> {
+  if (!companyId) return false;
+  const { data } = await supabase
+    .from('companies')
+    .select('openclaw_mode, openclaw_owns')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (!data) return false;
+  return data.openclaw_mode === 'primary' && data.openclaw_owns?.[channel] === true;
+}
+
+async function dispatchToOpenclaw(
+  supabase: any,
+  companyId: string,
+  channel: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+  conversationId?: string,
+): Promise<void> {
+  try {
+    await supabase.functions.invoke('openclaw-dispatch', {
+      body: { company_id: companyId, channel, event_type: eventType, conversation_id: conversationId, payload },
+    });
+  } catch (e) {
+    console.error('[meta-webhook][openclaw-dispatch] failed', e);
+  }
+}
+
+
 function availabilityLabel(stockValue: unknown): string {
   const stock = Number(stockValue);
   if (!Number.isFinite(stock)) return 'Availability: Check with us';
