@@ -6622,6 +6622,82 @@ serve(async (req) => {
       }
     }
 
+    // ── OPENCLAW PRIMARY GUARD ──
+    // If OpenClaw is in 'primary' mode for this company AND owns the WhatsApp channel,
+    // log the inbound, persist the customer message so OpenClaw can read it via MCP,
+    // dispatch the event to OpenClaw, and EXIT. Our internal AI does not run.
+    if ((company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
+      console.log(`[OPENCLAW-PRIMARY] Routing inbound to OpenClaw for company=${company.id}`);
+      try {
+        const customerPhone = From;
+        // Find or create the conversation so MCP / event payload can reference it
+        const { data: existingConv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('phone', customerPhone)
+          .eq('company_id', company.id)
+          .eq('status', 'active')
+          .maybeSingle();
+
+        let conversationId = existingConv?.id;
+        if (!conversationId) {
+          const { data: newConv } = await supabase
+            .from('conversations')
+            .insert({
+              phone: customerPhone,
+              company_id: company.id,
+              customer_name: ProfileName || 'Customer',
+              status: 'active',
+              human_takeover: true,         // lock our AI out
+              takeover_by: 'openclaw',
+              takeover_at: new Date().toISOString(),
+            })
+            .select('id')
+            .single();
+          conversationId = newConv?.id;
+        } else {
+          // Make sure our AI stays out
+          await supabase
+            .from('conversations')
+            .update({ human_takeover: true, takeover_by: 'openclaw', takeover_at: new Date().toISOString() })
+            .eq('id', conversationId)
+            .eq('human_takeover', false);
+        }
+
+        if (conversationId) {
+          await supabase.from('messages').insert({
+            conversation_id: conversationId,
+            role: 'user',
+            content: Body || '(media message)',
+            message_metadata: mediaFiles.length > 0 ? { media_urls: mediaFiles.map(m => m.url) } : null,
+          });
+        }
+
+        await supabase.functions.invoke('openclaw-dispatch', {
+          body: {
+            company_id: company.id,
+            channel: 'whatsapp',
+            event_type: 'inbound_message',
+            conversation_id: conversationId,
+            payload: {
+              from: From,
+              to: To,
+              body: Body,
+              profile_name: ProfileName,
+              media: mediaFiles,
+            },
+          },
+        });
+      } catch (e) {
+        console.error('[OPENCLAW-PRIMARY] dispatch error', e);
+      }
+      // Always 200 to Twilio so they don't retry. Our AI is intentionally silent.
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`, {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+      });
+    }
+
     // Detect WhatsApp Flow Response
     if (Body.includes('__flow_response__')) {
       console.log('[FLOW-RESPONSE] Detected flow submission');

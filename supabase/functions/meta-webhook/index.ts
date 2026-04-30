@@ -9,6 +9,42 @@ const corsHeaders = {
 
 const SAFE_CLIENT_FALLBACK_REPLY = "Thanks for your message — I can help with products, pricing, orders, and support. What would you like to know?";
 
+// ── OPENCLAW PRIMARY GUARD ──
+// Returns true if OpenClaw should handle this channel for this company. When true,
+// the caller MUST dispatch the event and return WITHOUT generating an AI reply.
+async function openclawPrimaryFor(
+  supabase: any,
+  companyId: string,
+  channel: 'meta_dm' | 'comments',
+): Promise<boolean> {
+  if (!companyId) return false;
+  const { data } = await supabase
+    .from('companies')
+    .select('openclaw_mode, openclaw_owns')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (!data) return false;
+  return data.openclaw_mode === 'primary' && data.openclaw_owns?.[channel] === true;
+}
+
+async function dispatchToOpenclaw(
+  supabase: any,
+  companyId: string,
+  channel: string,
+  eventType: string,
+  payload: Record<string, unknown>,
+  conversationId?: string,
+): Promise<void> {
+  try {
+    await supabase.functions.invoke('openclaw-dispatch', {
+      body: { company_id: companyId, channel, event_type: eventType, conversation_id: conversationId, payload },
+    });
+  } catch (e) {
+    console.error('[meta-webhook][openclaw-dispatch] failed', e);
+  }
+}
+
+
 function availabilityLabel(stockValue: unknown): string {
   const stock = Number(stockValue);
   if (!Number.isFinite(stock)) return 'Availability: Check with us';
@@ -794,9 +830,19 @@ async function handleComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
+    console.log(`[OPENCLAW-PRIMARY] FB comment ${commentId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
+      platform: 'facebook', page_id: pageId, comment_id: commentId,
+      text: messageText, commenter_name: commenterName, commenter_id: commenterFbId,
+    });
+    return;
+  }
+
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'comment')
     : ai_system_prompt || '';
+
 
   const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment');
   if (!aiReply) {
@@ -863,6 +909,14 @@ async function handleMessengerDM(
   if (!cred) return;
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
+
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'meta_dm')) {
+    console.log(`[OPENCLAW-PRIMARY] Messenger DM from ${senderId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'meta_dm', 'inbound_dm', {
+      platform: 'messenger', page_id: pageId, sender_id: senderId, text: messageText, ad_context: adContext,
+    });
+    return;
+  }
 
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
@@ -940,6 +994,15 @@ async function handleInstagramComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
+    console.log(`[OPENCLAW-PRIMARY] IG comment ${commentId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
+      platform: 'instagram', ig_user_id: igUserId, comment_id: commentId, media_id: mediaId,
+      text: messageText, commenter_name: commenterName, commenter_id: commenterIgId,
+    });
+    return;
+  }
+
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
     : ai_system_prompt || '';
@@ -1012,7 +1075,14 @@ async function handleInstagramDM(
 
   const { company_id: companyId } = cred;
 
-  // Save the incoming message for visibility in the dashboard, but do NOT generate or send a reply
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'meta_dm')) {
+    console.log(`[OPENCLAW-PRIMARY] IG DM from ${senderId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'meta_dm', 'inbound_dm', {
+      platform: 'instagram', ig_user_id: igUserId, sender_id: senderId, text: messageText, ad_context: adContext,
+    });
+    return;
+  }
+
   if (companyId) {
     try {
       const phoneKey = `igdm:${senderId}`;

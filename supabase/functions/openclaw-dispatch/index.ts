@@ -1,0 +1,126 @@
+// OpenClaw dispatcher: logs an event and forwards it to the company's OpenClaw webhook.
+// Called from inbound handlers (whatsapp-messages, meta-webhook) and from skill-gating logic.
+import { createClient } from 'npm:@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface DispatchBody {
+  company_id: string;
+  channel: string;          // whatsapp | meta_dm | comments | content | bms | handoff | system
+  event_type: string;       // inbound_message | skill_request | takeover_release | ...
+  conversation_id?: string;
+  skill?: string;
+  payload?: Record<string, unknown>;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  );
+
+  let body: DispatchBody;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'invalid_json' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!body.company_id || !body.channel || !body.event_type) {
+    return new Response(JSON.stringify({ error: 'missing_fields' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Look up company config
+  const { data: company, error: cErr } = await supabase
+    .from('companies')
+    .select('id, name, openclaw_mode, openclaw_owns, openclaw_webhook_url')
+    .eq('id', body.company_id)
+    .single();
+
+  if (cErr || !company) {
+    return new Response(JSON.stringify({ error: 'company_not_found' }), {
+      status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Insert event row
+  const { data: event, error: eErr } = await supabase
+    .from('openclaw_events')
+    .insert({
+      company_id: body.company_id,
+      conversation_id: body.conversation_id ?? null,
+      channel: body.channel,
+      event_type: body.event_type,
+      skill: body.skill ?? null,
+      payload: body.payload ?? {},
+      status: 'pending',
+    })
+    .select('id')
+    .single();
+
+  if (eErr) {
+    console.error('[openclaw-dispatch] insert event failed', eErr);
+    return new Response(JSON.stringify({ error: 'insert_failed', details: eErr.message }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Bump heartbeat (we treat dispatch attempt as the platform-side liveness signal — actual
+  // heartbeat from OpenClaw is bumped when their MCP tools fire).
+  // Forward to OpenClaw webhook if configured
+  const webhookUrl = company.openclaw_webhook_url;
+  let dispatchStatus = 'no_webhook';
+  let dispatchError: string | null = null;
+
+  if (webhookUrl) {
+    try {
+      const secret = Deno.env.get('OPENCLAW_WEBHOOK_SECRET') ?? '';
+      const resp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(secret ? { 'X-Openclaw-Signature': secret } : {}),
+        },
+        body: JSON.stringify({
+          event_id: event.id,
+          company_id: company.id,
+          company_name: company.name,
+          channel: body.channel,
+          event_type: body.event_type,
+          skill: body.skill,
+          conversation_id: body.conversation_id,
+          payload: body.payload ?? {},
+          dispatched_at: new Date().toISOString(),
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      dispatchStatus = resp.ok ? 'delivered' : `http_${resp.status}`;
+      if (!resp.ok) dispatchError = (await resp.text()).slice(0, 500);
+    } catch (e) {
+      dispatchStatus = 'error';
+      dispatchError = String(e).slice(0, 500);
+    }
+  }
+
+  await supabase
+    .from('openclaw_events')
+    .update({ dispatch_status: dispatchStatus, dispatch_error: dispatchError })
+    .eq('id', event.id);
+
+  return new Response(JSON.stringify({
+    event_id: event.id,
+    dispatch_status: dispatchStatus,
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    status: 200,
+  });
+});

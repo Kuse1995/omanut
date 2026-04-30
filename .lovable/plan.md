@@ -1,29 +1,86 @@
-# Surface claim codes inside the admin workspace
 
-## What's happening
+# OpenClaw-First Platform
 
-You're using the new admin workspace at `/admin/dashboard` — it has the icon sidebar + Cmd-K company search and **no "Companies list" view**. The Claim Codes panel I added earlier lives on the legacy `/admin/companies` page, which isn't linked anywhere in the new sidebar. That's why you can't see it.
+## Why
 
-Two clean ways to fix it. Pick one:
+Today our internal AI replies first to every customer. OpenClaw can only intervene *after* by flipping `human_takeover`. That AI cost us ANZ. We invert the flow: **OpenClaw is the brain.** Our AI becomes a cold standby that runs only if OpenClaw is explicitly off or its connection is dead.
 
-### Option A — Add claim code to each company in Cmd-K results (fastest, most contextual)
-When you search a company in the command palette, show its claim code right there with a one-click **Copy** button next to it (only if not yet claimed; show a green ✓ "Claimed" otherwise).
+OpenClaw never times out per-message. It runs as long as it's connected.
 
-- Edit `src/components/admin/CompanyCommandPalette.tsx` to fetch claim codes alongside companies (uses existing `admin_list_claim_codes` RPC) and render the code + copy button on each row.
-- No new pages, no new sidebar item. Codes appear exactly where you already look up companies.
+## Target behaviour
 
-### Option B — Add a dedicated "Claim Codes" entry in the admin sidebar
-Add a new icon (KeyRound) to `AdminIconSidebar` that opens a panel showing all companies + codes, same content as `ClaimCodesPanel.tsx`.
+```text
+Inbound (WhatsApp / Meta DM / Meta comment / boss request)
+        │
+        ├─ openclaw_mode = primary AND openclaw_owns[channel] = true ?
+        │       │
+        │       ├─ Yes → log event to openclaw_events, POST to OpenClaw webhook,
+        │       │        update heartbeat. EXIT. Our AI does not run.
+        │       │
+        │       └─ No  → existing internal AI flow (unchanged)
+```
 
-- Edit `src/components/admin/AdminIconSidebar.tsx` (add nav item)
-- Edit `src/components/admin/AdminContentTabs.tsx` (add `claim-codes` case → render `ClaimCodesPanel`)
-- Default expanded so codes are visible immediately.
+Outbound skills (BMS, content, image gen, handoff escalation): if OpenClaw owns the skill, our AI's tool returns `delegated_to_openclaw` and an event is logged. Our AI literally cannot use the skill.
 
-### Option C — Both
-Show codes in Cmd-K results AND add the dedicated sidebar entry.
+## Health check (heartbeat-only, no per-message timeouts)
 
----
+Cron `openclaw-health-check` every 5 min. For each `primary`-mode company, auto-flip to `assist` **only if BOTH**:
+- `openclaw_last_heartbeat` is older than 30 min, AND
+- There are `pending` events in `openclaw_events` from the last 30 min.
 
-**Recommendation: Option A.** You already use Cmd-K to find companies, so the claim code shows up exactly when you need it (right after creating a company you want to hand off). Option B is fine if you prefer a checklist-style view of all unclaimed codes.
+If OpenClaw is quiet but no events are pending, do nothing — silence just means the customer side is quiet. On flip we WhatsApp the boss: *"OpenClaw appears disconnected — internal AI resumed. Reconnect to take back over."*
 
-Tell me A, B, or C and I'll ship it.
+## What we build
+
+### 1. Schema additions (`companies`)
+- `openclaw_mode` enum: `off | assist | primary` (default `off`; legacy `openclaw_takeover_enabled=true` → `assist`)
+- `openclaw_owns` jsonb: `{ whatsapp, meta_dm, comments, content, bms, handoff }` booleans
+- `openclaw_last_heartbeat` timestamptz
+- `openclaw_webhook_url` text (per-company — OpenClaw gives us a URL per tenant)
+
+### 2. New table `openclaw_events`
+`id, company_id, conversation_id?, channel, event_type, payload jsonb, status (pending|answered|declined|escalated), created_at, answered_at, answered_by`. RLS: company members can read; service role writes.
+
+### 3. New edge function `openclaw-dispatch`
+Called from `whatsapp-messages` and `meta-webhook` at the very top:
+```text
+if (company.openclaw_mode==='primary' && company.openclaw_owns[channel]) {
+  await openclawDispatch(event);   // insert event row + POST webhook + bump heartbeat
+  return;                          // our AI never runs
+}
+```
+
+### 4. MCP additions for OpenClaw
+- Every existing MCP tool call updates `openclaw_last_heartbeat = now()`.
+- New MCP tool `mark_event_handled(event_id, action)` so OpenClaw closes events.
+
+### 5. Outbound skill gating
+At the entry of each tool used by our AI (`bms_check_stock`, `create_scheduled_post`, image gen, `notify_boss`):
+```text
+if (openclaw_owns[skill]) {
+  insert openclaw_events row;
+  return { status: 'delegated_to_openclaw' };
+}
+```
+
+### 6. Cron `openclaw-health-check` (5 min)
+Logic exactly as in "Health check" section above. Uses existing `pg_cron`/`pg_net`.
+
+### 7. Admin UI (rebuild `OpenClawAgentCard`)
+- Mode selector: **Off / Assist / Primary**
+- Per-skill checkboxes: WhatsApp, Meta DMs, Comments, BMS, Content, Handoffs
+- Webhook URL field (per company)
+- Heartbeat indicator: green <5min, amber 5–30min, red >30min + reconnect note
+- Activity log: last 100 events
+- Kill switch: instant flip to `assist`
+
+### 8. ANZ rollout
+After build + sign-off: ANZ → `openclaw_mode='primary'`, all six skills owned. Internal AI goes silent on ANZ.
+
+## Out of scope
+- Building OpenClaw itself (their endpoint must accept our POST).
+- Voice flow (`whatsapp-voice`) — keep on internal AI.
+
+## Open question (only one left)
+
+We need OpenClaw's webhook URL format and auth scheme so we know what to POST. You mentioned checking their docs — once we have one sample URL + the auth header convention (bearer token? signed HMAC?), we wire it up. Want me to start building everything *except* the dispatch HTTP call, so it's ready the moment you paste the URL + secret?
