@@ -4325,7 +4325,25 @@ Trust ONLY the information provided in this system prompt.
           } else if (toolCall.function.name === 'notify_boss') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
-            
+
+            // OpenClaw skill gating — if handoff is owned by OpenClaw, log + bail
+            try {
+              const { gateSkill } = await import('../_shared/openclaw-gate.ts');
+              const gate = await gateSkill(supabase, company.id, 'handoff', {
+                conversation_id: conversationId ?? undefined,
+                channel: 'handoff',
+                event_type: 'notify_boss',
+                payload: args,
+              });
+              if (gate.delegated) {
+                console.log('[BACKGROUND] notify_boss delegated to OpenClaw — internal escalation skipped');
+                anyToolExecuted = true;
+                continue;
+              }
+            } catch (e) {
+              console.error('[BACKGROUND] openclaw-gate failed for notify_boss:', e);
+            }
+
             try {
               // Map notification types to message formats
               let emoji = '📢';
