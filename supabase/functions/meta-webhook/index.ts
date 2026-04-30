@@ -830,9 +830,19 @@ async function handleComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
+    console.log(`[OPENCLAW-PRIMARY] FB comment ${commentId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
+      platform: 'facebook', page_id: pageId, comment_id: commentId,
+      text: messageText, commenter_name: commenterName, commenter_id: commenterFbId,
+    });
+    return;
+  }
+
   const systemPrompt = companyId
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'comment')
     : ai_system_prompt || '';
+
 
   const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment');
   if (!aiReply) {
