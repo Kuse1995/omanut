@@ -176,6 +176,23 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   (server as any).tool = (name: string, def: any) => {
     const userHandler = def.handler;
     def.handler = async (params: any, ctx: any) => {
+      // Heartbeat bump: every MCP tool call proves OpenClaw is alive.
+      // Best-effort, never blocks the tool call.
+      (async () => {
+        try {
+          let companyId: string | null = params?.company_id ?? null;
+          if (!companyId) {
+            if (auth.scope === "company") companyId = auth.defaultCompanyId;
+            else companyId = await getActiveCompany(supabase, auth.keyId, sessionId);
+          }
+          if (companyId) {
+            await supabase
+              .from("companies")
+              .update({ openclaw_last_heartbeat: new Date().toISOString() })
+              .eq("id", companyId);
+          }
+        } catch (_e) { /* swallow */ }
+      })();
       try {
         return await userHandler(params, ctx);
       } catch (err: any) {
