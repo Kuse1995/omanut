@@ -992,8 +992,15 @@ async function handleInstagramComment(
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
-  const systemPrompt = companyId
-    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
+  if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
+    console.log(`[OPENCLAW-PRIMARY] IG comment ${commentId} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
+      platform: 'instagram', ig_user_id: igUserId, comment_id: commentId, media_id: mediaId,
+      text: messageText, commenter_name: commenterName, commenter_id: commenterIgId,
+    });
+    return;
+  }
+
     : ai_system_prompt || '';
 
   const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment');
