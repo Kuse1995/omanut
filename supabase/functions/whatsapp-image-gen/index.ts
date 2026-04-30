@@ -1492,6 +1492,8 @@ serve(async (req) => {
       console.error('[IMAGE-GEN] openclaw-gate failed:', e);
     }
 
+
+    const { data: settings } = await supabase.from('image_generation_settings').select('enabled').eq('company_id', companyId).single();
     if (!settings?.enabled) {
       return new Response(
         JSON.stringify({ success: false, message: "Image generation is not enabled for this business." }),
