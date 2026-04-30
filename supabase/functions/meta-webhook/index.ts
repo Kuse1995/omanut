@@ -918,6 +918,8 @@ async function handleMessengerDM(
     return;
   }
 
+  const systemPrompt = companyId
+    ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'messenger')
     : ai_system_prompt || '';
 
   // Load conversation history for context
