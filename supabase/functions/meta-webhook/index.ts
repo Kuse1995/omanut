@@ -15,7 +15,7 @@ const SAFE_CLIENT_FALLBACK_REPLY = "Thanks for your message — I can help with 
 async function openclawPrimaryFor(
   supabase: any,
   companyId: string,
-  channel: 'meta_dm' | 'comments',
+  channel: 'meta_dm' | 'comments' | 'whatsapp',
 ): Promise<boolean> {
   if (!companyId) return false;
   const { data } = await supabase
