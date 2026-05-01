@@ -1,86 +1,82 @@
+## Goal
 
-# OpenClaw-First Platform
+Stand up the unified Meta webhook handler your spec describes, but as a **Supabase edge function** (not Express on Railway) and **layered on top of our existing `meta-webhook`** instead of replacing it. OpenClaw takeover stays driven by the `openclaw_mode` / `openclaw_owns` flags we already wired.
 
-## Why
+## Why no new function (and no Express)
 
-Today our internal AI replies first to every customer. OpenClaw can only intervene *after* by flipping `human_takeover`. That AI cost us ANZ. We invert the flow: **OpenClaw is the brain.** Our AI becomes a cold standby that runs only if OpenClaw is explicitly off or its connection is dead.
+Our `supabase/functions/meta-webhook/index.ts` already:
+- Handles `GET /webhook` verification with `META_VERIFY_TOKEN`
+- Verifies `X-Hub-Signature-256` using `META_APP_SECRET`
+- Parses all five payload shapes in your spec: WhatsApp messages, FB Messenger DMs, Instagram DMs, FB feed comments, IG comments
+- Resolves `company_id` from `phone_number_id` / `page_id` / `ig_user_id` via `meta_credentials`
+- Returns 200 immediately and processes async
 
-OpenClaw never times out per-message. It runs as long as it's connected.
+Rebuilding this as a separate Express service on Railway would duplicate ~1,200 lines of working signature/verification/routing code and split our Meta surface across two hosts. The clean move is to add a single fork point inside the existing handler.
 
-## Target behaviour
+## What changes
+
+### 1. New helper: `forwardToOpenclaw(skill, normalizedPayload)`
+
+Added to `supabase/functions/_shared/openclaw-gate.ts`. Reuses the existing `isOwnedByOpenclaw()` check, then POSTs the normalized event directly to the company's MCP URL (defaulting to the project's `mcp-server` function). Payloads match your spec exactly:
 
 ```text
-Inbound (WhatsApp / Meta DM / Meta comment / boss request)
-        │
-        ├─ openclaw_mode = primary AND openclaw_owns[channel] = true ?
-        │       │
-        │       ├─ Yes → log event to openclaw_events, POST to OpenClaw webhook,
-        │       │        update heartbeat. EXIT. Our AI does not run.
-        │       │
-        │       └─ No  → existing internal AI flow (unchanged)
+whatsapp         → { company_id, channel:'whatsapp', from, message, message_id, timestamp }
+facebook         → { company_id, channel:'facebook', from, page_id, message, message_id, timestamp }
+instagram        → { company_id, channel:'instagram', from, instagram_id, message, message_id, timestamp }
+facebook_comment → { company_id, channel:'facebook_comment', from, commenter_name, page_id,
+                     comment_id, post_id, message, parent_id, timestamp }
+instagram_comment→ { company_id, channel:'instagram_comment', from, username, instagram_id,
+                     comment_id, media_id, message, timestamp }
 ```
 
-Outbound skills (BMS, content, image gen, handoff escalation): if OpenClaw owns the skill, our AI's tool returns `delegated_to_openclaw` and an event is logged. Our AI literally cannot use the skill.
+Signed with `OPENCLAW_WEBHOOK_SECRET` via the existing `X-Openclaw-Signature` header so the receiver can verify.
 
-## Health check (heartbeat-only, no per-message timeouts)
+### 2. Fork point inside `meta-webhook`
 
-Cron `openclaw-health-check` every 5 min. For each `primary`-mode company, auto-flip to `assist` **only if BOTH**:
-- `openclaw_last_heartbeat` is older than 30 min, AND
-- There are `pending` events in `openclaw_events` from the last 30 min.
+At each of the five existing per-event branches, before invoking our internal AI handler (`handleComment`, `handleInstagramComment`, `handleMessenger`, `handleWhatsApp`, etc.), insert:
 
-If OpenClaw is quiet but no events are pending, do nothing — silence just means the customer side is quiet. On flip we WhatsApp the boss: *"OpenClaw appears disconnected — internal AI resumed. Reconnect to take back over."*
-
-## What we build
-
-### 1. Schema additions (`companies`)
-- `openclaw_mode` enum: `off | assist | primary` (default `off`; legacy `openclaw_takeover_enabled=true` → `assist`)
-- `openclaw_owns` jsonb: `{ whatsapp, meta_dm, comments, content, bms, handoff }` booleans
-- `openclaw_last_heartbeat` timestamptz
-- `openclaw_webhook_url` text (per-company — OpenClaw gives us a URL per tenant)
-
-### 2. New table `openclaw_events`
-`id, company_id, conversation_id?, channel, event_type, payload jsonb, status (pending|answered|declined|escalated), created_at, answered_at, answered_by`. RLS: company members can read; service role writes.
-
-### 3. New edge function `openclaw-dispatch`
-Called from `whatsapp-messages` and `meta-webhook` at the very top:
 ```text
-if (company.openclaw_mode==='primary' && company.openclaw_owns[channel]) {
-  await openclawDispatch(event);   // insert event row + POST webhook + bump heartbeat
-  return;                          // our AI never runs
+if (await isOwnedByOpenclaw(supabase, companyId, skill)) {
+  await forwardToOpenclaw(skill, normalizedPayload);
+  continue;            // OpenClaw owns the reply, do NOT run internal AI
+} else {
+  // existing behavior unchanged
 }
 ```
 
-### 4. MCP additions for OpenClaw
-- Every existing MCP tool call updates `openclaw_last_heartbeat = now()`.
-- New MCP tool `mark_event_handled(event_id, action)` so OpenClaw closes events.
+Skill mapping:
+- WhatsApp messages → `'whatsapp'`
+- FB Messenger DMs → `'meta_dm'`
+- IG DMs → `'meta_dm'`
+- FB feed comments → `'comments'`
+- IG comments → `'comments'`
 
-### 5. Outbound skill gating
-At the entry of each tool used by our AI (`bms_check_stock`, `create_scheduled_post`, image gen, `notify_boss`):
+### 3. No DB changes, no new function, no new secrets
+
+- Verification token, app secret, OpenClaw secret all already exist (`META_VERIFY_TOKEN`, `META_APP_SECRET`, `OPENCLAW_WEBHOOK_SECRET` — add this one if missing).
+- `companies.openclaw_mode` / `openclaw_owns` already control routing.
+- The webhook URL Meta points at stays the same: `https://dzheddvoiauevcayifev.supabase.co/functions/v1/meta-webhook`.
+
+## Flow after the change
+
 ```text
-if (openclaw_owns[skill]) {
-  insert openclaw_events row;
-  return { status: 'delegated_to_openclaw' };
-}
+Meta ──POST──► meta-webhook (verify sig, parse, resolve company_id)
+                  │
+                  ├─ openclaw_mode=primary & owns(skill)? ──► forwardToOpenclaw ──► MCP server
+                  │                                                                   │
+                  │                                                                   └─ OpenClaw replies via send_* MCP tools
+                  │
+                  └─ otherwise ──► existing internal AI flow (whatsapp-messages / meta DM handler / comment handler)
 ```
 
-### 6. Cron `openclaw-health-check` (5 min)
-Logic exactly as in "Health check" section above. Uses existing `pg_cron`/`pg_net`.
+## What you do after I ship
 
-### 7. Admin UI (rebuild `OpenClawAgentCard`)
-- Mode selector: **Off / Assist / Primary**
-- Per-skill checkboxes: WhatsApp, Meta DMs, Comments, BMS, Content, Handoffs
-- Webhook URL field (per company)
-- Heartbeat indicator: green <5min, amber 5–30min, red >30min + reconnect note
-- Activity log: last 100 events
-- Kill switch: instant flip to `assist`
-
-### 8. ANZ rollout
-After build + sign-off: ANZ → `openclaw_mode='primary'`, all six skills owned. Internal AI goes silent on ANZ.
+1. Confirm `OPENCLAW_WEBHOOK_SECRET` is set (I'll prompt if not).
+2. Per company, in the admin OpenClaw card: set `openclaw_mode='primary'` and tick the skills OpenClaw should own.
+3. That's it — Meta webhook URL is unchanged.
 
 ## Out of scope
-- Building OpenClaw itself (their endpoint must accept our POST).
-- Voice flow (`whatsapp-voice`) — keep on internal AI.
 
-## Open question (only one left)
-
-We need OpenClaw's webhook URL format and auth scheme so we know what to POST. You mentioned checking their docs — once we have one sample URL + the auth header convention (bearer token? signed HMAC?), we wire it up. Want me to start building everything *except* the dispatch HTTP call, so it's ready the moment you paste the URL + secret?
+- No Express service, no Railway deploy, no new public hostname.
+- No changes to reply tools — replies still go through `send_whatsapp_message` / `send-meta-dm` / comment-reply MCP tools as before.
+- No replacement of the existing internal AI path; it stays as the failover when `openclaw_mode != primary`.
