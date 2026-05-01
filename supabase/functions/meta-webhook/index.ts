@@ -15,7 +15,7 @@ const SAFE_CLIENT_FALLBACK_REPLY = "Thanks for your message — I can help with 
 async function openclawPrimaryFor(
   supabase: any,
   companyId: string,
-  channel: 'meta_dm' | 'comments',
+  channel: 'meta_dm' | 'comments' | 'whatsapp',
 ): Promise<boolean> {
   if (!companyId) return false;
   const { data } = await supabase
@@ -425,6 +425,23 @@ async function handleWhatsAppCloudMessage(
     default:
       console.log('[wa-cloud] unhandled msg.type:', msg.type);
       return;
+  }
+
+  // ── OpenClaw primary check (WhatsApp Cloud path) ──
+  // If OpenClaw owns the 'whatsapp' skill for this company, bypass the internal AI bridge
+  // and dispatch the inbound directly to OpenClaw's webhook so it can reply via MCP tools.
+  if (cred.company_id && await openclawPrimaryFor(supabase, cred.company_id, 'whatsapp')) {
+    console.log(`[OPENCLAW-PRIMARY][wa-cloud] inbound from ${fromE164} -> OpenClaw`);
+    await dispatchToOpenclaw(supabase, cred.company_id, 'whatsapp', 'inbound_message', {
+      platform: 'whatsapp_cloud',
+      from: fromE164,
+      message: body,
+      message_id: msg.id,
+      timestamp: msg.timestamp ? Number(msg.timestamp) : Math.floor(Date.now() / 1000),
+      profile_name: profileName,
+      media,
+    });
+    return;
   }
 
   // Use whatsapp:+E164 prefix to stay consistent with Twilio's existing convention,
