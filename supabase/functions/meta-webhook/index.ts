@@ -430,7 +430,7 @@ async function handleWhatsAppCloudMessage(
   // ── OpenClaw primary check (WhatsApp Cloud path) ──
   // If OpenClaw owns the 'whatsapp' skill for this company, bypass the internal AI bridge
   // and dispatch the inbound directly to OpenClaw's webhook so it can reply via MCP tools.
-  if (cred.company_id && await openclawPrimaryFor(supabase, cred.company_id, 'whatsapp' as any)) {
+  if (cred.company_id && await openclawPrimaryFor(supabase, cred.company_id, 'whatsapp')) {
     console.log(`[OPENCLAW-PRIMARY][wa-cloud] inbound from ${fromE164} -> OpenClaw`);
     await dispatchToOpenclaw(supabase, cred.company_id, 'whatsapp', 'inbound_message', {
       platform: 'whatsapp_cloud',
