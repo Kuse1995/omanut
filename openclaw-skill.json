@@ -29,6 +29,10 @@
       "list_my_companies": "List every company you can train (admin keys) or the single pinned company (company keys). Returns name, id, business_type, current active_company_id.",
       "set_active_company": "Set the active company for the rest of this session. Required at the start of every admin-key session before calling other tools."
     },
+    "webhook_management": {
+      "register_webhook": "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed HMAC-SHA256 ping to verify reachability before persisting. Args: { webhook_url (https), mode?: off|assist|primary, owns?: { whatsapp, meta_dm, comments, bms, content, handoff } }. Call on first setup and after every tunnel rotation.",
+      "get_webhook_status": "Return current webhook URL, mode, ownership flags, last heartbeat, and the last 5 dispatch events for the active company. Use to self-diagnose."
+    },
     "conversations": {
       "list_conversations": "List recent customer conversations with filters. Accepts optional company_id.",
       "get_conversation": "Get full conversation with all messages for analysis.",
