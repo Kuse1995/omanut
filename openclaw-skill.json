@@ -13,12 +13,14 @@
     ]
   },
   "session_workflow": {
-    "description": "ALWAYS start a session with these two tools when using an admin-scoped key:",
+    "description": "ALWAYS start a session with these tools when using an admin-scoped key:",
     "steps": [
       "1. Call list_my_companies to see every company you can train.",
       "2. Call set_active_company with the chosen company_id. All later tool calls (without an explicit company_id) target this company.",
-      "3. To switch mid-session: call set_active_company again with a different company_id.",
-      "4. Optional: pass company_id directly on any tool call to override the active company for that single call.",
+      "3. First-time setup: call register_webhook with your public tunnel URL (e.g. https://abc.trycloudflare.com/webhook). Re-call it any time your tunnel URL rotates. The server sends a signed ping; the URL is only saved if your endpoint returns 2xx.",
+      "4. Optional: call get_webhook_status to confirm wiring and view recent dispatch events.",
+      "5. To switch mid-session: call set_active_company again with a different company_id.",
+      "6. Optional: pass company_id directly on any tool call to override the active company for that single call.",
       "Company-scoped keys (legacy): the company_id arg is ignored; the key is pinned to one company."
     ]
   },
@@ -26,6 +28,10 @@
     "session_control": {
       "list_my_companies": "List every company you can train (admin keys) or the single pinned company (company keys). Returns name, id, business_type, current active_company_id.",
       "set_active_company": "Set the active company for the rest of this session. Required at the start of every admin-key session before calling other tools."
+    },
+    "webhook_management": {
+      "register_webhook": "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed HMAC-SHA256 ping to verify reachability before persisting. Args: { webhook_url (https), mode?: off|assist|primary, owns?: { whatsapp, meta_dm, comments, bms, content, handoff } }. Call on first setup and after every tunnel rotation.",
+      "get_webhook_status": "Return current webhook URL, mode, ownership flags, last heartbeat, and the last 5 dispatch events for the active company. Use to self-diagnose."
     },
     "conversations": {
       "list_conversations": "List recent customer conversations with filters. Accepts optional company_id.",

@@ -317,6 +317,150 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // Helper for tool schemas: optional per-call company_id override
   const companyOverride = z.object({ company_id: z.string().optional().describe("Optional: target a specific company (admin keys only). If omitted, uses set_active_company or the key's default.") });
 
+  // ── register_webhook ──
+  // Lets a local OpenClaw instance self-register (and rotate) its webhook URL
+  // without an Omanut admin touching the DB. Sends a signed ping to verify
+  // reachability before persisting.
+  server.tool("register_webhook", {
+    description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Call this on first setup and any time your tunnel URL changes.",
+    inputSchema: z.object({
+      webhook_url: z.string().url().describe("Public HTTPS URL OpenClaw exposes (e.g. https://abc.trycloudflare.com/webhook)."),
+      mode: z.enum(["off", "assist", "primary"]).optional().describe("Routing mode. Defaults to current value, or 'assist' on first call."),
+      owns: z.object({
+        whatsapp: z.boolean().optional(),
+        meta_dm: z.boolean().optional(),
+        comments: z.boolean().optional(),
+        bms: z.boolean().optional(),
+        content: z.boolean().optional(),
+        handoff: z.boolean().optional(),
+      }).optional().describe("Per-skill ownership flags. Merged with existing values; omitted skills are left unchanged."),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const webhookUrl: string = params.webhook_url;
+      if (!/^https:\/\//i.test(webhookUrl)) {
+        throw new Error("webhook_url must be https://");
+      }
+
+      // Fetch current config for sensible defaults on merge
+      const { data: current, error: cErr } = await supabase
+        .from("companies")
+        .select("openclaw_mode, openclaw_owns")
+        .eq("id", companyId)
+        .single();
+      if (cErr) throw cErr;
+
+      const nextMode = params.mode ?? current?.openclaw_mode ?? "assist";
+      const nextOwns = { ...(current?.openclaw_owns ?? {}), ...(params.owns ?? {}) };
+
+      // Send signed ping
+      const secret = Deno.env.get("OPENCLAW_WEBHOOK_SECRET") ?? "";
+      const bodyString = JSON.stringify({
+        event_id: "ping",
+        company_id: companyId,
+        channel: "system",
+        event_type: "ping",
+        payload: { source: "register_webhook" },
+        dispatched_at: new Date().toISOString(),
+      });
+      let sigHeader: string | null = null;
+      if (secret) {
+        const enc = new TextEncoder();
+        const key = await crypto.subtle.importKey(
+          "raw",
+          enc.encode(secret),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        );
+        const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(bodyString));
+        const hex = Array.from(new Uint8Array(sigBuf))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+        sigHeader = `sha256=${hex}`;
+      }
+
+      let pingStatus = "unknown";
+      let pingError: string | null = null;
+      try {
+        const resp = await fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(sigHeader ? { "X-Openclaw-Signature": sigHeader } : {}),
+          },
+          body: bodyString,
+          signal: AbortSignal.timeout(5_000),
+        });
+        pingStatus = resp.ok ? "delivered" : `http_${resp.status}`;
+        if (!resp.ok) pingError = (await resp.text()).slice(0, 300);
+      } catch (e) {
+        pingStatus = "error";
+        pingError = String(e).slice(0, 300);
+      }
+
+      if (pingStatus !== "delivered") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false,
+          error: "ping_failed",
+          ping_status: pingStatus,
+          ping_error: pingError,
+          hint: "Webhook URL was NOT saved. Make sure your tunnel is up and /webhook returns 2xx for signed POSTs.",
+        }, null, 2) }] };
+      }
+
+      const { error: uErr } = await supabase
+        .from("companies")
+        .update({
+          openclaw_webhook_url: webhookUrl,
+          openclaw_mode: nextMode,
+          openclaw_owns: nextOwns,
+          openclaw_last_heartbeat: new Date().toISOString(),
+        })
+        .eq("id", companyId);
+      if (uErr) throw uErr;
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        company_id: companyId,
+        webhook_url: webhookUrl,
+        mode: nextMode,
+        owns: nextOwns,
+        ping_status: pingStatus,
+        next_step: "Send a test event from the Omanut side or call get_webhook_status to verify dispatch.",
+      }, null, 2) }] };
+    },
+  });
+
+  // ── get_webhook_status ──
+  server.tool("get_webhook_status", {
+    description: "Read current OpenClaw webhook config for the active company plus the last 5 dispatch events. Use this to self-diagnose whether you're wired up correctly.",
+    inputSchema: z.object({}).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { data: company, error: cErr } = await supabase
+        .from("companies")
+        .select("openclaw_webhook_url, openclaw_mode, openclaw_owns, openclaw_last_heartbeat")
+        .eq("id", companyId)
+        .single();
+      if (cErr) throw cErr;
+      const { data: events } = await supabase
+        .from("openclaw_events")
+        .select("id, channel, event_type, skill, status, dispatch_status, dispatch_error, created_at")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        company_id: companyId,
+        webhook_url: company?.openclaw_webhook_url ?? null,
+        mode: company?.openclaw_mode ?? null,
+        owns: company?.openclaw_owns ?? {},
+        last_heartbeat: company?.openclaw_last_heartbeat ?? null,
+        recent_events: events ?? [],
+      }, null, 2) }] };
+    },
+  });
+
   // ── list_conversations ──
   server.tool("list_conversations", {
     description: "List recent conversations with customers. Filter by status (active/ended).",
