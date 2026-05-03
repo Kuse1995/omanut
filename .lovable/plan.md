@@ -1,39 +1,26 @@
 ## Goal
 
-Send OpenClaw their exact test payload, signed with our `OPENCLAW_WEBHOOK_SECRET`, so they can compare hex-to-hex and confirm our signing matches.
+Confirm OpenClaw's verifier now accepts our signed payload, then wire the new webhook URL to a pilot company so real events flow.
 
-## Why a new helper function
+## Steps
 
-`openclaw-dispatch` wraps the body (adds `event_id`, `company_name`, `dispatched_at`), so we can't push their exact bytes through it. And we can't sign locally because `OPENCLAW_WEBHOOK_SECRET` only lives in the edge runtime.
+1. **Smoke test** — call `openclaw-debug-sign` with:
+   - `target_url`: `https://send-administration-andreas-dogs.trycloudflare.com/webhook`
+   - `raw_body`: the same 147-byte test payload from last round
+   - Expect `http_status: 200`. Paste result back to OpenClaw.
 
-## Build
+2. **Wire it up** (only after 200) — update `companies.openclaw_webhook_url` for the pilot company. Need to know which company to point at this URL. Options:
+   - ANZ (production retail tenant)
+   - A dedicated test company
+   - All companies currently in `openclaw_mode='primary'`
 
-New edge function: `supabase/functions/openclaw-debug-sign/index.ts`
+3. **End-to-end check** — once URL is wired, send one real WhatsApp/Meta event and verify `openclaw_events.dispatch_status` shows `delivered` (not `http_4xx`).
 
-- Input: `{ target_url: string, raw_body: string }` (raw_body is the exact JSON string to sign — not re-parsed).
-- HMAC-SHA256 the UTF-8 bytes of `raw_body` with `OPENCLAW_WEBHOOK_SECRET`, hex-encoded.
-- POST to `target_url`:
-  - `Content-Type: application/json`
-  - `X-Openclaw-Signature: sha256=<hex>`
-  - `body: raw_body` (verbatim, no JSON.stringify round-trip).
-- Return `{ signature, http_status, response_text }`.
-- Restrict to admin caller (verify JWT + `has_role(uid,'admin')`) so it can't be used as an open relay.
+## Question for user before step 2
 
-## Test
-
-Invoke via `supabase--curl_edge_functions`:
-
-```text
-POST /openclaw-debug-sign
-{
-  "target_url": "<OpenClaw webhook URL from companies.openclaw_webhook_url>",
-  "raw_body": "{\"event_id\":\"hello\",\"company_id\":\"test\",\"channel\":\"whatsapp\",\"skill\":\"whatsapp\",\"event_type\":\"message_received\",\"payload\":{\"message\":\"test\"}}"
-}
-```
-
-Paste the returned `signature` + `http_status` + `response_text` into the reply to OpenClaw. If 200, we're done. If 401, share both hexes so they can diff bytes.
+Which company should we point at the new tunnel URL? (Cloudflare `trycloudflare.com` URLs are ephemeral — they die when OpenClaw restarts their tunnel, so we should probably only wire this to a test/staging company until they have a stable URL.)
 
 ## Out of scope
 
-- No further changes to `openclaw-dispatch` (already fixed).
-- No DB / RLS / front-end changes.
+- No code changes — `openclaw-dispatch` already signs correctly.
+- No DB schema changes.
