@@ -201,7 +201,7 @@ export async function geminiImageGenerate(options: {
     throw new Error('[CONFIG-ERROR] GEMINI_API_KEY is not configured — cannot generate images');
   }
 
-  const model = normalizeModel(options.model || 'gemini-3-pro-image-preview');
+  const model = normalizeModel(options.model || 'gemini-2.5-flash-image');
   console.log(`[IMAGE-GEN] Using direct Gemini API with model: ${model}`);
 
   // Build native Gemini parts
