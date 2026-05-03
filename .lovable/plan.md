@@ -1,64 +1,39 @@
-## Problem
+## Goal
 
-OpenClaw is correctly rejecting our requests with 401. Their verification expects:
+Send OpenClaw their exact test payload, signed with our `OPENCLAW_WEBHOOK_SECRET`, so they can compare hex-to-hex and confirm our signing matches.
 
-```
-X-Openclaw-Signature: sha256=<hex HMAC-SHA256 of raw body using OPENCLAW_WEBHOOK_SECRET>
-```
+## Why a new helper function
 
-But our dispatcher (`supabase/functions/openclaw-dispatch/index.ts`) currently sends the **raw secret** as the header value and never computes an HMAC:
+`openclaw-dispatch` wraps the body (adds `event_id`, `company_name`, `dispatched_at`), so we can't push their exact bytes through it. And we can't sign locally because `OPENCLAW_WEBHOOK_SECRET` only lives in the edge runtime.
 
-```ts
-...(secret ? { 'X-Openclaw-Signature': secret } : {}),
-```
+## Build
 
-So the answer to OpenClaw's two questions is:
-1. Yes, we use `OPENCLAW_WEBHOOK_SECRET` — but only as a bearer-style value, not as an HMAC key. That's the bug.
-2. The current header is just the raw secret with no `sha256=` prefix. We need to fix it to match the spec.
+New edge function: `supabase/functions/openclaw-debug-sign/index.ts`
 
-## Fix
+- Input: `{ target_url: string, raw_body: string }` (raw_body is the exact JSON string to sign — not re-parsed).
+- HMAC-SHA256 the UTF-8 bytes of `raw_body` with `OPENCLAW_WEBHOOK_SECRET`, hex-encoded.
+- POST to `target_url`:
+  - `Content-Type: application/json`
+  - `X-Openclaw-Signature: sha256=<hex>`
+  - `body: raw_body` (verbatim, no JSON.stringify round-trip).
+- Return `{ signature, http_status, response_text }`.
+- Restrict to admin caller (verify JWT + `has_role(uid,'admin')`) so it can't be used as an open relay.
 
-In `supabase/functions/openclaw-dispatch/index.ts`:
+## Test
 
-1. Serialize the JSON body once into a string (`bodyString`) so the signed bytes match the bytes we send.
-2. Compute `sha256=<hex>` using Web Crypto's `crypto.subtle` HMAC-SHA256 with the secret as key and `bodyString` as data.
-3. Send:
-   - `X-Openclaw-Signature: sha256=<hex>`
-   - `body: bodyString` (not a re-stringified object)
-4. Keep behavior identical when the secret is missing (skip the header, log a warning).
-
-Pseudocode:
+Invoke via `supabase--curl_edge_functions`:
 
 ```text
-async function signBody(secret, body):
-    key = importKey(secret, HMAC-SHA256)
-    sig = HMAC(key, body)
-    return "sha256=" + hex(sig)
-
-bodyString = JSON.stringify(payload)
-sigHeader  = await signBody(secret, bodyString)
-
-fetch(webhookUrl, {
-  headers: { 'Content-Type': 'application/json', 'X-Openclaw-Signature': sigHeader },
-  body: bodyString,
-})
+POST /openclaw-debug-sign
+{
+  "target_url": "<OpenClaw webhook URL from companies.openclaw_webhook_url>",
+  "raw_body": "{\"event_id\":\"hello\",\"company_id\":\"test\",\"channel\":\"whatsapp\",\"skill\":\"whatsapp\",\"event_type\":\"message_received\",\"payload\":{\"message\":\"test\"}}"
+}
 ```
 
-## Verification
-
-- Deploy `openclaw-dispatch`.
-- Trigger one inbound WhatsApp/Meta event for a company that has `openclaw_mode='primary'` and a webhook URL set.
-- Confirm in `openclaw_events.dispatch_status` that the row flips from `http_401` to `delivered` (or whatever 2xx OpenClaw returns).
-- Ask OpenClaw to confirm signature now validates.
-
-## Reply to OpenClaw
-
-After the fix is shipped, reply with:
-
-> You were right — the bug was on our side. We were sending the raw secret as the header value instead of an HMAC. Just shipped the fix: we now send `X-Openclaw-Signature: sha256=<hex HMAC-SHA256(rawBody, OPENCLAW_WEBHOOK_SECRET)>`. The signed bytes are the exact JSON string we send as the request body (no re-serialization). Please retry — should pass verification now.
+Paste the returned `signature` + `http_status` + `response_text` into the reply to OpenClaw. If 200, we're done. If 401, share both hexes so they can diff bytes.
 
 ## Out of scope
 
-- No DB changes.
-- No changes to the inbound side (we don't receive from OpenClaw via this header — they call our MCP server with bearer auth).
-- No changes to the routing/gating logic.
+- No further changes to `openclaw-dispatch` (already fixed).
+- No DB / RLS / front-end changes.
