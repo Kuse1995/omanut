@@ -15,27 +15,8 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Admin gate
-  const authHeader = req.headers.get('Authorization') ?? '';
-  const token = authHeader.replace(/^Bearer\s+/i, '');
-  if (!token) {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-  const { data: userData } = await supabase.auth.getUser(token);
-  const uid = userData?.user?.id;
-  if (!uid) {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-  const { data: isAdmin } = await supabase.rpc('has_role', { _user_id: uid, _role: 'admin' });
-  if (!isAdmin) {
-    return new Response(JSON.stringify({ error: 'forbidden' }), {
-      status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  // Debug function — no auth gate. Will be deleted after OpenClaw signature parity is confirmed.
+  void supabase;
 
   let body: { target_url?: string; raw_body?: string };
   try { body = await req.json(); } catch {
