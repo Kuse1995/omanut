@@ -84,23 +84,44 @@ Deno.serve(async (req) => {
   if (webhookUrl) {
     try {
       const secret = Deno.env.get('OPENCLAW_WEBHOOK_SECRET') ?? '';
+      const bodyString = JSON.stringify({
+        event_id: event.id,
+        company_id: company.id,
+        company_name: company.name,
+        channel: body.channel,
+        event_type: body.event_type,
+        skill: body.skill,
+        conversation_id: body.conversation_id,
+        payload: body.payload ?? {},
+        dispatched_at: new Date().toISOString(),
+      });
+
+      let sigHeader: string | null = null;
+      if (secret) {
+        const enc = new TextEncoder();
+        const key = await crypto.subtle.importKey(
+          'raw',
+          enc.encode(secret),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign'],
+        );
+        const sigBuf = await crypto.subtle.sign('HMAC', key, enc.encode(bodyString));
+        const hex = Array.from(new Uint8Array(sigBuf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+        sigHeader = `sha256=${hex}`;
+      } else {
+        console.warn('[openclaw-dispatch] OPENCLAW_WEBHOOK_SECRET not set — sending unsigned');
+      }
+
       const resp = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(secret ? { 'X-Openclaw-Signature': secret } : {}),
+          ...(sigHeader ? { 'X-Openclaw-Signature': sigHeader } : {}),
         },
-        body: JSON.stringify({
-          event_id: event.id,
-          company_id: company.id,
-          company_name: company.name,
-          channel: body.channel,
-          event_type: body.event_type,
-          skill: body.skill,
-          conversation_id: body.conversation_id,
-          payload: body.payload ?? {},
-          dispatched_at: new Date().toISOString(),
-        }),
+        body: bodyString,
         signal: AbortSignal.timeout(10_000),
       });
       dispatchStatus = resp.ok ? 'delivered' : `http_${resp.status}`;
