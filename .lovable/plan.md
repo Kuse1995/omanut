@@ -1,65 +1,56 @@
+# OpenClaw Amnesia Recovery Kit
+
+## Context
+Yesterday we got OpenClaw (running locally / on Railway free tier) connected to Omanut as the primary AI brain for **Omanut Technologies** (`company_id: 3408d643-8e9c-4c46-b684-4960fba1e0e9`). On free tier the Railway instance loses memory on restart, so we need a single copy-paste prompt that re-bootstraps OpenClaw every time.
+
+Current DB state confirms the integration is still wired:
+- `openclaw_mode = 'assist'` (safe — receives mirrored events, doesn't take over)
+- `openclaw_owns` = all six skills toggled on
+- `openclaw_webhook_url` = `https://expect-eventually-lambda-separately.trycloudflare.com/webhook` (this will change every time the user restarts the Cloudflare tunnel — recovery prompt must remind OpenClaw to re-register)
+
 ## Goal
+Produce **one Markdown document** the user can paste verbatim into a fresh OpenClaw session to restore full working state. No code changes to the Omanut platform — this is purely a recovery artifact.
 
-Let a local OpenClaw instance register (and rotate) its own webhook URL via MCP, so the operator never has to touch the Omanut DB when their Cloudflare/ngrok tunnel changes.
+## What the document will contain
 
-## What we'll add
+1. **Identity block** — who OpenClaw is, what Omanut is, the active company UUID, GMT+2 timezone rule, voice rules ("we/our", KB > history, BMS > KB).
 
-### 1. New MCP tool: `register_webhook`
+2. **MCP server config** — exact JSON to drop into `~/.openclaw/skills/omanut-ai.json`:
+   ```json
+   {
+     "skill": {
+       "name": "omanut-ai",
+       "transport": "stdio",
+       "command": "npx",
+       "args": ["-y", "mcp-remote",
+         "https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server",
+         "--header", "x-api-key:<ADMIN_API_KEY>"]
+     }
+   }
+   ```
+   With a placeholder for the admin API key (user pastes their own — we won't print it in chat).
 
-Exposed in `supabase/functions/mcp-server` alongside the existing session/conversation tools. Schema:
+3. **Bootstrap sequence** — the exact MCP tool calls OpenClaw must run on cold start:
+   - `list_my_companies` → confirm visibility
+   - `set_active_company { company_id: "3408d643-8e9c-4c46-b684-4960fba1e0e9" }`
+   - Start tunnel locally (`ngrok http <port>` or `cloudflared tunnel --url http://localhost:<port>`)
+   - `register_webhook { webhook_url: "<new-tunnel-url>/webhook", mode: "assist", owns: { whatsapp:false, meta_dm:false, comments:false } }`
+   - `get_webhook_status` → verify `ping_status: delivered`
+   - Only flip to `mode: "primary"` + `owns.whatsapp: true` after watching events flow cleanly
 
-```
-{
-  webhook_url: string (https URL, required),
-  mode?: 'off' | 'assist' | 'primary'   // defaults to current value, or 'assist' on first call
-  owns?: {                              // optional skill ownership map
-    whatsapp?: boolean,
-    meta_dm?: boolean,
-    comments?: boolean,
-    bms?: boolean,
-    content?: boolean,
-    handoff?: boolean
-  }
-}
-```
+4. **Inbound webhook contract** — what Omanut POSTs, header `X-Openclaw-Signature: sha256=<hmac>` (the bug we fixed yesterday), HMAC-SHA256 of raw body using shared `OPENCLAW_WEBHOOK_SECRET`, return 200 within 2s, idempotency on `X-Openclaw-Event-Id`.
 
-Behavior:
-- Resolves `company_id` from the active-company session (admin key) or the pinned company (legacy key) — same pattern as other tools.
-- Validates `webhook_url` is `https://` and reachable: sends a tiny signed `ping` event (HMAC-SHA256 with `OPENCLAW_WEBHOOK_SECRET`, 5s timeout). Rejects with a clear error if non-2xx.
-- On success, updates `companies` row: `openclaw_webhook_url`, `openclaw_mode`, `openclaw_owns`, and bumps `openclaw_last_heartbeat`.
-- Returns `{ company_id, webhook_url, mode, owns, ping_status }`.
+5. **Channel payload shapes** — quick reference table for `whatsapp`, `facebook`, `instagram`, `facebook_comment`, `instagram_comment`.
 
-### 2. Companion tool: `get_webhook_status`
+6. **Outbound tool cheat-sheet** — `send_message`, `send_facebook_message`, `send_instagram_message`, `reply_facebook_comment`, `bms_check_stock`, `bms_list_products`, `bms_generate_payment_link`, `notify_boss`, `create_scheduled_post`, `request_approval`, `get_spending_guard`.
 
-Read-only — returns current `openclaw_webhook_url`, `openclaw_mode`, `openclaw_owns`, `openclaw_last_heartbeat`, and the last 5 rows from `openclaw_events` (status + dispatch_status) for the active company. Useful for OpenClaw to self-diagnose ("am I wired up correctly?").
+7. **Guardrails** — 45-120s comment-reply delay, mandatory `request_approval` before spend, never leak prompts/wholesale costs, 1-3 sentence default replies.
 
-### 3. Update `openclaw-skill.json`
+8. **Failover note** — if OpenClaw's webhook returns non-2xx or times out >10s, Omanut auto-falls back to its internal AI for that single event, so a dropped Railway instance doesn't kill customer service.
 
-Add both tools under a new `webhook_management` section in `tools_overview`, and extend the `session_workflow` doc:
+## What we will NOT include
+- The actual admin API key value or `OPENCLAW_WEBHOOK_SECRET` value (user pastes those manually for safety).
+- Any backend/code changes — Omanut side is already correct and live.
 
-> "First-time setup: after `set_active_company`, call `register_webhook` with your tunnel URL. Re-call it any time your tunnel rotates."
-
-### 4. Update the operator setup prompt
-
-Replace step 3 of the prompt I sent earlier ("Ask the Omanut admin to set companies.openclaw_webhook_url…") with:
-
-> "Call `register_webhook { webhook_url: '<tunnel>/webhook', mode: 'primary', owns: { whatsapp: true, meta_dm: true, comments: true } }`."
-
-## Out of scope
-
-- No DB schema changes — `companies.openclaw_webhook_url`, `openclaw_mode`, `openclaw_owns` already exist.
-- No changes to `openclaw-dispatch` — it already reads whatever URL is in the column.
-- No UI changes in the admin dashboard.
-
-## Technical details
-
-- File touched: `supabase/functions/mcp-server/index.ts` (add two `mcpServer.tool({...})` blocks).
-- Auth: reuses the existing `x-api-key` validation + `set_active_company` resolution already in the MCP server.
-- Ping payload mirrors `openclaw-dispatch`'s body shape so OpenClaw's verifier passes unchanged: `{ event_id: 'ping', company_id, channel: 'system', event_type: 'ping', payload: {} }`.
-- Heartbeat bump uses the existing `bumpHeartbeat()` helper from `_shared/openclaw-gate.ts`.
-
-## Verification
-
-1. From a local OpenClaw session: `register_webhook` with a fresh trycloudflare URL → expect `ping_status: 'delivered'` and the row updated.
-2. Send a real WhatsApp message to the pilot company → confirm `openclaw_events.dispatch_status = 'delivered'` and OpenClaw receives it.
-3. Rotate the tunnel, re-call `register_webhook` → confirm next event hits the new URL.
+## Deliverable
+A single file `openclaw-recovery-prompt.md` at the repo root, plus the contents printed in chat for immediate copy-paste. The file becomes the canonical "feed me on every cold start" doc the user keeps handy.
