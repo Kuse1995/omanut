@@ -137,6 +137,15 @@ Deno.serve(async (req) => {
     .update({ dispatch_status: dispatchStatus, dispatch_error: dispatchError })
     .eq('id', event.id);
 
+  // Successful webhook delivery counts as a heartbeat — keeps health-check from
+  // demoting primary→assist when OpenClaw is actively receiving events.
+  if (dispatchStatus === 'delivered') {
+    await supabase
+      .from('companies')
+      .update({ openclaw_last_heartbeat: new Date().toISOString() })
+      .eq('id', company.id);
+  }
+
   return new Response(JSON.stringify({
     event_id: event.id,
     dispatch_status: dispatchStatus,
