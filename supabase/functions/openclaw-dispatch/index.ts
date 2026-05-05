@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
   // Look up company config
   const { data: company, error: cErr } = await supabase
     .from('companies')
-    .select('id, name, openclaw_mode, openclaw_owns, openclaw_webhook_url')
+    .select('id, name, openclaw_mode, openclaw_owns, openclaw_webhook_url, openclaw_drafter, business_type, sales_mode')
     .eq('id', body.company_id)
     .single();
 
