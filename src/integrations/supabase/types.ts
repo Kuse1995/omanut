@@ -2939,9 +2939,11 @@ export type Database = {
           dispatch_status: string | null
           event_type: string
           id: string
+          last_trigger_at: string | null
           payload: Json
           skill: string | null
           status: string
+          trigger_count: number
         }
         Insert: {
           answered_action?: string | null
@@ -2955,9 +2957,11 @@ export type Database = {
           dispatch_status?: string | null
           event_type: string
           id?: string
+          last_trigger_at?: string | null
           payload?: Json
           skill?: string | null
           status?: string
+          trigger_count?: number
         }
         Update: {
           answered_action?: string | null
@@ -2971,9 +2975,11 @@ export type Database = {
           dispatch_status?: string | null
           event_type?: string
           id?: string
+          last_trigger_at?: string | null
           payload?: Json
           skill?: string | null
           status?: string
+          trigger_count?: number
         }
         Relationships: [
           {
