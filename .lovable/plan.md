@@ -1,30 +1,92 @@
-## What I found
+## Goal
 
-- North Park is in OpenClaw primary mode and owns WhatsApp, Meta DM, and comments.
-- Inbound WhatsApp events are being created and delivered to OpenClaw with the wake trigger.
-- The 30-second retry job is running and re-pinging stale events successfully.
-- The latest North Park event was eventually marked answered, but the assistant message says: `MCP parser in script is broken. Triggers ARE arriving.`
-- That means the remaining break is no longer Omanut not firing the webhook; it is OpenClaw receiving the wake but not reliably consuming/acting on pending events automatically.
+Flip OpenClaw from a **direct sender** into a **reply-drafter**. Omanut stays the only system that talks to the customer on WhatsApp/Meta, which removes every class of bug we've been fighting (parser fragility, missing wake pings, stuck pending events, double messages).
 
-## Plan
+## New flow
 
-1. Strengthen `openclaw-dispatch` payloads
-   - Include an explicit `process_now: true`, `wake: true`, and `trigger_reason` field in the JSON body, not only headers.
-   - Include enough event data for OpenClaw to act without depending on a fragile MCP/list parser: `event_id`, `conversation_id`, customer phone/name, inbound text, channel, company id/name, and event type.
+```text
+Customer  ──►  Twilio/Meta  ──►  Omanut (whatsapp-messages / meta-webhook)
+                                          │
+                                          │ 1. log inbound, mark pending
+                                          ▼
+                                   openclaw-dispatch
+                                          │ HTTP POST {event_id, text, phone, history}
+                                          ▼
+                                     OpenClaw agent
+                                          │ drafts reply (no sending)
+                                          ▼
+                            POST /functions/v1/openclaw-reply
+                              { event_id, reply_text, media?, action? }
+                                          │
+                                          ▼
+                          Omanut validates + sends via Twilio/Meta
+                                          │
+                                          ▼
+                                     Customer ✅
+```
 
-2. Strengthen `openclaw-pending-trigger`
-   - Send the same self-contained payload format on retry.
-   - Add clearer retry metadata so OpenClaw can distinguish original wake vs stale-event wake.
+OpenClaw never touches Twilio. Omanut owns delivery, retries, dedupe, and the audit trail.
 
-3. Add a short-lived safety fallback for stale primary-mode WhatsApp events
-   - If a WhatsApp event is delivered to OpenClaw but remains pending after retries, send a boss/internal alert instead of silently stopping.
-   - Keep OpenClaw as primary; do not re-enable Omanut AI responses unless explicitly requested.
+## What changes
 
-4. Add observability
-   - Log event id, company id, channel, trigger type, retry count, and webhook response status for each OpenClaw trigger.
-   - This will make the next failure obvious: delivered-to-OpenClaw vs OpenClaw did not send vs WhatsApp provider failed.
+### 1. New edge function: `openclaw-reply` (inbound from OpenClaw)
+- Verifies HMAC signature using `OPENCLAW_WEBHOOK_SECRET`
+- Body: `{ event_id, reply_text, media_url?, action?: 'send'|'handoff'|'skip', metadata? }`
+- Looks up the `openclaw_events` row → resolves `company_id`, `conversation_id`, `customer_phone`, channel
+- Calls existing senders:
+  - WhatsApp → `send-whatsapp` / `send-whatsapp-cloud` (per `companies.whatsapp_provider`)
+  - Meta DM → `meta-send-dm`
+  - Comments → `meta-reply-comment`
+- Writes the assistant message into `messages` / `whatsapp_messages` so the inbox shows it
+- Marks event `status='answered'`, stores `reply_text` in payload for audit
+- Dedupe: ignore if event already `answered` or if same `reply_text` was sent in last 30s
 
-## Validation
+### 2. `openclaw-dispatch` payload — make it draft-friendly
+Add fields OpenClaw needs to write a good reply without calling back:
+- `recent_history`: last 8 messages (role + text) from `messages`
+- `customer_profile`: name, segment, tags, last order
+- `company_brief`: name, business_type, sales_mode
+- Keep existing `process_now`, `wake`, `customer_phone`, `inbound_text`
 
-- Trigger `openclaw-pending-trigger` manually after changes and confirm it returns candidates/retriggered cleanly.
-- Check latest North Park `openclaw_events` and `messages` rows to verify whether an automatic assistant reply appears without using the OpenClaw UI.
+### 3. Cron / retry simplification
+- `openclaw-pending-trigger` keeps re-pinging only events that have **no reply** after 30s
+- Boss-fallback alert now fires when OpenClaw fails to **post a reply back** (not when it fails to send) — much cleaner signal
+- Drop `MAX_TRIGGERS=5` to `3` since OpenClaw now has a single, simple job
+
+### 4. Company config flag
+Add `companies.openclaw_mode = 'drafter' | 'sender' | 'off'`:
+- `drafter` (new default for North Park): OpenClaw drafts, Omanut sends
+- `sender` (legacy): OpenClaw sends directly (kept for fallback)
+- `off`: Omanut handles everything itself
+
+UI toggle lives in the existing OpenClaw card on the company page.
+
+### 5. OpenClaw side (you do this)
+Update the agent to:
+- Stop calling Twilio
+- After drafting, `POST {SUPABASE_URL}/functions/v1/openclaw-reply` with HMAC signature
+- That's it — no polling, no MCP tools needed for sending
+
+I'll generate the exact endpoint URL, signing snippet, and a sample payload in a small `OPENCLAW_INTEGRATION.md` so you can paste it into the agent prompt.
+
+## Why this wins
+
+| Problem today | Fixed by |
+|---|---|
+| OpenClaw parser misses `wake=1` → no reply | OpenClaw doesn't need to act on pings; it just drafts whenever it sees an event |
+| Stuck pending events sit silent | Boss alert triggers on missing **reply**, not missing **send** |
+| Double sends / wrong number | Only Omanut sends, using verified Twilio creds |
+| No audit of what OpenClaw said | Reply text logged in `openclaw_events.payload.reply_text` + `messages` |
+| Twilio creds shared with OpenClaw | Removed — OpenClaw needs only the Supabase function URL + secret |
+
+## Out of scope (explicit)
+
+- No change to `whatsapp-messages` inbound parsing
+- No change to Meta webhook plumbing
+- No change to BMS / image-gen tool gating
+
+## Open question
+
+Should `openclaw-reply` also accept **tool calls** (e.g. "search BMS, then reply")? My suggestion: **no for v1** — keep OpenClaw to plain-text drafts; Omanut already has BMS/media/handoff tools and we can layer that later if needed.
+
+Ready to build this?
