@@ -84,6 +84,20 @@ Deno.serve(async (req) => {
   if (webhookUrl) {
     try {
       const secret = Deno.env.get('OPENCLAW_WEBHOOK_SECRET') ?? '';
+      // Inbound events that need immediate agent action (don't wait for poll)
+      const inboundTriggers = new Set([
+        'inbound_message', 'inbound_dm', 'inbound_comment',
+        'whatsapp_inbound', 'meta_dm_inbound', 'comment_inbound',
+      ]);
+      const triggerNow = inboundTriggers.has(body.event_type) || body.channel === 'whatsapp' || body.channel === 'meta_dm' || body.channel === 'comments';
+
+      // Surface frequently-needed fields at the top level so OpenClaw can act
+      // without needing to parse the nested `payload` (its MCP parser has been brittle).
+      const p: any = body.payload ?? {};
+      const customerPhone = p.from ?? p.phone ?? p.sender ?? null;
+      const customerName = p.profile_name ?? p.customer_name ?? p.commenter_name ?? null;
+      const inboundText = p.body ?? p.text ?? p.message ?? null;
+
       const bodyString = JSON.stringify({
         event_id: event.id,
         company_id: company.id,
@@ -92,7 +106,15 @@ Deno.serve(async (req) => {
         event_type: body.event_type,
         skill: body.skill,
         conversation_id: body.conversation_id,
-        payload: body.payload ?? {},
+        // Top-level convenience fields for the agent
+        process_now: triggerNow,
+        wake: triggerNow,
+        trigger_reason: triggerNow ? 'inbound_realtime' : 'skill_request',
+        customer_phone: customerPhone,
+        customer_name: customerName,
+        inbound_text: inboundText,
+        // Original payload preserved
+        payload: p,
         dispatched_at: new Date().toISOString(),
       });
 

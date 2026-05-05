@@ -1,55 +1,30 @@
-## Problem
+## What I found
 
-OpenClaw only replies after you message it on its own UI — meaning the agent's loop runs on internal poll, not on our push. Today every inbound (WhatsApp, Meta DM, FB/IG comment) for ANZ + North Park is being **delivered** to OpenClaw's `/webhook` (confirmed: 20/20 recent `openclaw_events` rows show `dispatch_status: delivered`). So the channel routing is fine — the gap is the **process-now signal**.
+- North Park is in OpenClaw primary mode and owns WhatsApp, Meta DM, and comments.
+- Inbound WhatsApp events are being created and delivered to OpenClaw with the wake trigger.
+- The 30-second retry job is running and re-pinging stale events successfully.
+- The latest North Park event was eventually marked answered, but the assistant message says: `MCP parser in script is broken. Triggers ARE arriving.`
+- That means the remaining break is no longer Omanut not firing the webhook; it is OpenClaw receiving the wake but not reliably consuming/acting on pending events automatically.
 
-`openclaw-dispatch` currently fires a second ping at `<base>/execute`. OpenClaw doesn't expose `/execute`, so that ping silently 404s. Result: the agent waits for its own poll cycle before reading the just-delivered event.
+## Plan
 
-## Fix
+1. Strengthen `openclaw-dispatch` payloads
+   - Include an explicit `process_now: true`, `wake: true`, and `trigger_reason` field in the JSON body, not only headers.
+   - Include enough event data for OpenClaw to act without depending on a fragile MCP/list parser: `event_id`, `conversation_id`, customer phone/name, inbound text, channel, company id/name, and event type.
 
-Two layers, both feeding the same `/webhook` URL:
+2. Strengthen `openclaw-pending-trigger`
+   - Send the same self-contained payload format on retry.
+   - Add clearer retry metadata so OpenClaw can distinguish original wake vs stale-event wake.
 
-### 1. Inline trigger (openclaw-dispatch)
-- Drop the `/execute` ping entirely.
-- The existing single POST to `/webhook` already carries `X-Openclaw-Trigger: process-now` and `X-Openclaw-Priority: immediate` headers for whatsapp / meta_dm / comments / inbound_* events. Confirm the trigger header set covers every inbound channel (whatsapp, meta_dm, comments) and event type (`inbound_message`, `inbound_dm`, `inbound_comment`).
-- Add `X-Openclaw-Wake: 1` as an extra hint and keep the 10s timeout.
+3. Add a short-lived safety fallback for stale primary-mode WhatsApp events
+   - If a WhatsApp event is delivered to OpenClaw but remains pending after retries, send a boss/internal alert instead of silently stopping.
+   - Keep OpenClaw as primary; do not re-enable Omanut AI responses unless explicitly requested.
 
-### 2. Cron safety net (new edge function `openclaw-pending-trigger`)
-Runs every 30 seconds via pg_cron. Scans:
+4. Add observability
+   - Log event id, company id, channel, trigger type, retry count, and webhook response status for each OpenClaw trigger.
+   - This will make the next failure obvious: delivered-to-OpenClaw vs OpenClaw did not send vs WhatsApp provider failed.
 
-```text
-openclaw_events
-  where dispatch_status = 'delivered'
-    and status in ('pending','processing')
-    and created_at > now() - interval '10 minutes'
-    and (last_trigger_at is null or last_trigger_at < now() - interval '25 seconds')
-```
+## Validation
 
-For each row, re-POSTs a signed `process-now` payload to the company's `openclaw_webhook_url` (HMAC-signed with `OPENCLAW_WEBHOOK_SECRET`, headers `X-Openclaw-Trigger: process-now`, `X-Openclaw-Event-Id`, `X-Openclaw-Wake: 1`). Updates `last_trigger_at` and increments `trigger_count` so we throttle and stop after ~5 attempts.
-
-This catches:
-- Original webhook delivered but OpenClaw process was asleep / restarted
-- Tunnel hiccups (cloudflare trycloudflare URLs flap)
-- Future channels added to `openclaw_owns` we forgot to wire
-
-## Schema additions (migration)
-
-`openclaw_events` add:
-- `last_trigger_at timestamptz`
-- `trigger_count int default 0`
-- index on `(dispatch_status, status, created_at desc)` for the cron scan
-
-## Cron registration
-
-`pg_cron` schedule `openclaw-pending-trigger-30s` invoking the new edge function via `net.http_post` every 30 seconds. Registered via `supabase--insert` (per platform rules — contains anon key + project URL).
-
-## Out of scope
-
-- No changes to `whatsapp-messages`, `meta-webhook`, or skill-gating logic — they already hand off to `openclaw-dispatch`.
-- No change to OpenClaw side; we just push harder to the URL it already exposes.
-
-## Files touched
-
-- `supabase/functions/openclaw-dispatch/index.ts` — remove `/execute` ping, tighten headers
-- `supabase/functions/openclaw-pending-trigger/index.ts` — new
-- new migration — schema + index
-- pg_cron job inserted via insert tool
+- Trigger `openclaw-pending-trigger` manually after changes and confirm it returns candidates/retriggered cleanly.
+- Check latest North Park `openclaw_events` and `messages` rows to verify whether an automatic assistant reply appears without using the OpenClaw UI.
