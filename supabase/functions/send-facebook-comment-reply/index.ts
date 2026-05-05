@@ -220,13 +220,14 @@ serve(async (req) => {
       }
 
       const { data: fbPage, error: pageError } = await supabase
-        .from("facebook_pages")
-        .select("page_access_token")
+        .from("meta_credentials")
+        .select("access_token")
         .eq("page_id", originalComment.page_id)
-        .single();
+        .maybeSingle();
 
-      if (pageError || !fbPage?.page_access_token) {
-        return new Response(JSON.stringify({ error: "Facebook page token not configured" }), {
+      if (pageError || !fbPage?.access_token) {
+        console.error("[send-facebook-comment-reply] page token lookup failed", { page_id: originalComment.page_id, pageError });
+        return new Response(JSON.stringify({ error: "Facebook page token not configured", details: pageError }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -235,7 +236,7 @@ serve(async (req) => {
       const metaResponse = await fetch(`https://graph.facebook.com/v18.0/${comment_id}/comments`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${fbPage.page_access_token}`,
+          Authorization: `Bearer ${fbPage.access_token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ message }),
