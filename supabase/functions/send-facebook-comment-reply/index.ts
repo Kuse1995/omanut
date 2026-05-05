@@ -14,19 +14,21 @@ serve(async (req) => {
   }
 
   try {
-    const { draft_id } = await req.json();
+    const payload = await req.json();
+    const { draft_id, comment_id, message, company_id } = payload;
 
-    if (!draft_id) {
+    // ACCEPT BOTH MODES: Human Draft (draft_id) OR Autonomous Agent (comment_id + message)
+    if (!draft_id && (!comment_id || !message)) {
       return new Response(
-        JSON.stringify({ error: "Missing required field: draft_id" }),
+        JSON.stringify({ error: "Missing required fields: Provide either draft_id OR (comment_id, message)" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
     const authHeader = req.headers.get("Authorization");
+
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: "Authorization required" }),
@@ -34,190 +36,238 @@ serve(async (req) => {
       );
     }
 
-    // Create user client for auth
-    const supabaseUser = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid authentication" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Create service client for data operations
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Load the draft - tenant context comes from DB
-    const { data: draft, error: draftError } = await supabase
-      .from("message_reply_drafts")
-      .select("*")
-      .eq("id", draft_id)
-      .single();
+    // Detect service-role calls (OpenClaw / autonomous agents) vs human users
+    const token = authHeader.replace("Bearer ", "");
+    const isServiceRole = token === supabaseServiceKey;
 
-    if (draftError || !draft) {
-      return new Response(
-        JSON.stringify({ error: "Draft not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Get company_id from the DB record, not from user input
-    const companyId = loadTenantFromRecord(draft, "message_reply_draft");
-    assertTenantContext(companyId, "send-facebook-comment-reply");
-
-    // Verify user has manager+ role
-    const { data: hasRole } = await supabase.rpc("has_company_role", {
-      company_uuid: companyId,
-      required_role: "manager",
-    });
-
-    if (!hasRole) {
-      await logSecurityEvent(supabase, {
-        eventType: "role_insufficient",
-        severity: "warning",
-        source: "send-facebook-comment-reply",
-        message: `User ${user.id} lacks manager role for sending comment replies`,
-        companyId: companyId,
-        userId: user.id,
+    let userId: string | null = null;
+    if (!isServiceRole) {
+      const supabaseUser = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Invalid authentication" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      userId = user.id;
+    }
+
+    // =========================================================
+    // MODE 1: HUMAN-IN-THE-LOOP (REQUIRES DRAFT_ID)
+    // =========================================================
+    if (draft_id) {
+      const { data: draft, error: draftError } = await supabase
+        .from("message_reply_drafts")
+        .select("*")
+        .eq("id", draft_id)
+        .single();
+
+      if (draftError || !draft) {
+        return new Response(JSON.stringify({ error: "Draft not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const cId = loadTenantFromRecord(draft, "message_reply_draft");
+      assertTenantContext(cId, "send-facebook-comment-reply");
+
+      if (!isServiceRole) {
+        const { data: hasRole } = await supabase.rpc("has_company_role", {
+          company_uuid: cId,
+          required_role: "manager",
+        });
+        if (!hasRole) {
+          await logSecurityEvent(supabase, {
+            eventType: "role_insufficient",
+            severity: "warning",
+            source: "send-facebook-comment-reply",
+            message: `User ${userId} lacks manager role`,
+            companyId: cId,
+            userId: userId ?? undefined,
+          });
+          return new Response(JSON.stringify({ error: "Insufficient permissions. Manager role required." }), {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      if (draft.status !== "approved") {
+        return new Response(JSON.stringify({ error: `Draft must be approved first. Current status: ${draft.status}` }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: originalComment, error: ocErr } = await supabase
+        .from("facebook_comments")
+        .select("comment_id, page_id")
+        .eq("id", draft.source_id)
+        .single();
+
+      if (ocErr || !originalComment) {
+        return new Response(JSON.stringify({ error: "Original comment not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: fbPage, error: pageError } = await supabase
+        .from("facebook_pages")
+        .select("page_access_token")
+        .eq("page_id", originalComment.page_id)
+        .single();
+
+      if (pageError || !fbPage?.page_access_token) {
+        return new Response(JSON.stringify({ error: "Facebook page configuration not found" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const metaResponse = await fetch(
+        `https://graph.facebook.com/v18.0/${originalComment.comment_id}/comments`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${fbPage.page_access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message: draft.ai_reply }),
+        }
+      );
+
+      if (!metaResponse.ok) {
+        const errorData = await metaResponse.json();
+        console.error("Meta API error:", errorData);
+        await supabase
+          .from("message_reply_drafts")
+          .update({
+            prompt_context: {
+              ...draft.prompt_context,
+              send_error: errorData,
+              send_attempted_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", draft_id);
+        return new Response(JSON.stringify({ error: "Failed to send comment reply via Facebook", details: errorData }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const metaResult = await metaResponse.json();
+
+      await supabase
+        .from("message_reply_drafts")
+        .update({
+          status: "sent",
+          sent_at: new Date().toISOString(),
+          prompt_context: {
+            ...draft.prompt_context,
+            meta_comment_id: metaResult.id,
+            sent_by: userId,
+          },
+        })
+        .eq("id", draft_id);
+
+      console.log(`[send-facebook-comment-reply] Sent draft ${draft_id} as comment ${metaResult.id}`);
 
       return new Response(
-        JSON.stringify({ error: "Insufficient permissions. Manager role required to send replies." }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: true, comment_id: metaResult.id, message: "Comment reply sent successfully" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Verify draft is approved
-    if (draft.status !== "approved") {
-      return new Response(
-        JSON.stringify({ error: `Cannot send draft with status: ${draft.status}. Must be approved first.` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // =========================================================
+    // MODE 2: AUTONOMOUS AGENT (DIRECT COMMENT_ID & MESSAGE)
+    // =========================================================
+    if (comment_id && message) {
+      const { data: originalComment, error: commentError } = await supabase
+        .from("facebook_comments")
+        .select("company_id, page_id")
+        .eq("comment_id", comment_id)
+        .single();
 
-    // Verify source type
-    if (draft.source_type !== "facebook_comment") {
-      return new Response(
-        JSON.stringify({ error: "This endpoint is for Facebook comments only" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+      if (commentError || !originalComment) {
+        return new Response(JSON.stringify({ error: "Original comment not found in database to map Page Token" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    // Load the original comment to get comment ID for reply
-    const { data: originalComment, error: commentError } = await supabase
-      .from("facebook_comments")
-      .select("comment_id, page_id")
-      .eq("id", draft.source_id)
-      .single();
+      const activeCompanyId = company_id || originalComment.company_id;
+      assertTenantContext(activeCompanyId, "send-facebook-comment-reply-direct");
 
-    if (commentError || !originalComment) {
-      return new Response(
-        JSON.stringify({ error: "Original comment not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+      // For human callers in autonomous mode, still require manager role on the resolved company
+      if (!isServiceRole) {
+        const { data: hasRole } = await supabase.rpc("has_company_role", {
+          company_uuid: activeCompanyId,
+          required_role: "manager",
+        });
+        if (!hasRole) {
+          return new Response(JSON.stringify({ error: "Insufficient permissions. Manager role required." }), {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
 
-    // Load page access token
-    const { data: fbPage, error: pageError } = await supabase
-      .from("facebook_pages")
-      .select("page_access_token")
-      .eq("page_id", originalComment.page_id)
-      .single();
+      const { data: fbPage, error: pageError } = await supabase
+        .from("facebook_pages")
+        .select("page_access_token")
+        .eq("page_id", originalComment.page_id)
+        .single();
 
-    if (pageError || !fbPage?.page_access_token) {
-      console.error("Failed to load Facebook page access token:", pageError);
-      return new Response(
-        JSON.stringify({ error: "Facebook page configuration not found" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+      if (pageError || !fbPage?.page_access_token) {
+        return new Response(JSON.stringify({ error: "Facebook page token not configured" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    // Reply to the comment via Meta Graph API
-    const metaResponse = await fetch(
-      `https://graph.facebook.com/v18.0/${originalComment.comment_id}/comments`,
-      {
+      const metaResponse = await fetch(`https://graph.facebook.com/v18.0/${comment_id}/comments`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${fbPage.page_access_token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          message: draft.ai_reply,
-        }),
-      }
-    );
-
-    if (!metaResponse.ok) {
-      const errorData = await metaResponse.json();
-      console.error("Meta API error:", errorData);
-
-      await logSecurityEvent(supabase, {
-        eventType: "invalid_request",
-        severity: "error",
-        source: "send-facebook-comment-reply",
-        message: `Failed to send Facebook comment reply: ${JSON.stringify(errorData)}`,
-        companyId: companyId,
-        userId: user.id,
-        details: { draft_id, error: errorData },
+        body: JSON.stringify({ message }),
       });
 
-      // Update draft with failure info
-      await supabase
-        .from("message_reply_drafts")
-        .update({
-          prompt_context: {
-            ...draft.prompt_context,
-            send_error: errorData,
-            send_attempted_at: new Date().toISOString(),
-          },
-        })
-        .eq("id", draft_id);
+      if (!metaResponse.ok) {
+        const errorData = await metaResponse.json();
+        console.error("Meta API error (autonomous):", errorData);
+        return new Response(JSON.stringify({ error: "Meta API error", details: errorData }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const metaResult = await metaResponse.json();
+      console.log(`[send-facebook-comment-reply] Autonomous reply sent as comment ${metaResult.id}`);
 
       return new Response(
-        JSON.stringify({ error: "Failed to send comment reply via Facebook", details: errorData }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: true, comment_id: metaResult.id, message: "Autonomous reply sent successfully" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const metaResult = await metaResponse.json();
-
-    // Update draft status to sent
-    const { error: updateError } = await supabase
-      .from("message_reply_drafts")
-      .update({
-        status: "sent",
-        sent_at: new Date().toISOString(),
-        prompt_context: {
-          ...draft.prompt_context,
-          meta_comment_id: metaResult.id,
-          sent_by: user.id,
-        },
-      })
-      .eq("id", draft_id);
-
-    if (updateError) {
-      console.error("Failed to update draft status:", updateError);
-    }
-
-    console.log(`[send-facebook-comment-reply] Sent draft ${draft_id} as comment reply ${metaResult.id}`);
-
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        comment_id: metaResult.id,
-        message: "Comment reply sent successfully"
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-
+    return new Response(JSON.stringify({ error: "Unhandled request shape" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (error) {
     console.error("Error in send-facebook-comment-reply:", error);
-    return new Response(
-      JSON.stringify({ error: 'An error occurred processing your request' }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: "An error occurred processing your request" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
