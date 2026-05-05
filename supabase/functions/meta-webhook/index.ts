@@ -1266,6 +1266,7 @@ async function generateAIReply(
   systemPrompt: string,
   context: 'comment' | 'messenger' | 'instagram_comment' | 'instagram_dm',
   conversationHistory: Array<{ role: string; content: string }> = [],
+  postContext: { postCaption?: string | null; parentCommentText?: string | null } = {},
 ): Promise<string | null> {
   const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
   if (!GEMINI_API_KEY) {
@@ -1273,10 +1274,21 @@ async function generateAIReply(
     return null;
   }
 
+  // Build a post-anchored block so the AI replies in context of the post,
+  // not a generic brand answer (e.g. quizzes, polls, announcements).
+  const { postCaption, parentCommentText } = postContext || {};
+  const postBlock = (postCaption || parentCommentText)
+    ? `\n\n=== ORIGINAL POST CONTEXT (the comment is replying to THIS post — your reply MUST stay on-topic with it) ===\n${
+        postCaption ? `Post caption: "${postCaption.slice(0, 800)}"` : ''
+      }${
+        parentCommentText ? `\nParent comment: "${parentCommentText.slice(0, 400)}"` : ''
+      }\n=== END POST CONTEXT ===\n\nIf the post is a quiz, poll, prompt, or question, respond as a participant/host of THAT post — do not pivot to generic product/service pitches.`
+    : '';
+
   const contextPrompts: Record<string, string> = {
-    comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    comment: `"${commenterName}" commented on your post: "${userMessage}"${postBlock}\n\nReply to them now, staying anchored to the post above.`,
     messenger: `Customer says: "${userMessage}"\n\nReply to them now.`,
-    instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"${postBlock}\n\nReply to them now, staying anchored to the post above.`,
     instagram_dm: `Customer says: "${userMessage}"\n\nReply to them now.`,
   };
 
