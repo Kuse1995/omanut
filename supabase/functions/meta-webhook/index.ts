@@ -179,6 +179,8 @@ async function processWebhook(body: any) {
             const messageText = value.message;
             const commenterName = value.from?.name || 'User';
             const commenterFbId = value.from?.id;
+            const postId = value.post_id || value.parent_id || null;
+            const parentCommentText = value.parent?.message || null;
 
             if (!commentId || !messageText) continue;
             if (commenterFbId === pageId) {
@@ -186,9 +188,9 @@ async function processWebhook(body: any) {
               continue;
             }
 
-            console.log(`Processing FB comment ${commentId}: "${messageText}" from ${commenterName}`);
+            console.log(`Processing FB comment ${commentId} on post ${postId}: "${messageText}" from ${commenterName}`);
             try {
-              await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
+              await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId, postId, parentCommentText);
             } catch (err) {
               console.error(`Error handling comment ${commentId}:`, err);
             }
@@ -281,6 +283,7 @@ async function processWebhook(body: any) {
           const commenterName = value.from?.username || 'Instagram User';
           const commenterIgId = value.from?.id;
           const mediaId = value.media?.id;
+          const mediaCaption = value.media?.caption || value.media?.media_product_type || null;
 
           if (!commentId || !messageText) continue;
           // Skip own comments
@@ -289,9 +292,9 @@ async function processWebhook(body: any) {
             continue;
           }
 
-          console.log(`Processing IG comment ${commentId}: "${messageText}" from ${commenterName}`);
+          console.log(`Processing IG comment ${commentId} on media ${mediaId}: "${messageText}" from ${commenterName}`);
           try {
-            await handleInstagramComment(supabase, igUserId, commentId, messageText, commenterName, commenterIgId, mediaId);
+            await handleInstagramComment(supabase, igUserId, commentId, messageText, commenterName, commenterIgId, mediaId, mediaCaption);
           } catch (err) {
             console.error(`Error handling IG comment ${commentId}:`, err);
           }
@@ -833,6 +836,36 @@ async function saveInteraction(
   triggerLeadAlert(companyId, conversationId, platform, customerName, userMessage);
 }
 
+// ── Fetch post context (caption + image) from Meta Graph API ──
+async function fetchPostContext(
+  postId: string | null,
+  accessToken: string,
+  platform: 'facebook' | 'instagram',
+): Promise<{ caption: string | null; permalink: string | null } | null> {
+  if (!postId) return null;
+  try {
+    const fields = platform === 'instagram'
+      ? 'caption,media_type,permalink'
+      : 'message,story,permalink_url';
+    const resp = await fetch(
+      `https://graph.facebook.com/v25.0/${postId}?fields=${fields}&access_token=${accessToken}`,
+    );
+    if (!resp.ok) {
+      console.warn(`[meta-webhook] fetchPostContext ${postId} failed: ${resp.status}`);
+      return null;
+    }
+    const data = await resp.json();
+    const caption = platform === 'instagram'
+      ? (data.caption || null)
+      : (data.message || data.story || null);
+    const permalink = data.permalink || data.permalink_url || null;
+    return { caption, permalink };
+  } catch (err) {
+    console.error('[meta-webhook] fetchPostContext error:', err);
+    return null;
+  }
+}
+
 // ── Handle Facebook comment ──
 async function handleComment(
   supabase: any,
@@ -841,16 +874,23 @@ async function handleComment(
   messageText: string,
   commenterName: string,
   commenterFbId: string,
+  postId: string | null = null,
+  parentCommentText: string | null = null,
 ) {
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  // Fetch original post context so AI replies are anchored to the post
+  const postContext = await fetchPostContext(postId, access_token, 'facebook');
+  const postCaption = postContext?.caption || null;
+
   if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
     console.log(`[OPENCLAW-PRIMARY] FB comment ${commentId} -> OpenClaw`);
     await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
-      platform: 'facebook', page_id: pageId, comment_id: commentId,
+      platform: 'facebook', page_id: pageId, comment_id: commentId, post_id: postId,
+      post_caption: postCaption, parent_comment_text: parentCommentText,
       text: messageText, commenter_name: commenterName, commenter_id: commenterFbId,
     });
     return;
@@ -861,7 +901,9 @@ async function handleComment(
     : ai_system_prompt || '';
 
 
-  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment');
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment', [], {
+    postCaption, parentCommentText,
+  });
   if (!aiReply) {
     console.error('AI returned empty reply, skipping');
     return;
@@ -1005,16 +1047,25 @@ async function handleInstagramComment(
   commenterName: string,
   commenterIgId: string,
   mediaId: string | undefined,
+  prefetchedCaption: string | null = null,
 ) {
   const cred = await getIgCredentials(supabase, igUserId);
   if (!cred) return;
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  // Fetch original media caption so the reply is anchored to the post
+  let postCaption = prefetchedCaption;
+  if (!postCaption && mediaId) {
+    const ctx = await fetchPostContext(mediaId, access_token, 'instagram');
+    postCaption = ctx?.caption || null;
+  }
+
   if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
     console.log(`[OPENCLAW-PRIMARY] IG comment ${commentId} -> OpenClaw`);
     await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
       platform: 'instagram', ig_user_id: igUserId, comment_id: commentId, media_id: mediaId,
+      post_caption: postCaption,
       text: messageText, commenter_name: commenterName, commenter_id: commenterIgId,
     });
     return;
@@ -1024,7 +1075,9 @@ async function handleInstagramComment(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment');
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment', [], {
+    postCaption,
+  });
   if (!aiReply) {
     console.error('AI returned empty reply for IG comment, skipping');
     return;
@@ -1213,6 +1266,7 @@ async function generateAIReply(
   systemPrompt: string,
   context: 'comment' | 'messenger' | 'instagram_comment' | 'instagram_dm',
   conversationHistory: Array<{ role: string; content: string }> = [],
+  postContext: { postCaption?: string | null; parentCommentText?: string | null } = {},
 ): Promise<string | null> {
   const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
   if (!GEMINI_API_KEY) {
@@ -1220,10 +1274,21 @@ async function generateAIReply(
     return null;
   }
 
+  // Build a post-anchored block so the AI replies in context of the post,
+  // not a generic brand answer (e.g. quizzes, polls, announcements).
+  const { postCaption, parentCommentText } = postContext || {};
+  const postBlock = (postCaption || parentCommentText)
+    ? `\n\n=== ORIGINAL POST CONTEXT (the comment is replying to THIS post — your reply MUST stay on-topic with it) ===\n${
+        postCaption ? `Post caption: "${postCaption.slice(0, 800)}"` : ''
+      }${
+        parentCommentText ? `\nParent comment: "${parentCommentText.slice(0, 400)}"` : ''
+      }\n=== END POST CONTEXT ===\n\nIf the post is a quiz, poll, prompt, or question, respond as a participant/host of THAT post — do not pivot to generic product/service pitches.`
+    : '';
+
   const contextPrompts: Record<string, string> = {
-    comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    comment: `"${commenterName}" commented on your post: "${userMessage}"${postBlock}\n\nReply to them now, staying anchored to the post above.`,
     messenger: `Customer says: "${userMessage}"\n\nReply to them now.`,
-    instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"\n\nReply to them now.`,
+    instagram_comment: `"${commenterName}" commented on your post: "${userMessage}"${postBlock}\n\nReply to them now, staying anchored to the post above.`,
     instagram_dm: `Customer says: "${userMessage}"\n\nReply to them now.`,
   };
 

@@ -142,6 +142,32 @@ serve(async (req) => {
 
       sourceContent = comment.comment_text || "";
       senderInfo = comment.commenter_name || "Unknown commenter";
+
+      // Try to fetch the original post caption so the AI reply stays anchored
+      // to the post (e.g. quizzes, polls, announcements) instead of going generic.
+      if (comment.post_id && comment.page_id) {
+        try {
+          const { data: fbPage } = await supabase
+            .from("facebook_pages")
+            .select("page_access_token")
+            .eq("page_id", comment.page_id)
+            .maybeSingle();
+          if (fbPage?.page_access_token) {
+            const r = await fetch(
+              `https://graph.facebook.com/v25.0/${comment.post_id}?fields=message,story&access_token=${fbPage.page_access_token}`,
+            );
+            if (r.ok) {
+              const pd = await r.json();
+              const caption = pd.message || pd.story || null;
+              if (caption) {
+                sourceContent = `[Comment on post: "${String(caption).slice(0, 600)}"]\nComment: ${sourceContent}`;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[generate-reply-draft] post context fetch failed:", e);
+        }
+      }
     }
 
     // Load company context for brand tone
@@ -217,6 +243,7 @@ Guidelines:
 - Be helpful and professional
 - Keep responses concise but warm
 - Address the customer's concern or question directly
+- If the message includes "[Comment on post: ...]", your reply MUST stay on-topic with that post. If it's a quiz/poll/prompt, react as a participant or host of THAT post — do not pivot to generic product/service pitches.
 - Never include hashtags unless relevant to the conversation
 - Do not include emojis unless the brand tone suggests it`;
 
