@@ -182,6 +182,11 @@ Deno.serve(async (req) => {
         customer_phone: customerPhone,
         customer_name: customerName,
         inbound_text: inboundText,
+        inbound: {
+          text: inboundText,
+          media_urls: inboundMediaUrls,
+          media_count: inboundMediaUrls.length,
+        },
         recent_history: recentHistory,
         // Original payload preserved
         payload: p,
