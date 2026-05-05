@@ -137,13 +137,6 @@ Deno.serve(async (req) => {
         console.warn('[openclaw-dispatch] OPENCLAW_WEBHOOK_SECRET not set — sending unsigned');
       }
 
-      // Inbound events that need immediate agent action (don't wait for poll)
-      const inboundTriggers = new Set([
-        'inbound_message', 'inbound_dm', 'inbound_comment',
-        'whatsapp_inbound', 'meta_dm_inbound', 'comment_inbound',
-      ]);
-      const triggerNow = inboundTriggers.has(body.event_type) || body.channel === 'whatsapp' || body.channel === 'meta_dm' || body.channel === 'comments';
-
       const resp = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
@@ -160,6 +153,14 @@ Deno.serve(async (req) => {
         },
         body: bodyString,
         signal: AbortSignal.timeout(10_000),
+      });
+      console.log('[openclaw-dispatch] sent', {
+        event_id: event.id,
+        company_id: company.id,
+        channel: body.channel,
+        event_type: body.event_type,
+        trigger_now: triggerNow,
+        status: resp.status,
       });
       dispatchStatus = resp.ok ? 'delivered' : `http_${resp.status}`;
       if (!resp.ok) dispatchError = (await resp.text()).slice(0, 500);
