@@ -121,13 +121,54 @@ Deno.serve(async (req) => {
       console.warn('[pending-trigger] re-ping failed', ev.id, String(e).slice(0, 200));
     }
 
+    const newCount = (ev.trigger_count ?? 0) + 1;
     await supabase
       .from('openclaw_events')
       .update({
         last_trigger_at: new Date().toISOString(),
-        trigger_count: (ev.trigger_count ?? 0) + 1,
+        trigger_count: newCount,
       })
       .eq('id', ev.id);
+
+    // Safety net: if we've hit MAX_TRIGGERS and event is still pending,
+    // alert the boss so a stuck OpenClaw doesn't silently drop the customer.
+    if (newCount >= MAX_TRIGGERS) {
+      try {
+        // Dedupe per event id
+        const marker = `[openclaw-stuck:${ev.id}]`;
+        const { data: existing } = await supabase
+          .from('boss_conversations')
+          .select('id')
+          .eq('company_id', ev.company_id)
+          .ilike('message_content', `%${marker}%`)
+          .limit(1)
+          .maybeSingle();
+        if (!existing) {
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId: ev.company_id,
+              notificationType: 'high_value_opportunity',
+              data: {
+                customer_name: customerName || 'Unknown',
+                customer_phone: customerPhone || 'unknown',
+                opportunity_type: 'OpenClaw not responding — please reply manually',
+                details: `Inbound ${ev.channel} message reached OpenClaw ${MAX_TRIGGERS}× but no automated reply.\n\nMessage: "${(inboundText ?? '').toString().slice(0, 240)}"\n\nEvent: ${ev.id.slice(0, 8)}`,
+                estimated_value: 'Unknown — please review',
+              },
+            },
+          });
+          await supabase.from('boss_conversations').insert({
+            company_id: ev.company_id,
+            message_from: 'system',
+            message_content: `OpenClaw stuck-event alert ${marker}: ${ev.channel} ${ev.event_type}`,
+            response: (inboundText ?? '').toString().slice(0, 200),
+          });
+          console.log('[pending-trigger] boss-alert sent for stuck event', ev.id);
+        }
+      } catch (e) {
+        console.warn('[pending-trigger] boss alert failed', ev.id, String(e).slice(0, 200));
+      }
+    }
   }));
 
   console.log('[pending-trigger] done', { scanned: events?.length ?? 0, candidates: candidates.length, retriggered, failed, skipped });
