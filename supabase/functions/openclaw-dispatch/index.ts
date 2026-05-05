@@ -39,10 +39,10 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Look up company config
+  // Look up company config (include KB-relevant fields for drafter context)
   const { data: company, error: cErr } = await supabase
     .from('companies')
-    .select('id, name, openclaw_mode, openclaw_owns, openclaw_webhook_url, openclaw_drafter, business_type, metadata')
+    .select('id, name, openclaw_mode, openclaw_owns, openclaw_webhook_url, openclaw_drafter, business_type, metadata, quick_reference_info, payment_instructions, payment_number_airtel, payment_number_mtn, payment_number_zamtel, currency_prefix, services, service_locations, hours, branches, voice_style, payments_disabled')
     .eq('id', body.company_id)
     .single();
 
