@@ -283,6 +283,7 @@ async function processWebhook(body: any) {
           const commenterName = value.from?.username || 'Instagram User';
           const commenterIgId = value.from?.id;
           const mediaId = value.media?.id;
+          const mediaCaption = value.media?.caption || value.media?.media_product_type || null;
 
           if (!commentId || !messageText) continue;
           // Skip own comments
@@ -291,9 +292,9 @@ async function processWebhook(body: any) {
             continue;
           }
 
-          console.log(`Processing IG comment ${commentId}: "${messageText}" from ${commenterName}`);
+          console.log(`Processing IG comment ${commentId} on media ${mediaId}: "${messageText}" from ${commenterName}`);
           try {
-            await handleInstagramComment(supabase, igUserId, commentId, messageText, commenterName, commenterIgId, mediaId);
+            await handleInstagramComment(supabase, igUserId, commentId, messageText, commenterName, commenterIgId, mediaId, mediaCaption);
           } catch (err) {
             console.error(`Error handling IG comment ${commentId}:`, err);
           }
