@@ -905,6 +905,7 @@ export type Database = {
           meta_phone_number_id: string | null
           metadata: Json | null
           name: string
+          openclaw_drafter: boolean
           openclaw_last_heartbeat: string | null
           openclaw_mode: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns: Json
@@ -950,6 +951,7 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name: string
+          openclaw_drafter?: boolean
           openclaw_last_heartbeat?: string | null
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
@@ -995,6 +997,7 @@ export type Database = {
           meta_phone_number_id?: string | null
           metadata?: Json | null
           name?: string
+          openclaw_drafter?: boolean
           openclaw_last_heartbeat?: string | null
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
