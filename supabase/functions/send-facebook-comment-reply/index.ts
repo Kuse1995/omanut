@@ -119,13 +119,13 @@ serve(async (req) => {
       }
 
       const { data: fbPage, error: pageError } = await supabase
-        .from("facebook_pages")
-        .select("page_access_token")
+        .from("meta_credentials")
+        .select("access_token")
         .eq("page_id", originalComment.page_id)
-        .single();
+        .maybeSingle();
 
-      if (pageError || !fbPage?.page_access_token) {
-        return new Response(JSON.stringify({ error: "Facebook page configuration not found" }), {
+      if (pageError || !fbPage?.access_token) {
+        return new Response(JSON.stringify({ error: "Facebook page configuration not found", details: pageError }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
