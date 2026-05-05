@@ -1,6 +1,12 @@
 project_id = "dzheddvoiauevcayifev"
 
 [functions]
+  [functions.openclaw-reply]
+    verify_jwt = false
+  [functions.openclaw-dispatch]
+    verify_jwt = false
+  [functions.openclaw-pending-trigger]
+    verify_jwt = false
   [functions.agent-api]
     verify_jwt = false
   [functions.ai-playground]
