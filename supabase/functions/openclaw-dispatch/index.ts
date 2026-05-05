@@ -115,17 +115,66 @@ Deno.serve(async (req) => {
         console.warn('[openclaw-dispatch] OPENCLAW_WEBHOOK_SECRET not set — sending unsigned');
       }
 
+      // Inbound events that need immediate agent action (don't wait for poll)
+      const inboundTriggers = new Set([
+        'inbound_message', 'inbound_dm', 'inbound_comment',
+        'whatsapp_inbound', 'meta_dm_inbound', 'comment_inbound',
+      ]);
+      const triggerNow = inboundTriggers.has(body.event_type) || body.channel === 'whatsapp' || body.channel === 'meta_dm' || body.channel === 'comments';
+
       const resp = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(sigHeader ? { 'X-Openclaw-Signature': sigHeader } : {}),
+          'X-Openclaw-Event-Id': event.id,
+          'X-Openclaw-Event-Type': body.event_type,
+          'X-Openclaw-Channel': body.channel,
+          ...(triggerNow ? { 'X-Openclaw-Trigger': 'process-now', 'X-Openclaw-Priority': 'immediate' } : {}),
         },
         body: bodyString,
         signal: AbortSignal.timeout(10_000),
       });
       dispatchStatus = resp.ok ? 'delivered' : `http_${resp.status}`;
       if (!resp.ok) dispatchError = (await resp.text()).slice(0, 500);
+
+      // Fire a second, lightweight execute-ping so OpenClaw runs its loop immediately
+      // instead of waiting for a poll cycle. Best-effort, non-blocking on failure.
+      if (triggerNow) {
+        const executeUrl = webhookUrl.endsWith('/webhook')
+          ? webhookUrl.slice(0, -'/webhook'.length) + '/execute'
+          : webhookUrl.replace(/\/+$/, '') + '/execute';
+        const pingBody = JSON.stringify({
+          event_id: event.id,
+          company_id: company.id,
+          channel: body.channel,
+          event_type: body.event_type,
+          conversation_id: body.conversation_id ?? null,
+          reason: 'inbound_event_trigger',
+          dispatched_at: new Date().toISOString(),
+        });
+        let pingSig: string | null = null;
+        if (secret) {
+          const enc2 = new TextEncoder();
+          const k2 = await crypto.subtle.importKey('raw', enc2.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+          const sb = await crypto.subtle.sign('HMAC', k2, enc2.encode(pingBody));
+          pingSig = 'sha256=' + Array.from(new Uint8Array(sb)).map((b) => b.toString(16).padStart(2, '0')).join('');
+        }
+        // Don't await — fire and forget, but log outcome
+        fetch(executeUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Openclaw-Trigger': 'process-now',
+            'X-Openclaw-Event-Id': event.id,
+            ...(pingSig ? { 'X-Openclaw-Signature': pingSig } : {}),
+          },
+          body: pingBody,
+          signal: AbortSignal.timeout(5_000),
+        })
+          .then((r) => console.log('[openclaw-dispatch] execute-ping', executeUrl, r.status))
+          .catch((e) => console.warn('[openclaw-dispatch] execute-ping failed', executeUrl, String(e).slice(0, 200)));
+      }
     } catch (e) {
       dispatchStatus = 'error';
       dispatchError = String(e).slice(0, 500);
