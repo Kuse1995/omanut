@@ -1047,16 +1047,25 @@ async function handleInstagramComment(
   commenterName: string,
   commenterIgId: string,
   mediaId: string | undefined,
+  prefetchedCaption: string | null = null,
 ) {
   const cred = await getIgCredentials(supabase, igUserId);
   if (!cred) return;
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  // Fetch original media caption so the reply is anchored to the post
+  let postCaption = prefetchedCaption;
+  if (!postCaption && mediaId) {
+    const ctx = await fetchPostContext(mediaId, access_token, 'instagram');
+    postCaption = ctx?.caption || null;
+  }
+
   if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
     console.log(`[OPENCLAW-PRIMARY] IG comment ${commentId} -> OpenClaw`);
     await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
       platform: 'instagram', ig_user_id: igUserId, comment_id: commentId, media_id: mediaId,
+      post_caption: postCaption,
       text: messageText, commenter_name: commenterName, commenter_id: commenterIgId,
     });
     return;
@@ -1066,7 +1075,9 @@ async function handleInstagramComment(
     ? await buildCompanySystemPrompt(supabase, companyId, ai_system_prompt, 'instagram_comment')
     : ai_system_prompt || '';
 
-  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment');
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'instagram_comment', [], {
+    postCaption,
+  });
   if (!aiReply) {
     console.error('AI returned empty reply for IG comment, skipping');
     return;
