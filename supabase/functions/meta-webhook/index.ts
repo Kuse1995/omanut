@@ -179,6 +179,8 @@ async function processWebhook(body: any) {
             const messageText = value.message;
             const commenterName = value.from?.name || 'User';
             const commenterFbId = value.from?.id;
+            const postId = value.post_id || value.parent_id || null;
+            const parentCommentText = value.parent?.message || null;
 
             if (!commentId || !messageText) continue;
             if (commenterFbId === pageId) {
@@ -186,9 +188,9 @@ async function processWebhook(body: any) {
               continue;
             }
 
-            console.log(`Processing FB comment ${commentId}: "${messageText}" from ${commenterName}`);
+            console.log(`Processing FB comment ${commentId} on post ${postId}: "${messageText}" from ${commenterName}`);
             try {
-              await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId);
+              await handleComment(supabase, pageId, commentId, messageText, commenterName, commenterFbId, postId, parentCommentText);
             } catch (err) {
               console.error(`Error handling comment ${commentId}:`, err);
             }
