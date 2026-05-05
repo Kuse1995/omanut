@@ -98,14 +98,45 @@ Deno.serve(async (req) => {
       const customerName = p.profile_name ?? p.customer_name ?? p.commenter_name ?? null;
       const inboundText = p.body ?? p.text ?? p.message ?? null;
 
+      // DRAFTER MODE: load recent history so OpenClaw can draft a contextual reply in one shot.
+      let recentHistory: Array<{ role: string; content: string; at: string }> = [];
+      if (company.openclaw_drafter && body.conversation_id) {
+        try {
+          const { data: msgs } = await supabase
+            .from('messages')
+            .select('role, content, created_at')
+            .eq('conversation_id', body.conversation_id)
+            .order('created_at', { ascending: false })
+            .limit(8);
+          recentHistory = (msgs ?? []).reverse().map((m: any) => ({
+            role: m.role, content: (m.content ?? '').slice(0, 1000), at: m.created_at,
+          }));
+        } catch (e) {
+          console.warn('[openclaw-dispatch] history load failed', String(e).slice(0, 200));
+        }
+      }
+
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const replyToUrl = `${supabaseUrl}/functions/v1/openclaw-reply`;
+
       const bodyString = JSON.stringify({
         event_id: event.id,
         company_id: company.id,
         company_name: company.name,
+        company_brief: {
+          business_type: (company as any).business_type ?? null,
+          sales_mode: (company as any).metadata?.sales_mode ?? null,
+        },
         channel: body.channel,
         event_type: body.event_type,
         skill: body.skill,
         conversation_id: body.conversation_id,
+        // Drafter mode signals
+        drafter_mode: !!company.openclaw_drafter,
+        reply_to_url: replyToUrl,
+        reply_instructions: company.openclaw_drafter
+          ? `Draft a reply for the customer and POST it to reply_to_url with body { event_id, reply_text, action: "send" } and header X-Openclaw-Signature: sha256=<HMAC-SHA256 of body using OPENCLAW_WEBHOOK_SECRET>. Do NOT send via Twilio. Use action: "handoff" to escalate to the boss, or "skip" to ignore.`
+          : null,
         // Top-level convenience fields for the agent
         process_now: triggerNow,
         wake: triggerNow,
@@ -113,6 +144,7 @@ Deno.serve(async (req) => {
         customer_phone: customerPhone,
         customer_name: customerName,
         inbound_text: inboundText,
+        recent_history: recentHistory,
         // Original payload preserved
         payload: p,
         dispatched_at: new Date().toISOString(),
