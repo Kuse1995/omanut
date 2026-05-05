@@ -136,7 +136,7 @@ serve(async (req) => {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${fbPage.page_access_token}`,
+            Authorization: `Bearer ${fbPage.access_token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ message: draft.ai_reply }),
