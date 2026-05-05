@@ -1,68 +1,66 @@
-# Fix: OpenClaw can't see Omanut knowledge in Drafter Mode
+# Fix: OpenClaw can't find KB info — make it use its tools
 
-## Root cause
+## Real root cause
 
-The `openclaw-dispatch` payload sends almost nothing about the company:
+You are right — OpenClaw already has tools. They just don't see the data, for two reasons:
 
-```json
-"company_brief": { "business_type": "school", "sales_mode": null }
-```
+1. **`search_knowledge_base` MCP tool only scans `company_documents.parsed_content`.**
+   North Park's tuition fees live in `companies.quick_reference_info` (the curated KB editor in the dashboard), NOT in `company_documents`. So even if the agent calls `search_knowledge_base("tuition")`, it returns `[]` — the field it's searching is empty for most companies.
 
-It does NOT include `quick_reference_info` (the full KB where North Park's tuition fees live), nor BMS data, nor a way to look it up live. So when a parent asks "How much is tuition?", OpenClaw has no source material and answers blank.
+2. **The dispatch payload tries to do the work for the agent** (12k KB blob inlined, top-level duplicates, "MANDATORY RULE…" prompts). The agent ignores the blob and falls back to a templated "contact admissions". Stuffing more context has not fixed this — we already tried twice.
 
-Meanwhile our internal AI gets all of this stitched in by `whatsapp-messages` before calling the model. Drafter Mode bypassed that step.
+Your instinct is correct: stop pre-stuffing, make the agent fetch what it needs through tools that actually return the right data.
 
-## Fix — two layers
+## Plan
 
-### 1. Inline the knowledge base in every dispatch (fast win)
+### 1. Fix `search_knowledge_base` so it actually finds KB content
 
-Update `openclaw-dispatch/index.ts` so the payload includes a real `company_context` block:
+Update the MCP tool in `supabase/functions/mcp-server/index.ts` to scan **all** company knowledge sources, mirroring what `openclaw-lookup`'s `search_kb` already does:
 
-- `quick_reference_info` (truncated to ~8k chars) — the curated KB
-- `payment_instructions`, `payment_number_*`, `currency_prefix`
-- `services`, `service_locations`, `hours`, `branches`
-- `business_type`, `sales_mode`, `voice_style`
-- BMS snapshot (when a `bms_connections` row exists for the company): call `bms-training-sync` once and cache the `formatted_text` on `bms_connections.last_kb_text` / `last_bms_sync_at` (already stamped). Reuse the cached text if synced <15 min ago, else re-sync. Send as `bms_snapshot`.
-- `kb_version_hash` so OpenClaw can cache on its side.
+- `companies.quick_reference_info` (the big curated KB — this is where tuition fees live)
+- `companies.payment_instructions`
+- `companies.services`, `hours`, `branches`, `service_locations`
+- `bms_connections.last_kb_text` (live BMS catalog snapshot)
+- `company_documents.parsed_content` (existing behavior)
 
-Add to `reply_instructions`: "Answer ONLY from `company_context` and `bms_snapshot`. If the answer isn't there, call the lookup endpoint or return `action: 'handoff'`."
+Return ranked snippets (paragraph-level, scored by keyword hits, top 8) tagged with their source. Same algorithm as `openclaw-lookup`, just exposed as the MCP tool the agent already knows about.
 
-### 2. Live lookup endpoint (for fresh stock / things not in KB)
+### 2. Add a real BMS-aware lookup tool to MCP
 
-New edge function `openclaw-lookup` (HMAC-signed, same secret):
+Add `search_bms_catalog` (or extend `bms_list_products` / `bms_check_stock` with a free-text `query`) so the agent can answer "do you have X?" without needing to know exact product names.
 
-POST body:
-```json
-{ "company_id": "...", "intent": "check_stock" | "list_products" | "search_kb" | "get_pricing", "query": "tuition grade 3" }
-```
+### 3. Slim the dispatch payload + tell the agent to use tools
 
-- `search_kb` → simple ILIKE / vector search across `quick_reference_info` + `company_documents.parsed_content` (we already have `match_documents` RPC).
-- `check_stock` / `list_products` / `get_sales_summary` → proxy to the company's BMS bridge via `_shared/bms-connection.ts` (same pattern as `bms-training-sync`).
+In `supabase/functions/openclaw-dispatch/index.ts`:
 
-The dispatch payload exposes this URL as `lookup_url` so the agent can fetch on demand instead of us shipping the entire BMS catalog every message.
+- **Stop inlining `knowledge_base` (12k chars) and `bms_catalog`** at the top level. Keep only a tiny `kb_summary` (first 800 chars) as a hint of what's available.
+- Replace the long "MANDATORY RULE" prose with a short, tool-first instruction:
 
-### 3. Surface in OPENCLAW_INTEGRATION.md
+  > "Before drafting, call `search_knowledge_base({ query })` for any factual question (fees, prices, hours, policies, contacts). For product/stock questions also call `bms_check_stock` or `bms_list_products`. Quote what you find verbatim. Only escalate via `action: 'handoff'` if both tools return empty."
 
-Document the new `company_context`, `bms_snapshot`, and `lookup_url` fields with an example call and the HMAC scheme (already used for `reply_to_url`).
+- Keep `lookup_url` as a fallback for agents that prefer direct HTTP, but the primary path is MCP tools (faster, already authenticated, already in the agent's context).
+
+### 4. Update `OPENCLAW_INTEGRATION.md` and `openclaw-skill.json`
+
+- Document the expanded `search_knowledge_base` behavior (now scans curated KB + BMS, not just documents).
+- Add a "Drafter Mode workflow" section: receive event → `search_knowledge_base` → optional BMS tool → draft → POST to `reply_to_url`.
 
 ## Technical details
 
-**Files to edit / create**
-- `supabase/functions/openclaw-dispatch/index.ts` — add `company_context`, `bms_snapshot`, `lookup_url`, beef up `reply_instructions`
-- `supabase/functions/openclaw-lookup/index.ts` — NEW; HMAC-verified; routes to KB search or BMS bridge
-- `supabase/functions/_shared/bms-connection.ts` — already has loader, reuse
-- `OPENCLAW_INTEGRATION.md` — document new fields
+**Files**
+- `supabase/functions/mcp-server/index.ts` — rewrite `search_knowledge_base` handler; optionally add `search_bms_catalog`
+- `supabase/functions/openclaw-dispatch/index.ts` — drop the 12k inline KB/BMS, shorten `reply_instructions`, keep `lookup_url` as fallback
+- `OPENCLAW_INTEGRATION.md` + `openclaw-skill.json` — document new behavior
 
-**Schema**
-- Add `bms_connections.last_kb_text text` (cache) — single migration. No other schema changes.
+**No schema changes.** `bms_connections.last_kb_text` already exists from the previous migration.
 
-**Caching strategy**
-- BMS snapshot: refresh every 15 min per company on dispatch (cheap — most calls hit cache).
-- KB text: read live from `companies.quick_reference_info` (already in DB, no extra fetch).
-
-**Why not push everything to OpenClaw once?**
-The agent has no per-company memory we control, and KB / BMS change. Re-sending on each event keeps the agent stateless and avoids stale answers like the tuition-fee miss.
+**Why this fixes North Park's miss**
+- Today: agent receives "knowledge_base: <12k blob>", ignores it, says "contact admissions". `search_knowledge_base("tuition")` returns `[]` because the data isn't in `company_documents`.
+- After: agent calls `search_knowledge_base("grade 7 fees")` → tool scans `quick_reference_info` → returns the "Grade 5–7 – K2,100" paragraph with source tag → agent quotes it.
 
 ## Validation
 
-After deploy: send "how much is tuition for grade 3?" to North Park's WhatsApp. Expect the dispatched payload (visible in `openclaw_events.payload`) to contain the tuition section, and the drafted reply to quote the actual K-amount from `quick_reference_info`.
+After deploy, ask North Park: "how much is grade 5 fees?"
+- Inspect `openclaw_events.payload` — should be small, no 12k blob.
+- Inspect MCP tool call logs — should see a `search_knowledge_base` call.
+- Reply should contain the exact K-amount from `quick_reference_info`.
