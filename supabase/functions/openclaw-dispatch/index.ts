@@ -156,6 +156,83 @@ Deno.serve(async (req) => {
 
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
       const replyToUrl = `${supabaseUrl}/functions/v1/openclaw-reply`;
+      const lookupUrl = `${supabaseUrl}/functions/v1/openclaw-lookup`;
+
+      // Build the company knowledge context that the drafter needs to answer factually.
+      const c: any = company;
+      const companyContext = company.openclaw_drafter ? {
+        name: c.name,
+        business_type: c.business_type ?? null,
+        sales_mode: c.metadata?.sales_mode ?? null,
+        voice_style: c.voice_style ?? null,
+        currency_prefix: c.currency_prefix ?? null,
+        services: c.services ?? null,
+        service_locations: c.service_locations ?? null,
+        hours: c.hours ?? null,
+        branches: c.branches ?? null,
+        payment_instructions: c.payment_instructions ?? null,
+        payment_numbers: {
+          airtel: c.payment_number_airtel ?? null,
+          mtn: c.payment_number_mtn ?? null,
+          zamtel: c.payment_number_zamtel ?? null,
+        },
+        payments_disabled: !!c.payments_disabled,
+        // The big curated KB — truncate defensively to keep payload reasonable.
+        knowledge_base: typeof c.quick_reference_info === 'string'
+          ? c.quick_reference_info.slice(0, 12000)
+          : null,
+        knowledge_base_truncated: typeof c.quick_reference_info === 'string' && c.quick_reference_info.length > 12000,
+      } : null;
+
+      // BMS snapshot — refresh via bms-training-sync if cache is stale (>15 min).
+      let bmsSnapshot: { text: string; synced_at: string | null } | null = null;
+      if (company.openclaw_drafter) {
+        try {
+          const { data: bmsRow } = await supabase
+            .from('bms_connections')
+            .select('last_kb_text, last_bms_sync_at, is_active')
+            .eq('company_id', company.id)
+            .eq('is_active', true)
+            .maybeSingle();
+          if (bmsRow) {
+            const stale = !bmsRow.last_bms_sync_at ||
+              (Date.now() - new Date(bmsRow.last_bms_sync_at).getTime()) > 15 * 60 * 1000;
+            if (stale || !bmsRow.last_kb_text) {
+              // Fire training sync and capture formatted_text.
+              try {
+                const syncRes = await fetch(`${supabaseUrl}/functions/v1/bms-training-sync`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!}`,
+                  },
+                  body: JSON.stringify({ company_id: company.id }),
+                  signal: AbortSignal.timeout(8_000),
+                });
+                const syncJson: any = await syncRes.json().catch(() => ({}));
+                if (syncJson?.formatted_text) {
+                  await supabase
+                    .from('bms_connections')
+                    .update({ last_kb_text: syncJson.formatted_text })
+                    .eq('company_id', company.id);
+                  bmsSnapshot = { text: syncJson.formatted_text.slice(0, 8000), synced_at: new Date().toISOString() };
+                } else if (bmsRow.last_kb_text) {
+                  bmsSnapshot = { text: bmsRow.last_kb_text.slice(0, 8000), synced_at: bmsRow.last_bms_sync_at };
+                }
+              } catch (e) {
+                console.warn('[openclaw-dispatch] bms sync failed, using cache', String(e).slice(0, 200));
+                if (bmsRow.last_kb_text) {
+                  bmsSnapshot = { text: bmsRow.last_kb_text.slice(0, 8000), synced_at: bmsRow.last_bms_sync_at };
+                }
+              }
+            } else {
+              bmsSnapshot = { text: bmsRow.last_kb_text.slice(0, 8000), synced_at: bmsRow.last_bms_sync_at };
+            }
+          }
+        } catch (e) {
+          console.warn('[openclaw-dispatch] bms snapshot load failed', String(e).slice(0, 200));
+        }
+      }
 
       const bodyString = JSON.stringify({
         event_id: event.id,
