@@ -242,6 +242,11 @@ Deno.serve(async (req) => {
           business_type: (company as any).business_type ?? null,
           sales_mode: (company as any).metadata?.sales_mode ?? null,
         },
+        // Full company knowledge (drafter mode only) — answer customer questions from this.
+        company_context: companyContext,
+        bms_snapshot: bmsSnapshot,
+        lookup_url: company.openclaw_drafter ? lookupUrl : null,
+        lookup_intents: company.openclaw_drafter ? ['search_kb', 'check_stock', 'list_products', 'get_pricing', 'low_stock_alerts', 'get_sales_summary'] : null,
         channel: body.channel,
         event_type: body.event_type,
         skill: body.skill,
@@ -250,7 +255,14 @@ Deno.serve(async (req) => {
         drafter_mode: !!company.openclaw_drafter,
         reply_to_url: replyToUrl,
         reply_instructions: company.openclaw_drafter
-          ? `Draft a reply for the customer and POST it to reply_to_url with body { event_id, reply_text, action: "send" } and header X-Openclaw-Signature: sha256=<HMAC-SHA256 of body using OPENCLAW_WEBHOOK_SECRET>. Do NOT send via Twilio. Use action: "handoff" to escalate to the boss, or "skip" to ignore.`
+          ? [
+              `You are drafting a reply on behalf of ${company.name}.`,
+              `ANSWER FROM SOURCES IN THIS PAYLOAD ONLY: company_context.knowledge_base, company_context.payment_instructions, bms_snapshot, and recent_history. Do NOT invent prices, fees, schedules, stock, or policies.`,
+              `If the customer asks about something not in company_context or bms_snapshot, POST to lookup_url first with body { company_id, intent, query } and header X-Openclaw-Signature: sha256=<HMAC-SHA256 of body using OPENCLAW_WEBHOOK_SECRET>. Use intent "search_kb" for fees/policies/info, "check_stock"/"list_products" for products.`,
+              `Once ready, POST the reply to reply_to_url with body { event_id, reply_text, action: "send" } and the same X-Openclaw-Signature header. Do NOT send via Twilio yourself.`,
+              `Use action: "handoff" only if the question genuinely cannot be answered from any source. Use action: "skip" to ignore.`,
+              `Match the company voice_style. Keep replies short (1-3 sentences) unless quoting a fee schedule.`,
+            ].join(' ')
           : null,
         // Top-level convenience fields for the agent
         process_now: triggerNow,
