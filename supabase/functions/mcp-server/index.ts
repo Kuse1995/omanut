@@ -777,22 +777,56 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   });
 
   // ── search_knowledge_base ──
+  // Scans ALL company knowledge sources (curated KB, payment info, services, hours,
+  // BMS catalog snapshot, uploaded documents) and returns ranked paragraph snippets.
   server.tool("search_knowledge_base", {
-    description: "Search company documents by keyword in parsed content.",
+    description: "Search the company's full knowledge base for an answer (tuition fees, prices, hours, policies, payment numbers, services, products). Scans curated KB, payment instructions, services/hours/branches, BMS catalog snapshot, and uploaded documents. Returns ranked snippets tagged by source. Call this BEFORE drafting any factual reply.",
     inputSchema: z.object({
-      query: z.string().describe("Search keyword"),
-      limit: z.number().optional(),
+      query: z.string().describe("Free-text search query (e.g. 'grade 7 fees', 'opening hours', 'mtn payment number')"),
+      limit: z.number().optional().describe("Max snippets to return (default 8)"),
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      const { data, error } = await supabase
-        .from("company_documents")
-        .select("id, filename, file_type, parsed_content, created_at")
-        .eq("company_id", companyId)
-        .ilike("parsed_content", `%${params.query}%`)
-        .limit(params?.limit || 10);
-      if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ documents: data }, null, 2) }] };
+      const q = String(params.query ?? "").trim();
+      if (!q) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "missing_query" }) }] };
+
+      const [{ data: company }, { data: docs }, { data: bmsRow }] = await Promise.all([
+        supabase.from("companies").select("name, quick_reference_info, payment_instructions, services, hours, branches, service_locations, currency_prefix, business_type").eq("id", companyId).maybeSingle(),
+        supabase.from("company_documents").select("filename, parsed_content").eq("company_id", companyId).limit(20),
+        supabase.from("bms_connections").select("last_kb_text").eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+      ]);
+
+      const terms = q.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+      const matches: Array<{ source: string; snippet: string; score: number }> = [];
+      const scan = (source: string, text: string | null | undefined) => {
+        if (!text) return;
+        const paragraphs = text.split(/\n{2,}|\r\n\r\n/);
+        for (const p of paragraphs) {
+          const lower = p.toLowerCase();
+          let score = 0;
+          for (const t of terms) if (lower.includes(t)) score++;
+          if (score > 0) matches.push({ source, snippet: p.trim().slice(0, 800), score });
+        }
+      };
+
+      scan("quick_reference_info", company?.quick_reference_info);
+      scan("payment_instructions", company?.payment_instructions);
+      scan("services", company?.services);
+      scan("hours", company?.hours);
+      scan("branches", company?.branches);
+      scan("service_locations", company?.service_locations);
+      scan("bms_catalog", bmsRow?.last_kb_text);
+      for (const d of docs ?? []) scan(`document:${d.filename}`, d.parsed_content);
+
+      matches.sort((a, b) => b.score - a.score);
+      const limit = params?.limit ?? 8;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        query: q,
+        company_name: company?.name ?? null,
+        result_count: matches.length,
+        results: matches.slice(0, limit),
+        hint: matches.length === 0 ? "No matches. Try broader keywords or call bms_list_products / bms_check_stock for product/inventory questions." : undefined,
+      }, null, 2) }] };
     },
   });
 
