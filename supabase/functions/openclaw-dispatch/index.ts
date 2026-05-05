@@ -98,6 +98,44 @@ Deno.serve(async (req) => {
       const customerName = p.profile_name ?? p.customer_name ?? p.commenter_name ?? null;
       const inboundText = p.body ?? p.text ?? p.message ?? null;
 
+      // Extract inbound media URLs. Sources (in priority order):
+      //   1. payload.media_urls / payload.mediaUrls   (already-normalized array)
+      //   2. payload.MediaUrl0..MediaUrlN              (raw Twilio webhook fields)
+      //   3. message_metadata.media_urls on the latest inbound DB row
+      const collectedMedia: string[] = [];
+      const pushUrl = (u: any) => { if (typeof u === 'string' && u.startsWith('http')) collectedMedia.push(u); };
+      if (Array.isArray(p.media_urls)) p.media_urls.forEach(pushUrl);
+      if (Array.isArray(p.mediaUrls)) p.mediaUrls.forEach(pushUrl);
+      for (let i = 0; i < 10; i++) pushUrl(p[`MediaUrl${i}`]);
+
+      if (collectedMedia.length === 0 && body.conversation_id) {
+        try {
+          const { data: lastMsg } = await supabase
+            .from('messages')
+            .select('message_metadata')
+            .eq('conversation_id', body.conversation_id)
+            .eq('role', 'user')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const meta: any = lastMsg?.message_metadata ?? {};
+          if (Array.isArray(meta.media_urls)) meta.media_urls.forEach(pushUrl);
+        } catch (e) {
+          console.warn('[openclaw-dispatch] media metadata load failed', String(e).slice(0, 200));
+        }
+      }
+
+      // Twilio media URLs require basic auth — inline the credentials so OpenClaw
+      // can fetch with a plain GET. Meta media URLs are signed and pass through.
+      const twSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
+      const twTok = Deno.env.get('TWILIO_AUTH_TOKEN') ?? '';
+      const inboundMediaUrls = collectedMedia.map((url) => {
+        if (twSid && twTok && url.includes('api.twilio.com') && !url.includes('@')) {
+          return url.replace('https://', `https://${twSid}:${twTok}@`);
+        }
+        return url;
+      });
+
       // DRAFTER MODE: load recent history so OpenClaw can draft a contextual reply in one shot.
       let recentHistory: Array<{ role: string; content: string; at: string }> = [];
       if (company.openclaw_drafter && body.conversation_id) {
@@ -144,6 +182,11 @@ Deno.serve(async (req) => {
         customer_phone: customerPhone,
         customer_name: customerName,
         inbound_text: inboundText,
+        inbound: {
+          text: inboundText,
+          media_urls: inboundMediaUrls,
+          media_count: inboundMediaUrls.length,
+        },
         recent_history: recentHistory,
         // Original payload preserved
         payload: p,
