@@ -78,8 +78,8 @@ async function processWebhook(body: any) {
           const val = change.value;
           if (val.item !== "comment" || val.verb !== "add" || val.from?.id === pageId) continue;
 
-          // === THE FIX: PERSIST TO DB BEFORE DISPATCH ===
-          await supabase.from("facebook_comments").upsert(
+          // === PERSIST TO DB BEFORE DISPATCH (autonomous reply requires this row) ===
+          const { error: upsertErr } = await supabase.from("facebook_comments").upsert(
             {
               comment_id: val.comment_id,
               post_id: val.post_id,
@@ -88,9 +88,21 @@ async function processWebhook(body: any) {
               comment_text: val.message,
               commenter_name: val.from?.name,
               commenter_id: val.from?.id,
+              parent_comment_id: val.parent_id ?? null,
             },
             { onConflict: "comment_id" },
           );
+          if (upsertErr) {
+            console.error("[meta-webhook] facebook_comments upsert FAILED", {
+              comment_id: val.comment_id,
+              page_id: pageId,
+              company_id: pageCred.company_id,
+              error: upsertErr,
+            });
+            // Skip dispatch — autonomous reply would fail without the row
+            continue;
+          }
+          console.log("[meta-webhook] persisted comment", val.comment_id, "company", pageCred.company_id);
 
           await handleComment(supabase, pageId, val.comment_id, val.message, val.from?.name, val.from?.id, val.post_id);
         }
