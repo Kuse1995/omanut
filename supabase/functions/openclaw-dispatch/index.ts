@@ -234,6 +234,10 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Surface KB at top-level too (some agent parsers miss nested fields)
+      const kbText = companyContext?.knowledge_base ?? null;
+      const bmsText = bmsSnapshot?.text ?? null;
+
       const bodyString = JSON.stringify({
         event_id: event.id,
         company_id: company.id,
@@ -245,6 +249,9 @@ Deno.serve(async (req) => {
         // Full company knowledge (drafter mode only) — answer customer questions from this.
         company_context: companyContext,
         bms_snapshot: bmsSnapshot,
+        // TOP-LEVEL duplicates so the agent can't miss them
+        knowledge_base: kbText,
+        bms_catalog: bmsText,
         lookup_url: company.openclaw_drafter ? lookupUrl : null,
         lookup_intents: company.openclaw_drafter ? ['search_kb', 'check_stock', 'list_products', 'get_pricing', 'low_stock_alerts', 'get_sales_summary'] : null,
         channel: body.channel,
@@ -256,12 +263,13 @@ Deno.serve(async (req) => {
         reply_to_url: replyToUrl,
         reply_instructions: company.openclaw_drafter
           ? [
-              `You are drafting a reply on behalf of ${company.name}.`,
-              `ANSWER FROM SOURCES IN THIS PAYLOAD ONLY: company_context.knowledge_base, company_context.payment_instructions, bms_snapshot, and recent_history. Do NOT invent prices, fees, schedules, stock, or policies.`,
-              `If the customer asks about something not in company_context or bms_snapshot, POST to lookup_url first with body { company_id, intent, query } and header X-Openclaw-Signature: sha256=<HMAC-SHA256 of body using OPENCLAW_WEBHOOK_SECRET>. Use intent "search_kb" for fees/policies/info, "check_stock"/"list_products" for products.`,
-              `Once ready, POST the reply to reply_to_url with body { event_id, reply_text, action: "send" } and the same X-Openclaw-Signature header. Do NOT send via Twilio yourself.`,
-              `Use action: "handoff" only if the question genuinely cannot be answered from any source. Use action: "skip" to ignore.`,
-              `Match the company voice_style. Keep replies short (1-3 sentences) unless quoting a fee schedule.`,
+              `CRITICAL: You ARE the official ${company.name} agent. The full knowledge base is provided in the "knowledge_base" field of THIS payload (also at company_context.knowledge_base). READ IT before replying.`,
+              `MANDATORY RULE: Before drafting any reply that says "contact admissions/sales/the team", you MUST first scan knowledge_base and bms_catalog for the answer. If the answer is present (fees, prices, hours, policies, products, schedules, contact info, etc.), QUOTE IT DIRECTLY. Redirecting the customer when the answer is in the KB is a failure.`,
+              `Examples of what to look for in knowledge_base: tuition fees per grade, registration fees, payment account numbers, uniform costs, transport charges, hours, contact numbers, location, services. If the customer asks "fees for grade 7" and knowledge_base lists "Grade 5–7 – K2,100", reply with that exact figure plus mandatory charges.`,
+              `Only if the answer is genuinely absent from knowledge_base AND bms_catalog: POST to lookup_url with { company_id, intent: "search_kb", query: "<keywords>" } and header X-Openclaw-Signature: sha256=<HMAC-SHA256 of body using OPENCLAW_WEBHOOK_SECRET>. Use intent "check_stock" or "list_products" for product/inventory queries.`,
+              `When ready, POST the reply to reply_to_url with body { event_id, reply_text, action: "send" } and the same X-Openclaw-Signature header. Do NOT send via Twilio yourself.`,
+              `Use action: "handoff" ONLY if the question cannot be answered from knowledge_base, bms_catalog, OR a lookup_url call. Generic "contact admissions" replies when the data is in the KB are forbidden.`,
+              `Match the company voice_style. 1-3 sentences for simple questions; quote the full schedule when asked about fees/pricing.`,
             ].join(' ')
           : null,
         // Top-level convenience fields for the agent
