@@ -30,6 +30,11 @@ OpenClaw's only job is to **draft a reply** and POST it back.
   "customer_phone": "+260977...",
   "customer_name": "Abraham",
   "inbound_text": "do you have stout?",
+  "inbound": {
+    "text": "do you have stout?",
+    "media_urls": ["https://SID:TOKEN@api.twilio.com/.../Media/ME..."],
+    "media_count": 1
+  },
   "recent_history": [
     { "role": "user",      "content": "hi", "at": "2026-05-05T15:08:00Z" },
     { "role": "assistant", "content": "Hello! How can we help?", "at": "..." }
@@ -37,6 +42,10 @@ OpenClaw's only job is to **draft a reply** and POST it back.
   "payload": { "...original Twilio/Meta payload..." }
 }
 ```
+
+> **Media**: `inbound.media_urls[]` contains every image/audio/video the customer just sent.
+> Twilio URLs are pre-authenticated (basic-auth credentials inlined) — fetch them with a plain GET.
+> Meta URLs are signed by Meta and also work with a plain GET.
 
 ## Reply payload (POST to `reply_to_url`)
 
