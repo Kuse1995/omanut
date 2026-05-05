@@ -1,0 +1,1 @@
+ALTER TABLE public.companies ALTER COLUMN openclaw_mode SET DEFAULT 'primary'; ALTER TABLE public.companies ALTER COLUMN openclaw_owns SET DEFAULT '{"bms":true,"content":true,"handoff":true,"meta_dm":true,"comments":true,"whatsapp":true}'::jsonb;
