@@ -836,6 +836,36 @@ async function saveInteraction(
   triggerLeadAlert(companyId, conversationId, platform, customerName, userMessage);
 }
 
+// ── Fetch post context (caption + image) from Meta Graph API ──
+async function fetchPostContext(
+  postId: string | null,
+  accessToken: string,
+  platform: 'facebook' | 'instagram',
+): Promise<{ caption: string | null; permalink: string | null } | null> {
+  if (!postId) return null;
+  try {
+    const fields = platform === 'instagram'
+      ? 'caption,media_type,permalink'
+      : 'message,story,permalink_url';
+    const resp = await fetch(
+      `https://graph.facebook.com/v25.0/${postId}?fields=${fields}&access_token=${accessToken}`,
+    );
+    if (!resp.ok) {
+      console.warn(`[meta-webhook] fetchPostContext ${postId} failed: ${resp.status}`);
+      return null;
+    }
+    const data = await resp.json();
+    const caption = platform === 'instagram'
+      ? (data.caption || null)
+      : (data.message || data.story || null);
+    const permalink = data.permalink || data.permalink_url || null;
+    return { caption, permalink };
+  } catch (err) {
+    console.error('[meta-webhook] fetchPostContext error:', err);
+    return null;
+  }
+}
+
 // ── Handle Facebook comment ──
 async function handleComment(
   supabase: any,
@@ -844,16 +874,23 @@ async function handleComment(
   messageText: string,
   commenterName: string,
   commenterFbId: string,
+  postId: string | null = null,
+  parentCommentText: string | null = null,
 ) {
   const cred = await getPageCredentials(supabase, pageId);
   if (!cred) return;
 
   const { access_token, ai_system_prompt, company_id: companyId } = cred;
 
+  // Fetch original post context so AI replies are anchored to the post
+  const postContext = await fetchPostContext(postId, access_token, 'facebook');
+  const postCaption = postContext?.caption || null;
+
   if (companyId && await openclawPrimaryFor(supabase, companyId, 'comments')) {
     console.log(`[OPENCLAW-PRIMARY] FB comment ${commentId} -> OpenClaw`);
     await dispatchToOpenclaw(supabase, companyId, 'comments', 'inbound_comment', {
-      platform: 'facebook', page_id: pageId, comment_id: commentId,
+      platform: 'facebook', page_id: pageId, comment_id: commentId, post_id: postId,
+      post_caption: postCaption, parent_comment_text: parentCommentText,
       text: messageText, commenter_name: commenterName, commenter_id: commenterFbId,
     });
     return;
@@ -864,7 +901,9 @@ async function handleComment(
     : ai_system_prompt || '';
 
 
-  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment');
+  const aiReply = await generateAIReply(messageText, commenterName, systemPrompt, 'comment', [], {
+    postCaption, parentCommentText,
+  });
   if (!aiReply) {
     console.error('AI returned empty reply, skipping');
     return;
