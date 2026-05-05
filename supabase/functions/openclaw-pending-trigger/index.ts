@@ -73,6 +73,11 @@ Deno.serve(async (req) => {
     const co = urlByCompany.get(ev.company_id);
     if (!co?.url) { skipped++; return; }
 
+    const p: any = ev.payload ?? {};
+    const customerPhone = p.from ?? p.phone ?? p.sender ?? null;
+    const customerName = p.profile_name ?? p.customer_name ?? p.commenter_name ?? null;
+    const inboundText = p.body ?? p.text ?? p.message ?? null;
+
     const body = JSON.stringify({
       event_id: ev.id,
       company_id: ev.company_id,
@@ -80,9 +85,14 @@ Deno.serve(async (req) => {
       channel: ev.channel,
       event_type: ev.event_type,
       conversation_id: ev.conversation_id,
-      payload: ev.payload ?? {},
-      reason: 'pending_retry',
-      trigger_count: (ev.trigger_count ?? 0) + 1,
+      process_now: true,
+      wake: true,
+      trigger_reason: 'pending_retry',
+      customer_phone: customerPhone,
+      customer_name: customerName,
+      inbound_text: inboundText,
+      payload: p,
+      retry: (ev.trigger_count ?? 0) + 1,
       dispatched_at: new Date().toISOString(),
     });
     const sig = secret ? await sign(secret, body) : null;
