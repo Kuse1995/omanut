@@ -243,6 +243,7 @@ Guidelines:
 - Be helpful and professional
 - Keep responses concise but warm
 - Address the customer's concern or question directly
+- If the message includes "[Comment on post: ...]", your reply MUST stay on-topic with that post. If it's a quiz/poll/prompt, react as a participant or host of THAT post — do not pivot to generic product/service pitches.
 - Never include hashtags unless relevant to the conversation
 - Do not include emojis unless the brand tone suggests it`;
 
