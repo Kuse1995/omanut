@@ -99,3 +99,60 @@ await fetch(reply_to_url, {
 `companies.openclaw_drafter` (boolean, default `true`).
 - `true`  → drafter mode (this doc).
 - `false` → legacy mode where OpenClaw sends directly via Twilio (kept as a fallback).
+
+---
+
+## Knowledge sources in the dispatch payload
+
+Every drafter-mode dispatch now includes everything the agent needs to answer factually — no more blank replies on questions like "what is the tuition?".
+
+### `company_context` (drafter mode only)
+
+```json
+"company_context": {
+  "name": "North Park School – Solwezi Campus",
+  "business_type": "school",
+  "sales_mode": null,
+  "voice_style": "...",
+  "currency_prefix": "K",
+  "services": "...",
+  "service_locations": "...",
+  "hours": "...",
+  "branches": "...",
+  "payment_instructions": "...",
+  "payment_numbers": { "airtel": "...", "mtn": "...", "zamtel": "..." },
+  "payments_disabled": false,
+  "knowledge_base": "About North Park School ... Tuition Fees per Term ...",
+  "knowledge_base_truncated": false
+}
+```
+
+`knowledge_base` is the curated KB (`companies.quick_reference_info`), capped at 12k chars.
+
+### `bms_snapshot` (when the company has an active BMS connection)
+
+```json
+"bms_snapshot": {
+  "text": "PRODUCTS & PRICING:\n- ...\nLOW STOCK ALERTS:\n- ...\nSALES OVERVIEW:\n- ...",
+  "synced_at": "2026-05-05T20:42:00Z"
+}
+```
+
+Refreshed lazily — if the cached snapshot on `bms_connections.last_kb_text` is older than 15 min, dispatch re-runs `bms-training-sync` before forwarding.
+
+### `lookup_url` — live lookup endpoint
+
+For anything not in `company_context` or `bms_snapshot`, POST to `lookup_url` (HMAC-signed exactly like `reply_to_url`):
+
+```
+POST /functions/v1/openclaw-lookup
+X-Openclaw-Signature: sha256=<HMAC-SHA256(body, OPENCLAW_WEBHOOK_SECRET)>
+
+{ "company_id": "...", "intent": "search_kb", "query": "tuition grade 3" }
+```
+
+Supported intents: `search_kb`, `check_stock`, `list_products`, `get_pricing`, `low_stock_alerts`, `get_sales_summary`.
+
+### Reply rule
+
+Per the new `reply_instructions`: the agent MUST source answers from `company_context` / `bms_snapshot` / `lookup_url` and only `action: "handoff"` when no source answers the question.
