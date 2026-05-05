@@ -73,6 +73,11 @@ Deno.serve(async (req) => {
     const co = urlByCompany.get(ev.company_id);
     if (!co?.url) { skipped++; return; }
 
+    const p: any = ev.payload ?? {};
+    const customerPhone = p.from ?? p.phone ?? p.sender ?? null;
+    const customerName = p.profile_name ?? p.customer_name ?? p.commenter_name ?? null;
+    const inboundText = p.body ?? p.text ?? p.message ?? null;
+
     const body = JSON.stringify({
       event_id: ev.id,
       company_id: ev.company_id,
@@ -80,9 +85,14 @@ Deno.serve(async (req) => {
       channel: ev.channel,
       event_type: ev.event_type,
       conversation_id: ev.conversation_id,
-      payload: ev.payload ?? {},
-      reason: 'pending_retry',
-      trigger_count: (ev.trigger_count ?? 0) + 1,
+      process_now: true,
+      wake: true,
+      trigger_reason: 'pending_retry',
+      customer_phone: customerPhone,
+      customer_name: customerName,
+      inbound_text: inboundText,
+      payload: p,
+      retry: (ev.trigger_count ?? 0) + 1,
       dispatched_at: new Date().toISOString(),
     });
     const sig = secret ? await sign(secret, body) : null;
@@ -111,13 +121,54 @@ Deno.serve(async (req) => {
       console.warn('[pending-trigger] re-ping failed', ev.id, String(e).slice(0, 200));
     }
 
+    const newCount = (ev.trigger_count ?? 0) + 1;
     await supabase
       .from('openclaw_events')
       .update({
         last_trigger_at: new Date().toISOString(),
-        trigger_count: (ev.trigger_count ?? 0) + 1,
+        trigger_count: newCount,
       })
       .eq('id', ev.id);
+
+    // Safety net: if we've hit MAX_TRIGGERS and event is still pending,
+    // alert the boss so a stuck OpenClaw doesn't silently drop the customer.
+    if (newCount >= MAX_TRIGGERS) {
+      try {
+        // Dedupe per event id
+        const marker = `[openclaw-stuck:${ev.id}]`;
+        const { data: existing } = await supabase
+          .from('boss_conversations')
+          .select('id')
+          .eq('company_id', ev.company_id)
+          .ilike('message_content', `%${marker}%`)
+          .limit(1)
+          .maybeSingle();
+        if (!existing) {
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId: ev.company_id,
+              notificationType: 'high_value_opportunity',
+              data: {
+                customer_name: customerName || 'Unknown',
+                customer_phone: customerPhone || 'unknown',
+                opportunity_type: 'OpenClaw not responding — please reply manually',
+                details: `Inbound ${ev.channel} message reached OpenClaw ${MAX_TRIGGERS}× but no automated reply.\n\nMessage: "${(inboundText ?? '').toString().slice(0, 240)}"\n\nEvent: ${ev.id.slice(0, 8)}`,
+                estimated_value: 'Unknown — please review',
+              },
+            },
+          });
+          await supabase.from('boss_conversations').insert({
+            company_id: ev.company_id,
+            message_from: 'system',
+            message_content: `OpenClaw stuck-event alert ${marker}: ${ev.channel} ${ev.event_type}`,
+            response: (inboundText ?? '').toString().slice(0, 200),
+          });
+          console.log('[pending-trigger] boss-alert sent for stuck event', ev.id);
+        }
+      } catch (e) {
+        console.warn('[pending-trigger] boss alert failed', ev.id, String(e).slice(0, 200));
+      }
+    }
   }));
 
   console.log('[pending-trigger] done', { scanned: events?.length ?? 0, candidates: candidates.length, retriggered, failed, skipped });
