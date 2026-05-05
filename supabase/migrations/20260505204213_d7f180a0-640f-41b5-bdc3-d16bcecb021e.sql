@@ -1,0 +1,1 @@
+ALTER TABLE public.bms_connections ADD COLUMN IF NOT EXISTS last_kb_text text;
