@@ -348,13 +348,20 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       // Fetch current config for sensible defaults on merge
       const { data: current, error: cErr } = await supabase
         .from("companies")
-        .select("openclaw_mode, openclaw_owns")
+        .select("openclaw_mode, openclaw_owns, openclaw_webhook_token")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
 
       const nextMode = params.mode ?? current?.openclaw_mode ?? "assist";
       const nextOwns = { ...(current?.openclaw_owns ?? {}), ...(params.owns ?? {}) };
+      // webhook_token: undefined = keep, "" = clear, anything else = set
+      const nextToken: string | null = params.webhook_token === undefined
+        ? (current?.openclaw_webhook_token ?? null)
+        : (params.webhook_token === "" ? null : params.webhook_token);
+      const gatewayToken = nextToken
+        || Deno.env.get("OPENCLAW_GATEWAY_TOKEN")
+        || "";
 
       // Send signed ping
       const secret = Deno.env.get("OPENCLAW_WEBHOOK_SECRET") ?? "";
