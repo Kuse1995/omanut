@@ -441,6 +441,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .from("companies")
         .update({
           openclaw_webhook_url: webhookUrl,
+          openclaw_webhook_token: nextToken,
           openclaw_mode: nextMode,
           openclaw_owns: nextOwns,
           openclaw_last_heartbeat: new Date().toISOString(),
