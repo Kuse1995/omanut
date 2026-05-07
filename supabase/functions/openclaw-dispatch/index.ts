@@ -314,11 +314,22 @@ Deno.serve(async (req) => {
         console.warn('[openclaw-dispatch] OPENCLAW_WEBHOOK_SECRET not set — sending unsigned');
       }
 
+      // Per-company gateway token (e.g. OpenClaw's `gateway.auth.token`).
+      // Falls back to a global OPENCLAW_GATEWAY_TOKEN env var so we can ship a
+      // sane default for all companies without having to set the column on each.
+      const gatewayToken = (company as any).openclaw_webhook_token
+        || Deno.env.get('OPENCLAW_GATEWAY_TOKEN')
+        || '';
+
       const resp = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(sigHeader ? { 'X-Openclaw-Signature': sigHeader } : {}),
+          ...(gatewayToken ? {
+            'Authorization': `Bearer ${gatewayToken}`,
+            'X-Api-Key': gatewayToken,
+          } : {}),
           'X-Openclaw-Event-Id': event.id,
           'X-Openclaw-Event-Type': body.event_type,
           'X-Openclaw-Channel': body.channel,
