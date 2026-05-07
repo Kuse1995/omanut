@@ -399,6 +399,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           headers: {
             "Content-Type": "application/json",
             ...(sigHeader ? { "X-Openclaw-Signature": sigHeader } : {}),
+            ...(gatewayToken ? {
+              "Authorization": `Bearer ${gatewayToken}`,
+              "X-Api-Key": gatewayToken,
+            } : {}),
           },
           body: bodyString,
           signal: AbortSignal.timeout(5_000),
