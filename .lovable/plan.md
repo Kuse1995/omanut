@@ -1,66 +1,64 @@
-# Fix: OpenClaw can't find KB info — make it use its tools
+# Unblock OpenClaw webhook self-registration — for every company
 
-## Real root cause
+Approved. Making the fix universal so OpenClaw can register/rotate its tunnel URL for **any** company (current 7 + every future one) without us touching the DB.
 
-You are right — OpenClaw already has tools. They just don't see the data, for two reasons:
+## Root cause
 
-1. **`search_knowledge_base` MCP tool only scans `company_documents.parsed_content`.**
-   North Park's tuition fees live in `companies.quick_reference_info` (the curated KB editor in the dashboard), NOT in `company_documents`. So even if the agent calls `search_knowledge_base("tuition")`, it returns `[]` — the field it's searching is empty for most companies.
+`register_webhook` in `supabase/functions/mcp-server/index.ts` (lines 383–410) does a hard pre-flight: it sends a signed POST to the tunnel; anything other than `2xx` is rejected and the URL is **not saved**. Cloudflare/auth-gated tunnels respond with `401/403` at the proxy layer even though OpenClaw's `/webhook` route behind it is healthy. Result: `ping_failed` every time, manual DB update needed per company.
 
-2. **The dispatch payload tries to do the work for the agent** (12k KB blob inlined, top-level duplicates, "MANDATORY RULE…" prompts). The agent ignores the blob and falls back to a templated "contact admissions". Stuffing more context has not fixed this — we already tried twice.
+## Fix (applied to the shared MCP tool — automatically covers every company)
 
-Your instinct is correct: stop pre-stuffing, make the agent fetch what it needs through tools that actually return the right data.
+Because `register_webhook` is a single MCP tool that resolves `company_id` per call, one change covers all companies — current and future. No per-company config, no migration, no new env vars.
 
-## Plan
+### 1. Treat "reachable but auth-gated" as success
 
-### 1. Fix `search_knowledge_base` so it actually finds KB content
+Update the ping logic so these outcomes all save the URL:
+- Any `2xx` (current behavior).
+- `401`, `403`, `405` — proves the host is up; auth/method mismatch is OpenClaw's internal concern, not ours.
+- `404` on the exact `/webhook` path → still fail (real misconfig).
 
-Update the MCP tool in `supabase/functions/mcp-server/index.ts` to scan **all** company knowledge sources, mirroring what `openclaw-lookup`'s `search_kb` already does:
+Returned status becomes `ping_status: "delivered" | "reachable_auth_gated" | "error"`.
 
-- `companies.quick_reference_info` (the big curated KB — this is where tuition fees live)
-- `companies.payment_instructions`
-- `companies.services`, `hours`, `branches`, `service_locations`
-- `bms_connections.last_kb_text` (live BMS catalog snapshot)
-- `company_documents.parsed_content` (existing behavior)
+### 2. Add an explicit `force: boolean` escape hatch
 
-Return ranked snippets (paragraph-level, scored by keyword hits, top 8) tagged with their source. Same algorithm as `openclaw-lookup`, just exposed as the MCP tool the agent already knows about.
+Optional `force` param on the same tool. When `force: true`:
+- Still send the ping, capture status.
+- Save the URL **regardless** of ping result.
+- Return `ok: true` with `ping_warning: "saved without verified reachability"`.
 
-### 2. Add a real BMS-aware lookup tool to MCP
+Default stays `force: false` — strict mode for first-time setups that should fail loudly.
 
-Add `search_bms_catalog` (or extend `bms_list_products` / `bms_check_stock` with a free-text `query`) so the agent can answer "do you have X?" without needing to know exact product names.
+### 3. Add `clear_webhook` MCP tool
 
-### 3. Slim the dispatch payload + tell the agent to use tools
+So OpenClaw can null its own stale tunnel URL on shutdown/rotation:
+- Sets `openclaw_webhook_url = null`, `openclaw_mode = 'off'`.
+- Resolves `company_id` from MCP context, same as `register_webhook`.
 
-In `supabase/functions/openclaw-dispatch/index.ts`:
+### 4. Document it once in the integration guide
 
-- **Stop inlining `knowledge_base` (12k chars) and `bms_catalog`** at the top level. Keep only a tiny `kb_summary` (first 800 chars) as a hint of what's available.
-- Replace the long "MANDATORY RULE" prose with a short, tool-first instruction:
+Append a short "Registering / rotating your tunnel" section to `OPENCLAW_INTEGRATION.md` with the two new behaviors, so any new client OpenClaw instance picks the correct call without trial-and-error.
 
-  > "Before drafting, call `search_knowledge_base({ query })` for any factual question (fees, prices, hours, policies, contacts). For product/stock questions also call `bms_check_stock` or `bms_list_products`. Quote what you find verbatim. Only escalate via `action: 'handoff'` if both tools return empty."
+## Why this is permanent for all companies
 
-- Keep `lookup_url` as a fallback for agents that prefer direct HTTP, but the primary path is MCP tools (faster, already authenticated, already in the agent's context).
+- The MCP tool is **company-agnostic** — it always operates on whichever company the caller is authenticated for. New companies created via `create-company` automatically get the same `register_webhook` path.
+- No per-company toggles, no new columns, no per-company SQL.
+- Existing 7 companies (ANZ, Art of Intelligence, E Library, Finch, GreenGrid, North Park, Omanut) gain the fix the moment the function deploys.
 
-### 4. Update `OPENCLAW_INTEGRATION.md` and `openclaw-skill.json`
+## Files touched
 
-- Document the expanded `search_knowledge_base` behavior (now scans curated KB + BMS, not just documents).
-- Add a "Drafter Mode workflow" section: receive event → `search_knowledge_base` → optional BMS tool → draft → POST to `reply_to_url`.
+- `supabase/functions/mcp-server/index.ts` — relax `register_webhook` ping gate, add `force`, add `clear_webhook` tool.
+- `OPENCLAW_INTEGRATION.md` — short "Registering your tunnel" section.
 
-## Technical details
+No DB migration. No changes to `openclaw-dispatch`, `openclaw-reply`, or the per-company drafter flow.
 
-**Files**
-- `supabase/functions/mcp-server/index.ts` — rewrite `search_knowledge_base` handler; optionally add `search_bms_catalog`
-- `supabase/functions/openclaw-dispatch/index.ts` — drop the 12k inline KB/BMS, shorten `reply_instructions`, keep `lookup_url` as fallback
-- `OPENCLAW_INTEGRATION.md` + `openclaw-skill.json` — document new behavior
+## Verification
 
-**No schema changes.** `bms_connections.last_kb_text` already exists from the previous migration.
+1. From OpenClaw on the auth-gated Omanut tunnel: call `register_webhook` with no `force` → expect `ok: true, ping_status: "reachable_auth_gated"` and the URL persisted.
+2. Send a real WhatsApp to Omanut → confirm `openclaw_events.dispatch_status = 'delivered'`.
+3. Repeat from any other company's OpenClaw instance with a different tunnel → same result, no code change needed.
+4. Negative check: call with a truly bogus URL (DNS fails) and `force: false` → still rejected (`ping_status: "error"`).
+5. Same bogus URL with `force: true` → saved with `ping_warning`.
 
-**Why this fixes North Park's miss**
-- Today: agent receives "knowledge_base: <12k blob>", ignores it, says "contact admissions". `search_knowledge_base("tuition")` returns `[]` because the data isn't in `company_documents`.
-- After: agent calls `search_knowledge_base("grade 7 fees")` → tool scans `quick_reference_info` → returns the "Grade 5–7 – K2,100" paragraph with source tag → agent quotes it.
+## Not included
 
-## Validation
-
-After deploy, ask North Park: "how much is grade 5 fees?"
-- Inspect `openclaw_events.payload` — should be small, no 12k blob.
-- Inspect MCP tool call logs — should see a `search_knowledge_base` call.
-- Reply should contain the exact K-amount from `quick_reference_info`.
+- Not resuming the prior fallback-AI / heartbeat plan in this change (per your earlier "stop this procedure"). We can pick that back up afterward if you want.
