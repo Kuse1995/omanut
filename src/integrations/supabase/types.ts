@@ -913,6 +913,7 @@ export type Database = {
           openclaw_mode: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns: Json
           openclaw_takeover_enabled: boolean
+          openclaw_webhook_token: string | null
           openclaw_webhook_url: string | null
           payment_instructions: string | null
           payment_number_airtel: string | null
@@ -959,6 +960,7 @@ export type Database = {
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
           openclaw_takeover_enabled?: boolean
+          openclaw_webhook_token?: string | null
           openclaw_webhook_url?: string | null
           payment_instructions?: string | null
           payment_number_airtel?: string | null
@@ -1005,6 +1007,7 @@ export type Database = {
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
           openclaw_takeover_enabled?: boolean
+          openclaw_webhook_token?: string | null
           openclaw_webhook_url?: string | null
           payment_instructions?: string | null
           payment_number_airtel?: string | null

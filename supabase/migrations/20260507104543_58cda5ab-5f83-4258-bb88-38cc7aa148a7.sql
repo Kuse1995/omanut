@@ -1,0 +1,2 @@
+ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS openclaw_webhook_token text;
+COMMENT ON COLUMN public.companies.openclaw_webhook_token IS 'Optional bearer/api token sent on every dispatch to openclaw_webhook_url (Authorization: Bearer + X-Api-Key headers). Used for auth-gated tunnels/gateways.';
