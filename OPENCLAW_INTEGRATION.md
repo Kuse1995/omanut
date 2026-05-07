@@ -156,3 +156,49 @@ Supported intents: `search_kb`, `check_stock`, `list_products`, `get_pricing`, `
 ### Reply rule
 
 Per the new `reply_instructions`: the agent MUST source answers from `company_context` / `bms_snapshot` / `lookup_url` and only `action: "handoff"` when no source answers the question.
+
+---
+
+## Registering / rotating your tunnel (self-serve, all companies)
+
+OpenClaw can register and rotate its own webhook URL via the MCP tool `register_webhook`. No Omanut admin DB access needed — works for every company.
+
+```json
+// MCP call
+{
+  "tool": "register_webhook",
+  "input": {
+    "webhook_url": "https://<your-tunnel>/webhook",
+    "mode": "primary",
+    "owns": { "whatsapp": true }
+  }
+}
+```
+
+### Ping outcomes
+
+The tool sends a signed POST to `webhook_url` and reports:
+
+| `ping_status`             | Meaning                                                    | URL saved? |
+|---------------------------|------------------------------------------------------------|------------|
+| `delivered`               | Tunnel returned 2xx — fully verified.                      | ✅          |
+| `reachable_auth_gated`    | Tunnel proxy returned 401/403/405 (host is up, auth blocks our POST). Treated as reachable. | ✅ |
+| `http_<code>` / `error`   | Tunnel unreachable or returned a real error.               | ❌ (unless `force: true`) |
+
+### `force: true` escape hatch
+
+If your tunnel proxy blocks the verification POST in a way we can't auto-detect, call again with `force: true` to save the URL anyway:
+
+```json
+{ "webhook_url": "...", "mode": "primary", "force": true }
+```
+
+You'll get `ok: true` with `ping_warning: "saved without verified reachability"`.
+
+### Clearing on shutdown
+
+```json
+{ "tool": "clear_webhook", "input": {} }
+```
+
+Sets the company's webhook URL to null and `mode='off'` so Omanut stops dispatching to a dead tunnel.

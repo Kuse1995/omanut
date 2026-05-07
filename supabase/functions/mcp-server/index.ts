@@ -322,10 +322,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // without an Omanut admin touching the DB. Sends a signed ping to verify
   // reachability before persisting.
   server.tool("register_webhook", {
-    description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Call this on first setup and any time your tunnel URL changes.",
+    description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
     inputSchema: z.object({
       webhook_url: z.string().url().describe("Public HTTPS URL OpenClaw exposes (e.g. https://abc.trycloudflare.com/webhook)."),
       mode: z.enum(["off", "assist", "primary"]).optional().describe("Routing mode. Defaults to current value, or 'assist' on first call."),
+      force: z.boolean().optional().describe("If true, save the URL even if the ping check fails (e.g. tunnel proxy blocks our POST). Default false."),
       owns: z.object({
         whatsapp: z.boolean().optional(),
         meta_dm: z.boolean().optional(),
@@ -338,6 +339,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
       const webhookUrl: string = params.webhook_url;
+      const force: boolean = params.force === true;
       if (!/^https:\/\//i.test(webhookUrl)) {
         throw new Error("webhook_url must be https://");
       }
@@ -382,6 +384,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
       let pingStatus = "unknown";
       let pingError: string | null = null;
+      let httpCode: number | null = null;
       try {
         const resp = await fetch(webhookUrl, {
           method: "POST",
@@ -392,20 +395,33 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           body: bodyString,
           signal: AbortSignal.timeout(5_000),
         });
-        pingStatus = resp.ok ? "delivered" : `http_${resp.status}`;
-        if (!resp.ok) pingError = (await resp.text()).slice(0, 300);
+        httpCode = resp.status;
+        if (resp.ok) {
+          pingStatus = "delivered";
+        } else if (resp.status === 401 || resp.status === 403 || resp.status === 405) {
+          // Tunnel/proxy is up but blocking our POST. Endpoint is reachable;
+          // OpenClaw's own auth/method handling is its concern, not ours.
+          pingStatus = "reachable_auth_gated";
+          pingError = `http_${resp.status} at proxy (treated as reachable)`;
+        } else {
+          pingStatus = `http_${resp.status}`;
+          pingError = (await resp.text()).slice(0, 300);
+        }
       } catch (e) {
         pingStatus = "error";
         pingError = String(e).slice(0, 300);
       }
 
-      if (pingStatus !== "delivered") {
+      const reachable = pingStatus === "delivered" || pingStatus === "reachable_auth_gated";
+
+      if (!reachable && !force) {
         return { content: [{ type: "text" as const, text: JSON.stringify({
           ok: false,
           error: "ping_failed",
           ping_status: pingStatus,
+          http_code: httpCode,
           ping_error: pingError,
-          hint: "Webhook URL was NOT saved. Make sure your tunnel is up and /webhook returns 2xx for signed POSTs.",
+          hint: "Webhook URL was NOT saved. Make sure your tunnel is up. If your tunnel proxy is auth-gated and we're getting a non-401/403/405 error, retry with force=true to save anyway.",
         }, null, 2) }] };
       }
 
@@ -427,7 +443,33 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         mode: nextMode,
         owns: nextOwns,
         ping_status: pingStatus,
+        http_code: httpCode,
+        ...(reachable ? {} : { ping_warning: "saved without verified reachability (force=true)" }),
         next_step: "Send a test event from the Omanut side or call get_webhook_status to verify dispatch.",
+      }, null, 2) }] };
+    },
+  });
+
+  // ── clear_webhook ──
+  // Lets OpenClaw null out a stale tunnel URL on shutdown/rotation.
+  server.tool("clear_webhook", {
+    description: "Clear the OpenClaw webhook URL for the active company and set mode='off'. Use on shutdown or before rotating to a new tunnel.",
+    inputSchema: z.object({}).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { error } = await supabase
+        .from("companies")
+        .update({
+          openclaw_webhook_url: null,
+          openclaw_mode: "off",
+        })
+        .eq("id", companyId);
+      if (error) throw error;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        company_id: companyId,
+        webhook_url: null,
+        mode: "off",
       }, null, 2) }] };
     },
   });
