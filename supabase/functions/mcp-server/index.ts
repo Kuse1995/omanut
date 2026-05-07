@@ -325,6 +325,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
     inputSchema: z.object({
       webhook_url: z.string().url().describe("Public HTTPS URL OpenClaw exposes (e.g. https://abc.trycloudflare.com/webhook)."),
+      webhook_token: z.string().optional().describe("Optional bearer/api token enforced by the OpenClaw gateway (gateway.auth.token in openclaw.json). Sent on every dispatch as both `Authorization: Bearer <token>` and `X-Api-Key: <token>`. Omit to keep the existing token; pass an empty string to clear."),
       mode: z.enum(["off", "assist", "primary"]).optional().describe("Routing mode. Defaults to current value, or 'assist' on first call."),
       force: z.boolean().optional().describe("If true, save the URL even if the ping check fails (e.g. tunnel proxy blocks our POST). Default false."),
       owns: z.object({
