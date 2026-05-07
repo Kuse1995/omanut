@@ -325,6 +325,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
     inputSchema: z.object({
       webhook_url: z.string().url().describe("Public HTTPS URL OpenClaw exposes (e.g. https://abc.trycloudflare.com/webhook)."),
+      webhook_token: z.string().optional().describe("Optional bearer/api token enforced by the OpenClaw gateway (gateway.auth.token in openclaw.json). Sent on every dispatch as both `Authorization: Bearer <token>` and `X-Api-Key: <token>`. Omit to keep the existing token; pass an empty string to clear."),
       mode: z.enum(["off", "assist", "primary"]).optional().describe("Routing mode. Defaults to current value, or 'assist' on first call."),
       force: z.boolean().optional().describe("If true, save the URL even if the ping check fails (e.g. tunnel proxy blocks our POST). Default false."),
       owns: z.object({
@@ -347,13 +348,20 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       // Fetch current config for sensible defaults on merge
       const { data: current, error: cErr } = await supabase
         .from("companies")
-        .select("openclaw_mode, openclaw_owns")
+        .select("openclaw_mode, openclaw_owns, openclaw_webhook_token")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
 
       const nextMode = params.mode ?? current?.openclaw_mode ?? "assist";
       const nextOwns = { ...(current?.openclaw_owns ?? {}), ...(params.owns ?? {}) };
+      // webhook_token: undefined = keep, "" = clear, anything else = set
+      const nextToken: string | null = params.webhook_token === undefined
+        ? (current?.openclaw_webhook_token ?? null)
+        : (params.webhook_token === "" ? null : params.webhook_token);
+      const gatewayToken = nextToken
+        || Deno.env.get("OPENCLAW_GATEWAY_TOKEN")
+        || "";
 
       // Send signed ping
       const secret = Deno.env.get("OPENCLAW_WEBHOOK_SECRET") ?? "";
@@ -391,6 +399,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           headers: {
             "Content-Type": "application/json",
             ...(sigHeader ? { "X-Openclaw-Signature": sigHeader } : {}),
+            ...(gatewayToken ? {
+              "Authorization": `Bearer ${gatewayToken}`,
+              "X-Api-Key": gatewayToken,
+            } : {}),
           },
           body: bodyString,
           signal: AbortSignal.timeout(5_000),
@@ -429,6 +441,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .from("companies")
         .update({
           openclaw_webhook_url: webhookUrl,
+          openclaw_webhook_token: nextToken,
           openclaw_mode: nextMode,
           openclaw_owns: nextOwns,
           openclaw_last_heartbeat: new Date().toISOString(),
