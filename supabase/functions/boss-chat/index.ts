@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat, geminiImageGenerate, veoStartGeneration } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiImageGenerate, veoStartGeneration, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { minimaxStartVideoGeneration } from "../_shared/minimax-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import { resolveCompaniesForPhone } from "../_shared/boss-phones.ts";
