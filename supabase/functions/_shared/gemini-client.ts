@@ -184,13 +184,12 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
   const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
-  const minimaxPrimary = (Deno.env.get('MINIMAX_AS_PRIMARY') || '').toLowerCase() === 'true';
+  // MiniMax is now the default primary brain. PRIMARY_TEXT_MODEL env var lets ops swap back to glm-4.7 instantly.
   const fallbackChain = [
     options.model,
-    ...(minimaxPrimary ? ['MiniMax-M2'] : []),
+    PRIMARY_TEXT_MODEL,
     ...(glm5Enabled ? ['glm-5'] : []),
-    'glm-4.7',
-    ...(minimaxPrimary ? [] : ['MiniMax-M2']),
+    FALLBACK_TEXT_MODEL,
     'gemini-2.5-flash',
     'deepseek-chat',
     'kimi-k2-0711-preview',
