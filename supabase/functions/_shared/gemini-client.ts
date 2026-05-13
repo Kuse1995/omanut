@@ -12,23 +12,26 @@ const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/open
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
+const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
-  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi)\//, '');
+  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi|minimax)\//, '');
 }
 
 /** Determine provider from model name. No 'lovable' option — gateway is removed. */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' {
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' | 'minimax' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
   if (lowered.startsWith('deepseek/')) return 'deepseek';
   if (lowered.startsWith('kimi/') || lowered.startsWith('moonshot/')) return 'kimi';
+  if (lowered.startsWith('minimax/') || lowered.startsWith('minimax-')) return 'minimax';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
   if (normalized.startsWith('kimi-') || normalized.startsWith('moonshot-')) return 'kimi';
+  if (/^minimax/i.test(normalized)) return 'minimax';
   // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
@@ -98,6 +101,21 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
         if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/GEMINI both missing)');
       }
       break;
+    case 'minimax':
+      apiUrl = MINIMAX_OPENAI_URL;
+      apiKey = Deno.env.get('MINIMAX_API_KEY');
+      // Default to MiniMax-M2 (latest text model) if a bare "minimax" name was provided
+      if (!modelToSend || modelToSend.toLowerCase() === 'minimax' || modelToSend.toLowerCase() === 'minimax-latest') {
+        modelToSend = 'MiniMax-M2';
+      }
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing MINIMAX_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (MINIMAX/GEMINI both missing)');
+      }
+      break;
     case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
@@ -147,10 +165,13 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
   const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
+  const minimaxPrimary = (Deno.env.get('MINIMAX_AS_PRIMARY') || '').toLowerCase() === 'true';
   const fallbackChain = [
     options.model,
+    ...(minimaxPrimary ? ['MiniMax-M2'] : []),
     ...(glm5Enabled ? ['glm-5'] : []),
     'glm-4.7',
+    ...(minimaxPrimary ? [] : ['MiniMax-M2']),
     'gemini-2.5-flash',
     'deepseek-chat',
     'kimi-k2-0711-preview',
@@ -165,14 +186,35 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     return true;
   });
 
+  // Detect provider billing/quota errors that come back as HTTP 200 with an error body
+  // (DeepSeek "Insufficient Balance", Zhipu / OpenAI-style "insufficient_quota", etc.)
+  const isBillingErrorBody = (text: string): boolean => {
+    const t = text.toLowerCase();
+    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance/.test(t);
+  };
+
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
     try {
       console.log(`[AI-FALLBACK] Trying model ${i + 1}/${chain.length}: ${model}`);
       const response = await geminiChat({ ...options, model });
       if (response.ok) {
+        // Peek body to catch HTTP-200 billing errors before returning to caller
+        const cloned = response.clone();
+        const peek = await cloned.text();
+        if (isBillingErrorBody(peek) || /"choices"\s*:\s*\[\s*\]/.test(peek) || !/"choices"/.test(peek)) {
+          if (isBillingErrorBody(peek)) {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body is a billing/quota error: ${peek.substring(0, 200)}`);
+          } else if (!/"choices"/.test(peek)) {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no choices: ${peek.substring(0, 200)}`);
+          } else {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 with empty choices array`);
+          }
+          continue;
+        }
         console.log(`[AI-FALLBACK] Success with model: ${model}`);
-        return response;
+        // Re-wrap the already-read body into a fresh Response for the caller
+        return new Response(peek, { status: 200, headers: response.headers });
       }
       const errText = await response.text();
       console.warn(`[AI-FALLBACK] Model ${model} failed (${response.status}): ${errText.substring(0, 200)}`);

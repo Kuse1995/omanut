@@ -795,39 +795,18 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
   console.log(`[ROUTER] Using routing model: ${routingModel}, temperature: ${routingTemperature}`);
 
   try {
-    let response;
-    
-    // Check if using DeepSeek or Lovable AI Gateway
-    if (routingModel === 'deepseek-chat' && DEEPSEEK_API_KEY) {
-      response = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: routingModel,
-          messages: [
-            { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
-            { role: 'user', content: routingPrompt }
-          ],
-          temperature: routingTemperature,
-          max_tokens: 150
-        })
-      });
-    } else {
-      // Use direct Gemini API for other models
-      response = await geminiChat({
-        model: routingModel,
-        messages: [
-          { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
-          { role: 'user', content: routingPrompt }
-        ],
-        temperature: routingTemperature,
-        max_tokens: 150
-      });
-    }
-    
+    // Use the shared fallback chain so a single provider's billing/quota failure
+    // (e.g. DeepSeek "Insufficient Balance") never silences intent classification.
+    const response = await geminiChatWithFallback({
+      model: routingModel,
+      messages: [
+        { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+        { role: 'user', content: routingPrompt }
+      ],
+      temperature: routingTemperature,
+      max_tokens: 150
+    });
+
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content;
     if (!content) {
