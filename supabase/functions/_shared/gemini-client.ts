@@ -12,23 +12,26 @@ const GEMINI_OPENAI_URL = 'https://generativelanguage.googleapis.com/v1beta/open
 const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
+const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
-  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi)\//, '');
+  return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi|minimax)\//, '');
 }
 
 /** Determine provider from model name. No 'lovable' option — gateway is removed. */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' {
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' | 'minimax' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
   if (lowered.startsWith('deepseek/')) return 'deepseek';
   if (lowered.startsWith('kimi/') || lowered.startsWith('moonshot/')) return 'kimi';
+  if (lowered.startsWith('minimax/') || lowered.startsWith('minimax-')) return 'minimax';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
   if (normalized.startsWith('kimi-') || normalized.startsWith('moonshot-')) return 'kimi';
+  if (/^minimax/i.test(normalized)) return 'minimax';
   // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
   return 'gemini';
 }
