@@ -804,15 +804,24 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     const response = await geminiChatWithFallback({
       model: routingModel,
       messages: [
-        { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+        { role: 'system', content: 'You are an intent classifier. Output ONLY a JSON object on the first line of your reply. Do not think out loud. Do not wrap in markdown.' },
         { role: 'user', content: routingPrompt }
       ],
       temperature: routingTemperature,
-      max_tokens: 150
+      max_tokens: 400
     });
 
     const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
+    let content: string = data?.choices?.[0]?.message?.content || '';
+    // Reasoning models (GLM/DeepSeek/MiniMax) often leave `content` empty and
+    // dump everything into `reasoning_content`. Recover the JSON from there.
+    if (!content) {
+      const reasoning = data?.choices?.[0]?.message?.reasoning_content || '';
+      if (reasoning) {
+        const m = String(reasoning).match(/\{[\s\S]*?"agent"[\s\S]*?\}/);
+        if (m) content = m[0];
+      }
+    }
     if (!content) {
       console.warn('[ROUTER] Provider returned no choices, payload shape:', JSON.stringify(data).slice(0, 300));
       throw new Error('Router provider returned no choices');
