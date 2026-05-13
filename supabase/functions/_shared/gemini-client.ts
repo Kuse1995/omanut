@@ -165,10 +165,13 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
   const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
+  const minimaxPrimary = (Deno.env.get('MINIMAX_AS_PRIMARY') || '').toLowerCase() === 'true';
   const fallbackChain = [
     options.model,
+    ...(minimaxPrimary ? ['MiniMax-M2'] : []),
     ...(glm5Enabled ? ['glm-5'] : []),
     'glm-4.7',
+    ...(minimaxPrimary ? [] : ['MiniMax-M2']),
     'gemini-2.5-flash',
     'deepseek-chat',
     'kimi-k2-0711-preview',
@@ -183,14 +186,35 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     return true;
   });
 
+  // Detect provider billing/quota errors that come back as HTTP 200 with an error body
+  // (DeepSeek "Insufficient Balance", Zhipu / OpenAI-style "insufficient_quota", etc.)
+  const isBillingErrorBody = (text: string): boolean => {
+    const t = text.toLowerCase();
+    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance/.test(t);
+  };
+
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
     try {
       console.log(`[AI-FALLBACK] Trying model ${i + 1}/${chain.length}: ${model}`);
       const response = await geminiChat({ ...options, model });
       if (response.ok) {
+        // Peek body to catch HTTP-200 billing errors before returning to caller
+        const cloned = response.clone();
+        const peek = await cloned.text();
+        if (isBillingErrorBody(peek) || /"choices"\s*:\s*\[\s*\]/.test(peek) || !/"choices"/.test(peek)) {
+          if (isBillingErrorBody(peek)) {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body is a billing/quota error: ${peek.substring(0, 200)}`);
+          } else if (!/"choices"/.test(peek)) {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no choices: ${peek.substring(0, 200)}`);
+          } else {
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 with empty choices array`);
+          }
+          continue;
+        }
         console.log(`[AI-FALLBACK] Success with model: ${model}`);
-        return response;
+        // Re-wrap the already-read body into a fresh Response for the caller
+        return new Response(peek, { status: 200, headers: response.headers });
       }
       const errText = await response.text();
       console.warn(`[AI-FALLBACK] Model ${model} failed (${response.status}): ${errText.substring(0, 200)}`);
