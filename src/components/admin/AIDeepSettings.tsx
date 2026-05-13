@@ -11,6 +11,7 @@ import { AgentConfigPanel } from "./deep-settings/AgentConfigPanel";
 import { ToolControlPanel } from "./deep-settings/ToolControlPanel";
 import { ABTestPanel } from "./deep-settings/ABTestPanel";
 import { QualitySafetyPanel } from "./deep-settings/QualitySafetyPanel";
+import { SwarmModeToggler } from "./deep-settings/SwarmModeToggler";
 
 interface AIDeepSettingsProps {
   companyId: string;
@@ -327,6 +328,8 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
           </div>
         </div>
       )}
+
+      <SwarmModeToggler companyId={companyId} />
 
       <Card>
         <CardHeader>

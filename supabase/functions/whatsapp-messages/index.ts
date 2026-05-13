@@ -6266,6 +6266,48 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
+    // ========== SWARM QA REFINEMENT (opt-in) ==========
+    // When companies.metadata.swarm_enabled === true, route the final reply through the
+    // Critic loop. The swarm acts as a polish/scoring pass — tools have already executed.
+    try {
+      if ((company as any)?.metadata?.swarm_enabled && assistantReply && assistantReply.trim().length > 0) {
+        console.log('[SWARM] swarm_enabled=true → running QA refinement on final reply');
+        const swarmStart = Date.now();
+        const swarmResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/swarm-orchestrator`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            company_id: company.id,
+            channel: 'whatsapp',
+            raw_text: userMessage,
+            conversation_id: conversationId,
+            customer_name: conversation.customer_name || null,
+            // Seed the Creative with the existing draft as remedy context via history.
+            history: [
+              { role: 'assistant', content: `DRAFT_TO_REFINE: ${assistantReply}` },
+            ],
+          }),
+        });
+        if (swarmResp.ok) {
+          const swarmData = await swarmResp.json();
+          const refined = (swarmData.final_text || '').trim();
+          if (refined && swarmData.final_score >= 8) {
+            console.log(`[SWARM] accepted refined reply (score=${swarmData.final_score} retries=${swarmData.retries} ms=${Date.now() - swarmStart})`);
+            assistantReply = refined;
+          } else {
+            console.log(`[SWARM] kept original reply (score=${swarmData.final_score} retries=${swarmData.retries} escalated=${swarmData.escalated})`);
+          }
+        } else {
+          console.warn('[SWARM] orchestrator failed, keeping original reply:', swarmResp.status);
+        }
+      }
+    } catch (swarmErr) {
+      console.error('[SWARM] refinement error (non-fatal):', swarmErr);
+    }
+
     console.log('[BACKGROUND] Final reply:', assistantReply);
 
     // ========== FRUSTRATION SIGNAL DETECTION ==========

@@ -3542,6 +3542,57 @@ export type Database = {
           },
         ]
       }
+      swarm_runs: {
+        Row: {
+          channel: string
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          critique_history: Json | null
+          error: string | null
+          escalated: boolean | null
+          final_score: number | null
+          final_text: string | null
+          id: string
+          input_excerpt: string | null
+          models_used: Json | null
+          retries: number | null
+          stage_timings: Json | null
+        }
+        Insert: {
+          channel: string
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          critique_history?: Json | null
+          error?: string | null
+          escalated?: boolean | null
+          final_score?: number | null
+          final_text?: string | null
+          id?: string
+          input_excerpt?: string | null
+          models_used?: Json | null
+          retries?: number | null
+          stage_timings?: Json | null
+        }
+        Update: {
+          channel?: string
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          critique_history?: Json | null
+          error?: string | null
+          escalated?: boolean | null
+          final_score?: number | null
+          final_text?: string | null
+          id?: string
+          input_excerpt?: string | null
+          models_used?: Json | null
+          retries?: number | null
+          stage_timings?: Json | null
+        }
+        Relationships: []
+      }
       takeover_sessions: {
         Row: {
           company_id: string

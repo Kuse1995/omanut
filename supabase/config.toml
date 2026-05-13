@@ -141,3 +141,6 @@ project_id = "dzheddvoiauevcayifev"
   [functions.engagement-watchdog]
     timeout = 120
     verify_jwt = false
+  [functions.swarm-orchestrator]
+    timeout = 60
+    verify_jwt = false
