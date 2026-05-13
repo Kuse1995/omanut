@@ -96,12 +96,28 @@ export async function runLibrarian(
     }
   }
 
+  // BMS cache hit/miss detection: if intent looks product-y but no matching fact landed, flag it.
+  const askText = (intent.asks || []).join(' ').toLowerCase() + ' ' + intent.cleaned_text.toLowerCase();
+  const isProductIntent = /price|cost|stock|buy|order|product|catalog|available|list|show/i.test(intent.intent_type + ' ' + askText);
+  const entityValues = Object.values(intent.entities || {}).map(v => String(v).toLowerCase()).filter(Boolean);
+  const hasMatchingFact = entityValues.length === 0
+    ? facts.length > 0
+    : facts.some(f => entityValues.some(v => v && f.toLowerCase().includes(v)));
+  const bms_cache_hit = isProductIntent ? hasMatchingFact : true;
+  const bms_miss = isProductIntent && !hasMatchingFact;
+
+  if (bms_miss) {
+    must_do.push('A specific product/price the customer asked about is NOT in FACTS. Tell them we will check our live system and follow up — do NOT invent prices or stock numbers.');
+  }
+
   const rules: RuleSet = {
     must_do: dedupe(must_do).slice(0, 12),
     must_not: dedupe(must_not).slice(0, 12),
     brand_voice,
     facts: dedupe(facts).slice(0, 20),
     language: intent.language,
+    bms_cache_hit,
+    bms_miss,
   };
 
   return { rules, ms: Date.now() - start, model: 'glm-4.7+local' };
