@@ -721,8 +721,12 @@ async function routeToAgent(
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
   
-  // Use configured values or defaults
-  const routingModel = config?.routingModel || 'deepseek-chat';
+  // Use configured values or defaults.
+  // IMPORTANT: router must be a NON-reasoning model. Reasoning-tier models
+  // (glm-4.5-air, glm-4.6, deepseek-reasoner, MiniMax-M2, *-thinking) burn the
+  // token budget inside `reasoning_content` and return empty `content`, which
+  // forces the catch-block fallback and pins everything to the is_default mode.
+  const routingModel = config?.routingModel || 'google/gemini-2.5-flash-lite';
   const routingTemperature = config?.routingTemperature ?? 0.3;
   const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   
@@ -800,15 +804,24 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     const response = await geminiChatWithFallback({
       model: routingModel,
       messages: [
-        { role: 'system', content: 'You are an intent classifier. Respond only with valid JSON.' },
+        { role: 'system', content: 'You are an intent classifier. Output ONLY a JSON object on the first line of your reply. Do not think out loud. Do not wrap in markdown.' },
         { role: 'user', content: routingPrompt }
       ],
       temperature: routingTemperature,
-      max_tokens: 150
+      max_tokens: 400
     });
 
     const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
+    let content: string = data?.choices?.[0]?.message?.content || '';
+    // Reasoning models (GLM/DeepSeek/MiniMax) often leave `content` empty and
+    // dump everything into `reasoning_content`. Recover the JSON from there.
+    if (!content) {
+      const reasoning = data?.choices?.[0]?.message?.reasoning_content || '';
+      if (reasoning) {
+        const m = String(reasoning).match(/\{[\s\S]*?"agent"[\s\S]*?\}/);
+        if (m) content = m[0];
+      }
+    }
     if (!content) {
       console.warn('[ROUTER] Provider returned no choices, payload shape:', JSON.stringify(data).slice(0, 300));
       throw new Error('Router provider returned no choices');
@@ -830,16 +843,17 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     };
     
   } catch (error) {
-    console.error('[ROUTER] Error classifying intent:', error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error('[ROUTER] Error classifying intent:', errMsg);
     const lowerMsg = userMessage.toLowerCase();
     if (hasDynamic) {
       for (const m of modes) {
         if (m.trigger_keywords?.some(k => k && lowerMsg.includes(k.toLowerCase()))) {
-          return { agent: m.slug, reasoning: `Keyword match for "${m.name}"`, confidence: 0.7, modeId: m.id };
+          return { agent: m.slug, reasoning: `Keyword match for "${m.name}" (router exception: ${errMsg.slice(0, 80)})`, confidence: 0.7, modeId: m.id };
         }
       }
       const fb = modes.find(m => m.is_default) || modes[0];
-      return { agent: fb.slug, reasoning: 'Default mode (no keyword match)', confidence: 0.4, modeId: fb.id };
+      return { agent: fb.slug, reasoning: `Router exception, used default mode: ${errMsg.slice(0, 120)}`, confidence: 0.4, modeId: fb.id };
     }
     if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
       return { agent: 'sales', reasoning: 'Payment/purchase keyword detected', confidence: 0.9 };
@@ -2006,7 +2020,7 @@ async function _processAIResponseInner(
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
         const routingConfig = {
-          routingModel: aiOverrides?.routing_model || 'deepseek-chat',
+          routingModel: aiOverrides?.routing_model || 'google/gemini-2.5-flash-lite',
           routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
           confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6,
           modes: agentModes,
