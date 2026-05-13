@@ -22,7 +22,7 @@ export async function runCritic(args: {
   draft: string;
 }): Promise<{ report: CritiqueReport; ms: number; model: string }> {
   const start = Date.now();
-  const model = 'glm-4.7';
+  const model = 'MiniMax-M2';
 
   const userMsg = `INTENT:
 ${JSON.stringify(args.intent, null, 2)}
