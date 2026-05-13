@@ -14,6 +14,10 @@ const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
+/** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback. */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'MiniMax-M2';
+export const FALLBACK_TEXT_MODEL = 'glm-4.7';
+
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi|minimax)\//, '');
