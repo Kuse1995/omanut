@@ -2020,7 +2020,7 @@ async function _processAIResponseInner(
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
         const routingConfig = {
-          routingModel: aiOverrides?.routing_model || 'deepseek-chat',
+          routingModel: aiOverrides?.routing_model || 'google/gemini-2.5-flash-lite',
           routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
           confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6,
           modes: agentModes,
