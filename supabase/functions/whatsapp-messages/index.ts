@@ -843,16 +843,17 @@ Respond with ONLY valid JSON (no markdown). The "agent" value MUST be one of: ${
     };
     
   } catch (error) {
-    console.error('[ROUTER] Error classifying intent:', error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error('[ROUTER] Error classifying intent:', errMsg);
     const lowerMsg = userMessage.toLowerCase();
     if (hasDynamic) {
       for (const m of modes) {
         if (m.trigger_keywords?.some(k => k && lowerMsg.includes(k.toLowerCase()))) {
-          return { agent: m.slug, reasoning: `Keyword match for "${m.name}"`, confidence: 0.7, modeId: m.id };
+          return { agent: m.slug, reasoning: `Keyword match for "${m.name}" (router exception: ${errMsg.slice(0, 80)})`, confidence: 0.7, modeId: m.id };
         }
       }
       const fb = modes.find(m => m.is_default) || modes[0];
-      return { agent: fb.slug, reasoning: 'Default mode (no keyword match)', confidence: 0.4, modeId: fb.id };
+      return { agent: fb.slug, reasoning: `Router exception, used default mode: ${errMsg.slice(0, 120)}`, confidence: 0.4, modeId: fb.id };
     }
     if (lowerMsg.match(/pay|payment|transfer|invoice|money|receipt|buy|purchase|order|checkout/)) {
       return { agent: 'sales', reasoning: 'Payment/purchase keyword detected', confidence: 0.9 };
