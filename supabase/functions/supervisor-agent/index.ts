@@ -1,6 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -171,7 +171,7 @@ Provide brief market insights, pricing context, or competitive positioning that 
 
       try {
         const researchResponse = await geminiChat({
-          model: 'glm-4.7',
+          model: PRIMARY_TEXT_MODEL,
           messages: [{ role: 'user', content: researchPrompt }],
           max_tokens: 500
         });

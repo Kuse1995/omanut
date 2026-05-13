@@ -22,7 +22,7 @@ export async function runCritic(args: {
   draft: string;
 }): Promise<{ report: CritiqueReport; ms: number; model: string }> {
   const start = Date.now();
-  const model = 'glm-4.7';
+  const model = 'MiniMax-M2';
 
   const userMsg = `INTENT:
 ${JSON.stringify(args.intent, null, 2)}
@@ -86,7 +86,7 @@ export async function runCriticSafetyOnly(args: {
   draft: string;
 }): Promise<{ safe: boolean; violations: string[]; ms: number; model: string }> {
   const start = Date.now();
-  const model = 'glm-4.7';
+  const model = 'MiniMax-M2';
   const SYSTEM_SAFETY = `You are a SAFETY GATE. Output STRICT JSON: {"safe": boolean, "violations": string[]}.
 Mark unsafe ONLY if the draft:
 - Discusses a banned topic from MUST NOT, OR

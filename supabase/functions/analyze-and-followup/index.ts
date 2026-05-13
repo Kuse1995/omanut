@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { embedText } from "../_shared/embedding-client.ts";
 
 const corsHeaders = {
@@ -289,7 +289,7 @@ async function processCompany(
 
         // Use Gemini to craft follow-up message
         const geminiResponse = await geminiChat({
-          model: 'glm-4.7',
+          model: PRIMARY_TEXT_MODEL,
           messages: [
             {
               role: 'system',

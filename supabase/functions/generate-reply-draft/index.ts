@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { assertTenantContext, loadTenantFromRecord } from "../_shared/tenant-context.ts";
 import { logTenantViolation, logSecurityEvent } from "../_shared/security-logging.ts";
-import { geminiChat } from "../_shared/gemini-client.ts";
+import { geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -254,7 +254,7 @@ Generate a professional reply:`;
 
     // Generate AI reply using Gemini API
     const aiResponse = await geminiChat({
-      model: "glm-4.7",
+      model: PRIMARY_TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

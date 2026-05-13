@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { geminiChat, geminiImageGenerate } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiImageGenerate, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -202,7 +202,7 @@ Return ONLY the caption text, nothing else.`;
 
     if (!caption) {
       const captionResponse = await geminiChat({
-        model: 'glm-4.7',
+        model: PRIMARY_TEXT_MODEL,
         messages: [{ role: 'user', content: captionPrompt }],
       });
 

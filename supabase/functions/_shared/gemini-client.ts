@@ -14,6 +14,10 @@ const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
+/** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback. */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'MiniMax-M2';
+export const FALLBACK_TEXT_MODEL = 'glm-4.7';
+
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
   return model.replace(/^(google|openai|zai|zhipu|deepseek|moonshot|kimi|minimax)\//, '');
@@ -137,7 +141,22 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 
   if (options.temperature !== undefined) body.temperature = options.temperature;
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
-  if (options.tools) body.tools = options.tools;
+  if (options.tools) {
+    // MiniMax rejects tool definitions whose `parameters` is missing or `{}` — coerce to a valid empty object schema.
+    if (provider === 'minimax') {
+      body.tools = options.tools.map((t: any) => {
+        if (t?.type === 'function' && t.function) {
+          const params = t.function.parameters;
+          if (!params || (typeof params === 'object' && Object.keys(params).length === 0)) {
+            return { ...t, function: { ...t.function, parameters: { type: 'object', properties: {} } } };
+          }
+        }
+        return t;
+      });
+    } else {
+      body.tools = options.tools;
+    }
+  }
   if (options.tool_choice) body.tool_choice = options.tool_choice;
   if (provider === 'gemini' && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
@@ -165,13 +184,12 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
   const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
-  const minimaxPrimary = (Deno.env.get('MINIMAX_AS_PRIMARY') || '').toLowerCase() === 'true';
+  // MiniMax is now the default primary brain. PRIMARY_TEXT_MODEL env var lets ops swap back to glm-4.7 instantly.
   const fallbackChain = [
     options.model,
-    ...(minimaxPrimary ? ['MiniMax-M2'] : []),
+    PRIMARY_TEXT_MODEL,
     ...(glm5Enabled ? ['glm-5'] : []),
-    'glm-4.7',
-    ...(minimaxPrimary ? [] : ['MiniMax-M2']),
+    FALLBACK_TEXT_MODEL,
     'gemini-2.5-flash',
     'deepseek-chat',
     'kimi-k2-0711-preview',

@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
-import { geminiChat, geminiChatWithFallback } from "../_shared/gemini-client.ts";
+import { geminiChat, geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { classifyAiError } from "../_shared/safe-error.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import {
@@ -1838,7 +1838,7 @@ async function _processAIResponseInner(
       let aiDrafts: any[] = [];
       try {
           const draftResponse = await geminiChat({
-            model: aiOverrides?.primary_model || 'google/gemini-2.5-flash',
+            model: aiOverrides?.primary_model || PRIMARY_TEXT_MODEL,
             messages: [
               {
                 role: 'system',
@@ -2911,7 +2911,7 @@ ${supervisorRecommendation.recommendedResponse}
     // Per-agent model override beats company-default. NULL → fall back to company primary_model, then hard default.
     const primaryModel = (selectedMode?.model && selectedMode.model.trim().length > 0)
       ? selectedMode.model
-      : (aiOverrides?.primary_model || 'glm-4.7');
+      : (aiOverrides?.primary_model || PRIMARY_TEXT_MODEL);
 
     // Always respect the resolved primary model. Speed/complexity tradeoffs
     // belong in the per-company / per-agent model config, NOT a runtime hard-code.
