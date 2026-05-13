@@ -3544,50 +3544,65 @@ export type Database = {
       }
       swarm_runs: {
         Row: {
+          bms_cache_hit: boolean | null
+          bypass_reason: string | null
           channel: string
           company_id: string
           conversation_id: string | null
           created_at: string
           critique_history: Json | null
+          divergence_score: number | null
           error: string | null
           escalated: boolean | null
           final_score: number | null
           final_text: string | null
           id: string
           input_excerpt: string | null
+          mode: string | null
           models_used: Json | null
+          profile: string | null
           retries: number | null
           stage_timings: Json | null
         }
         Insert: {
+          bms_cache_hit?: boolean | null
+          bypass_reason?: string | null
           channel: string
           company_id: string
           conversation_id?: string | null
           created_at?: string
           critique_history?: Json | null
+          divergence_score?: number | null
           error?: string | null
           escalated?: boolean | null
           final_score?: number | null
           final_text?: string | null
           id?: string
           input_excerpt?: string | null
+          mode?: string | null
           models_used?: Json | null
+          profile?: string | null
           retries?: number | null
           stage_timings?: Json | null
         }
         Update: {
+          bms_cache_hit?: boolean | null
+          bypass_reason?: string | null
           channel?: string
           company_id?: string
           conversation_id?: string | null
           created_at?: string
           critique_history?: Json | null
+          divergence_score?: number | null
           error?: string | null
           escalated?: boolean | null
           final_score?: number | null
           final_text?: string | null
           id?: string
           input_excerpt?: string | null
+          mode?: string | null
           models_used?: Json | null
+          profile?: string | null
           retries?: number | null
           stage_timings?: Json | null
         }
