@@ -1299,7 +1299,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
 
     // ========== DYNAMIC AI CONFIGURATION FROM DATABASE ==========
     // Use AI overrides from company_ai_overrides table instead of hardcoded values
-    const primaryModel = aiOverrides?.primary_model || 'glm-4.7';
+    const primaryModel = aiOverrides?.primary_model || PRIMARY_TEXT_MODEL;
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const maxTokens = aiOverrides?.max_tokens || 8192;
     const bossAgentPrompt = aiOverrides?.boss_agent_prompt;
