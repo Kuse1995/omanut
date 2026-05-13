@@ -6266,46 +6266,34 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
       }
     }
 
-    // ========== SWARM QA REFINEMENT (opt-in) ==========
-    // When companies.metadata.swarm_enabled === true, route the final reply through the
-    // Critic loop. The swarm acts as a polish/scoring pass — tools have already executed.
+    // ========== SWARM QA REFINEMENT (async post-hoc) ==========
+    // When companies.metadata.swarm_enabled === true, fire the swarm AFTER we've sent
+    // the reply. The orchestrator runs the Critic loop in the background and only emits
+    // a follow-up correction message if the refined draft materially diverges. This keeps
+    // the customer-visible reply latency unchanged.
     try {
       if ((company as any)?.metadata?.swarm_enabled && assistantReply && assistantReply.trim().length > 0) {
-        console.log('[SWARM] swarm_enabled=true → running QA refinement on final reply');
-        const swarmStart = Date.now();
-        const swarmResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/swarm-orchestrator`, {
+        console.log('[SWARM] swarm_enabled=true → dispatching post_hoc_refine (async)');
+        // Fire and forget — do NOT await. Errors are swallowed by the orchestrator.
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/swarm-orchestrator`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
+            mode: 'post_hoc_refine',
             company_id: company.id,
             channel: 'whatsapp',
             raw_text: userMessage,
             conversation_id: conversationId,
             customer_name: conversation.customer_name || null,
-            // Seed the Creative with the existing draft as remedy context via history.
-            history: [
-              { role: 'assistant', content: `DRAFT_TO_REFINE: ${assistantReply}` },
-            ],
+            already_sent_text: assistantReply,
           }),
-        });
-        if (swarmResp.ok) {
-          const swarmData = await swarmResp.json();
-          const refined = (swarmData.final_text || '').trim();
-          if (refined && swarmData.final_score >= 8) {
-            console.log(`[SWARM] accepted refined reply (score=${swarmData.final_score} retries=${swarmData.retries} ms=${Date.now() - swarmStart})`);
-            assistantReply = refined;
-          } else {
-            console.log(`[SWARM] kept original reply (score=${swarmData.final_score} retries=${swarmData.retries} escalated=${swarmData.escalated})`);
-          }
-        } else {
-          console.warn('[SWARM] orchestrator failed, keeping original reply:', swarmResp.status);
-        }
+        }).catch((e) => console.warn('[SWARM] dispatch error (ignored):', e));
       }
     } catch (swarmErr) {
-      console.error('[SWARM] refinement error (non-fatal):', swarmErr);
+      console.error('[SWARM] dispatch threw (non-fatal):', swarmErr);
     }
 
     console.log('[BACKGROUND] Final reply:', assistantReply);
