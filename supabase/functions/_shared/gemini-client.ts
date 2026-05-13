@@ -141,7 +141,22 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
 
   if (options.temperature !== undefined) body.temperature = options.temperature;
   if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
-  if (options.tools) body.tools = options.tools;
+  if (options.tools) {
+    // MiniMax rejects tool definitions whose `parameters` is missing or `{}` — coerce to a valid empty object schema.
+    if (provider === 'minimax') {
+      body.tools = options.tools.map((t: any) => {
+        if (t?.type === 'function' && t.function) {
+          const params = t.function.parameters;
+          if (!params || (typeof params === 'object' && Object.keys(params).length === 0)) {
+            return { ...t, function: { ...t.function, parameters: { type: 'object', properties: {} } } };
+          }
+        }
+        return t;
+      });
+    } else {
+      body.tools = options.tools;
+    }
+  }
   if (options.tool_choice) body.tool_choice = options.tool_choice;
   if (provider === 'gemini' && options.modalities) body.modalities = options.modalities;
   if (options.stream !== undefined) body.stream = options.stream;
