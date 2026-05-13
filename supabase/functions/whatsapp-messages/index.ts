@@ -2911,7 +2911,7 @@ ${supervisorRecommendation.recommendedResponse}
     // Per-agent model override beats company-default. NULL → fall back to company primary_model, then hard default.
     const primaryModel = (selectedMode?.model && selectedMode.model.trim().length > 0)
       ? selectedMode.model
-      : (aiOverrides?.primary_model || 'glm-4.7');
+      : (aiOverrides?.primary_model || PRIMARY_TEXT_MODEL);
 
     // Always respect the resolved primary model. Speed/complexity tradeoffs
     // belong in the per-company / per-agent model config, NOT a runtime hard-code.
