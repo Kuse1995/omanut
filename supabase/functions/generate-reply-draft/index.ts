@@ -254,7 +254,7 @@ Generate a professional reply:`;
 
     // Generate AI reply using Gemini API
     const aiResponse = await geminiChat({
-      model: "glm-4.7",
+      model: PRIMARY_TEXT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
