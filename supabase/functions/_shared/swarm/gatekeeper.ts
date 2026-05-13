@@ -20,7 +20,7 @@ Schema:
 
 export async function runGatekeeper(input: SwarmInput): Promise<{ intent: IntentObject; ms: number; model: string }> {
   const start = Date.now();
-  const model = 'glm-4.7';
+  const model = 'MiniMax-M2';
   const userMsg = `Channel: ${input.channel}
 Customer: ${input.customer_name || 'unknown'}
 Raw message:
