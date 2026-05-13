@@ -202,7 +202,7 @@ Return ONLY the caption text, nothing else.`;
 
     if (!caption) {
       const captionResponse = await geminiChat({
-        model: 'glm-4.7',
+        model: PRIMARY_TEXT_MODEL,
         messages: [{ role: 'user', content: captionPrompt }],
       });
 
