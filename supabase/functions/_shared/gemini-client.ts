@@ -101,6 +101,21 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
         if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/GEMINI both missing)');
       }
       break;
+    case 'minimax':
+      apiUrl = MINIMAX_OPENAI_URL;
+      apiKey = Deno.env.get('MINIMAX_API_KEY');
+      // Default to MiniMax-M2 (latest text model) if a bare "minimax" name was provided
+      if (!modelToSend || modelToSend.toLowerCase() === 'minimax' || modelToSend.toLowerCase() === 'minimax-latest') {
+        modelToSend = 'MiniMax-M2';
+      }
+      if (!apiKey) {
+        console.error(`[CONFIG-ERROR] Missing MINIMAX_API_KEY for model "${options.model}", falling back to direct Gemini`);
+        apiUrl = GEMINI_OPENAI_URL;
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        modelToSend = 'gemini-2.5-flash';
+        if (!apiKey) throw new Error('No direct provider API keys configured (MINIMAX/GEMINI both missing)');
+      }
+      break;
     case 'gemini':
     default:
       apiUrl = GEMINI_OPENAI_URL;
