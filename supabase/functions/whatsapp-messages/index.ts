@@ -721,8 +721,12 @@ async function routeToAgent(
   
   const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
   
-  // Use configured values or defaults
-  const routingModel = config?.routingModel || 'deepseek-chat';
+  // Use configured values or defaults.
+  // IMPORTANT: router must be a NON-reasoning model. Reasoning-tier models
+  // (glm-4.5-air, glm-4.6, deepseek-reasoner, MiniMax-M2, *-thinking) burn the
+  // token budget inside `reasoning_content` and return empty `content`, which
+  // forces the catch-block fallback and pins everything to the is_default mode.
+  const routingModel = config?.routingModel || 'google/gemini-2.5-flash-lite';
   const routingTemperature = config?.routingTemperature ?? 0.3;
   const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   

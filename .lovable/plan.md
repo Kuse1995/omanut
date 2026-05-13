@@ -1,76 +1,41 @@
-## Goal
-Make **MiniMax-M2** (latest text/tool-calling model from MiniMax — the closest match to your "MiniMax 2.7" ask; their current GA text model is `MiniMax-M2`) the **primary brain** for all major tool-calling and response generation across the system, with GLM-4.7 demoted to fallback only.
+# Fix: Router Always Lands on Customer Care
 
-> ⚠️ Quick check before I build: MiniMax has not yet released a public model literally named `MiniMax-M2.7`. Their current latest text+tool-calling model is `MiniMax-M2`. I'll proceed with `MiniMax-M2` as the canonical name and make the model id a single constant so we can swap to `MiniMax-M2.7` later by changing one line. If you have an exact model id you've been given by MiniMax (e.g. preview SKU), drop it in chat and I'll use it.
+## What's broken
 
-## Scope — what gets switched to MiniMax
+The intent router in `whatsapp-messages` calls a reasoning-tier LLM (GLM‑4.5‑Air / similar) with `max_tokens: 150`. These models spend their entire budget inside `reasoning_content` and return an **empty** `message.content` with `finish_reason: "length"`. Our code reads only `content`, sees empty, throws `"Router provider returned no choices"`, and falls into the keyword/`is_default` fallback. Because the seeded default is **support** (priority 20, `is_default = true`), every conversation gets pinned to Customer Care — regardless of what the customer said.
 
-**Switched to MiniMax-M2 (primary)**
-1. `whatsapp-messages` — main router + tool-calling loop (the agent that calls `check_stock`, `list_products`, `notify_boss`, reservations, etc.). Both call sites at lines 1841 and 2911-2914.
-2. `boss-chat` — owner chat tool-calling loop (line 1302).
-3. `swarm/creative.ts` — already on MiniMax-M2, leave as-is.
-4. `swarm/critic.ts` (lines 25, 89) and `swarm/gatekeeper.ts` (line 23) — switch to MiniMax-M2 so the **whole swarm runs on one provider** (eliminates cross-provider latency variance the user flagged).
-5. `supervisor-agent` (line 174), `analyze-and-followup` (line 292), `generate-reply-draft` (line 257) — primary response generation.
-6. `auto-content-creator` (line 205) — social post drafts.
-7. `ai-playground` default (line 73).
-8. Default `companies.ai_overrides.primary_model` for **new** companies (seed) → `MiniMax-M2`.
+Evidence:
+- `agent_performance`: 15/15 most recent rows = `support`, confidence `0.4`, reason `"Default mode (no keyword match)"` (the catch-block string).
+- Edge logs: `[ROUTER] Provider returned no choices, payload shape: {"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"…"}}]}`.
 
-**NOT switched (kept on current model)**
-- `whatsapp-image-gen`, `extract-product-identity`, `analyze-customer-image`, `analyze-reference-image`, `analyze-media`, `index-brand-asset`, `reindex-company-media` — all multimodal vision tasks. MiniMax-M2 is text-only; vision stays on `glm-4.7` / `gemini-2.5-flash`.
-- `research-company`, `smart-configure`, `meta-lead-alert`, `analyze-conversation`, `ai-training-coach`, `daily-briefing`, `analyze-ai-quality`, `extract-product-identity` — low-volume admin/analytics jobs. Leave on `glm-4.7` to avoid burning MiniMax quota for non-customer-facing work.
-- Embeddings (`embedding-client.ts`) — Gemini, unchanged.
-- Image generation (`gpt-image-1`, `gemini-2.5-flash-image`) — unchanged.
+## Fix (3 small, surgical changes)
 
-## How — single switch, safe rollout
+### 1. `supabase/functions/whatsapp-messages/index.ts` — `routeToAgent()`
 
-### 1. New constant in `_shared/gemini-client.ts`
-```ts
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'MiniMax-M2';
-export const FALLBACK_TEXT_MODEL = 'glm-4.7';
-```
-One env var (`PRIMARY_TEXT_MODEL`) lets us flip back to `glm-4.7` without redeploying if MiniMax has an outage.
+- **Raise `max_tokens`** from `150` → `400` so reasoning models have room to emit JSON after their internal thoughts.
+- **Read `reasoning_content` as a secondary source.** When `content` is empty, scan `reasoning_content` for the first `{...}` block and parse that. Many GLM/DeepSeek reasoning replies embed the final JSON inside the reasoning trail.
+- **Add a strict-mode hint** to the system message: `"Output ONLY a JSON object on the first line. Do not think out loud."` — cuts reasoning length on models that honor it.
+- **Pin the router default to a non-reasoning model.** Change the inline default from `'deepseek-chat'` to `'google/gemini-2.5-flash-lite'` (fast, cheap, non-reasoning, reliable JSON). `aiOverrides.routing_model` still wins when set.
 
-### 2. Update fallback chain
-Reorder `geminiChatWithFallback` so MiniMax is **always first**, GLM second, Gemini third, DeepSeek/Kimi tail. Remove the existing `MINIMAX_AS_PRIMARY` env gate (becomes default).
+### 2. `supabase/migrations/<new>.sql`
 
-```
-chain = [PRIMARY_TEXT_MODEL, 'glm-4.7', 'gemini-2.5-flash', 'deepseek-chat', 'kimi-k2-0711-preview']
-```
+- Update existing `company_ai_overrides.routing_model` rows that are currently set to a reasoning model (`glm-4.5-air`, `glm-4.6`, `deepseek-reasoner`, anything ending in `-thinking`/`-reasoning`) → `google/gemini-2.5-flash-lite`.
+- Update the `seed_company_ai_overrides()` trigger so new companies start with `routing_model = 'google/gemini-2.5-flash-lite'` (today it's `'MiniMax-M2'`, which is also a reasoning-tier model and would reproduce the same bug).
 
-### 3. Replace inline `'glm-4.7'` / `'google/gemini-2.5-flash'` literals
-In the 8 files listed under "Switched", swap the hard-coded string for `PRIMARY_TEXT_MODEL` (or the override expression `aiOverrides?.primary_model || PRIMARY_TEXT_MODEL`).
+### 3. Observability (tiny)
 
-### 4. Tool-calling compatibility validation (critical)
-MiniMax-M2 supports OpenAI-compatible `tools` + `tool_choice`. The current `whatsapp-messages` and `boss-chat` payloads already match that schema (`tools: filteredTools, tool_choice: "auto"`). I'll add one defensive normalization:
-- MiniMax requires `tool_call_id` echoed back in `role:"tool"` messages (already done in our loops — verified).
-- MiniMax rejects `parameters: {}` for zero-arg tools — coerce to `{type:"object", properties:{}}` if any tool is missing it (cheap one-liner in the geminiChat wrapper, MiniMax branch only).
-
-### 5. Per-company override preserved
-`companies.ai_overrides.primary_model` still wins. Existing companies with explicit GLM stay on GLM; new companies get MiniMax via seed default.
-
-### 6. Rollout
-- Ship with `PRIMARY_TEXT_MODEL=MiniMax-M2` env var unset → reads default `MiniMax-M2`.
-- Watch for 1 hour:
-  - `swarm_runs.bypass_reason` for `'budget_exhausted'` spikes
-  - `whatsapp-messages` logs for `[AI-FALLBACK] Model MiniMax-M2 failed` patterns
-  - Tool-call success rate (no malformed `tool_calls` arrays)
-- If MiniMax misbehaves, set workspace secret `PRIMARY_TEXT_MODEL=glm-4.7` → instant rollback, no code change.
+- In the catch block, log the **actual error string** at `console.error` and write `notes = "Router exception: <err>"` instead of the misleading `"Default mode (no keyword match)"`. This way, future failures are diagnosable from `agent_performance` alone without grepping edge logs.
 
 ## Out of scope
-- Vision pipelines (kept on GLM/Gemini)
-- Voice (Realtime stays on its current model)
-- Embeddings
-- Image / video generation
-- Changing the swarm post-hoc refinement architecture (already shipped)
-- Re-pointing existing companies that have a non-default `primary_model` set
 
-## Files I'll edit
-- `supabase/functions/_shared/gemini-client.ts` (constants + fallback reorder + MiniMax tool-schema coerce)
-- `supabase/functions/whatsapp-messages/index.ts` (2 model literals)
-- `supabase/functions/boss-chat/index.ts` (1 default literal)
-- `supabase/functions/_shared/swarm/{gatekeeper,critic}.ts` (model literals)
-- `supabase/functions/{supervisor-agent,analyze-and-followup,generate-reply-draft,auto-content-creator,ai-playground}/index.ts` (model literals)
-- New migration: update default JSONB for `companies.ai_overrides->>primary_model` for newly-seeded companies (does NOT touch existing rows)
-- `mem://index.md` — add a Core line: "Primary text/tool-calling model: MiniMax-M2 (override via PRIMARY_TEXT_MODEL env)"
+- No changes to swarm, tool-calling loop, prompts, or the primary text model (`MiniMax-M2` stays as the response brain — it's only the **router** that needs a deterministic JSON model).
+- No UI changes.
+- Not changing `is_default = support` in `company_agent_modes` — that's a sensible safety net once the router actually works.
 
-Approve and I'll ship it. If you want me to also flip *existing* companies (not just new ones) over to MiniMax in the same migration, say so — otherwise I leave their `ai_overrides.primary_model` untouched.
+## Validation
+
+1. Deploy → send a test WhatsApp message like "How much is the premium package?".
+2. Check `agent_performance`: expect `agent_type = sales`, `confidence ≥ 0.7`, reason mentioning pricing/buy intent.
+3. Send "this is broken, help" → expect `support`.
+4. Tail edge logs for `[ROUTER] ✓ Selected:` lines with non-`0.4` confidences.
+5. Confirm no rows with `notes = "Default mode (no keyword match)"` accumulate after deploy.
