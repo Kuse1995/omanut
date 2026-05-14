@@ -1,41 +1,90 @@
-# Fix: Router Always Lands on Customer Care
+## Diagnosis (already confirmed from the database)
 
-## What's broken
+The 503s are **not** coming from Omanut, the WhatsApp API, or rate limiting. They're coming from the **OpenClaw tunnel registered against each company** — i.e. the URL the customer's local OpenClaw instance (or your Cloudflare tunnel) is exposed on.
 
-The intent router in `whatsapp-messages` calls a reasoning-tier LLM (GLM‑4.5‑Air / similar) with `max_tokens: 150`. These models spend their entire budget inside `reasoning_content` and return an **empty** `message.content` with `finish_reason: "length"`. Our code reads only `content`, sees empty, throws `"Router provider returned no choices"`, and falls into the keyword/`is_default` fallback. Because the seeded default is **support** (priority 20, `is_default = true`), every conversation gets pinned to Customer Care — regardless of what the customer said.
+What `openclaw_events.dispatch_error` actually contains for the recent 503s:
 
-Evidence:
-- `agent_performance`: 15/15 most recent rows = `support`, confidence `0.4`, reason `"Default mode (no keyword match)"` (the catch-block string).
-- Edge logs: `[ROUTER] Provider returned no choices, payload shape: {"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"…"}}]}`.
+```
+<h1>no tunnel here :(</h1>
+```
 
-## Fix (3 small, surgical changes)
+That HTML is the standard **localhost.run / lhr.life** "tunnel offline" page. So the dispatch flow is:
 
-### 1. `supabase/functions/whatsapp-messages/index.ts` — `routeToAgent()`
+```text
+Twilio → whatsapp-messages → openclaw-dispatch → POST <company.openclaw_webhook_url>
+                                                          │
+                                                          ▼
+                                          lhr.life / trycloudflare.com tunnel (DEAD)
+                                                          │
+                                                          ▼
+                                                  HTTP 503 "no tunnel here"
+```
 
-- **Raise `max_tokens`** from `150` → `400` so reasoning models have room to emit JSON after their internal thoughts.
-- **Read `reasoning_content` as a secondary source.** When `content` is empty, scan `reasoning_content` for the first `{...}` block and parse that. Many GLM/DeepSeek reasoning replies embed the final JSON inside the reasoning trail.
-- **Add a strict-mode hint** to the system message: `"Output ONLY a JSON object on the first line. Do not think out loud."` — cuts reasoning length on models that honor it.
-- **Pin the router default to a non-reasoning model.** Change the inline default from `'deepseek-chat'` to `'google/gemini-2.5-flash-lite'` (fast, cheap, non-reasoning, reliable JSON). `aiOverrides.routing_model` still wins when set.
+Webhook URLs currently registered on `companies`:
 
-### 2. `supabase/migrations/<new>.sql`
+| Company | Webhook URL | State |
+|---|---|---|
+| Omanut Technologies | `https://f53c55aa61d799.lhr.life/webhook` | **dead** (lhr.life session expired) → source of the current http_503s |
+| Finch, E Library, Art of Intelligence, GreenGrid, ANZ | `https://contributing-prisoners-politics-pontiac.trycloudflare.com/webhook` | **dead** (older trycloudflare tunnel) → source of the older http_530 / DNS errors |
+| North Park School | `https://agent.omanut.me/webhook` | alive (the only stable one) |
 
-- Update existing `company_ai_overrides.routing_model` rows that are currently set to a reasoning model (`glm-4.5-air`, `glm-4.6`, `deepseek-reasoner`, anything ending in `-thinking`/`-reasoning`) → `google/gemini-2.5-flash-lite`.
-- Update the `seed_company_ai_overrides()` trigger so new companies start with `routing_model = 'google/gemini-2.5-flash-lite'` (today it's `'MiniMax-M2'`, which is also a reasoning-tier model and would reproduce the same bug).
+So:
 
-### 3. Observability (tiny)
+1. **Is the MCP server receiving outbound dispatch?** No — the requests never reach OpenClaw because the *tunnel in front of OpenClaw* is gone. Omanut's `openclaw-dispatch` is doing the right thing and faithfully reporting the 503 back.
+2. **Rate limiting / queue overflow?** No. `trigger_count = 0` on every stuck row, dispatch attempts aren't being retried at all — they fail on the first POST and sit `pending`.
+3. **Connection between gateway and WhatsApp API?** Fine. Inbound works, and the only outbound that's currently delivering (North Park) goes through cleanly.
+4. **Recent deploys?** Today's deploys touched the WhatsApp router model and MiniMax wiring — none of that changed dispatch URLs or the tunnel layer. The 503s pre-date today's edits (oldest stuck row is from May 7).
 
-- In the catch block, log the **actual error string** at `console.error` and write `notes = "Router exception: <err>"` instead of the misleading `"Default mode (no keyword match)"`. This way, future failures are diagnosable from `agent_performance` alone without grepping edge logs.
+## Immediate unblock (no code, you do this)
+
+Re-register the live tunnel for each affected company via the MCP `register_webhook` tool, e.g. for Omanut Technologies:
+
+```json
+{ "tool": "register_webhook", "input": { "webhook_url": "https://<your-new-tunnel>/webhook", "mode": "primary" } }
+```
+
+If your local OpenClaw isn't running right now, call `clear_webhook` on the dead companies so we stop dispatching into a black hole.
+
+## Code changes I'd like to land in this loop
+
+These prevent the same situation from silently snowballing again. All scoped to `supabase/functions/openclaw-dispatch/index.ts` plus one tiny migration. No UI work, no changes to whatsapp-messages routing logic.
+
+### 1. Detect "dead tunnel" responses and auto-quiet the webhook
+
+When dispatch gets back any of:
+- HTTP 503/502/504 with body containing `no tunnel here`, `Tunnel`, `cloudflare`, `Cloudflare Tunnel error`
+- DNS error (`failed to lookup address information`)
+- HTTP 530
+
+…and that company has had **≥ 5 consecutive dead-tunnel failures**, set `companies.openclaw_webhook_url = null` (or a new `openclaw_webhook_mode = 'off'` if you want to keep the URL for debugging) and write a single boss notification: *"OpenClaw tunnel for <company> has been offline for N attempts — webhook auto-disabled, run register_webhook to re-enable."*
+
+### 2. Mark events `failed` instead of leaving them `pending` forever
+
+After N (=3) failed dispatch attempts on the same event, flip `status` from `pending` → `failed` so:
+- `openclaw-pending-trigger` stops re-trying them every minute,
+- the dashboard / engagement-watchdog can see the real backlog count.
+
+Add a small index migration on `(status, dispatch_status, created_at)` for the watchdog query.
+
+### 3. Better dispatch_error storage
+
+Right now we store the full HTML error page (the truncated row above is 50+ lines of Cloudflare HTML). Cap to first 500 chars and prefix with the detected reason (`tunnel_offline`, `dns_error`, `http_404`, etc.) so future debugging is one query, not log-diving.
+
+### 4. (Optional) Customer-facing fallback
+
+When a tunnel is detected dead and the inbound message is still inside Twilio's reply window, optionally send the company's configured "we'll get back to you" auto-reply via `send-whatsapp-message` instead of leaving the customer in silence. Off by default behind a `companies.openclaw_dead_tunnel_fallback` flag.
 
 ## Out of scope
 
-- No changes to swarm, tool-calling loop, prompts, or the primary text model (`MiniMax-M2` stays as the response brain — it's only the **router** that needs a deterministic JSON model).
-- No UI changes.
-- Not changing `is_default = support` in `company_agent_modes` — that's a sensible safety net once the router actually works.
+- No changes to `whatsapp-messages` router (today's MiniMax/router fix stays).
+- No changes to the MCP server itself.
+- No retroactive re-dispatch of the existing 10+ pending events — once the tunnel is restored, you can mass-retrigger via `openclaw-pending-trigger` and they'll flow through.
 
-## Validation
+## Validation after deploy
 
-1. Deploy → send a test WhatsApp message like "How much is the premium package?".
-2. Check `agent_performance`: expect `agent_type = sales`, `confidence ≥ 0.7`, reason mentioning pricing/buy intent.
-3. Send "this is broken, help" → expect `support`.
-4. Tail edge logs for `[ROUTER] ✓ Selected:` lines with non-`0.4` confidences.
-5. Confirm no rows with `notes = "Default mode (no keyword match)"` accumulate after deploy.
+1. Send a test WhatsApp to Omanut Technologies → expect `dispatch_status = http_503`, `dispatch_error` prefixed with `tunnel_offline:`.
+2. Repeat 5 times → expect `companies.openclaw_webhook_url` set to null + one boss notification.
+3. After 3 attempts on the same event → expect `status = 'failed'`.
+4. Re-register a live tunnel → next inbound dispatches successfully (`status = answered`).
+
+Want me to proceed with all four changes, or drop #4 (customer-facing fallback)?
