@@ -358,10 +358,102 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ── Classify failures so logs/queries are useful, and detect dead tunnels.
+  // Dead-tunnel signals: localhost.run "no tunnel here", Cloudflare tunnel error pages,
+  // DNS lookup failures, HTTP 502/503/504/530 from tunnel front-ends.
+  const rawErr = (dispatchError ?? '').toLowerCase();
+  let failureReason: string | null = null;
+  let isDeadTunnel = false;
+  if (dispatchStatus === 'delivered' || dispatchStatus === 'no_webhook') {
+    // success / no-op — nothing to classify
+  } else if (
+    rawErr.includes('no tunnel here') ||
+    rawErr.includes('cloudflare tunnel error') ||
+    rawErr.includes('error 1033') ||
+    rawErr.includes('error 1016') ||
+    dispatchStatus === 'http_530'
+  ) {
+    failureReason = 'tunnel_offline';
+    isDeadTunnel = true;
+  } else if (rawErr.includes('failed to lookup address') || rawErr.includes('dns error')) {
+    failureReason = 'dns_error';
+    isDeadTunnel = true;
+  } else if (dispatchStatus === 'http_502' || dispatchStatus === 'http_503' || dispatchStatus === 'http_504') {
+    failureReason = 'tunnel_unavailable';
+    isDeadTunnel = true;
+  } else if (dispatchStatus === 'http_404') {
+    failureReason = 'webhook_path_not_found';
+  } else if (dispatchStatus === 'error') {
+    failureReason = rawErr.includes('timeout') ? 'timeout' : 'transport_error';
+  } else if (dispatchStatus.startsWith('http_4')) {
+    failureReason = 'webhook_client_error';
+  } else if (dispatchStatus.startsWith('http_5')) {
+    failureReason = 'webhook_server_error';
+  }
+  const taggedError = failureReason
+    ? `${failureReason}: ${(dispatchError ?? '').slice(0, 460)}`
+    : dispatchError;
+
+  // Mark dead-tunnel events as `failed` immediately — they have no realistic chance of
+  // being delivered until the tunnel is restored, so they shouldn't pollute the
+  // pending-event queue forever.
+  const newEventStatus = isDeadTunnel ? 'failed' : 'pending';
+
   await supabase
     .from('openclaw_events')
-    .update({ dispatch_status: dispatchStatus, dispatch_error: dispatchError })
+    .update({
+      dispatch_status: dispatchStatus,
+      dispatch_error: taggedError,
+      status: newEventStatus,
+    })
     .eq('id', event.id);
+
+  // ── Track consecutive dead-tunnel failures per company. After 5 in a row, auto-disable
+  // the webhook URL and ping the boss once so a stale tunnel stops silently dropping messages.
+  const DEAD_TUNNEL_DISABLE_THRESHOLD = 5;
+  if (webhookUrl) {
+    if (isDeadTunnel) {
+      const newCount = ((company as any).openclaw_consecutive_failures ?? 0) + 1;
+      const updates: Record<string, unknown> = {
+        openclaw_consecutive_failures: newCount,
+        openclaw_last_failure_at: new Date().toISOString(),
+      };
+      let autoDisabled = false;
+      if (newCount >= DEAD_TUNNEL_DISABLE_THRESHOLD && (company as any).openclaw_webhook_url) {
+        updates.openclaw_webhook_url = null;
+        updates.openclaw_auto_disabled_at = new Date().toISOString();
+        autoDisabled = true;
+      }
+      await supabase.from('companies').update(updates).eq('id', company.id);
+
+      if (autoDisabled) {
+        try {
+          await supabase.functions.invoke('send-boss-notification', {
+            body: {
+              companyId: company.id,
+              notificationType: 'high_value_opportunity',
+              data: {
+                customer_name: 'OpenClaw infrastructure',
+                customer_phone: 'system',
+                opportunity_type: 'OpenClaw tunnel offline — webhook auto-disabled',
+                details: `The OpenClaw webhook for ${company.name} has failed ${newCount} times in a row (reason: ${failureReason}). The webhook URL has been cleared so we stop dispatching into a dead tunnel. Run the MCP tool register_webhook with a live tunnel URL to re-enable.\n\nLast error: ${(taggedError ?? '').slice(0, 200)}`,
+                estimated_value: 'Customer messages currently NOT being answered',
+              },
+            },
+          });
+          console.log('[openclaw-dispatch] auto-disabled dead tunnel', { company_id: company.id, reason: failureReason, failures: newCount });
+        } catch (e) {
+          console.warn('[openclaw-dispatch] boss notify after auto-disable failed', String(e).slice(0, 200));
+        }
+      }
+    } else if (dispatchStatus === 'delivered' && ((company as any).openclaw_consecutive_failures ?? 0) > 0) {
+      // Recovery — reset the counter once we get a successful delivery.
+      await supabase.from('companies').update({
+        openclaw_consecutive_failures: 0,
+        openclaw_last_failure_at: null,
+      }).eq('id', company.id);
+    }
+  }
 
   // Successful webhook delivery counts as a heartbeat — keeps health-check from
   // demoting primary→assist when OpenClaw is actively receiving events.
