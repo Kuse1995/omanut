@@ -355,8 +355,14 @@ export const MetaIntegrationsPanel = () => {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      // Read from local session first (no network); fall back to getUser only if missing.
+      const { data: { session } } = await supabase.auth.getSession();
+      let user = session?.user ?? null;
+      if (!user) {
+        const { data } = await supabase.auth.getUser();
+        user = data.user ?? null;
+      }
+      if (!user) throw new Error('Your session expired. Please sign in again, then retry saving this page.');
 
       const payload = {
         page_id: form.page_id,
