@@ -382,7 +382,11 @@ Deno.serve(async (req) => {
     failureReason = 'tunnel_unavailable';
     isDeadTunnel = true;
   } else if (dispatchStatus === 'http_404') {
+    // Customer tunnel is up but `/webhook` (or whatever path was registered) isn't mounted.
+    // Treat as dead-tunnel-class so the auto-disable counter kicks in and we stop dispatching
+    // into a misconfigured route forever.
     failureReason = 'webhook_path_not_found';
+    isDeadTunnel = true;
   } else if (dispatchStatus === 'error') {
     failureReason = rawErr.includes('timeout') ? 'timeout' : 'transport_error';
   } else if (dispatchStatus.startsWith('http_4')) {
