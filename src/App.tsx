@@ -26,6 +26,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import Companies from "./pages/admin/Companies";
 import NewCompany from "./pages/admin/NewCompany";
 import EditCompany from "./pages/admin/EditCompany";
+import EventQueue from "./pages/admin/EventQueue";
 import NotFound from "./pages/NotFound";
 import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 import PitchBanking from "./pages/PitchBanking";
@@ -66,6 +67,7 @@ const App = () => (
             <Route path="/admin/companies" element={<Companies />} />
             <Route path="/admin/companies/new" element={<NewCompany />} />
             <Route path="/admin/company/:id" element={<EditCompany />} />
+            <Route path="/admin/event-queue" element={<EventQueue />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/setup" element={<Setup />} />
             <Route path="/setup/wizard" element={<SetupWizard />} />
