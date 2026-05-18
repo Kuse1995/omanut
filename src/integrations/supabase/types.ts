@@ -2417,6 +2417,83 @@ export type Database = {
           },
         ]
       }
+      inbound_events: {
+        Row: {
+          ai_response: string | null
+          attempts: number
+          channel: Database["public"]["Enums"]["event_channel"]
+          company_id: string
+          completed_at: string | null
+          conversation_id: string | null
+          created_at: string
+          error_class: Database["public"]["Enums"]["event_error_class"] | null
+          external_id: string | null
+          id: string
+          last_error: string | null
+          latency_ms: number | null
+          model: string | null
+          next_attempt_at: string
+          payload: Json
+          picked_at: string | null
+          source: Database["public"]["Enums"]["event_source"]
+          status: Database["public"]["Enums"]["event_status"]
+          tokens: number | null
+          updated_at: string
+        }
+        Insert: {
+          ai_response?: string | null
+          attempts?: number
+          channel: Database["public"]["Enums"]["event_channel"]
+          company_id: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error_class?: Database["public"]["Enums"]["event_error_class"] | null
+          external_id?: string | null
+          id?: string
+          last_error?: string | null
+          latency_ms?: number | null
+          model?: string | null
+          next_attempt_at?: string
+          payload?: Json
+          picked_at?: string | null
+          source: Database["public"]["Enums"]["event_source"]
+          status?: Database["public"]["Enums"]["event_status"]
+          tokens?: number | null
+          updated_at?: string
+        }
+        Update: {
+          ai_response?: string | null
+          attempts?: number
+          channel?: Database["public"]["Enums"]["event_channel"]
+          company_id?: string
+          completed_at?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          error_class?: Database["public"]["Enums"]["event_error_class"] | null
+          external_id?: string | null
+          id?: string
+          last_error?: string | null
+          latency_ms?: number | null
+          model?: string | null
+          next_attempt_at?: string
+          payload?: Json
+          picked_at?: string | null
+          source?: Database["public"]["Enums"]["event_source"]
+          status?: Database["public"]["Enums"]["event_status"]
+          tokens?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mcp_active_company: {
         Row: {
           api_key_id: string
@@ -4048,6 +4125,30 @@ export type Database = {
     Enums: {
       app_role: "admin" | "user" | "client"
       company_role: "owner" | "manager" | "contributor" | "viewer"
+      event_channel: "whatsapp" | "direct_message" | "public_comment"
+      event_error_class:
+        | "webhook_404"
+        | "auth"
+        | "tunnel_dead"
+        | "timeout"
+        | "empty_ai"
+        | "send_failed"
+        | "rate_limited"
+        | "unknown"
+      event_source:
+        | "twilio"
+        | "meta_whatsapp"
+        | "meta_dm_fb"
+        | "meta_dm_ig"
+        | "meta_comment_fb"
+        | "meta_comment_ig"
+      event_status:
+        | "pending"
+        | "processing"
+        | "sent"
+        | "failed"
+        | "dead"
+        | "skipped"
       media_category:
         | "menu"
         | "interior"
@@ -4189,6 +4290,33 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "user", "client"],
       company_role: ["owner", "manager", "contributor", "viewer"],
+      event_channel: ["whatsapp", "direct_message", "public_comment"],
+      event_error_class: [
+        "webhook_404",
+        "auth",
+        "tunnel_dead",
+        "timeout",
+        "empty_ai",
+        "send_failed",
+        "rate_limited",
+        "unknown",
+      ],
+      event_source: [
+        "twilio",
+        "meta_whatsapp",
+        "meta_dm_fb",
+        "meta_dm_ig",
+        "meta_comment_fb",
+        "meta_comment_ig",
+      ],
+      event_status: [
+        "pending",
+        "processing",
+        "sent",
+        "failed",
+        "dead",
+        "skipped",
+      ],
       media_category: [
         "menu",
         "interior",
