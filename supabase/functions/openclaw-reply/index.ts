@@ -101,15 +101,32 @@ Deno.serve(async (req) => {
   const p: any = event.payload ?? {};
   const customerPhone = p.from ?? p.phone ?? p.sender ?? null;
 
+  // Helper to write event status across either backing table.
+  const updateEvent = async (patch: Record<string, unknown>) => {
+    if (eventTable === 'inbound_events') {
+      const mapped: Record<string, unknown> = {};
+      if ('status' in patch) {
+        const s = patch.status as string;
+        mapped.status = s === 'answered' ? 'sent' : (s === 'pending' ? 'pending' : s);
+      }
+      if ('answered_at' in patch) mapped.completed_at = patch.answered_at;
+      if ('answered_by' in patch) mapped.consumed_by = patch.answered_by;
+      mapped.ai_response = reply_text ?? null;
+      await supabase.from('inbound_events').update(mapped).eq('id', event_id);
+    } else {
+      await supabase.from('openclaw_events').update(patch).eq('id', event_id);
+    }
+  };
+
   // Skip / handoff actions just mark the event without sending.
   if (act === 'skip' || act === 'handoff') {
-    await supabase.from('openclaw_events').update({
+    await updateEvent({
       status: 'answered',
       answered_at: new Date().toISOString(),
       answered_by: 'openclaw',
       answered_action: act,
       payload: { ...p, openclaw_reply: reply_text ?? null, openclaw_action: act },
-    }).eq('id', event_id);
+    });
     if (act === 'handoff') {
       // Forward to boss so a human picks it up
       try {
@@ -144,16 +161,17 @@ Deno.serve(async (req) => {
       .limit(3);
     const dup = (recent ?? []).find((m: any) => (m.content ?? '').trim() === reply_text.trim());
     if (dup) {
-      await supabase.from('openclaw_events').update({
+      await updateEvent({
         status: 'answered',
         answered_at: new Date().toISOString(),
         answered_by: 'openclaw',
         answered_action: 'duplicate_suppressed',
         payload: { ...p, openclaw_reply: reply_text },
-      }).eq('id', event_id);
+      });
       return jsonResp(200, { status: 'duplicate_suppressed', event_id });
     }
   }
+
 
   // Look up company for provider routing
   const { data: company } = await supabase
