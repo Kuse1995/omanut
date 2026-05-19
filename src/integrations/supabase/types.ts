@@ -2422,8 +2422,11 @@ export type Database = {
           ai_response: string | null
           attempts: number
           channel: Database["public"]["Enums"]["event_channel"]
+          claimed_at: string | null
+          claimed_by: string | null
           company_id: string
           completed_at: string | null
+          consumed_by: string | null
           conversation_id: string | null
           created_at: string
           error_class: Database["public"]["Enums"]["event_error_class"] | null
@@ -2444,8 +2447,11 @@ export type Database = {
           ai_response?: string | null
           attempts?: number
           channel: Database["public"]["Enums"]["event_channel"]
+          claimed_at?: string | null
+          claimed_by?: string | null
           company_id: string
           completed_at?: string | null
+          consumed_by?: string | null
           conversation_id?: string | null
           created_at?: string
           error_class?: Database["public"]["Enums"]["event_error_class"] | null
@@ -2466,8 +2472,11 @@ export type Database = {
           ai_response?: string | null
           attempts?: number
           channel?: Database["public"]["Enums"]["event_channel"]
+          claimed_at?: string | null
+          claimed_by?: string | null
           company_id?: string
           completed_at?: string | null
+          consumed_by?: string | null
           conversation_id?: string | null
           created_at?: string
           error_class?: Database["public"]["Enums"]["event_error_class"] | null
@@ -3992,6 +4001,44 @@ export type Database = {
         Returns: boolean
       }
       claim_company: { Args: { _code: string }; Returns: Json }
+      claim_inbound_event: {
+        Args: { _claimed_by?: string; _event_id: string }
+        Returns: boolean
+      }
+      claim_pending_events: {
+        Args: { _claimed_by?: string; _company_id: string; _max?: number }
+        Returns: {
+          ai_response: string | null
+          attempts: number
+          channel: Database["public"]["Enums"]["event_channel"]
+          claimed_at: string | null
+          claimed_by: string | null
+          company_id: string
+          completed_at: string | null
+          consumed_by: string | null
+          conversation_id: string | null
+          created_at: string
+          error_class: Database["public"]["Enums"]["event_error_class"] | null
+          external_id: string | null
+          id: string
+          last_error: string | null
+          latency_ms: number | null
+          model: string | null
+          next_attempt_at: string
+          payload: Json
+          picked_at: string | null
+          source: Database["public"]["Enums"]["event_source"]
+          status: Database["public"]["Enums"]["event_status"]
+          tokens: number | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "inbound_events"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       deduct_credits: {
         Args: {
           p_amount: number
@@ -4107,6 +4154,10 @@ export type Database = {
           selar_link: string
           similarity: number
         }[]
+      }
+      release_stuck_events: {
+        Args: { _stuck_seconds?: number }
+        Returns: number
       }
       seed_company_agent_modes: {
         Args: { _company_id: string }

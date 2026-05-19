@@ -41,12 +41,20 @@ Deno.serve(async (req) => {
 
   // Optional: explicit event_id from ingestion path for immediate processing.
   let explicitId: string | null = null;
+  let bypassGrace = false;
   if (req.method === 'POST') {
     try {
       const body = await req.json();
       explicitId = body?.event_id ?? null;
+      bypassGrace = !!body?.bypass_grace;
     } catch { /* ignore */ }
   }
+
+  // OpenClaw-v3: give external pull consumers (OpenClaw) first dibs. The
+  // in-house worker only takes events whose age exceeds OPENCLAW_PULL_GRACE_SECONDS,
+  // unless explicitly invoked with bypass_grace=true.
+  const GRACE_SECONDS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8');
+  const graceCutoff = new Date(Date.now() - GRACE_SECONDS * 1000).toISOString();
 
   const processed: string[] = [];
 
@@ -54,21 +62,40 @@ Deno.serve(async (req) => {
     let events: any[] = [];
 
     if (explicitId) {
-      const { data } = await supabase
+      // Check grace window unless caller bypasses (cron straggler-runner does).
+      const { data: row } = await supabase
         .from('inbound_events')
-        .update({ status: 'processing', picked_at: new Date().toISOString() })
+        .select('id, created_at, status')
         .eq('id', explicitId)
-        .in('status', ['pending'])
-        .select('*');
-      events = data ?? [];
+        .maybeSingle();
+      if (!row) {
+        // nothing to do
+      } else if (row.status !== 'pending') {
+        // Already claimed by OpenClaw or another consumer — nothing to do.
+      } else if (!bypassGrace && row.created_at > graceCutoff) {
+        // Still inside grace window. A scheduled invoke will retry after grace.
+      } else {
+        const { data } = await supabase
+          .from('inbound_events')
+          .update({
+            status: 'processing',
+            claimed_by: 'worker',
+            claimed_at: new Date().toISOString(),
+            picked_at: new Date().toISOString(),
+          })
+          .eq('id', explicitId)
+          .eq('status', 'pending')
+          .select('*');
+        events = data ?? [];
+      }
     } else {
-      // Drain a batch of due pending events. We claim by updating status atomically;
-      // unique row update prevents two workers from grabbing the same event.
+      // Drain a batch of due pending events whose grace has elapsed.
       const { data: due } = await supabase
         .from('inbound_events')
         .select('id')
-        .in('status', ['pending'])
+        .eq('status', 'pending')
         .lte('next_attempt_at', new Date().toISOString())
+        .lte('created_at', graceCutoff)
         .order('next_attempt_at', { ascending: true })
         .limit(BATCH);
 
@@ -76,13 +103,19 @@ Deno.serve(async (req) => {
         const ids = due.map((d: any) => d.id);
         const { data } = await supabase
           .from('inbound_events')
-          .update({ status: 'processing', picked_at: new Date().toISOString() })
+          .update({
+            status: 'processing',
+            claimed_by: 'worker',
+            claimed_at: new Date().toISOString(),
+            picked_at: new Date().toISOString(),
+          })
           .in('id', ids)
           .eq('status', 'pending')
           .select('*');
         events = data ?? [];
       }
     }
+
 
     for (const ev of events) {
       const t0 = Date.now();
@@ -369,10 +402,12 @@ async function markSent(supabase: any, ev: any, text: string, model: string | nu
     model: model ?? ev.model,
     tokens: tokens ?? ev.tokens,
     completed_at: new Date().toISOString(),
+    consumed_by: 'worker',
     last_error: null,
     error_class: null,
   }).eq('id', ev.id);
 }
+
 
 async function markSkipped(supabase: any, ev: any, reason: string) {
   await supabase.from('inbound_events').update({
