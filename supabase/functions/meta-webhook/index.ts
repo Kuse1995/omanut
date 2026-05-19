@@ -148,13 +148,24 @@ async function enqueueOrLegacy(supabase: any, e: EnqueueInput) {
       return;
     }
 
-    // Kick the worker immediately — don't wait for cron.
-    try {
-      await supabase.functions.invoke("openclaw-worker", { body: { event_id: row.id } });
-    } catch (err) {
-      console.warn("[meta-webhook] worker invoke failed (cron will retry)", String(err).slice(0, 200));
+    // OpenClaw-v3: give external pull consumers first dibs. Schedule the
+    // in-house worker AFTER the grace window so it only runs as fallback.
+    const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8') * 1000;
+    const fallback = async () => {
+      await new Promise((r) => setTimeout(r, GRACE_MS));
+      try {
+        await supabase.functions.invoke('openclaw-worker', { body: { event_id: row.id } });
+      } catch (err) {
+        console.warn('[meta-webhook] delayed worker invoke failed', String(err).slice(0, 200));
+      }
+    };
+    if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+      (globalThis as any).EdgeRuntime.waitUntil(fallback());
+    } else {
+      fallback();
     }
     return;
+
   }
 
   // Legacy path (USE_EVENT_QUEUE=false rollback) — fall back to old openclaw-dispatch behaviour.
