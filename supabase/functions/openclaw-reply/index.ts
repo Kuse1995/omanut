@@ -238,13 +238,14 @@ Deno.serve(async (req) => {
     console.error('[openclaw-reply] send failed', { event_id, routedTo, sendError });
   }
 
-  await supabase.from('openclaw_events').update({
+  await updateEvent({
     status: sendStatus === 'sent' ? 'answered' : 'pending',
     answered_at: sendStatus === 'sent' ? new Date().toISOString() : null,
     answered_by: sendStatus === 'sent' ? 'openclaw' : null,
     answered_action: sendStatus === 'sent' ? `sent_via_${routedTo}` : null,
     payload: { ...p, openclaw_reply: reply_text, openclaw_media: media_url ?? null, send_error: sendError },
-  }).eq('id', event_id);
+  });
+
 
   return jsonResp(sendStatus === 'sent' ? 200 : 502, {
     status: sendStatus,
