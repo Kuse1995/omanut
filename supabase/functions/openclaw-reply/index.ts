@@ -61,16 +61,42 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  // Load event
-  const { data: event, error: eErr } = await supabase
-    .from('openclaw_events')
-    .select('id, company_id, conversation_id, channel, payload, status')
-    .eq('id', event_id)
-    .maybeSingle();
-  if (eErr || !event) return jsonResp(404, { error: 'event_not_found' });
-  if (event.status === 'answered') {
-    return jsonResp(200, { status: 'already_answered', event_id });
+  // Load event — try v3 inbound_events queue first, then legacy openclaw_events.
+  let event: any = null;
+  let eventTable: 'inbound_events' | 'openclaw_events' = 'inbound_events';
+
+  {
+    const { data } = await supabase
+      .from('inbound_events')
+      .select('id, company_id, conversation_id, channel, source, payload, status')
+      .eq('id', event_id)
+      .maybeSingle();
+    if (data) {
+      event = data;
+      eventTable = 'inbound_events';
+      if (data.status === 'sent' || data.status === 'skipped') {
+        return jsonResp(200, { status: 'already_answered', event_id });
+      }
+      // Normalize channel for the existing routing switch below.
+      if (event.channel === 'direct_message') event.channel = 'meta_dm';
+      else if (event.channel === 'public_comment') event.channel = 'comments';
+    }
   }
+
+  if (!event) {
+    const { data, error: eErr } = await supabase
+      .from('openclaw_events')
+      .select('id, company_id, conversation_id, channel, payload, status')
+      .eq('id', event_id)
+      .maybeSingle();
+    if (eErr || !data) return jsonResp(404, { error: 'event_not_found' });
+    event = data;
+    eventTable = 'openclaw_events';
+    if (event.status === 'answered') {
+      return jsonResp(200, { status: 'already_answered', event_id });
+    }
+  }
+
 
   const p: any = event.payload ?? {};
   const customerPhone = p.from ?? p.phone ?? p.sender ?? null;
