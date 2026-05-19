@@ -402,10 +402,12 @@ async function markSent(supabase: any, ev: any, text: string, model: string | nu
     model: model ?? ev.model,
     tokens: tokens ?? ev.tokens,
     completed_at: new Date().toISOString(),
+    consumed_by: 'worker',
     last_error: null,
     error_class: null,
   }).eq('id', ev.id);
 }
+
 
 async function markSkipped(supabase: any, ev: any, reason: string) {
   await supabase.from('inbound_events').update({
