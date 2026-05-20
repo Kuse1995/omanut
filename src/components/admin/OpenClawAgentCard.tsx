@@ -1,14 +1,11 @@
-import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Bot, Loader2, Activity } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Props {
@@ -29,8 +26,6 @@ const SKILLS: { key: string; label: string; hint: string }[] = [
 ];
 
 export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
-  const queryClient = useQueryClient();
-
   const { data: company, refetch } = useQuery({
     queryKey: ['openclaw-company-config', companyId],
     queryFn: async () => {
@@ -61,10 +56,10 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
     refetchInterval: 15000,
   });
 
-  const [webhookUrl, setWebhookUrl] = useState('');
-  useEffect(() => {
-    if (company?.openclaw_webhook_url !== undefined) setWebhookUrl(company.openclaw_webhook_url ?? '');
-  }, [company?.openclaw_webhook_url]);
+  // OpenClaw no longer needs an inbound webhook URL — it pulls from us via
+  // /openclaw-pull, /openclaw-stream, or Supabase Realtime. The legacy
+  // companies.openclaw_webhook_url column is left in place for back-compat
+  // but is no longer surfaced or written from the UI.
 
   const mode: Mode = (company?.openclaw_mode as Mode) || 'off';
   const owns = (company?.openclaw_owns as Record<string, boolean>) || {};
@@ -92,20 +87,6 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
     onError: (e: any) => toast.error(e.message || 'Failed'),
   });
 
-  const setWebhookMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from('companies')
-        .update({ openclaw_webhook_url: webhookUrl.trim() || null } as any)
-        .eq('id', companyId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('Webhook URL saved');
-      refetch();
-    },
-    onError: (e: any) => toast.error(e.message || 'Failed'),
-  });
 
   const killSwitchMutation = useMutation({
     mutationFn: async () => {
