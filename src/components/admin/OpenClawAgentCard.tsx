@@ -1,14 +1,11 @@
-import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Bot, Loader2, Activity } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Props {
@@ -29,8 +26,6 @@ const SKILLS: { key: string; label: string; hint: string }[] = [
 ];
 
 export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
-  const queryClient = useQueryClient();
-
   const { data: company, refetch } = useQuery({
     queryKey: ['openclaw-company-config', companyId],
     queryFn: async () => {
@@ -61,10 +56,10 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
     refetchInterval: 15000,
   });
 
-  const [webhookUrl, setWebhookUrl] = useState('');
-  useEffect(() => {
-    if (company?.openclaw_webhook_url !== undefined) setWebhookUrl(company.openclaw_webhook_url ?? '');
-  }, [company?.openclaw_webhook_url]);
+  // OpenClaw no longer needs an inbound webhook URL — it pulls from us via
+  // /openclaw-pull, /openclaw-stream, or Supabase Realtime. The legacy
+  // companies.openclaw_webhook_url column is left in place for back-compat
+  // but is no longer surfaced or written from the UI.
 
   const mode: Mode = (company?.openclaw_mode as Mode) || 'off';
   const owns = (company?.openclaw_owns as Record<string, boolean>) || {};
@@ -92,20 +87,6 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
     onError: (e: any) => toast.error(e.message || 'Failed'),
   });
 
-  const setWebhookMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from('companies')
-        .update({ openclaw_webhook_url: webhookUrl.trim() || null } as any)
-        .eq('id', companyId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('Webhook URL saved');
-      refetch();
-    },
-    onError: (e: any) => toast.error(e.message || 'Failed'),
-  });
 
   const killSwitchMutation = useMutation({
     mutationFn: async () => {
@@ -155,20 +136,26 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
           </div>
         </div>
 
-        {/* Webhook URL */}
-        <div className="space-y-2">
-          <Label htmlFor="oc-webhook" className="text-xs">OpenClaw inbound webhook URL</Label>
-          <div className="flex gap-2">
-            <Input
-              id="oc-webhook"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder="https://…/openclaw/webhook/{tenant}"
-              className="text-xs"
-            />
-            <Button size="sm" onClick={() => setWebhookMutation.mutate()} disabled={setWebhookMutation.isPending}>
-              Save
-            </Button>
+        {/* Pull endpoints (OpenClaw connects out to us — no inbound tunnel needed) */}
+        <div className="space-y-2 rounded border border-border p-3 bg-muted/30">
+          <p className="text-xs font-medium">Pull endpoints (OpenClaw → Omanut)</p>
+          <p className="text-[11px] text-muted-foreground">
+            OpenClaw authenticates with <code>OPENCLAW_GATEWAY_TOKEN</code> and chooses any transport.
+            No inbound webhook on OpenClaw's side.
+          </p>
+          <div className="space-y-1 text-[11px] font-mono">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">GET /functions/v1/openclaw-pull</span>
+              <Badge variant="outline" className="text-[10px]">long-poll</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">GET /functions/v1/openclaw-stream</span>
+              <Badge variant="outline" className="text-[10px]">SSE</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">realtime: inbound_events</span>
+              <Badge variant="outline" className="text-[10px]">supabase</Badge>
+            </div>
           </div>
         </div>
 
