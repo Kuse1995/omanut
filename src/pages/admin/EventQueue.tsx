@@ -21,6 +21,8 @@ interface EventRow {
   latency_ms: number | null;
   created_at: string;
   completed_at: string | null;
+  consumed_by: string | null;
+  claimed_by: string | null;
 }
 
 export default function EventQueue() {
@@ -32,7 +34,7 @@ export default function EventQueue() {
     setLoading(true);
     const { data, error } = await supabase
       .from("inbound_events")
-      .select("id, company_id, channel, source, status, error_class, attempts, last_error, ai_response, model, latency_ms, created_at, completed_at")
+      .select("id, company_id, channel, source, status, error_class, attempts, last_error, ai_response, model, latency_ms, created_at, completed_at, consumed_by, claimed_by")
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) toast.error(error.message);
@@ -132,6 +134,7 @@ export default function EventQueue() {
                   <th className="text-left p-3">Channel</th>
                   <th className="text-left p-3">Source</th>
                   <th className="text-left p-3">Status</th>
+                  <th className="text-left p-3">Consumed by</th>
                   <th className="text-left p-3">Att.</th>
                   <th className="text-left p-3">Latency</th>
                   <th className="text-left p-3">AI / Error</th>
@@ -139,7 +142,9 @@ export default function EventQueue() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
+                {filtered.map((r) => {
+                  const consumer = r.consumed_by ?? r.claimed_by ?? null;
+                  return (
                   <tr key={r.id} className="border-t border-border">
                     <td className="p-3 text-muted-foreground whitespace-nowrap">
                       {new Date(r.created_at).toLocaleTimeString()}
@@ -147,6 +152,15 @@ export default function EventQueue() {
                     <td className="p-3">{r.channel}</td>
                     <td className="p-3 text-muted-foreground">{r.source}</td>
                     <td className="p-3"><Badge variant={statusColor(r.status) as any}>{r.status}</Badge></td>
+                    <td className="p-3">
+                      {consumer ? (
+                        <Badge variant={consumer === 'openclaw' ? 'default' : 'outline'} className="text-[10px]">
+                          {consumer}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="p-3">{r.attempts}</td>
                     <td className="p-3 text-muted-foreground">{r.latency_ms ? `${r.latency_ms}ms` : "—"}</td>
                     <td className="p-3 max-w-md truncate" title={r.ai_response ?? r.last_error ?? ""}>
@@ -162,9 +176,10 @@ export default function EventQueue() {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No events</td></tr>
+                  <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No events</td></tr>
                 )}
               </tbody>
             </table>

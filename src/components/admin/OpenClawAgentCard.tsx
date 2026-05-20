@@ -155,20 +155,26 @@ export const OpenClawAgentCard = ({ companyId, onChanged }: Props) => {
           </div>
         </div>
 
-        {/* Webhook URL */}
-        <div className="space-y-2">
-          <Label htmlFor="oc-webhook" className="text-xs">OpenClaw inbound webhook URL</Label>
-          <div className="flex gap-2">
-            <Input
-              id="oc-webhook"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder="https://…/openclaw/webhook/{tenant}"
-              className="text-xs"
-            />
-            <Button size="sm" onClick={() => setWebhookMutation.mutate()} disabled={setWebhookMutation.isPending}>
-              Save
-            </Button>
+        {/* Pull endpoints (OpenClaw connects out to us — no inbound tunnel needed) */}
+        <div className="space-y-2 rounded border border-border p-3 bg-muted/30">
+          <p className="text-xs font-medium">Pull endpoints (OpenClaw → Omanut)</p>
+          <p className="text-[11px] text-muted-foreground">
+            OpenClaw authenticates with <code>OPENCLAW_GATEWAY_TOKEN</code> and chooses any transport.
+            No inbound webhook on OpenClaw's side.
+          </p>
+          <div className="space-y-1 text-[11px] font-mono">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">GET /functions/v1/openclaw-pull</span>
+              <Badge variant="outline" className="text-[10px]">long-poll</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">GET /functions/v1/openclaw-stream</span>
+              <Badge variant="outline" className="text-[10px]">SSE</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">realtime: inbound_events</span>
+              <Badge variant="outline" className="text-[10px]">supabase</Badge>
+            </div>
           </div>
         </div>
 
