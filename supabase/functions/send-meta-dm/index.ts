@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { checkIsLive } from "../_shared/is-live-gate.ts";
+
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -86,8 +88,22 @@ serve(async (req) => {
       });
     }
 
+    // Sandbox / live gate
+    const liveCheck = await checkIsLive({
+      company_id: companyId,
+      channel: "meta_dm",
+      recipient: recipientId,
+      payload: { text, surface: isInstagramDM ? 'instagram_dm' : 'facebook_messenger' },
+    });
+    if (!liveCheck.allowed) {
+      return new Response(JSON.stringify({
+        success: true, sandboxed: true, reason: liveCheck.reason, logged_id: liveCheck.logged_id,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // Send via Meta Graph API
     const graphUrl = 'https://graph.facebook.com/v25.0/me/messages';
+
     const graphResponse = await fetch(graphUrl, {
       method: 'POST',
       headers: {
