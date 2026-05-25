@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { assertTenantContext, loadTenantFromRecord } from "../_shared/tenant-context.ts";
 import { logTenantViolation, logSecurityEvent } from "../_shared/security-logging.ts";
+import { checkIsLive } from "../_shared/is-live-gate.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,6 +133,18 @@ serve(async (req) => {
         });
       }
 
+      const liveCheck1 = await checkIsLive({
+        company_id: originalComment.company_id,
+        channel: "fb_comment_reply",
+        recipient: originalComment.comment_id,
+        payload: { message: draft.ai_reply, draft_id },
+      });
+      if (!liveCheck1.allowed) {
+        return new Response(JSON.stringify({
+          success: true, sandboxed: true, reason: liveCheck1.reason, logged_id: liveCheck1.logged_id,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       const metaResponse = await fetch(
         `https://graph.facebook.com/v18.0/${originalComment.comment_id}/comments`,
         {
@@ -142,6 +156,7 @@ serve(async (req) => {
           body: JSON.stringify({ message: draft.ai_reply }),
         }
       );
+
 
       if (!metaResponse.ok) {
         const errorData = await metaResponse.json();
@@ -233,6 +248,18 @@ serve(async (req) => {
         });
       }
 
+      const liveCheck2 = await checkIsLive({
+        company_id: originalComment.company_id,
+        channel: "fb_comment_reply",
+        recipient: comment_id,
+        payload: { message, autonomous: true },
+      });
+      if (!liveCheck2.allowed) {
+        return new Response(JSON.stringify({
+          success: true, sandboxed: true, reason: liveCheck2.reason, logged_id: liveCheck2.logged_id,
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
       const metaResponse = await fetch(`https://graph.facebook.com/v18.0/${comment_id}/comments`, {
         method: "POST",
         headers: {
@@ -241,6 +268,7 @@ serve(async (req) => {
         },
         body: JSON.stringify({ message }),
       });
+
 
       if (!metaResponse.ok) {
         const errorData = await metaResponse.json();
