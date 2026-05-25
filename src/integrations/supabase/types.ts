@@ -904,6 +904,8 @@ export type Database = {
           google_calendar_id: string | null
           hours: string | null
           id: string
+          image_gen_unlocked: boolean
+          is_live: boolean
           meta_business_account_id: string | null
           meta_phone_number_id: string | null
           metadata: Json | null
@@ -926,6 +928,7 @@ export type Database = {
           quick_reference_info: string | null
           service_locations: string | null
           services: string | null
+          subscription_tier: Database["public"]["Enums"]["subscription_tier_t"]
           takeover_number: string | null
           test_mode: boolean | null
           twilio_number: string | null
@@ -954,6 +957,8 @@ export type Database = {
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
+          image_gen_unlocked?: boolean
+          is_live?: boolean
           meta_business_account_id?: string | null
           meta_phone_number_id?: string | null
           metadata?: Json | null
@@ -976,6 +981,7 @@ export type Database = {
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null
+          subscription_tier?: Database["public"]["Enums"]["subscription_tier_t"]
           takeover_number?: string | null
           test_mode?: boolean | null
           twilio_number?: string | null
@@ -1004,6 +1010,8 @@ export type Database = {
           google_calendar_id?: string | null
           hours?: string | null
           id?: string
+          image_gen_unlocked?: boolean
+          is_live?: boolean
           meta_business_account_id?: string | null
           meta_phone_number_id?: string | null
           metadata?: Json | null
@@ -1026,6 +1034,7 @@ export type Database = {
           quick_reference_info?: string | null
           service_locations?: string | null
           services?: string | null
+          subscription_tier?: Database["public"]["Enums"]["subscription_tier_t"]
           takeover_number?: string | null
           test_mode?: boolean | null
           twilio_number?: string | null
@@ -1131,10 +1140,12 @@ export type Database = {
           custom_tools: Json | null
           enabled_tools: string[] | null
           escalation_rules: Json | null
+          escalation_triggers: string[]
           fallback_message: string | null
           id: string
           max_tokens: number | null
           max_tool_rounds: number | null
+          persona_version: number
           primary_model: string | null
           primary_temperature: number | null
           qa_style: string
@@ -1161,6 +1172,7 @@ export type Database = {
           supervisor_urgency_triggers: Json | null
           support_agent_prompt: string | null
           system_instructions: string
+          tone_voice_guide: string | null
           updated_at: string | null
           video_provider: string
           voice_model: string | null
@@ -1189,10 +1201,12 @@ export type Database = {
           custom_tools?: Json | null
           enabled_tools?: string[] | null
           escalation_rules?: Json | null
+          escalation_triggers?: string[]
           fallback_message?: string | null
           id?: string
           max_tokens?: number | null
           max_tool_rounds?: number | null
+          persona_version?: number
           primary_model?: string | null
           primary_temperature?: number | null
           qa_style?: string
@@ -1219,6 +1233,7 @@ export type Database = {
           supervisor_urgency_triggers?: Json | null
           support_agent_prompt?: string | null
           system_instructions?: string
+          tone_voice_guide?: string | null
           updated_at?: string | null
           video_provider?: string
           voice_model?: string | null
@@ -1247,10 +1262,12 @@ export type Database = {
           custom_tools?: Json | null
           enabled_tools?: string[] | null
           escalation_rules?: Json | null
+          escalation_triggers?: string[]
           fallback_message?: string | null
           id?: string
           max_tokens?: number | null
           max_tool_rounds?: number | null
+          persona_version?: number
           primary_model?: string | null
           primary_temperature?: number | null
           qa_style?: string
@@ -1277,6 +1294,7 @@ export type Database = {
           supervisor_urgency_triggers?: Json | null
           support_agent_prompt?: string | null
           system_instructions?: string
+          tone_voice_guide?: string | null
           updated_at?: string | null
           video_provider?: string
           voice_model?: string | null
@@ -1490,6 +1508,9 @@ export type Database = {
           file_type: string
           filename: string
           id: string
+          kb_sync_error: string | null
+          kb_sync_status: Database["public"]["Enums"]["kb_sync_status_t"]
+          kb_synced_at: string | null
           parsed_content: string | null
           updated_at: string
           uploaded_by: string | null
@@ -1503,6 +1524,9 @@ export type Database = {
           file_type: string
           filename: string
           id?: string
+          kb_sync_error?: string | null
+          kb_sync_status?: Database["public"]["Enums"]["kb_sync_status_t"]
+          kb_synced_at?: string | null
           parsed_content?: string | null
           updated_at?: string
           uploaded_by?: string | null
@@ -1516,6 +1540,9 @@ export type Database = {
           file_type?: string
           filename?: string
           id?: string
+          kb_sync_error?: string | null
+          kb_sync_status?: Database["public"]["Enums"]["kb_sync_status_t"]
+          kb_synced_at?: string | null
           parsed_content?: string | null
           updated_at?: string
           uploaded_by?: string | null
@@ -1532,6 +1559,7 @@ export type Database = {
       }
       company_media: {
         Row: {
+          asset_validation_status: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id: string | null
           category: Database["public"]["Enums"]["media_category"]
           company_id: string
@@ -1548,8 +1576,10 @@ export type Database = {
           thumbnail_url: string | null
           updated_at: string
           uploaded_by: string | null
+          validation_reason: string | null
         }
         Insert: {
+          asset_validation_status?: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
           company_id: string
@@ -1566,8 +1596,10 @@ export type Database = {
           thumbnail_url?: string | null
           updated_at?: string
           uploaded_by?: string | null
+          validation_reason?: string | null
         }
         Update: {
+          asset_validation_status?: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
           company_id?: string
@@ -1584,10 +1616,55 @@ export type Database = {
           thumbnail_url?: string | null
           updated_at?: string
           uploaded_by?: string | null
+          validation_reason?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "company_media_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_onboarding_drafts: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          current_step: number
+          draft: Json
+          id: string
+          step_errors: Json
+          updated_at: string
+          user_id: string
+          wizard_state: Database["public"]["Enums"]["wizard_state_t"]
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          current_step?: number
+          draft?: Json
+          id?: string
+          step_errors?: Json
+          updated_at?: string
+          user_id: string
+          wizard_state?: Database["public"]["Enums"]["wizard_state_t"]
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          current_step?: number
+          draft?: Json
+          id?: string
+          step_errors?: Json
+          updated_at?: string
+          user_id?: string
+          wizard_state?: Database["public"]["Enums"]["wizard_state_t"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_onboarding_drafts_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -1767,6 +1844,8 @@ export type Database = {
           last_message_at: string | null
           last_message_preview: string | null
           last_promise_fulfillment_at: string | null
+          paused_reason: string | null
+          paused_until: string | null
           phone: string | null
           pinned: boolean | null
           platform: string
@@ -1799,6 +1878,8 @@ export type Database = {
           last_message_at?: string | null
           last_message_preview?: string | null
           last_promise_fulfillment_at?: string | null
+          paused_reason?: string | null
+          paused_until?: string | null
           phone?: string | null
           pinned?: boolean | null
           platform?: string
@@ -1831,6 +1912,8 @@ export type Database = {
           last_message_at?: string | null
           last_message_preview?: string | null
           last_promise_fulfillment_at?: string | null
+          paused_reason?: string | null
+          paused_until?: string | null
           phone?: string | null
           pinned?: boolean | null
           platform?: string
@@ -2898,6 +2981,7 @@ export type Database = {
           ai_system_prompt: string | null
           company_id: string | null
           connected_via: string
+          connection_state: Database["public"]["Enums"]["meta_connection_state_t"]
           created_at: string | null
           health_status: string
           id: string
@@ -2916,6 +3000,7 @@ export type Database = {
           ai_system_prompt?: string | null
           company_id?: string | null
           connected_via?: string
+          connection_state?: Database["public"]["Enums"]["meta_connection_state_t"]
           created_at?: string | null
           health_status?: string
           id?: string
@@ -2934,6 +3019,7 @@ export type Database = {
           ai_system_prompt?: string | null
           company_id?: string | null
           connected_via?: string
+          connection_state?: Database["public"]["Enums"]["meta_connection_state_t"]
           created_at?: string | null
           health_status?: string
           id?: string
@@ -3088,6 +3174,56 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "openclaw_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outbound_approval_queue: {
+        Row: {
+          channel: string
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          id: string
+          payload: Json
+          reason: string | null
+          recipient: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["approval_status_t"]
+        }
+        Insert: {
+          channel: string
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          payload: Json
+          reason?: string | null
+          recipient?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["approval_status_t"]
+        }
+        Update: {
+          channel?: string
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          payload?: Json
+          reason?: string | null
+          recipient?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["approval_status_t"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outbound_approval_queue_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
@@ -3703,6 +3839,41 @@ export type Database = {
         }
         Relationships: []
       }
+      system_metrics: {
+        Row: {
+          company_id: string | null
+          id: string
+          metric: string
+          recorded_at: string
+          tags: Json
+          value: number
+        }
+        Insert: {
+          company_id?: string | null
+          id?: string
+          metric: string
+          recorded_at?: string
+          tags?: Json
+          value: number
+        }
+        Update: {
+          company_id?: string | null
+          id?: string
+          metric?: string
+          recorded_at?: string
+          tags?: Json
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_metrics_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       takeover_sessions: {
         Row: {
           company_id: string
@@ -3744,6 +3915,44 @@ export type Database = {
             columns: ["selected_conversation_id"]
             isOneToOne: false
             referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      test_outbound_log: {
+        Row: {
+          channel: string
+          company_id: string
+          created_at: string
+          id: string
+          payload: Json
+          reason: string
+          recipient: string | null
+        }
+        Insert: {
+          channel: string
+          company_id: string
+          created_at?: string
+          id?: string
+          payload: Json
+          reason?: string
+          recipient?: string | null
+        }
+        Update: {
+          channel?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          payload?: Json
+          reason?: string
+          recipient?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "test_outbound_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -4175,6 +4384,13 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "user" | "client"
+      approval_status_t:
+        | "pending"
+        | "approved"
+        | "rejected"
+        | "sent"
+        | "expired"
+      asset_validation_status_t: "pending" | "approved" | "rejected"
       company_role: "owner" | "manager" | "contributor" | "viewer"
       event_channel: "whatsapp" | "direct_message" | "public_comment"
       event_error_class:
@@ -4200,6 +4416,7 @@ export type Database = {
         | "failed"
         | "dead"
         | "skipped"
+      kb_sync_status_t: "pending" | "syncing" | "synced" | "failed"
       media_category:
         | "menu"
         | "interior"
@@ -4211,7 +4428,21 @@ export type Database = {
         | "events"
         | "facilities"
         | "other"
+      meta_connection_state_t:
+        | "meta_oauth_initiated"
+        | "meta_domain_verification_required"
+        | "meta_business_verification_pending"
+        | "meta_whatsapp_number_pending"
+        | "meta_connected"
+        | "meta_disconnected"
       openclaw_mode_t: "off" | "assist" | "primary"
+      subscription_tier_t: "hustler" | "starter" | "pro" | "enterprise"
+      wizard_state_t:
+        | "not_started"
+        | "in_progress"
+        | "meta_pending_verification"
+        | "billing_pending"
+        | "complete"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -4340,6 +4571,8 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user", "client"],
+      approval_status_t: ["pending", "approved", "rejected", "sent", "expired"],
+      asset_validation_status_t: ["pending", "approved", "rejected"],
       company_role: ["owner", "manager", "contributor", "viewer"],
       event_channel: ["whatsapp", "direct_message", "public_comment"],
       event_error_class: [
@@ -4368,6 +4601,7 @@ export const Constants = {
         "dead",
         "skipped",
       ],
+      kb_sync_status_t: ["pending", "syncing", "synced", "failed"],
       media_category: [
         "menu",
         "interior",
@@ -4380,7 +4614,23 @@ export const Constants = {
         "facilities",
         "other",
       ],
+      meta_connection_state_t: [
+        "meta_oauth_initiated",
+        "meta_domain_verification_required",
+        "meta_business_verification_pending",
+        "meta_whatsapp_number_pending",
+        "meta_connected",
+        "meta_disconnected",
+      ],
       openclaw_mode_t: ["off", "assist", "primary"],
+      subscription_tier_t: ["hustler", "starter", "pro", "enterprise"],
+      wizard_state_t: [
+        "not_started",
+        "in_progress",
+        "meta_pending_verification",
+        "billing_pending",
+        "complete",
+      ],
     },
   },
 } as const
