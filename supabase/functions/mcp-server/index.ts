@@ -299,20 +299,36 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   });
 
   server.tool("set_active_company", {
-    description: "Set the active company for the rest of this session. After calling this, all subsequent tool calls (without an explicit company_id) target this company. Persisted across requests. Only meaningful for admin-scoped keys.",
+    description: "Set the active company for the rest of this session. Returns the full persona block + persona_key for caching; subsequent envelopes carry only { company_id, persona_key } until the cache is invalidated. Pass conversation_id to bind the persona_key to that thread.",
     inputSchema: z.object({
       company_id: z.string().describe("UUID of the company to switch to"),
+      conversation_id: z.string().optional().describe("Optional: bind persona_key to this conversation so the envelope builder can detect cache hits."),
     }),
     handler: async (params: any) => {
-      if (auth.scope === "company") {
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, note: "Company-scoped key is already pinned; switching is a no-op.", active_company_id: auth.defaultCompanyId }, null, 2) }] };
+      const targetCompanyId = auth.scope === "company" ? auth.defaultCompanyId : params.company_id;
+      if (auth.scope !== "company") {
+        await requireCompanyAccess(params.company_id);
+        await setActiveCompany(supabase, auth.keyId, sessionId, params.company_id);
       }
-      await requireCompanyAccess(params.company_id);
-      await setActiveCompany(supabase, auth.keyId, sessionId, params.company_id);
-      const { data: c } = await supabase.from("companies").select("id, name").eq("id", params.company_id).maybeSingle();
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true, active_company_id: params.company_id, company_name: c?.name || null, message: `All subsequent tool calls will target ${c?.name || params.company_id}.`, next_step: "Proceed with any company-specific tool." }, null, 2) }] };
+      const { buildPersonaEnvelope, setConversationPersonaKey } = await import("../_shared/persona-cache.ts");
+      const env = await buildPersonaEnvelope(supabase, targetCompanyId);
+      if (params.conversation_id) {
+        await setConversationPersonaKey(supabase, params.conversation_id, env.persona_key);
+      }
+      const { data: c } = await supabase.from("companies").select("id, name").eq("id", targetCompanyId).maybeSingle();
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        ok: true,
+        active_company_id: targetCompanyId,
+        company_name: c?.name || null,
+        persona_key: env.persona_key,
+        persona_version: env.persona_version,
+        persona: env.persona,
+        cache_contract: "Cache persona by persona_key. Subsequent envelopes will carry only { company_id, persona_key } unless persona_invalidated:true is set, in which case a fresh persona block is included.",
+        next_step: "Proceed with any company-specific tool.",
+      }, null, 2) }] };
     },
   });
+
 
   // Helper for tool schemas: optional per-call company_id override
   const companyOverride = z.object({ company_id: z.string().optional().describe("Optional: target a specific company (admin keys only). If omitted, uses set_active_company or the key's default.") });

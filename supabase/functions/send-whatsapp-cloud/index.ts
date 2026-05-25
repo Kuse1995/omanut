@@ -7,6 +7,8 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { checkIsLive } from "../_shared/is-live-gate.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -91,6 +93,19 @@ serve(async (req) => {
 
     const recipient = normalizeE164(to);
     if (!recipient) return jsonError(400, "Invalid 'to' phone number");
+
+    // Sandbox / live gate
+    const liveCheck = await checkIsLive({
+      company_id, channel: "whatsapp_cloud", recipient,
+      payload: { body, media_url },
+    });
+    if (!liveCheck.allowed) {
+      return new Response(JSON.stringify({
+        success: true, sandboxed: true, reason: liveCheck.reason,
+        logged_id: liveCheck.logged_id,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
 
     // Build payload
     let payload: Record<string, unknown>;
