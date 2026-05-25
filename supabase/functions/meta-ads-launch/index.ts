@@ -4,6 +4,8 @@ import {
   authenticate, corsHeaders, assertOwner, loadCredential, metaFetch,
   META_GRAPH, humanizeMetaError, logAudit, MAX_DAILY_BUDGET_CENTS,
 } from "../_shared/meta-ads.ts";
+import { checkIsLive } from "../_shared/is-live-gate.ts";
+
 
 const TargetingSchema = z.object({
   geo_countries: z.array(z.string()).default([]),
@@ -69,6 +71,19 @@ serve(async (req) => {
     }
     const acctId = cred.ad_account_id.startsWith('act_') ? cred.ad_account_id : `act_${cred.ad_account_id}`;
     const token = cred.access_token;
+
+    // Sandbox / live gate — ads always hit Meta, even drafts
+    const liveCheck = await checkIsLive({
+      company_id: b.company_id,
+      channel: "meta_ads",
+      payload: { name: b.name, objective: b.objective, launch: !!b.launch, daily_budget_cents: b.daily_budget_cents },
+    });
+    if (!liveCheck.allowed) {
+      return new Response(JSON.stringify({
+        success: true, sandboxed: true, reason: liveCheck.reason, logged_id: liveCheck.logged_id,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
 
     // Insert local draft first (PAUSED), then create on Meta. If Meta succeeds, flip to PAUSED/ACTIVE accordingly.
     const targetStatus = b.launch ? 'ACTIVE' : 'PAUSED';
