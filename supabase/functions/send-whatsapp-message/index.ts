@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { checkIsLive } from "../_shared/is-live-gate.ts";
+
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -246,7 +248,21 @@ serve(async (req) => {
     const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
 
     if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && conversation.companies?.whatsapp_number) {
+      // Sandbox / live gate
+      const liveCheck = await checkIsLive({
+        company_id: conversation.company_id,
+        channel: "twilio_whatsapp",
+        recipient: conversation.phone,
+        payload: { message, mediaUrl: effectiveMediaUrl },
+      });
+      if (!liveCheck.allowed) {
+        return new Response(JSON.stringify({
+          success: true, sandboxed: true, reason: liveCheck.reason, logged_id: liveCheck.logged_id,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+
       
       const formData = new URLSearchParams();
       // Normalize From number
