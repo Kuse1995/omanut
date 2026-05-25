@@ -1,98 +1,240 @@
+# Omanut v2 — Production Refactor Brief (Revised)
 
-# OpenClaw v3 — Pull-Based Inbound, Drop the Tunnel
+Targeted refactor + extension of the live Omanut stack. We preserve `build-zambia-handler`, `mcp_active_company` routing, MiniMax-M2 default, ANZ baseline, swarm v2, BMS auto-sync, autonomous checkout authority, 8s grace fallback, and the missed-lead triple-guard. Nothing below replaces those — it extends them.
 
-## Why
+---
 
-Today Omanut **pushes** every inbound WhatsApp/Meta event to each customer's `openclaw_webhook_url`. Customer tunnels are the single biggest source of failure (404 / 530 / 502 / timeouts). The reply path (`openclaw-reply`) already works fine because it's OpenClaw calling *us*.
+## Section 0 — Non-negotiables to preserve
 
-The fix is symmetric: make the **inbound** path also OpenClaw → Omanut. OpenClaw runs no inbound webhook, no tunnel, no exposed port. It connects out to Omanut, claims pending events from `inbound_events`, drafts a reply, POSTs it to `openclaw-reply`. Done.
+- One external OpenClaw, many tenants via `set_active_company`. No per-tenant deploys.
+- `PRIMARY_TEXT_MODEL` env override stays as the instant rollback lever.
+- Existing pull-based `inbound_events` bus + `claim_inbound_event` RPC are the only outbound chokepoint we extend. No parallel queues.
+- `company_ai_overrides`, `company_agent_modes`, `company_documents` + `match_documents` already exist. Extend, never duplicate.
+- Conversation pause/takeover already lives on `conversations` (`human_takeover`, `takeover_at`, `takeover_by`). No mirror table.
 
-```text
-Customer ──► Twilio/Meta ──► Omanut webhook ──► inbound_events (pending)
-                                                       │
-                                          ┌────────────┼────────────┐
-                                          ▼            ▼            ▼
-                                   long-poll        SSE        Realtime
-                                          \         │          /
-                                           ▼        ▼         ▼
-                                              OpenClaw agent
-                                                     │ draft
-                                                     ▼
-                                          POST /openclaw-reply
-                                                     │
-                                                     ▼
-                                       Omanut sends via Twilio / Meta
-```
+---
 
-## Scope
+## Section 1 — Persona injection (fix #1: kill token burn)
 
-- **In:** Replace push-to-tunnel with pull endpoints. Three transports (OpenClaw chooses). Drop `openclaw-dispatch` push path entirely.
-- **Out:** No changes to the AI itself, the reply path, the queue table schema, or the existing `openclaw-worker` (which keeps running as the in-house fallback brain).
+Add to existing `company_ai_overrides`:
+- `tone_voice_guide text`
+- `escalation_triggers text[]`
 
-## Architecture
+**Persona is injected once per conversation, never per tool call.**
 
-### 1. Three pull transports, all reading the same `inbound_events` queue
+Mechanism:
+1. `set_active_company` (the MCP handshake / first tool call of a thread) computes `persona_key = sha256(company_ai_overrides_row || agent_mode_row)` and returns the **full persona block** in the response.
+2. The same `persona_key` is written to `conversations.metadata.persona_key`.
+3. Every subsequent tool envelope in that conversation carries only `{ company_id, persona_key }` — no persona body.
+4. If an owner edits overrides, a trigger bumps `company_ai_overrides.persona_version`. Next envelope detects `persona_key` mismatch, sets `persona_invalidated: true`, and re-sends the full block once.
 
-| Transport | Endpoint | Use case |
+Result: persona ships once per thread, not per tool call. Token cost stays flat regardless of tool-call depth.
+
+---
+
+## Section 2 — escalation_triggers spec (fix #8)
+
+`escalation_triggers text[]` is **prompt-only**. No trigger → priority mapping table.
+
+The strings are inlined into the system prompt under "Escalate to owner when…". The AI picks `notify_boss` priority from prompt context exactly as it does today. Documented explicitly in `OPENCLAW_INTEGRATION.md` so implementers don't build an unused mapping layer.
+
+---
+
+## Section 3 — Wizard state machine (fix #5)
+
+Extend `company_onboarding_drafts`:
+- `wizard_state enum('not_started','in_progress','meta_pending_verification','billing_pending','complete')`
+- `current_step int` (already exists — wizard resumes from it)
+- `step_errors jsonb` — per-step failure log, never blocks resume
+
+Partial failures **never invalidate the draft**. Each step writes independently. Dropping off at step 7 with Meta half-connected lands the draft in `meta_pending_verification` and the wizard resumes there next login.
+
+---
+
+## Section 4 — Meta OAuth reality (fix #2)
+
+No "one-click" claim. The wizard surfaces the real Meta states:
+
+| State | What's happening | User action |
 |---|---|---|
-| **Long-poll** | `GET /openclaw-pull?max=10&wait=25` | Simplest. OpenClaw polls; we hold the connection up to 25s if queue is empty, return as soon as events appear. |
-| **SSE stream** | `GET /openclaw-stream` | Persistent connection. We push event JSON as `data:` frames the moment rows land. Auto-resume via `Last-Event-Id`. |
-| **Supabase Realtime** | Direct subscription to `inbound_events` (filtered by `company_id`) using a scoped key OpenClaw already has. | Lowest latency, zero infra. |
+| `meta_oauth_initiated` | Token exchanged via FB JS SDK | none |
+| `meta_domain_verification_required` | We display `.well-known/meta` file + HTML meta tag | Paste into their site, click "verify" |
+| `meta_business_verification_pending` | Meta-side review, can take days | Wait — we poll Meta Graph API hourly |
+| `meta_whatsapp_number_pending` | Phone ownership SMS/voice code | Enter code |
+| `meta_connected` | All green | Done |
 
-All three return the **same event envelope** that today's dispatch payload uses (`event_id`, `company_id`, `channel`, `inbound_text`, `recent_history`, `company_context`, `bms_snapshot`, `reply_to_url`, `lookup_url`, signed). Only the delivery mechanism differs.
+State persisted in `meta_credentials.connection_state`. Wizard's `wizard_state = 'meta_pending_verification'` is a **valid resting state**, not a failure. Companies in this state can still use Twilio WhatsApp (existing provider toggle handles it).
 
-### 2. Claim semantics
+Start Meta domain + business verification in **week 1**, in parallel with everything else, so it doesn't surprise us in week 6.
 
-`/openclaw-pull` and `/openclaw-stream` atomically:
-1. `UPDATE inbound_events SET status='processing', claimed_by=$worker_id, claimed_at=now() WHERE id IN (SELECT id FROM inbound_events WHERE status='pending' AND company_id=$cid ORDER BY created_at LIMIT $max FOR UPDATE SKIP LOCKED) RETURNING *`
-2. Existing `openclaw-worker` cron stays as a safety net: any `processing` row stuck >60s is reset to `pending` so another consumer (or our in-house worker) picks it up.
+---
 
-Realtime subscribers see the INSERT, then call a new `claim_event(event_id)` RPC to flip the row to `processing`; if RPC returns 409 they skip (someone else got it).
+## Section 5 — Sandbox / go-live gate (fix #3)
 
-### 3. Auth
+WhatsApp/Meta don't have real sandbox modes. We gate **outbound only**:
 
-- Pull endpoints require `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` (already exists) + `X-Openclaw-Company: <company_id>`.
-- Realtime: scoped Supabase key + RLS policy `company_id IN (openclaw allowed list)`.
+- New: `companies.is_live bool default false`
+- **Inbound webhooks always flow** into `inbound_events`. We need the data to test the AI loop.
+- All outbound dispatchers (`send-whatsapp-cloud`, `send-twilio-message`, `send-meta-dm`, `send-fb-comment-reply`, `meta-ads-launch`) check `is_live`:
+  - `true` → real provider call
+  - `false` → write to new `test_outbound_log` table + surface in `/admin/sandbox-console`. No provider call.
+- Feature flag `SANDBOX_ENFORCEMENT` env var lets us disable the gate globally if needed.
+- Final wizard step flips `is_live = true` only after a "send test message to my own number" passes.
 
-### 4. Reply path: unchanged
+This is the chokepoint. Belt-and-braces: dispatcher-level check + env flag.
 
-OpenClaw keeps POSTing to `reply_to_url` (`openclaw-reply`). That endpoint already marks the event `sent` and sends via Twilio/Meta. No change.
+---
 
-### 5. Drop the push path
+## Section 6 — Approval queue (scoped, not blanket)
 
-- `openclaw-dispatch` is **deleted** (or stubbed to 410 Gone for one release).
-- `companies.openclaw_webhook_url` column is dropped after one release.
-- `meta-webhook` and `whatsapp-messages` no longer call `supabase.functions.invoke('openclaw-worker', { body: { event_id } })` for OpenClaw's benefit — they only enqueue. The worker still runs on cron to handle companies that don't have OpenClaw connected, and to recover stuck rows.
-- `MetaIntegrationsPanel` "register webhook URL" UI is removed. OpenClaw self-registers as a consumer by simply calling the pull endpoints with its token.
+Intercepts outbound when **either**:
+- `companies.metadata.sales_mode = 'human_in_loop'`, OR
+- Risk threshold tripped: spend > company limit, refund keyword, legal keyword, or `escalation_triggers` match.
 
-## Files
+Autonomous checkout authority + ANZ baseline are untouched. The queue lives in a new `outbound_approval_queue` table; dispatchers check it before sending.
 
-### New
-- `supabase/functions/openclaw-pull/index.ts` — long-poll endpoint
-- `supabase/functions/openclaw-stream/index.ts` — SSE endpoint
-- `supabase/migrations/<ts>_openclaw_pull.sql`
-  - `claim_event(event_id uuid)` RPC
-  - `release_stuck_events()` function + cron (60s) for `processing` >60s
-  - RLS policy on `inbound_events` for the OpenClaw role
-  - drop `companies.openclaw_webhook_url`, `companies.openclaw_mode` (after grace period — keep nullable for now)
-- `OPENCLAW_INTEGRATION.md` — rewritten for pull model with code samples for all 3 transports
+---
 
-### Edited
-- `supabase/functions/meta-webhook/index.ts` — drop the legacy `openclaw-dispatch` fallback branch; enqueue only.
-- `supabase/functions/whatsapp-messages/index.ts` — same: enqueue, no dispatch.
-- `supabase/functions/openclaw-worker/index.ts` — keep, but it now only processes events still `pending` after `OPENCLAW_PULL_GRACE_SECONDS` (default 8s). This gives OpenClaw first dibs; we take over only if it didn't pull.
-- `src/components/admin/MetaIntegrationsPanel.tsx` + `src/components/admin/OpenClawAgentCard.tsx` — remove tunnel-URL inputs; show token + endpoints instead.
-- `src/pages/admin/EventQueue.tsx` — add column "Consumed by" (openclaw vs in-house worker) for visibility.
+## Section 7 — Safety-only bypass (fix #4)
 
-### Deleted
-- `supabase/functions/openclaw-dispatch/index.ts`
+Triggered when the swarm circuit breaker trips OR `sales_mode = 'safety_only'`. The AI is **not** authoring debt-collection notices.
 
-## Rollout
+Strict tool whitelist in this mode:
+- `notify_boss` ✓
+- `bms_who_owes` ✓ (read-only research)
+- `send_message` ✓ **only if `recipient_type = 'owner'`**
+- Everything customer-facing ✗
 
-1. Ship pull endpoints + grace-period in worker. Tunnels still allowed but become best-effort mirror for one release.
-2. Switch OpenClaw to pull (their side).
-3. Delete `openclaw-dispatch` and drop the columns.
+Codified in new `_shared/safety-mode-gate.ts`, imported by every outbound dispatcher. The AI becomes a research assistant for the owner; the owner reads the ledger output in boss-chat, drafts the message, hits send. No self-authorized collection messages.
 
-## Open question for you
+---
 
-Grace period before our in-house worker takes over an event OpenClaw could have pulled — start at **8 seconds**? Lower = faster fallback, higher = more chance OpenClaw handles it itself.
+## Section 8 — Billing tiers (layer, don't replace)
+
+Existing `credit_balance` + `credit_usage` + `deduct_credits` RPC stay. Add:
+- `companies.subscription_tier enum('hustler','starter','pro','enterprise')`
+- Monthly credit grant via cron, sized by tier
+- Per-message cost multiplier read by `deduct_credits` callers
+
+K0.50/message is **derived** from tier × base rate, never stored as a column.
+
+---
+
+## Section 9 — Knowledge base sync (fix #6)
+
+Existing `company_documents` + `match_documents` + RLS via `user_has_company_access_v2` stay. Add:
+
+- New edge fn `embed-document` invoked via `pg_net` from a trigger on `company_documents` INSERT/UPDATE (fire-and-forget; no blocking writes).
+- New columns: `kb_sync_status enum('pending','syncing','synced','failed')`, `kb_sync_error text`, `kb_synced_at timestamptz`.
+- `match_documents` RPC filters to `kb_sync_status = 'synced'` only — **AI never serves stale knowledge**.
+- `/setup` KB card shows per-doc sync status.
+- Backfill marks all existing docs `synced` (no mass re-embed) until first edit.
+
+---
+
+## Section 10 — Image-gen unlock gate (fix #7)
+
+Add to `company_media`:
+- `asset_validation_status enum('pending','approved','rejected')`
+- `validation_reason text`
+- Min resolution **800×800** enforced at upload in `media-upload` edge fn (smaller is rejected outright).
+
+Unlock rule: `companies.image_gen_unlocked = true` requires **≥3 `company_media` rows with `asset_validation_status = 'approved'`**.
+
+Approval flow:
+1. Upload → Gemini vision quality check (resolution, clarity, on-brand, not a screenshot of text).
+2. Confident pass → auto-approved.
+3. Borderline → admin approval queue at `/admin/media-approvals`.
+4. Garbage → auto-rejected with reason.
+
+Gate enforced in `whatsapp-messages` + `generate-business-image` reading `image_gen_unlocked`, not in the wizard UI (wizard just shows progress).
+
+---
+
+## Section 11 — Conversation control (fix #9: no mirror table)
+
+No `conversation_control_states` table. We extend the **authoritative** `conversations` columns:
+
+- Already exists: `human_takeover`, `takeover_at`, `takeover_by`
+- Add only: `paused_reason text`, `paused_until timestamptz` (for time-boxed pauses)
+
+New `/admin/conversations/:id/control` UI reads/writes these fields directly. OpenClaw and Omanut UI share one source of truth — no drift possible.
+
+---
+
+## Section 12 — Observability (Day-1 realistic)
+
+- Structured JSON logs from every edge function (mostly already there).
+- New `system_metrics` table: `(company_id, metric, value, recorded_at)`.
+- New `/admin/observability` page: event latency, token spend, error rate, BMS tool timeouts, persona-cache hit rate.
+- Prometheus scrape endpoint + Loki/Grafana wiring → **deferred to Tier 2**. Not Day-1.
+
+---
+
+## Section 13 — Migration & rollback
+
+Feature flags (env vars) for every new gate so any single piece can be killed in seconds:
+- `SANDBOX_ENFORCEMENT` (default off → on after burn-in)
+- `APPROVAL_QUEUE_ENABLED`
+- `BILLING_TIER_ENFORCEMENT`
+- `IMAGE_GEN_GATE_ENABLED`
+- `KB_SYNC_FILTER_ENABLED`
+- `PERSONA_CACHE_ENABLED`
+
+Backfill for existing companies:
+- `is_live = true`
+- `wizard_state = 'complete'`
+- `subscription_tier = 'starter'`
+- `image_gen_unlocked` inherited from current state
+- `kb_sync_status = 'synced'` on all `company_documents` (no mass re-embed)
+
+---
+
+## Section 14 — Out of scope (call it out)
+
+- No rewrite of `build-zambia-handler` or MCP routing.
+- No new chat-model wiring beyond what `PRIMARY_TEXT_MODEL` already does.
+- No Loki/Grafana, no Prometheus scraper.
+- No replacement of swarm v2 or autonomous checkout authority.
+- No `conversation_control_states` mirror table.
+- No trigger → priority mapping table.
+
+---
+
+## Deliverables
+
+**Migrations**
+- `company_ai_overrides` + `tone_voice_guide`, `escalation_triggers`, `persona_version`
+- `company_onboarding_drafts` + `wizard_state`, `step_errors`
+- `companies` + `is_live`, `subscription_tier`, `image_gen_unlocked`
+- `company_media` + `asset_validation_status`, `validation_reason`
+- `company_documents` + `kb_sync_status`, `kb_sync_error`, `kb_synced_at`
+- `conversations` + `paused_reason`, `paused_until`
+- `meta_credentials` + `connection_state`
+- New tables: `test_outbound_log`, `system_metrics`, `outbound_approval_queue`
+
+**Edge functions**
+- `embed-document` (trigger-invoked, fire-and-forget)
+- `media-upload` resolution + vision validation
+- `meta-oauth-state-machine` (poller for Meta-side verification states)
+- `_shared/safety-mode-gate.ts` (imported by every dispatcher)
+- `is_live` gate added to all outbound dispatchers
+
+**UI**
+- Wizard with real Meta state surfacing
+- `/admin/sandbox-console`
+- `/admin/observability`
+- `/admin/media-approvals`
+- Conversation control panel using existing `conversations` fields
+- KB sync badges on `/setup`
+
+**Docs**
+- `OPENCLAW_INTEGRATION.md` — persona cache contract, escalation_triggers prompt format, sandbox/live behaviour, safety-mode tool whitelist, Meta state machine.
+
+---
+
+## Top three risks (your callout, restated)
+
+1. **Meta verification timeline** — start week 1, not week 6.
+2. **Token burn** — Section 1 persona cache lands **before** any new MCP tool ships.
+3. **Sandbox outbound gating** — Section 5 ships **before** `is_live` defaults flip on real tenants.
