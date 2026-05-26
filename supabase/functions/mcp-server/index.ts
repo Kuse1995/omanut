@@ -2310,8 +2310,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       note: z.string().optional().describe("Optional free-text note stored in payload.handler_note"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = await resolveCompanyId(params?.company_id);
-      // Verify event belongs to this company before mutating
+      // Load the event first; admin keys may close events across companies.
       const { data: ev, error: evErr } = await supabase
         .from("inbound_events")
         .select("id, company_id, payload, status")
@@ -2319,7 +2318,16 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .maybeSingle();
       if (evErr) throw evErr;
       if (!ev) throw new Error(`Event not found: ${params.event_id}`);
-      if (ev.company_id !== companyId) throw new Error(`Event ${params.event_id} does not belong to active company`);
+
+      let companyId: string = ev.company_id;
+      if (auth.scope === "company") {
+        if (!auth.defaultCompanyId || auth.defaultCompanyId !== ev.company_id) {
+          throw new Error(`Event ${params.event_id} does not belong to active company`);
+        }
+        companyId = auth.defaultCompanyId;
+      } else if (params?.company_id?.trim() && params.company_id.trim() !== ev.company_id) {
+        throw new Error(`Event ${params.event_id} does not belong to company ${params.company_id}`);
+      }
 
       const nextPayload = { ...(ev.payload || {}) };
       if (params.note) nextPayload.handler_note = params.note;
