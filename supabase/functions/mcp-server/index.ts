@@ -2258,20 +2258,23 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      let q = supabase
-        .from("inbound_events")
-        .select("id, company_id, conversation_id, channel, source, external_id, payload, attempts, created_at")
-        .eq("company_id", companyId)
-        .eq("status", "pending")
-        .order("created_at", { ascending: false })
-        .limit(params?.limit || 50);
-      if (params?.channel) q = q.eq("channel", params.channel);
-      const { data, error } = await q;
-      if (error) throw error;
+      const max = Math.max(1, Math.min(params?.limit || 10, 50));
 
-      // Enrich each pending row with the full OpenClaw envelope (KB, voice, history, BMS, reply guidance)
+      // Atomically claim pending rows (status -> 'processing') so concurrent/repeat
+      // polls don't see the same event again before mark_event_handled runs.
+      const { data: claimed, error: claimErr } = await supabase.rpc("claim_pending_events", {
+        _company_id: companyId,
+        _max: max,
+        _claimed_by: `openclaw:${auth.keyPrefix}`,
+      });
+      if (claimErr) throw claimErr;
+
+      let rows = (claimed ?? []) as any[];
+      if (params?.channel) rows = rows.filter((r) => r.channel === params.channel);
+
+      // Enrich each claimed row with the full OpenClaw envelope
       const envelopes: any[] = [];
-      for (const row of (data ?? [])) {
+      for (const row of rows) {
         try {
           const { envelope } = await buildEnvelope(supabase, row);
           envelopes.push(envelope);
@@ -2292,6 +2295,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, count: envelopes.length, events: envelopes }, null, 2) }] };
     },
   });
+
 
   server.tool("mark_event_handled", {
     description: "Close an inbound event after acting on it. action='answered' → status=sent; 'declined' → status=skipped; 'escalated' → status=sent with handler_note. Operates on the inbound_events queue.",
