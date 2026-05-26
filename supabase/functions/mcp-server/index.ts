@@ -516,8 +516,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .single();
       if (cErr) throw cErr;
       const { data: events } = await supabase
-        .from("openclaw_events")
-        .select("id, channel, event_type, skill, status, dispatch_status, dispatch_error, created_at")
+        .from("inbound_events")
+        .select("id, channel, source, status, created_at")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(5);
@@ -2246,17 +2246,20 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // OPENCLAW EVENT COORDINATION
   // ═══════════════════════════════════════════════════════════
 
+  // NOTE: These tools read/write `inbound_events` — the SAME queue that
+  // whatsapp-messages enqueues into and that openclaw-pull / openclaw-worker
+  // drain. The legacy `openclaw_events` table is no longer the source of truth.
   server.tool("list_pending_events", {
-    description: "List OpenClaw events that are still pending (not yet handled). Use this to find inbound customer messages or skill requests waiting for OpenClaw to act on them.",
+    description: "List inbound customer events that are still pending (not yet handled). Reads from the shared inbound_events queue — same queue whatsapp-messages writes to.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
-      channel: z.string().optional().describe("Filter by channel: whatsapp, meta_dm, comments, bms, content, handoff"),
+      channel: z.string().optional().describe("Filter by channel: whatsapp, direct_message, public_comment"),
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
       let q = supabase
-        .from("openclaw_events")
-        .select("id, conversation_id, channel, event_type, skill, payload, dispatch_status, created_at")
+        .from("inbound_events")
+        .select("id, conversation_id, channel, source, external_id, payload, attempts, created_at")
         .eq("company_id", companyId)
         .eq("status", "pending")
         .order("created_at", { ascending: false })
@@ -2269,9 +2272,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   });
 
   server.tool("mark_event_handled", {
-    description: "Close an OpenClaw event after acting on it. Set action to 'answered' (you replied/handled it), 'declined' (intentionally ignored), or 'escalated' (passed to boss). Bumps heartbeat.",
+    description: "Close an inbound event after acting on it. action='answered' → status=sent; 'declined' → status=skipped; 'escalated' → status=sent with handler_note. Operates on the inbound_events queue.",
     inputSchema: z.object({
-      event_id: z.string().describe("UUID of the openclaw_events row"),
+      event_id: z.string().describe("UUID of the inbound_events row"),
       action: z.enum(["answered", "declined", "escalated"]).describe("How you closed it"),
       note: z.string().optional().describe("Optional free-text note stored in payload.handler_note"),
     }).merge(companyOverride),
@@ -2279,7 +2282,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const companyId = await resolveCompanyId(params?.company_id);
       // Verify event belongs to this company before mutating
       const { data: ev, error: evErr } = await supabase
-        .from("openclaw_events")
+        .from("inbound_events")
         .select("id, company_id, payload, status")
         .eq("id", params.event_id)
         .maybeSingle();
@@ -2289,13 +2292,22 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
       const nextPayload = { ...(ev.payload || {}) };
       if (params.note) nextPayload.handler_note = params.note;
+      if (params.action === "escalated") nextPayload.escalated = true;
 
+      // Map MCP action → inbound_events status enum
+      const nextStatus =
+        params.action === "declined" ? "skipped" :
+        "sent"; // answered + escalated both terminate the queue row
+
+      const nowIso = new Date().toISOString();
       const { error: updErr } = await supabase
-        .from("openclaw_events")
+        .from("inbound_events")
         .update({
-          status: params.action,
-          answered_at: new Date().toISOString(),
-          answered_by: `openclaw:${auth.keyPrefix}`,
+          status: nextStatus,
+          completed_at: nowIso,
+          claimed_by: `openclaw:${auth.keyPrefix}`,
+          claimed_at: nowIso,
+          consumed_by: `openclaw:${auth.keyPrefix}`,
           payload: nextPayload,
         })
         .eq("id", params.event_id);
@@ -2304,7 +2316,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       return { content: [{ type: "text" as const, text: JSON.stringify({
         ok: true,
         event_id: params.event_id,
-        new_status: params.action,
+        new_status: nextStatus,
+        action: params.action,
         company_id: companyId,
       }, null, 2) }] };
     },
