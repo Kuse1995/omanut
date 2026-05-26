@@ -30,6 +30,19 @@ Deno.serve(async (req) => {
   const auth = req.headers.get('authorization') ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
   if (!GATEWAY_TOKEN || token !== GATEWAY_TOKEN) {
+    try {
+      const sb = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      );
+      await sb.from('openclaw_pull_log').insert({
+        endpoint: 'openclaw-pull',
+        events_returned: 0,
+        status_code: 401,
+        user_agent: req.headers.get('user-agent')?.slice(0, 200) ?? null,
+        remote_ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+      });
+    } catch { /* noop */ }
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
