@@ -6766,12 +6766,12 @@ serve(async (req) => {
           console.error('[OPENCLAW-PRIMARY] enqueue failed', enqErr);
         }
 
-        // Schedule the in-house AI fallback AFTER the grace window. If OpenClaw
-        // claimed the row in time, we no-op. Otherwise we re-invoke this same
-        // function with `openclaw_bypass=true` so the full AI pipeline runs and
-        // actually replies on WhatsApp.
-        if (eventRow?.id) {
-          const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8') * 1000;
+        // In-house AI fallback. DISABLED by default when OpenClaw owns the
+        // WhatsApp channel — the user wants OpenClaw to be the sole responder.
+        // To re-enable as a safety net set OPENCLAW_INHOUSE_FALLBACK_ENABLED=true.
+        const fallbackEnabled = (Deno.env.get('OPENCLAW_INHOUSE_FALLBACK_ENABLED') ?? 'false').toLowerCase() === 'true';
+        if (eventRow?.id && fallbackEnabled) {
+          const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '60') * 1000;
           const eventId = eventRow.id;
           const fallback = async () => {
             await new Promise((r) => setTimeout(r, GRACE_MS));
@@ -6785,7 +6785,6 @@ serve(async (req) => {
                 console.log('[OPENCLAW-FALLBACK] skip — already claimed', stillPending?.claimed_by, stillPending?.status);
                 return;
               }
-              // Claim the row so we don't double-process.
               await supabase
                 .from('inbound_events')
                 .update({ status: 'processing', claimed_by: 'in_house', claimed_at: new Date().toISOString() })
@@ -6819,6 +6818,8 @@ serve(async (req) => {
           } else {
             fallback();
           }
+        } else if (eventRow?.id) {
+          console.log('[OPENCLAW-PRIMARY] in-house fallback disabled — OpenClaw owns this conversation');
         }
       } catch (e) {
         console.error('[OPENCLAW-PRIMARY] enqueue error', e);
