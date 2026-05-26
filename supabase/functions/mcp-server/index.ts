@@ -2251,7 +2251,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // whatsapp-messages enqueues into and that openclaw-pull / openclaw-worker
   // drain. The legacy `openclaw_events` table is no longer the source of truth.
   server.tool("list_pending_events", {
-    description: "List inbound customer events that are still pending (not yet handled). Reads from the shared inbound_events queue — same queue whatsapp-messages writes to.",
+    description: "List inbound customer events that are still pending (not yet handled). Each event is returned as a FULL ENVELOPE containing the company's knowledge base, voice style, custom instructions, payment numbers, hours, services, recent message history, BMS snapshot, inbound text/media, and reply guidance. Ground every reply in this envelope — do NOT rely on general model knowledge. Reads from the shared inbound_events queue.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
       channel: z.string().optional().describe("Filter by channel: whatsapp, direct_message, public_comment"),
@@ -2260,7 +2260,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const companyId = await resolveCompanyId(params?.company_id);
       let q = supabase
         .from("inbound_events")
-        .select("id, conversation_id, channel, source, external_id, payload, attempts, created_at")
+        .select("id, company_id, conversation_id, channel, source, external_id, payload, attempts, created_at")
         .eq("company_id", companyId)
         .eq("status", "pending")
         .order("created_at", { ascending: false })
@@ -2268,7 +2268,28 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       if (params?.channel) q = q.eq("channel", params.channel);
       const { data, error } = await q;
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, count: data?.length || 0, events: data ?? [] }, null, 2) }] };
+
+      // Enrich each pending row with the full OpenClaw envelope (KB, voice, history, BMS, reply guidance)
+      const envelopes: any[] = [];
+      for (const row of (data ?? [])) {
+        try {
+          const { envelope } = await buildEnvelope(supabase, row);
+          envelopes.push(envelope);
+        } catch (e) {
+          envelopes.push({
+            event_id: row.id,
+            company_id: row.company_id,
+            channel: row.channel,
+            source: row.source,
+            conversation_id: row.conversation_id,
+            payload: row.payload,
+            enqueued_at: row.created_at,
+            envelope_error: String((e as any)?.message ?? e),
+          });
+        }
+      }
+
+      return { content: [{ type: "text" as const, text: JSON.stringify({ company_id: companyId, count: envelopes.length, events: envelopes }, null, 2) }] };
     },
   });
 
