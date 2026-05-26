@@ -6701,7 +6701,7 @@ serve(async (req) => {
     // /openclaw-pull to claim. After OPENCLAW_PULL_GRACE_SECONDS, the
     // in-house worker fallback kicks in automatically. We do NOT lock the
     // conversation — that would block the failover.
-    if ((company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
+    if (!openclawBypass && (company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
       console.log(`[OPENCLAW-PRIMARY] Enqueueing inbound for company=${company.id} sid=${MessageSid}`);
       try {
         const customerPhone = From;
