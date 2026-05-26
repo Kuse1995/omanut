@@ -33,16 +33,29 @@ interface InboundEvent {
   created_at: string;
 }
 
+interface PullLog {
+  id: string;
+  called_at: string;
+  endpoint: string;
+  company_id: string | null;
+  events_returned: number;
+  wait_seconds: number | null;
+  status_code: number;
+  user_agent: string | null;
+  remote_ip: string | null;
+}
+
 export default function SandboxConsole() {
   const [rows, setRows] = useState<Row[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [events, setEvents] = useState<InboundEvent[]>([]);
+  const [pulls, setPulls] = useState<PullLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [companyFilter, setCompanyFilter] = useState<string>("all");
 
   async function load() {
     setLoading(true);
-    const [{ data: logs, error }, { data: cs }, { data: ev }] = await Promise.all([
+    const [{ data: logs, error }, { data: cs }, { data: ev }, { data: pl }] = await Promise.all([
       supabase
         .from("test_outbound_log")
         .select("id, company_id, channel, recipient, payload, reason, created_at")
@@ -54,11 +67,17 @@ export default function SandboxConsole() {
         .select("id, company_id, channel, source, status, claimed_by, claimed_at, completed_at, attempts, last_error, created_at")
         .order("created_at", { ascending: false })
         .limit(50),
+      supabase
+        .from("openclaw_pull_log" as any)
+        .select("id, called_at, endpoint, company_id, events_returned, wait_seconds, status_code, user_agent, remote_ip")
+        .order("called_at", { ascending: false })
+        .limit(50),
     ]);
     if (error) toast.error(error.message);
     setRows((logs as any) ?? []);
     setCompanies((cs as any) ?? []);
     setEvents((ev as any) ?? []);
+    setPulls((pl as any) ?? []);
     setLoading(false);
   }
 
