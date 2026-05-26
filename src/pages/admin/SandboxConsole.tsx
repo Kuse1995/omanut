@@ -131,6 +131,53 @@ export default function SandboxConsole() {
       </Card>
 
       <Card className="p-4">
+        <div className="text-sm font-medium mb-3 flex items-center gap-2 flex-wrap">
+          OpenClaw pull activity
+          {pulls.length > 0 ? (
+            <Badge variant="default">
+              last call {Math.floor((Date.now() - new Date(pulls[0].called_at).getTime()) / 1000)}s ago
+            </Badge>
+          ) : (
+            <Badge variant="destructive">no calls yet — OpenClaw loop isn't hitting us</Badge>
+          )}
+          <span className="text-xs text-muted-foreground ml-auto">
+            200 = good poll · 401 = wrong/missing OPENCLAW_GATEWAY_TOKEN
+          </span>
+        </div>
+        <div className="space-y-1 max-h-72 overflow-auto">
+          {pulls.length === 0 && (
+            <div className="text-sm text-muted-foreground">
+              No pull requests recorded. Have OpenClaw's operator confirm their loop is hitting:
+              <code className="block mt-1 p-2 bg-muted/30 rounded text-xs break-all">
+                GET https://dzheddvoiauevcayifev.supabase.co/functions/v1/openclaw-pull?wait=25&max=10
+                <br />Authorization: Bearer &lt;OPENCLAW_GATEWAY_TOKEN&gt;
+              </code>
+            </div>
+          )}
+          {pulls.map((p) => {
+            const ageS = Math.floor((Date.now() - new Date(p.called_at).getTime()) / 1000);
+            return (
+              <div key={p.id} className="flex items-center gap-2 border border-border rounded-md p-2 text-xs flex-wrap">
+                <Badge variant={p.status_code === 200 ? "default" : "destructive"}>
+                  {p.status_code}
+                </Badge>
+                <span className={p.events_returned > 0 ? "text-primary font-medium" : "text-muted-foreground"}>
+                  {p.events_returned} event{p.events_returned === 1 ? "" : "s"} returned
+                </span>
+                {p.wait_seconds != null && (
+                  <span className="text-muted-foreground">wait={p.wait_seconds}s</span>
+                )}
+                {p.remote_ip && <span className="text-muted-foreground">ip={p.remote_ip}</span>}
+                <span className="ml-auto text-muted-foreground">
+                  {ageS < 60 ? `${ageS}s ago` : new Date(p.called_at).toLocaleTimeString()}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="p-4">
         <div className="text-sm font-medium mb-3">
           Inbound event queue (last 50)
           <span className="ml-2 text-xs text-muted-foreground">
