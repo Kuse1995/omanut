@@ -84,6 +84,22 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Log this pull call so admins can see in /admin/sandbox-console that
+  // OpenClaw's external loop is actually hitting us.
+  try {
+    await supabase.from('openclaw_pull_log').insert({
+      endpoint: 'openclaw-pull',
+      company_id: companyId,
+      events_returned: events.length,
+      wait_seconds: wait,
+      status_code: 200,
+      user_agent: req.headers.get('user-agent')?.slice(0, 200) ?? null,
+      remote_ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+    });
+  } catch (e) {
+    console.warn('[openclaw-pull] log insert failed', String(e).slice(0, 200));
+  }
+
   return new Response(JSON.stringify({ events, count: events.length }), {
     status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
