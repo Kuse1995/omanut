@@ -6397,6 +6397,8 @@ serve(async (req) => {
 
   // Track promise-fulfillment mode for prompt augmentation later in the pipeline.
   let isPromiseFulfillment = false;
+  // When true, skip the OpenClaw enqueue short-circuit and run the in-house AI path.
+  let openclawBypass = false;
 
   try {
     const contentType = req.headers.get('content-type') || '';
@@ -6413,10 +6415,16 @@ serve(async (req) => {
       //   1. Promise-fulfillment re-entry (from pending-promise-watchdog)
       //   2. Meta WhatsApp Cloud inbound bridge (from meta-webhook)
       const isCloudInbound = jsonBody?.source === 'meta_cloud_webhook';
+      const isOpenclawFallback = jsonBody?.openclaw_bypass === true;
 
-      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound) {
-        console.log('[SKIP] Non-promise / non-cloud JSON request');
+      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound && !isOpenclawFallback) {
+        console.log('[SKIP] Non-promise / non-cloud / non-bypass JSON request');
         return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+
+      if (isOpenclawFallback) {
+        openclawBypass = true;
+        console.log('[OPENCLAW-FALLBACK] In-house AI takeover for sid=', jsonBody.MessageSid);
       }
 
       if (isCloudInbound) {
@@ -6433,6 +6441,7 @@ serve(async (req) => {
       formData.append('Body', jsonBody.Body || jsonBody.original_question || '');
       formData.append('ProfileName', jsonBody.ProfileName || '');
       formData.append('NumMedia', String(jsonBody.NumMedia ?? 0));
+      if (jsonBody.MessageSid) formData.append('MessageSid', String(jsonBody.MessageSid));
 
       // Forward any Cloud media entries
       const mediaList: Array<{ url: string; contentType: string }> = Array.isArray(jsonBody.media) ? jsonBody.media : [];
@@ -6692,7 +6701,7 @@ serve(async (req) => {
     // /openclaw-pull to claim. After OPENCLAW_PULL_GRACE_SECONDS, the
     // in-house worker fallback kicks in automatically. We do NOT lock the
     // conversation — that would block the failover.
-    if ((company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
+    if (!openclawBypass && (company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
       console.log(`[OPENCLAW-PRIMARY] Enqueueing inbound for company=${company.id} sid=${MessageSid}`);
       try {
         const customerPhone = From;
@@ -6757,17 +6766,52 @@ serve(async (req) => {
           console.error('[OPENCLAW-PRIMARY] enqueue failed', enqErr);
         }
 
-        // Schedule the in-house worker AFTER the grace window so OpenClaw
-        // gets first dibs but we always have a fallback.
+        // Schedule the in-house AI fallback AFTER the grace window. If OpenClaw
+        // claimed the row in time, we no-op. Otherwise we re-invoke this same
+        // function with `openclaw_bypass=true` so the full AI pipeline runs and
+        // actually replies on WhatsApp.
         if (eventRow?.id) {
           const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8') * 1000;
           const eventId = eventRow.id;
           const fallback = async () => {
             await new Promise((r) => setTimeout(r, GRACE_MS));
             try {
-              await supabase.functions.invoke('openclaw-worker', { body: { event_id: eventId } });
+              const { data: stillPending } = await supabase
+                .from('inbound_events')
+                .select('id, status, claimed_by')
+                .eq('id', eventId)
+                .maybeSingle();
+              if (!stillPending || stillPending.status !== 'pending') {
+                console.log('[OPENCLAW-FALLBACK] skip — already claimed', stillPending?.claimed_by, stillPending?.status);
+                return;
+              }
+              // Claim the row so we don't double-process.
+              await supabase
+                .from('inbound_events')
+                .update({ status: 'processing', claimed_by: 'in_house', claimed_at: new Date().toISOString() })
+                .eq('id', eventId)
+                .eq('status', 'pending');
+
+              await supabase.functions.invoke('whatsapp-messages', {
+                body: {
+                  openclaw_bypass: true,
+                  From, To, Body, ProfileName,
+                  MessageSid,
+                  NumMedia: mediaFiles.length,
+                  media: mediaFiles,
+                },
+              });
+
+              await supabase
+                .from('inbound_events')
+                .update({ status: 'sent', completed_at: new Date().toISOString(), ai_response: '(handled by in_house fallback)' })
+                .eq('id', eventId);
             } catch (err) {
-              console.warn('[OPENCLAW-PRIMARY] delayed worker invoke failed', String(err).slice(0, 200));
+              console.warn('[OPENCLAW-FALLBACK] in-house re-invoke failed', String(err).slice(0, 200));
+              await supabase
+                .from('inbound_events')
+                .update({ status: 'failed', last_error: String(err).slice(0, 500) })
+                .eq('id', eventId);
             }
           };
           if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
