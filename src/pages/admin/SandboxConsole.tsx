@@ -19,25 +19,46 @@ interface Row {
 
 interface Company { id: string; name: string; is_live: boolean }
 
+interface InboundEvent {
+  id: string;
+  company_id: string;
+  channel: string;
+  source: string;
+  status: string;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+}
+
 export default function SandboxConsole() {
   const [rows, setRows] = useState<Row[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [events, setEvents] = useState<InboundEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [companyFilter, setCompanyFilter] = useState<string>("all");
 
   async function load() {
     setLoading(true);
-    const [{ data: logs, error }, { data: cs }] = await Promise.all([
+    const [{ data: logs, error }, { data: cs }, { data: ev }] = await Promise.all([
       supabase
         .from("test_outbound_log")
         .select("id, company_id, channel, recipient, payload, reason, created_at")
         .order("created_at", { ascending: false })
         .limit(200),
       supabase.from("companies").select("id, name, is_live").order("name"),
+      supabase
+        .from("inbound_events")
+        .select("id, company_id, channel, source, status, claimed_by, claimed_at, completed_at, attempts, last_error, created_at")
+        .order("created_at", { ascending: false })
+        .limit(50),
     ]);
     if (error) toast.error(error.message);
     setRows((logs as any) ?? []);
     setCompanies((cs as any) ?? []);
+    setEvents((ev as any) ?? []);
     setLoading(false);
   }
 
