@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
   {
     const { data } = await supabase
       .from('inbound_events')
-      .select('id, company_id, conversation_id, channel, source, payload, status')
+      .select('id, company_id, conversation_id, channel, source, payload, status, created_at')
       .eq('id', event_id)
       .maybeSingle();
     if (data) {
