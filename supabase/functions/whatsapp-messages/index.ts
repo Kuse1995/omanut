@@ -6397,6 +6397,8 @@ serve(async (req) => {
 
   // Track promise-fulfillment mode for prompt augmentation later in the pipeline.
   let isPromiseFulfillment = false;
+  // When true, skip the OpenClaw enqueue short-circuit and run the in-house AI path.
+  let openclawBypass = false;
 
   try {
     const contentType = req.headers.get('content-type') || '';
