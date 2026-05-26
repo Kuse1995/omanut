@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
   if (!event) {
     const { data, error: eErr } = await supabase
       .from('openclaw_events')
-      .select('id, company_id, conversation_id, channel, payload, status')
+      .select('id, company_id, conversation_id, channel, payload, status, created_at')
       .eq('id', event_id)
       .maybeSingle();
     if (eErr || !data) return jsonResp(404, { error: 'event_not_found' });
@@ -95,7 +95,37 @@ Deno.serve(async (req) => {
     if (event.status === 'answered') {
       return jsonResp(200, { status: 'already_answered', event_id });
     }
+    // Stale-event guard: never dispatch replies for events >1h old. This stops
+    // pull loops from re-processing months-old legacy rows and flooding customers.
+    const ageMs = Date.now() - new Date((data as any).created_at).getTime();
+    if (ageMs > 60 * 60 * 1000) {
+      await supabase.from('openclaw_events').update({
+        status: 'answered',
+        answered_at: new Date().toISOString(),
+        answered_by: 'openclaw-reply',
+        answered_action: 'expired_stale',
+      }).eq('id', event_id);
+      return jsonResp(200, { status: 'expired_stale', event_id, age_ms: ageMs });
+    }
   }
+
+  // Same stale-event guard for the v3 inbound_events table.
+  if (event && eventTable === 'inbound_events') {
+    const created = (event as any).created_at;
+    if (created) {
+      const ageMs = Date.now() - new Date(created).getTime();
+      if (ageMs > 60 * 60 * 1000) {
+        await supabase.from('inbound_events').update({
+          status: 'skipped',
+          last_error: 'expired_stale',
+          completed_at: new Date().toISOString(),
+        }).eq('id', event_id);
+        return jsonResp(200, { status: 'expired_stale', event_id, age_ms: ageMs });
+      }
+    }
+  }
+
+
 
 
   const p: any = event.payload ?? {};
