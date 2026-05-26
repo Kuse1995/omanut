@@ -3181,6 +3181,42 @@ export type Database = {
           },
         ]
       }
+      openclaw_pull_log: {
+        Row: {
+          called_at: string
+          company_id: string | null
+          endpoint: string
+          events_returned: number
+          id: string
+          remote_ip: string | null
+          status_code: number
+          user_agent: string | null
+          wait_seconds: number | null
+        }
+        Insert: {
+          called_at?: string
+          company_id?: string | null
+          endpoint: string
+          events_returned?: number
+          id?: string
+          remote_ip?: string | null
+          status_code?: number
+          user_agent?: string | null
+          wait_seconds?: number | null
+        }
+        Update: {
+          called_at?: string
+          company_id?: string | null
+          endpoint?: string
+          events_returned?: number
+          id?: string
+          remote_ip?: string | null
+          status_code?: number
+          user_agent?: string | null
+          wait_seconds?: number | null
+        }
+        Relationships: []
+      }
       outbound_approval_queue: {
         Row: {
           channel: string

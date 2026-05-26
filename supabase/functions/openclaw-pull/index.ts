@@ -30,6 +30,19 @@ Deno.serve(async (req) => {
   const auth = req.headers.get('authorization') ?? '';
   const token = auth.replace(/^Bearer\s+/i, '');
   if (!GATEWAY_TOKEN || token !== GATEWAY_TOKEN) {
+    try {
+      const sb = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      );
+      await sb.from('openclaw_pull_log').insert({
+        endpoint: 'openclaw-pull',
+        events_returned: 0,
+        status_code: 401,
+        user_agent: req.headers.get('user-agent')?.slice(0, 200) ?? null,
+        remote_ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+      });
+    } catch { /* noop */ }
     return new Response(JSON.stringify({ error: 'unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -82,6 +95,22 @@ Deno.serve(async (req) => {
         status: 'pending', claimed_by: null, claimed_at: null,
       }).eq('id', ev.id);
     }
+  }
+
+  // Log this pull call so admins can see in /admin/sandbox-console that
+  // OpenClaw's external loop is actually hitting us.
+  try {
+    await supabase.from('openclaw_pull_log').insert({
+      endpoint: 'openclaw-pull',
+      company_id: companyId,
+      events_returned: events.length,
+      wait_seconds: wait,
+      status_code: 200,
+      user_agent: req.headers.get('user-agent')?.slice(0, 200) ?? null,
+      remote_ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+    });
+  } catch (e) {
+    console.warn('[openclaw-pull] log insert failed', String(e).slice(0, 200));
   }
 
   return new Response(JSON.stringify({ events, count: events.length }), {
