@@ -6685,15 +6685,18 @@ serve(async (req) => {
       }
     }
 
-    // ── OPENCLAW PRIMARY GUARD ──
-    // If OpenClaw is in 'primary' mode for this company AND owns the WhatsApp channel,
-    // log the inbound, persist the customer message so OpenClaw can read it via MCP,
-    // dispatch the event to OpenClaw, and EXIT. Our internal AI does not run.
+    // ── OPENCLAW PRIMARY GUARD (v3 pull queue) ──
+    // If OpenClaw owns the WhatsApp channel for this company, enqueue the
+    // inbound into `inbound_events` and ACK Twilio. OpenClaw long-polls
+    // /openclaw-pull to claim. After OPENCLAW_PULL_GRACE_SECONDS, the
+    // in-house worker fallback kicks in automatically. We do NOT lock the
+    // conversation — that would block the failover.
     if ((company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
-      console.log(`[OPENCLAW-PRIMARY] Routing inbound to OpenClaw for company=${company.id}`);
+      console.log(`[OPENCLAW-PRIMARY] Enqueueing inbound for company=${company.id} sid=${MessageSid}`);
       try {
         const customerPhone = From;
-        // Find or create the conversation so MCP / event payload can reference it
+
+        // Resolve / create conversation so OpenClaw can reference it
         const { data: existingConv } = await supabase
           .from('conversations')
           .select('id')
@@ -6711,50 +6714,71 @@ serve(async (req) => {
               company_id: company.id,
               customer_name: ProfileName || 'Customer',
               status: 'active',
-              human_takeover: true,         // lock our AI out
-              takeover_by: 'openclaw',
-              takeover_at: new Date().toISOString(),
             })
             .select('id')
             .single();
           conversationId = newConv?.id;
-        } else {
-          // Make sure our AI stays out
-          await supabase
-            .from('conversations')
-            .update({ human_takeover: true, takeover_by: 'openclaw', takeover_at: new Date().toISOString() })
-            .eq('id', conversationId)
-            .eq('human_takeover', false);
         }
 
+        // Persist the inbound message so it shows in the UI / MCP history
         if (conversationId) {
           await supabase.from('messages').insert({
             conversation_id: conversationId,
             role: 'user',
             content: Body || '(media message)',
-            message_metadata: mediaFiles.length > 0 ? { media_urls: mediaFiles.map(m => m.url) } : null,
+            message_metadata: mediaFiles.length > 0 ? { media_urls: mediaFiles.map((m: any) => m.url) } : null,
           });
         }
 
-        await supabase.functions.invoke('openclaw-dispatch', {
-          body: {
+        // Enqueue to inbound_events (dedup on MessageSid)
+        const { data: eventRow, error: enqErr } = await supabase
+          .from('inbound_events')
+          .insert({
             company_id: company.id,
-            channel: 'whatsapp',
-            event_type: 'inbound_message',
             conversation_id: conversationId,
+            channel: 'whatsapp',
+            source: 'twilio',
+            external_id: MessageSid,
+            status: 'pending',
             payload: {
               from: From,
               to: To,
               body: Body,
               profile_name: ProfileName,
+              message_sid: MessageSid,
               media: mediaFiles,
             },
-          },
-        });
+          })
+          .select('id')
+          .single();
+
+        if (enqErr && (enqErr as any).code !== '23505') {
+          console.error('[OPENCLAW-PRIMARY] enqueue failed', enqErr);
+        }
+
+        // Schedule the in-house worker AFTER the grace window so OpenClaw
+        // gets first dibs but we always have a fallback.
+        if (eventRow?.id) {
+          const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8') * 1000;
+          const eventId = eventRow.id;
+          const fallback = async () => {
+            await new Promise((r) => setTimeout(r, GRACE_MS));
+            try {
+              await supabase.functions.invoke('openclaw-worker', { body: { event_id: eventId } });
+            } catch (err) {
+              console.warn('[OPENCLAW-PRIMARY] delayed worker invoke failed', String(err).slice(0, 200));
+            }
+          };
+          if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+            (globalThis as any).EdgeRuntime.waitUntil(fallback());
+          } else {
+            fallback();
+          }
+        }
       } catch (e) {
-        console.error('[OPENCLAW-PRIMARY] dispatch error', e);
+        console.error('[OPENCLAW-PRIMARY] enqueue error', e);
       }
-      // Always 200 to Twilio so they don't retry. Our AI is intentionally silent.
+      // ACK Twilio so they don't retry.
       return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`, {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
