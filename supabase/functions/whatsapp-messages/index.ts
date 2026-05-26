@@ -6441,6 +6441,7 @@ serve(async (req) => {
       formData.append('Body', jsonBody.Body || jsonBody.original_question || '');
       formData.append('ProfileName', jsonBody.ProfileName || '');
       formData.append('NumMedia', String(jsonBody.NumMedia ?? 0));
+      if (jsonBody.MessageSid) formData.append('MessageSid', String(jsonBody.MessageSid));
 
       // Forward any Cloud media entries
       const mediaList: Array<{ url: string; contentType: string }> = Array.isArray(jsonBody.media) ? jsonBody.media : [];
