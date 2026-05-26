@@ -154,6 +154,24 @@ async function processOne(supabase: any, ev: any) {
 
   // WhatsApp inbound is handled by whatsapp-messages — worker just mirrors.
   if (channel === 'whatsapp') {
+    // OpenClaw-primary companies: never auto-complete WhatsApp here. Release
+    // the event back to pending so the external OpenClaw pull loop can claim
+    // it. Otherwise we silently swallow the inbound when OpenClaw is late.
+    const { data: companyCfg } = await supabase
+      .from('companies')
+      .select('openclaw_mode, openclaw_owns')
+      .eq('id', ev.company_id)
+      .maybeSingle();
+    const owns = companyCfg?.openclaw_owns?.whatsapp === true;
+    const primary = companyCfg?.openclaw_mode === 'primary';
+    if (primary && owns) {
+      console.log('[openclaw-worker] releasing whatsapp event to OpenClaw pull', ev.id);
+      await supabase
+        .from('inbound_events')
+        .update({ status: 'pending', claimed_by: null, claimed_at: null, picked_at: null })
+        .eq('id', ev.id);
+      return;
+    }
     await mirrorToTunnel(supabase, ev, ev.ai_response ?? null);
     await markSent(supabase, ev, ev.ai_response ?? '(handled by whatsapp-messages)', null, null);
     return;
