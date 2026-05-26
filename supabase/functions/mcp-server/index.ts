@@ -2257,11 +2257,16 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       channel: z.string().optional().describe("Filter by channel: whatsapp, direct_message, public_comment"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = await resolveCompanyId(params?.company_id);
+      // Admin keys without an explicit company → claim across ALL companies
+      // (RPC accepts NULL _company_id). Company-scoped keys stay locked to their company.
+      let companyId: string | null = null;
+      if (auth.scope === "company") {
+        companyId = auth.defaultCompanyId ?? null;
+      } else if (params?.company_id?.trim()) {
+        companyId = params.company_id.trim();
+      }
       const max = Math.max(1, Math.min(params?.limit || 10, 50));
 
-      // Atomically claim pending rows (status -> 'processing') so concurrent/repeat
-      // polls don't see the same event again before mark_event_handled runs.
       const { data: claimed, error: claimErr } = await supabase.rpc("claim_pending_events", {
         _company_id: companyId,
         _max: max,
