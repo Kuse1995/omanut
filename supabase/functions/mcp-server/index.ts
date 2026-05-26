@@ -516,8 +516,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .single();
       if (cErr) throw cErr;
       const { data: events } = await supabase
-        .from("openclaw_events")
-        .select("id, channel, event_type, skill, status, dispatch_status, dispatch_error, created_at")
+        .from("inbound_events")
+        .select("id, channel, source, status, created_at")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(5);
