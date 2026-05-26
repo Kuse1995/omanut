@@ -1,46 +1,41 @@
-# Fix: OpenClaw never sees inbound WhatsApp messages
+## Goal
 
-## Root cause
-`whatsapp-messages/index.ts` (the OPENCLAW-PRIMARY branch around line 6739) still uses the deprecated v2 push path — it POSTs to `openclaw-dispatch` (which hits the offline tunnel) and locks the conversation with `human_takeover=true, takeover_by='openclaw'`. As a result:
-- No row is ever inserted into `inbound_events`, so the OpenClaw pull loop has nothing to claim.
-- Omanut's in-house AI is blocked by the takeover flag, so the 8-second failover never engages either.
-- Net effect: customer sends "Hi" → silence.
+Confirm the `MINIMAX_API_KEY` already stored in Lovable Cloud is valid for `https://api.minimax.io/v1/text/chatcompletion_v2` with model `MiniMax-M2`. If valid, the local OpenClaw pull loop is failing only because its `.env` holds a different (group-ID or stale) key. We then copy the working key from Lovable Cloud into the local `.env`.
 
 ## Steps
 
-1. **Rewrite the OPENCLAW-PRIMARY branch in `whatsapp-messages/index.ts`**
-   - Remove the `openclaw-dispatch` invoke and the `human_takeover=true` write.
-   - Insert one row into `inbound_events` with:
-     - `company_id`, `conversation_id`
-     - `channel='whatsapp'`, `source='twilio_whatsapp'`
-     - `external_id = MessageSid` (dedup key)
-     - `status='pending'`, `next_attempt_at = now()`
-     - `payload` = the normalized Twilio payload (From, Body, MediaUrls, ProfileName, etc.)
-   - Return 200 to Twilio immediately (no waiting on OpenClaw).
+1. **Add a diagnostic edge function** `supabase/functions/diag-minimax/index.ts`:
+   - GET endpoint, `verify_jwt = false`.
+   - Reads `MINIMAX_API_KEY` from env.
+   - Calls `POST https://api.minimax.io/v1/text/chatcompletion_v2` with:
+     ```json
+     { "model": "MiniMax-M2", "max_tokens": 32,
+       "messages": [{"role":"user","content":"ping"}] }
+     ```
+   - Returns JSON: `{ http_status, base_resp, key_prefix: first 8 chars + "…" + last 4, key_length, content_preview }` so we can see exactly what MiniMax says without ever leaking the full key.
+   - Includes CORS headers.
 
-2. **Mirror the same change in `meta-webhook`** for DM + comment inbounds, so the queue is the single source of truth across channels.
+2. **Deploy it** with `supabase--deploy_edge_functions(["diag-minimax"])`.
 
-3. **Confirm the failover worker is wired**
-   - Verify the cron / worker that scans `inbound_events` where `status='pending' AND created_at < now() - interval '8 seconds'` and re-routes to the in-house Omanut swarm exists and is scheduled.
-   - If missing, add it as a small edge function + 1-minute cron.
+3. **Call it** via `supabase--curl_edge_functions` and read the result:
+   - `base_resp.status_code === 0` + a `content_preview` → key is good. Continue to step 4.
+   - `status_code === 1004` ("auth error") → the stored Lovable key is *also* wrong/stale. Pivot: prompt you to paste a fresh secret key from `bms.omanut.me`, then `update_secret('MINIMAX_API_KEY')`, redeploy, re-run diag.
 
-4. **Verify OpenClaw is actually pulling**
-   - The local OpenClaw process must be calling `GET /functions/v1/openclaw-pull?max=10&wait=25` (or SSE / Realtime) and then `claim_inbound_event` RPC with `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`.
-   - Heartbeat alone (MCP traffic) does not prove the pull loop is running. Add this check to `/admin/sandbox-console` — "last pull at" timestamp per company.
+4. **Get the working key onto your laptop** (only if step 3 succeeds):
+   - Open **Lovable → Project Settings → Secrets → `MINIMAX_API_KEY`** and click *Reveal* / *Copy*.
+   - Paste it into your local `openclaw-pull-loop` `.env` as `MINIMAX_API_KEY=...` (no `Bearer ` prefix, raw key only).
+   - Restart the loop: `pm2 restart openclaw-pull-loop`.
+   - Send a "Hi" to Omanut WhatsApp; verify `inbound_events` flips `pending → processing(claimed_by=openclaw) → completed` in `/admin/sandbox-console`.
 
-5. **End-to-end test**
-   - Send "Hi" to Omanut Technologies WhatsApp.
-   - Expect: new `inbound_events` row appears within 1s. Within 8s, either `status='sent'` + `claimed_by='openclaw'` (OpenClaw answered) OR the worker fires and Omanut's AI replies (failover proven).
-   - Watch `/admin/observability` for the claim/failover counters.
+5. **Cleanup**: once confirmed, delete `diag-minimax` (it exposes a small surface for anyone with the URL). Done via `supabase--delete_edge_functions(["diag-minimax"])`.
 
-6. **Deprecate the push path** (`openclaw-dispatch` function + v2 branch code) after one clean day of v3 traffic.
+## Technical notes
 
-## Files touched
-- `supabase/functions/whatsapp-messages/index.ts` — rewrite OPENCLAW-PRIMARY branch
-- `supabase/functions/meta-webhook/index.ts` — same pattern for DM/comment inbounds
-- `supabase/functions/openclaw-failover-worker/index.ts` *(new, if not already present)* + cron
-- `src/pages/admin/SandboxConsole.tsx` — add "last pull at" indicator
+- Why this is safe: the diagnostic only returns a masked prefix/suffix of the key and the model's reply preview — never the full secret.
+- No DB changes, no migration, no Lovable UI changes. One temporary edge function, then removed.
+- The endpoint and Bearer-token pattern in `supabase/functions/_shared/gemini-client.ts` (lines 15, 167) are identical to what your pull loop is using, so any difference in result isolates the key value as the variable.
 
 ## Out of scope
-- Changing OpenClaw client code on your machine (we assume it pulls; we'll verify in Step 4).
-- Touching other companies' configs.
+
+- The `openclaw-pull-loop` script itself (lives on your laptop, not in this repo).
+- Changing the production `_shared/gemini-client.ts` path.
