@@ -6415,10 +6415,16 @@ serve(async (req) => {
       //   1. Promise-fulfillment re-entry (from pending-promise-watchdog)
       //   2. Meta WhatsApp Cloud inbound bridge (from meta-webhook)
       const isCloudInbound = jsonBody?.source === 'meta_cloud_webhook';
+      const isOpenclawFallback = jsonBody?.openclaw_bypass === true;
 
-      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound) {
-        console.log('[SKIP] Non-promise / non-cloud JSON request');
+      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound && !isOpenclawFallback) {
+        console.log('[SKIP] Non-promise / non-cloud / non-bypass JSON request');
         return new Response('OK', { status: 200, headers: corsHeaders });
+      }
+
+      if (isOpenclawFallback) {
+        openclawBypass = true;
+        console.log('[OPENCLAW-FALLBACK] In-house AI takeover for sid=', jsonBody.MessageSid);
       }
 
       if (isCloudInbound) {
