@@ -112,6 +112,50 @@ export default function SandboxConsole() {
       </Card>
 
       <Card className="p-4">
+        <div className="text-sm font-medium mb-3">
+          Inbound event queue (last 50)
+          <span className="ml-2 text-xs text-muted-foreground">
+            claimed_by tells you who answered — "openclaw" = OpenClaw picked it up, "in_house" / null = Omanut fallback
+          </span>
+        </div>
+        <div className="space-y-1 max-h-96 overflow-auto">
+          {events.length === 0 && (
+            <div className="text-sm text-muted-foreground">No inbound events yet.</div>
+          )}
+          {events
+            .filter((e) => companyFilter === "all" || e.company_id === companyFilter)
+            .map((e) => {
+              const company = companies.find((c) => c.id === e.company_id);
+              const ageMs = Date.now() - new Date(e.created_at).getTime();
+              const ageS = Math.floor(ageMs / 1000);
+              return (
+                <div key={e.id} className="flex items-center gap-2 border border-border rounded-md p-2 text-xs flex-wrap">
+                  <Badge variant={e.status === "completed" ? "default" : e.status === "failed" ? "destructive" : "secondary"}>
+                    {e.status}
+                  </Badge>
+                  <Badge variant="outline">{e.channel}</Badge>
+                  <span className="text-muted-foreground">{company?.name ?? e.company_id.slice(0, 8)}</span>
+                  <span className="text-muted-foreground">src={e.source}</span>
+                  <span className={e.claimed_by === "openclaw" ? "text-primary font-medium" : "text-muted-foreground"}>
+                    claimed_by={e.claimed_by ?? "—"}
+                  </span>
+                  {e.attempts > 0 && <span className="text-muted-foreground">attempts={e.attempts}</span>}
+                  <span className="ml-auto text-muted-foreground">
+                    {ageS < 60 ? `${ageS}s ago` : new Date(e.created_at).toLocaleTimeString()}
+                  </span>
+                  {e.last_error && (
+                    <div className="w-full text-destructive truncate">err: {e.last_error}</div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      </Card>
+
+      <Card className="p-4">
+
+
+      <Card className="p-4">
         <div className="flex items-center gap-3 mb-3">
           <div className="text-sm font-medium">Shadow-logged outbound</div>
           <select
