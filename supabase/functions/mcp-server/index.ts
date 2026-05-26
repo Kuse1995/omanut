@@ -3,6 +3,7 @@ import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "zod";
 import zodToJsonSchema from "zod-to-json-schema";
+import { buildEnvelope } from "../_shared/openclaw-envelope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
