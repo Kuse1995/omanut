@@ -154,8 +154,6 @@ export default function SandboxConsole() {
 
       <Card className="p-4">
 
-
-      <Card className="p-4">
         <div className="flex items-center gap-3 mb-3">
           <div className="text-sm font-medium">Shadow-logged outbound</div>
           <select
