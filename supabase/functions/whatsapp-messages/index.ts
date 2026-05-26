@@ -6458,6 +6458,7 @@ serve(async (req) => {
     const To = formData.get('To') as string;
     const Body = formData.get('Body') as string || '';
     const ProfileName = formData.get('ProfileName') as string || '';
+    const MessageSid = (formData.get('MessageSid') as string) || (formData.get('SmsMessageSid') as string) || `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     
     // Extract media information
     const NumMedia = parseInt(formData.get('NumMedia') as string || '0');
