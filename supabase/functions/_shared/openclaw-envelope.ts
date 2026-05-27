@@ -79,7 +79,7 @@ export async function buildEnvelope(
     return url;
   });
 
-  const inboundText: string = p.text || p.message || '';
+  const inboundText: string = p.text || p.message || p.body || p.Body || '';
   const kbSummary = typeof (c as any).quick_reference_info === 'string'
     ? (c as any).quick_reference_info.slice(0, 600)
     : null;
