@@ -152,26 +152,41 @@ async function processOne(supabase: any, ev: any) {
   const channel: NormalizedChannel = ev.channel;
   const source: string = ev.source;
 
-  // WhatsApp inbound is handled by whatsapp-messages — worker just mirrors.
-  if (channel === 'whatsapp') {
-    // OpenClaw-primary companies: never auto-complete WhatsApp here. Release
-    // the event back to pending so the external OpenClaw pull loop can claim
-    // it. Otherwise we silently swallow the inbound when OpenClaw is late.
-    const { data: companyCfg } = await supabase
-      .from('companies')
-      .select('openclaw_mode, openclaw_owns')
-      .eq('id', ev.company_id)
-      .maybeSingle();
-    const owns = companyCfg?.openclaw_owns?.whatsapp === true;
-    const primary = companyCfg?.openclaw_mode === 'primary';
-    if (primary && owns) {
-      console.log('[openclaw-worker] releasing whatsapp event to OpenClaw pull', ev.id);
+  // OpenClaw-primary release: for any channel that OpenClaw owns, leave the
+  // event pending so the laptop's pull loop can claim it. The in-house worker
+  // only takes over once the grace window (OPENCLAW_PULL_GRACE_SECONDS) has
+  // elapsed — see the SELECT in the main drain loop.
+  const { data: companyCfg } = await supabase
+    .from('companies')
+    .select('openclaw_mode, openclaw_owns')
+    .eq('id', ev.company_id)
+    .maybeSingle();
+  const primary = companyCfg?.openclaw_mode === 'primary';
+  const ownsKey = channel === 'whatsapp'
+    ? 'whatsapp'
+    : channel === 'direct_message'
+      ? 'meta_dm'
+      : channel === 'public_comment'
+        ? 'comments'
+        : null;
+  const owns = ownsKey ? companyCfg?.openclaw_owns?.[ownsKey] === true : false;
+
+  if (primary && owns) {
+    const ageMs = Date.now() - new Date(ev.created_at).getTime();
+    if (ageMs < GRACE_SECONDS * 1000) {
+      console.log('[openclaw-worker] releasing to OpenClaw pull', ev.id, channel);
       await supabase
         .from('inbound_events')
         .update({ status: 'pending', claimed_by: null, claimed_at: null, picked_at: null })
         .eq('id', ev.id);
       return;
     }
+    console.log('[openclaw-worker] grace expired, falling back for', ev.id, channel);
+  }
+
+  // WhatsApp inbound is normally handled by whatsapp-messages — worker just mirrors
+  // unless OpenClaw was primary and missed its grace window (then we fall through).
+  if (channel === 'whatsapp') {
     await mirrorToTunnel(supabase, ev, ev.ai_response ?? null);
     await markSent(supabase, ev, ev.ai_response ?? '(handled by whatsapp-messages)', null, null);
     return;
