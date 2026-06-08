@@ -148,37 +148,12 @@ async function enqueueOrLegacy(supabase: any, e: EnqueueInput) {
       return;
     }
 
-    // OpenClaw-v3: give external pull consumers first dibs. Schedule the
-    // in-house worker AFTER the grace window so it only runs as fallback.
-    const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8') * 1000;
-    const fallback = async () => {
-      await new Promise((r) => setTimeout(r, GRACE_MS));
-      try {
-        await supabase.functions.invoke('openclaw-worker', { body: { event_id: row.id } });
-      } catch (err) {
-        console.warn('[meta-webhook] delayed worker invoke failed', String(err).slice(0, 200));
-      }
-    };
-    if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
-      (globalThis as any).EdgeRuntime.waitUntil(fallback());
-    } else {
-      fallback();
-    }
+    // OpenClaw removed. Event sits in inbound_events for the in-house Meta worker
+    // (to be wired to MiniMax in a follow-up). No external dispatch.
     return;
-
   }
 
-  // Legacy path (USE_EVENT_QUEUE=false rollback) — fall back to old openclaw-dispatch behaviour.
-  try {
-    await supabase.functions.invoke("openclaw-dispatch", {
-      body: {
-        company_id: e.company_id,
-        channel: e.channel === "public_comment" ? "comments" : "meta_dm",
-        event_type: e.channel === "public_comment" ? "inbound_comment" : "inbound_dm",
-        payload: e.payload,
-      },
-    });
-  } catch (err) {
-    console.error("[meta-webhook] legacy dispatch failed", err);
-  }
+  // Legacy path disabled (openclaw-dispatch removed).
+  console.warn("[meta-webhook] legacy dispatch path is disabled; enable USE_EVENT_QUEUE");
 }
+

@@ -26,8 +26,6 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import Companies from "./pages/admin/Companies";
 import NewCompany from "./pages/admin/NewCompany";
 import EditCompany from "./pages/admin/EditCompany";
-import EventQueue from "./pages/admin/EventQueue";
-import SandboxConsole from "./pages/admin/SandboxConsole";
 import Observability from "./pages/admin/Observability";
 import MediaApprovals from "./pages/admin/MediaApprovals";
 import ConversationControl from "./pages/admin/ConversationControl";
@@ -71,8 +69,6 @@ const App = () => (
             <Route path="/admin/companies" element={<Companies />} />
             <Route path="/admin/companies/new" element={<NewCompany />} />
             <Route path="/admin/company/:id" element={<EditCompany />} />
-            <Route path="/admin/event-queue" element={<EventQueue />} />
-            <Route path="/admin/sandbox-console" element={<SandboxConsole />} />
             <Route path="/admin/observability" element={<Observability />} />
             <Route path="/admin/media-approvals" element={<MediaApprovals />} />
             <Route path="/admin/conversations/:id/control" element={<ConversationControl />} />

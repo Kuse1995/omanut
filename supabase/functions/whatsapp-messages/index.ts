@@ -4319,23 +4319,8 @@ Trust ONLY the information provided in this system prompt.
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
 
-            // OpenClaw skill gating — if handoff is owned by OpenClaw, log + bail
-            try {
-              const { gateSkill } = await import('../_shared/openclaw-gate.ts');
-              const gate = await gateSkill(supabase, company.id, 'handoff', {
-                conversation_id: conversationId ?? undefined,
-                channel: 'handoff',
-                event_type: 'notify_boss',
-                payload: args,
-              });
-              if (gate.delegated) {
-                console.log('[BACKGROUND] notify_boss delegated to OpenClaw — internal escalation skipped');
-                anyToolExecuted = true;
-                continue;
-              }
-            } catch (e) {
-              console.error('[BACKGROUND] openclaw-gate failed for notify_boss:', e);
-            }
+
+
 
             try {
               // Map notification types to message formats
@@ -5785,26 +5770,8 @@ Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
           } else if (fnName === 'notify_boss') {
             console.log(`[TOOL-LOOP] Round ${currentRound}: Executing notify_boss`, JSON.stringify(args));
 
-            // OpenClaw skill gating
-            try {
-              const { gateSkill } = await import('../_shared/openclaw-gate.ts');
-              const gate = await gateSkill(supabase, company.id, 'handoff', {
-                conversation_id: conversationId ?? undefined,
-                channel: 'handoff',
-                event_type: 'notify_boss',
-                payload: args,
-              });
-              if (gate.delegated) {
-                console.log('[TOOL-LOOP] notify_boss delegated to OpenClaw');
-                toolResults.push({
-                  tool_call_id: toolCall.id, role: "tool",
-                  content: JSON.stringify({ success: true, delegated_to_openclaw: true, event_id: gate.response?.event_id, message: 'OpenClaw owns handoffs for this company. Tell the customer the team will follow up shortly.' }),
-                });
-                continue;
-              }
-            } catch (e) {
-              console.error('[TOOL-LOOP] openclaw-gate failed for notify_boss:', e);
-            }
+
+
 
             try {
               const explicitHumanReq = /\b(human|agent|person|manager|owner|representative|speak\s+to\s+(?:a\s+)?(?:real\s+)?(?:person|human))\b/i.test(userMessage || '');
@@ -6397,35 +6364,23 @@ serve(async (req) => {
 
   // Track promise-fulfillment mode for prompt augmentation later in the pipeline.
   let isPromiseFulfillment = false;
-  // When true, skip the OpenClaw enqueue short-circuit and run the in-house AI path.
-  let openclawBypass = false;
 
   try {
     const contentType = req.headers.get('content-type') || '';
 
     // === PROMISE-FULFILLMENT JSON BRIDGE ===
-    // The pending-promise-watchdog invokes this function with JSON instead of Twilio form-data.
-    // We synthesize an equivalent FormData payload and fall through to the normal pipeline.
     let formData: FormData;
     if (contentType.includes('application/json')) {
       let jsonBody: any;
       try { jsonBody = await req.json(); } catch { jsonBody = {}; }
 
-      // Two JSON entry modes:
-      //   1. Promise-fulfillment re-entry (from pending-promise-watchdog)
-      //   2. Meta WhatsApp Cloud inbound bridge (from meta-webhook)
       const isCloudInbound = jsonBody?.source === 'meta_cloud_webhook';
-      const isOpenclawFallback = jsonBody?.openclaw_bypass === true;
 
-      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound && !isOpenclawFallback) {
-        console.log('[SKIP] Non-promise / non-cloud / non-bypass JSON request');
+      if (!jsonBody?.isPromiseFulfillment && !isCloudInbound) {
+        console.log('[SKIP] Non-promise / non-cloud JSON request');
         return new Response('OK', { status: 200, headers: corsHeaders });
       }
 
-      if (isOpenclawFallback) {
-        openclawBypass = true;
-        console.log('[OPENCLAW-FALLBACK] In-house AI takeover for sid=', jsonBody.MessageSid);
-      }
 
       if (isCloudInbound) {
         console.log('[CLOUD-INBOUND] From=', jsonBody.From, 'To=', jsonBody.To, 'q=', String(jsonBody.Body || '').slice(0, 80));
@@ -6695,141 +6650,8 @@ serve(async (req) => {
       }
     }
 
-    // ── OPENCLAW PRIMARY GUARD (v3 pull queue) ──
-    // If OpenClaw owns the WhatsApp channel for this company, enqueue the
-    // inbound into `inbound_events` and ACK Twilio. OpenClaw long-polls
-    // /openclaw-pull to claim. After OPENCLAW_PULL_GRACE_SECONDS, the
-    // in-house worker fallback kicks in automatically. We do NOT lock the
-    // conversation — that would block the failover.
-    if (!openclawBypass && (company as any).openclaw_mode === 'primary' && (company as any).openclaw_owns?.whatsapp === true) {
-      console.log(`[OPENCLAW-PRIMARY] Enqueueing inbound for company=${company.id} sid=${MessageSid}`);
-      try {
-        const customerPhone = From;
+    // (OpenClaw primary guard removed — MiniMax handles every channel in-house.)
 
-        // Resolve / create conversation so OpenClaw can reference it
-        const { data: existingConv } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('phone', customerPhone)
-          .eq('company_id', company.id)
-          .eq('status', 'active')
-          .maybeSingle();
-
-        let conversationId = existingConv?.id;
-        if (!conversationId) {
-          const { data: newConv } = await supabase
-            .from('conversations')
-            .insert({
-              phone: customerPhone,
-              company_id: company.id,
-              customer_name: ProfileName || 'Customer',
-              status: 'active',
-            })
-            .select('id')
-            .single();
-          conversationId = newConv?.id;
-        }
-
-        // Persist the inbound message so it shows in the UI / MCP history
-        if (conversationId) {
-          await supabase.from('messages').insert({
-            conversation_id: conversationId,
-            role: 'user',
-            content: Body || '(media message)',
-            message_metadata: mediaFiles.length > 0 ? { media_urls: mediaFiles.map((m: any) => m.url) } : null,
-          });
-        }
-
-        // Enqueue to inbound_events (dedup on MessageSid)
-        const { data: eventRow, error: enqErr } = await supabase
-          .from('inbound_events')
-          .insert({
-            company_id: company.id,
-            conversation_id: conversationId,
-            channel: 'whatsapp',
-            source: 'twilio',
-            external_id: MessageSid,
-            status: 'pending',
-            payload: {
-              from: From,
-              to: To,
-              body: Body,
-              profile_name: ProfileName,
-              message_sid: MessageSid,
-              media: mediaFiles,
-            },
-          })
-          .select('id')
-          .single();
-
-        if (enqErr && (enqErr as any).code !== '23505') {
-          console.error('[OPENCLAW-PRIMARY] enqueue failed', enqErr);
-        }
-
-        // In-house AI fallback. DISABLED by default when OpenClaw owns the
-        // WhatsApp channel — the user wants OpenClaw to be the sole responder.
-        // To re-enable as a safety net set OPENCLAW_INHOUSE_FALLBACK_ENABLED=true.
-        const fallbackEnabled = (Deno.env.get('OPENCLAW_INHOUSE_FALLBACK_ENABLED') ?? 'false').toLowerCase() === 'true';
-        if (eventRow?.id && fallbackEnabled) {
-          const GRACE_MS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '60') * 1000;
-          const eventId = eventRow.id;
-          const fallback = async () => {
-            await new Promise((r) => setTimeout(r, GRACE_MS));
-            try {
-              const { data: stillPending } = await supabase
-                .from('inbound_events')
-                .select('id, status, claimed_by')
-                .eq('id', eventId)
-                .maybeSingle();
-              if (!stillPending || stillPending.status !== 'pending') {
-                console.log('[OPENCLAW-FALLBACK] skip — already claimed', stillPending?.claimed_by, stillPending?.status);
-                return;
-              }
-              await supabase
-                .from('inbound_events')
-                .update({ status: 'processing', claimed_by: 'in_house', claimed_at: new Date().toISOString() })
-                .eq('id', eventId)
-                .eq('status', 'pending');
-
-              await supabase.functions.invoke('whatsapp-messages', {
-                body: {
-                  openclaw_bypass: true,
-                  From, To, Body, ProfileName,
-                  MessageSid,
-                  NumMedia: mediaFiles.length,
-                  media: mediaFiles,
-                },
-              });
-
-              await supabase
-                .from('inbound_events')
-                .update({ status: 'sent', completed_at: new Date().toISOString(), ai_response: '(handled by in_house fallback)' })
-                .eq('id', eventId);
-            } catch (err) {
-              console.warn('[OPENCLAW-FALLBACK] in-house re-invoke failed', String(err).slice(0, 200));
-              await supabase
-                .from('inbound_events')
-                .update({ status: 'failed', last_error: String(err).slice(0, 500) })
-                .eq('id', eventId);
-            }
-          };
-          if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
-            (globalThis as any).EdgeRuntime.waitUntil(fallback());
-          } else {
-            fallback();
-          }
-        } else if (eventRow?.id) {
-          console.log('[OPENCLAW-PRIMARY] in-house fallback disabled — OpenClaw owns this conversation');
-        }
-      } catch (e) {
-        console.error('[OPENCLAW-PRIMARY] enqueue error', e);
-      }
-      // ACK Twilio so they don't retry.
-      return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<Response></Response>`, {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
-      });
-    }
 
     // Detect WhatsApp Flow Response
     if (Body.includes('__flow_response__')) {

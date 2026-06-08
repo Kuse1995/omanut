@@ -15,7 +15,7 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback. */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'MiniMax-M2';
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'MiniMax-M3';
 export const FALLBACK_TEXT_MODEL = 'glm-4.7';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
@@ -108,9 +108,9 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
     case 'minimax':
       apiUrl = MINIMAX_OPENAI_URL;
       apiKey = Deno.env.get('MINIMAX_API_KEY');
-      // Default to MiniMax-M2 (latest text model) if a bare "minimax" name was provided
+      // Default to MiniMax-M3 (latest text model) if a bare "minimax" name was provided
       if (!modelToSend || modelToSend.toLowerCase() === 'minimax' || modelToSend.toLowerCase() === 'minimax-latest') {
-        modelToSend = 'MiniMax-M2';
+        modelToSend = 'MiniMax-M3';
       }
       if (!apiKey) {
         console.error(`[CONFIG-ERROR] Missing MINIMAX_API_KEY for model "${options.model}", falling back to direct Gemini`);
