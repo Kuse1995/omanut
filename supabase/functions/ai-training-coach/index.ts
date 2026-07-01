@@ -391,7 +391,7 @@ ${hasObjectives ? 'Continue the conversation naturally.' : 'START NOW: greet the
 
     // First AI call
     const firstResponse = await geminiChat({
-      model: 'glm-4.7',
+      model: PRIMARY_TEXT_MODEL,
       messages,
       temperature: 0.8,
       max_tokens: 1024,
@@ -459,7 +459,7 @@ ${hasObjectives ? 'Continue the conversation naturally.' : 'START NOW: greet the
     ];
 
     const secondResponse = await geminiChat({
-      model: 'glm-4.7',
+      model: PRIMARY_TEXT_MODEL,
       messages: secondMessages,
       temperature: 0.8,
       max_tokens: 1024,
