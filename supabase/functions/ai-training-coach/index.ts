@@ -234,6 +234,37 @@ async function executeTool(
     return { success: true, target: 'Banned Topics', summary };
   }
 
+  if (toolName === 'set_business_objectives') {
+    const { objectives, summary } = args;
+    const formatted = '=== BUSINESS OBJECTIVES (AI north-star) ===\n' +
+      (objectives as any[]).map((o, i) =>
+        `${i + 1}. [${(o.priority || 'medium').toUpperCase()}] ${o.goal}${o.success_metric ? ` — measured by: ${o.success_metric}` : ''}`
+      ).join('\n');
+
+    const { data: overrides } = await supabase
+      .from('company_ai_overrides')
+      .select('system_instructions')
+      .eq('company_id', companyId)
+      .maybeSingle();
+
+    const existing = (overrides?.system_instructions || '').replace(/=== BUSINESS OBJECTIVES \(AI north-star\) ===[\s\S]*?(?=\n===|$)/g, '').trim();
+    const updated = existing ? `${formatted}\n\n${existing}` : formatted;
+
+    if (overrides) {
+      const { error } = await supabase
+        .from('company_ai_overrides')
+        .update({ system_instructions: updated })
+        .eq('company_id', companyId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('company_ai_overrides')
+        .insert({ company_id: companyId, system_instructions: updated });
+      if (error) throw error;
+    }
+    return { success: true, target: 'Business Objectives', summary };
+  }
+
   return { success: false, target: 'unknown', summary: 'Unknown tool' };
 }
 
