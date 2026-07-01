@@ -99,6 +99,34 @@ const tools = [
         additionalProperties: false
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_business_objectives",
+      description: "Save the business owner's stated OBJECTIVES for what they want the AI to achieve (e.g. increase reservations 20%, reduce complaint response time, upsell drinks with meals). Call this AS SOON as the admin has stated one or more concrete objectives — even if only one is agreed. These objectives become the AI's north star for every downstream customer interaction.",
+      parameters: {
+        type: "object",
+        properties: {
+          objectives: {
+            type: "array",
+            description: "Ordered list of concrete, measurable objectives the AI should optimize for.",
+            items: {
+              type: "object",
+              properties: {
+                goal: { type: "string", description: "One-line objective (e.g. 'Convert 30% of WhatsApp inquiries into bookings')." },
+                success_metric: { type: "string", description: "How success will be measured (e.g. 'weekly bookings from WhatsApp')." },
+                priority: { type: "string", enum: ["high", "medium", "low"] }
+              },
+              required: ["goal"]
+            }
+          },
+          summary: { type: "string", description: "One-line summary shown to the user." }
+        },
+        required: ["objectives", "summary"],
+        additionalProperties: false
+      }
+    }
   }
 ];
 
