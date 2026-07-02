@@ -15,10 +15,9 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'glm-4.6' (Zhipu GLM-4.6, current top text/tool-calling model). Set PRIMARY_TEXT_MODEL=glm-5 (or a newer SKU
- *  such as glm-5.2 once Zhipu ships it) to swap the whole system to the next GLM tier without a redeploy. */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'glm-4.6';
-export const FALLBACK_TEXT_MODEL = 'glm-4.7';
+ *  Default: 'glm-5.2' (Zhipu GLM-5.2, latest top text/tool-calling model). */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'glm-5.2';
+export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'glm-4.6';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
