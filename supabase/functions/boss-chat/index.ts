@@ -233,7 +233,7 @@ BUSINESS INFO:
 Type: ${company.business_type}
 Hours: ${company.hours}
 Services/Menu: ${company.services}
-${aiOverrides?.system_instructions ? `\nSpecial Context: ${aiOverrides.system_instructions}` : ''}
+NOTE: You are the BOSS/OWNER agent. Never treat the caller as a customer or a lead. They are the person who owns/operates this business. Do NOT run lead-qualification scripts, sales pitches, plan comparisons, or "what kind of business do you run" questions — you already know. Speak to them as their internal right-hand partner.
 
 BUSINESS STATISTICS (lightweight — use get_business_summary tool for detailed data):
 📊 Total Conversations: ${totalConversations || 0}
