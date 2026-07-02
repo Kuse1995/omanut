@@ -4318,100 +4318,38 @@ Trust ONLY the information provided in this system prompt.
           } else if (toolCall.function.name === 'notify_boss') {
             const args = JSON.parse(toolCall.function.arguments);
             console.log('[BACKGROUND] notify_boss called with:', JSON.stringify(args));
-
-
-
-
             try {
-              // Map notification types to message formats
-              let emoji = '📢';
-              let title = 'Notification';
-              
-              switch (args.notification_type) {
-                case 'high_value':
-                  emoji = '💎';
-                  title = 'High-Value Opportunity';
-                  break;
-                case 'complaint':
-                  emoji = '⚠️';
-                  title = 'Customer Complaint';
-                  break;
-                case 'reservation_change':
-                  emoji = '🔄';
-                  title = 'Reservation Change Request';
-                  break;
-                case 'cancellation':
-                  emoji = '❌';
-                  title = 'Cancellation Request';
-                  break;
-                case 'vip_info':
-                  emoji = '⭐';
-                  title = 'VIP Customer Alert';
-                  break;
-              }
-              
-              const priorityText = args.priority === 'urgent' ? ' [URGENT]' : '';
-              
-              const message = `${emoji} ${title}${priorityText}
-
-Customer: ${conversation.customer_name || 'Unknown'}
-Phone: ${customerPhone}
-
-${args.summary}
-
-${args.details ? `Details: ${args.details}\n` : ''}
-Time: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Lusaka' })}`;
-
-              // Send notification via Twilio
-              const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-              const twilioToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-              
-              if (!twilioSid || !twilioToken) {
-                console.error('[BACKGROUND] Twilio credentials not configured');
-                toolExecutionContext.push('boss notification failed - no twilio config');
-              } else {
-                // Get boss phone
-                const bossPhone = company.boss_phone;
-                if (!bossPhone) {
-                  console.log('[BACKGROUND] No boss phone configured');
-                  toolExecutionContext.push('boss notification skipped - no phone');
-                } else {
-                  const twilioResponse = await fetch(
-                    `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
-                    {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                      },
-                      body: new URLSearchParams({
-                        To: bossPhone.startsWith('whatsapp:') ? bossPhone : `whatsapp:${bossPhone}`,
-                        From: `whatsapp:${company.whatsapp_number || Deno.env.get('TWILIO_WHATSAPP_NUMBER') || '+13344685065'}`,
-                        Body: message,
-                      }),
-                    }
-                  );
-
-                  if (!twilioResponse.ok) {
-                    const errorText = await twilioResponse.text();
-                    console.error('[BACKGROUND] Twilio error:', errorText);
-                    toolExecutionContext.push('boss notification failed - twilio error');
-                  } else {
-                    anyToolExecuted = true;
-                    toolExecutionContext.push(`boss notified: ${args.notification_type}`);
-                    console.log('[BACKGROUND] Boss notification sent successfully');
-                    
-                    // Log to boss_conversations
-                    await supabase
-                      .from('boss_conversations')
-                      .insert({
-                        company_id: company.id,
-                        message_from: 'ai',
-                        message_content: message,
-                        response: null
-                      });
-                  }
+              // Route through multi-boss fan-out (company_boss_phones) so every opted-in
+              // recipient gets pinged, not just the legacy single company.boss_phone.
+              const summary = `[${args.notification_type || 'notification'}] ${args.summary || ''}${args.details ? `\n${args.details}` : ''}`;
+              const sendResult = await sendBossHandoffNotification(
+                company,
+                customerPhone,
+                conversation.customer_name || 'Customer',
+                summary,
+                supabase,
+                'ai_tool',
+                {
+                  askingAbout: userMessage,
+                  stage: args.notification_type,
+                  triggerReason: args.summary,
+                  collectedInfo: args.collected_info || {},
                 }
+              );
+              const delivered = sendResult?.delivered || 0;
+              if (delivered > 0) {
+                anyToolExecuted = true;
+                toolExecutionContext.push(`boss notified: ${args.notification_type} (${delivered} recipients)`);
+                try {
+                  await supabase.from('boss_conversations').insert({
+                    company_id: company.id,
+                    message_from: 'ai_agent_handoff',
+                    message_content: `[${args.notification_type}] customer:${customerPhone} ${args.summary || ''}`,
+                  });
+                } catch (_) {}
+              } else {
+                console.error('[BACKGROUND] notify_boss: no boss reachable');
+                toolExecutionContext.push('boss notification failed - no recipient reachable');
               }
             } catch (error) {
               console.error('[BACKGROUND] Exception in notify_boss:', error);
