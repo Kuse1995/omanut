@@ -184,12 +184,12 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
-  const glm5Enabled = (Deno.env.get('ZHIPU_GLM5_ENABLED') || '').toLowerCase() === 'true';
-  // GLM is now the default primary brain. PRIMARY_TEXT_MODEL env var lets ops swap instantly.
+  // GLM-5.2 is now GA and the primary brain. Kept env-gate for legacy toggle compatibility.
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
-    ...(glm5Enabled ? ['glm-5.2', 'glm-5'] : []),
+    'glm-5.2',
+    'glm-5',
     'glm-4.6',
     FALLBACK_TEXT_MODEL,
     'gemini-2.5-flash',
