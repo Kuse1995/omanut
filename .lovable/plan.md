@@ -1,92 +1,45 @@
-# Make OpenClaw the Sole Brain (with 2-min safety net)
+## Problem
 
-## Goal
+For OmanutBMS, no boss handoff notification has fired in the last week even though 10+ real conversations came in with clear buying signals ("I sell LPG gas, challenge is keeping sales records", "Track stock as well", "How does the Hustler Plan work?", plus a customer providing phone/date for a callback). DB confirms:
 
-Your laptop's OpenClaw loop becomes the only AI that talks to customers across **WhatsApp, Facebook/Instagram DMs, and FB/IG comments** for all 8 companies. The in-house AI stays silent unless OpenClaw fails to claim an event within **2 minutes** — then it drains the straggler so customers are never ghosted.
+- `boss_conversations` has zero `ai_agent_handoff` rows for this company — the AI never called `notify_boss`.
+- `supervisor-agent` ran on every message but its stored recommendations never emit `urgency` or `conversionProbability`, so the auto-escalation branch in `supervisor-agent/index.ts` (lines 356–420) never triggers.
+- `engagement-watchdog` cron only alerts after **8+** user messages — every recent lead sits at 1–4, so it never fires either.
+- Result: all three layers of the "Missed-Lead Escalation Stack" memory are silent for this account.
 
-## How it works
+## Fix (4 layers, deterministic-first)
 
-```text
-Customer message
-      │
-      ▼
-inbound_events (status=pending)
-      │
-      ├──► OpenClaw on your laptop (every 25s via MCP)
-      │         claims → answers → mark_event_handled
-      │
-      └──► [if pending > 2 min] in-house openclaw-worker takes over
-                claims → swarm AI answers → sends
-```
+### 1. Force supervisor to emit urgency + conversion signal
+`supabase/functions/supervisor-agent/index.ts`
+- Update the supervisor system prompt to REQUIRE the JSON output include `urgency` (`low|medium|high|critical`), `conversionProbability` (0–100), and `buyingSignal` (bool).
+- Broaden the auto-escalation heuristic: fire on any of
+  - `urgency` = high/critical
+  - `conversionProbability` >= 50 (was 70)
+  - `buyingSignal` true regardless of prob
+  - Business-qualifier keywords in the customer message (industry name, employee count, "I sell", "my business", "we run", "we supply", provided phone/date/time) — treat as qualified lead.
+- Keep the 30-min dedupe.
 
-Two switches control this:
+### 2. Deterministic server-side escalator in whatsapp-messages
+`supabase/functions/whatsapp-messages/index.ts`
+- After the tool loop finishes, if the AI didn't call `notify_boss` in this turn AND the incoming user message matches a strict "hot-lead" regex (demo/call booking, "book a call", "when can we talk", "I want to buy", "I'll take", "how do I pay", "MTN/Airtel MoMo?", or the qualifier phrases above), call `sendBossHandoffNotification` server-side with `notification_type='auto_hot_lead'` and the 30-min dedupe check.
+- This guarantees the boss gets pinged even if the model ignores the prompt.
 
-- **`companies.openclaw_mode = 'primary'`** + **`openclaw_owns = {whatsapp:true, dm:true, comments:true}`** for every company → tells the in-house worker "don't touch this, OpenClaw owns it."
-- **`OPENCLAW_PULL_GRACE_SECONDS = 120`** env var on `openclaw-worker` → the worker already respects a grace window; bumping it to 120s means OpenClaw gets a full 2 minutes before fallback kicks in.
+### 3. Lower engagement-watchdog threshold
+`supabase/functions/engagement-watchdog/index.ts`
+- `MIN_USER_MESSAGES`: 8 → 4.
+- `ACTIVE_WINDOW_HOURS`: 2 → 6 (catch leads that went cold within the same session).
 
-That's it. No new tables. No new edge functions. The plumbing is already there from previous iterations — we just flip the flags consistently.
+### 4. Tighten notify_boss prompt triggers
+`supabase/functions/whatsapp-messages/index.ts` (system-prompt block around lines 2436–2461)
+- Add explicit trigger: "When a customer shares business context (industry, size, pain point, phone/email, or requests a call/demo) they are a QUALIFIED LEAD — call `notify_boss` with `notification_type='qualified_lead'` on that same turn."
+- Add explicit trigger: "When the customer books/asks for a call, demo, or meeting, call `notify_boss` with `notification_type='demo_booking'` and include the requested time and their contact."
+- Reinforce that failing to escalate a qualified lead is a critical failure.
 
-## Changes
+### Verification
 
-### 1. Database migration (one-shot config flip for all 8 companies)
+After deploy, watch for:
+- New `ai_agent_handoff` rows in `boss_conversations` for OmanutBMS as new conversations arrive.
+- Supervisor recommendations JSON now containing `urgency` / `conversionProbability` / `buyingSignal`.
+- WhatsApp delivery to +260972064502 (boss phone, `notify_alerts=true`).
 
-```sql
-UPDATE public.companies
-   SET openclaw_mode = 'primary',
-       openclaw_owns = jsonb_build_object(
-         'whatsapp', true,
-         'dm',       true,
-         'comments', true
-       );
-```
-
-### 2. Bump the grace window so OpenClaw has 2 full minutes
-
-Set the Supabase function secret `OPENCLAW_PULL_GRACE_SECONDS = 120` (currently defaults to 8s). The `openclaw-worker` already reads it at line 56:
-
-```ts
-const GRACE_SECONDS = Number(Deno.env.get('OPENCLAW_PULL_GRACE_SECONDS') ?? '8');
-```
-
-So the cron'd worker will skip any event younger than 2 minutes — giving OpenClaw exclusive first dibs.
-
-### 3. Patch `openclaw-worker` to honor the WhatsApp release path consistently
-
-The worker today already has the release-to-OpenClaw logic for WhatsApp (lines 156–171), but it only triggers when `explicitId` is passed. For DM + comments, when OpenClaw is primary, the worker should similarly **skip + leave pending** during the grace window instead of processing.
-
-Small surgical change in `processOne`:
-
-- If `company.openclaw_mode === 'primary'` AND the matching `openclaw_owns[<channel>]` is true AND the event is younger than `GRACE_SECONDS`, release back to `pending` and return.
-- This applies to `direct_message` and `public_comment` the same way it already does for `whatsapp`.
-
-### 4. Visible status surface (so you know OpenClaw is actually winning)
-
-Tiny UI addition to the **OpenClaw Agent Card** (`src/components/admin/OpenClawAgentCard.tsx`):
-
-- Show "Last heartbeat: 12s ago" (already tracked via `openclaw_last_heartbeat`)
-- Show "Events handled (last hour): N by openclaw / M by fallback worker" — single SQL count grouped by `consumed_by`.
-
-This is the only frontend touch; no new pages.
-
-## Behavior matrix after rollout
-
-| Scenario | What happens |
-|---|---|
-| Laptop online, OpenClaw loop running | Every customer message handled by your laptop within ~25s |
-| Laptop offline / loop crashed | Events sit pending for 2 min, then in-house worker drains them |
-| Laptop comes back mid-backlog | OpenClaw picks up everything still pending (worker only takes events >2min old) |
-| You manually disable OpenClaw on one company | Set `openclaw_mode='off'` on that company — worker resumes immediately |
-
-## Out of scope
-
-- The Twilio `401 Authenticate` send failure — separate item, doesn't block this work (OpenClaw will hit the same wall when it tries to send, but that's an outbound credential issue, not a routing one).
-- Per-channel granularity beyond on/off (e.g. "OpenClaw owns WhatsApp but not comments for company X") — the schema supports it; we just won't expose UI for it now.
-- Any change to the MCP tool surface (`list_pending_events` / `mark_event_handled`) — already correct after recent fixes.
-
-## Verification steps after build
-
-1. Run the migration; confirm all 8 companies show `openclaw_mode='primary'`.
-2. Confirm secret `OPENCLAW_PULL_GRACE_SECONDS=120` is set.
-3. Send a test WhatsApp to any company; watch `inbound_events` — it should stay `pending` until OpenClaw claims it via MCP.
-4. Stop your local OpenClaw loop; send another test; wait ~2 min; confirm `openclaw-worker` takes over (`consumed_by='worker'`).
-5. Restart OpenClaw; confirm new events go back to `consumed_by='openclaw:oai_36e7c3ea'`.
+No schema changes; no frontend changes.
