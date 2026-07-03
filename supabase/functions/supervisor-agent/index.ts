@@ -377,14 +377,27 @@ Be strategic, data-driven, and focus on ${focusAreasText}.`;
       const recText = JSON.stringify(recommendation).toLowerCase();
       const urgency = (recommendation?.urgency || recommendation?.urgencyLevel || '').toString().toLowerCase();
       const conversionProb = Number(recommendation?.conversionProbability ?? recommendation?.conversion_probability ?? 0);
+      const buyingSignal = recommendation?.buyingSignal === true || recommendation?.buying_signal === true;
+      const qualifiedLead = recommendation?.qualifiedLead === true || recommendation?.qualified_lead === true;
+      const explicitEscalate = recommendation?.shouldEscalateToBoss === true || recommendation?.should_escalate_to_boss === true;
       const distrustHit = /distrust|don'?t trust|scam|legit|credibility|skeptic|suspicious/.test(recText);
       const churnHit = /churn|leaving|will leave|frustrat|angry|complaint/.test(recText);
       const buyingHit = /buying signal|ready to buy|purchase intent|wants to purchase|high intent/.test(recText);
 
+      // Business-qualifier / hot-lead keywords in the raw customer message
+      const msgLower = (customerMessage || '').toLowerCase();
+      const qualifierHit = /\b(i sell|we sell|we run|we supply|we install|my business|our business|our shop|our company|employees?|staff of|budget|monthly|per month|pain point|challenge|struggle|need help with|track(?:ing)?|manage|inventory|stock|records?)\b/.test(msgLower);
+      const bookingHit = /\b(book|schedule|arrange|set up|when can (?:we|you|i)|available|meet|demo|call|zoom|meeting)\b/.test(msgLower);
+      const buyIntentHit = /\b(buy|purchase|order|i'?ll take|i want|price|how much|pay|payment|momo|airtel|mtn|zamtel)\b/.test(msgLower);
+      const contactShared = /\b(?:\+?\d[\d\s-]{7,}\d)\b/.test(customerMessage || ''); // phone-like
+
       const shouldEscalate =
+        explicitEscalate ||
         urgency === 'high' || urgency === 'critical' ||
-        conversionProb >= 70 ||
-        distrustHit || churnHit || (buyingHit && conversionProb >= 50);
+        conversionProb >= 50 ||
+        buyingSignal || qualifiedLead ||
+        distrustHit || churnHit || buyingHit ||
+        qualifierHit || bookingHit || buyIntentHit || contactShared;
 
       if (shouldEscalate && conversationId) {
         // Dedupe: skip if any non-supervisor boss_conversations row mentions this conversationId in last 30 min
@@ -400,12 +413,20 @@ Be strategic, data-driven, and focus on ${focusAreasText}.`;
 
         if (!recentAlert) {
           const reasonTags = [
+            explicitEscalate ? 'ai_flagged' : null,
             urgency === 'high' || urgency === 'critical' ? 'high_urgency' : null,
-            conversionProb >= 70 ? `conv_${conversionProb}%` : null,
+            conversionProb >= 50 ? `conv_${conversionProb}%` : null,
+            buyingSignal ? 'buying_signal' : null,
+            qualifiedLead ? 'qualified_lead' : null,
             distrustHit ? 'distrust' : null,
             churnHit ? 'churn_risk' : null,
-            buyingHit ? 'buying_signal' : null,
+            buyingHit ? 'buying_text' : null,
+            qualifierHit ? 'business_qualifier' : null,
+            bookingHit ? 'demo_booking' : null,
+            buyIntentHit ? 'buy_intent' : null,
+            contactShared ? 'contact_shared' : null,
           ].filter(Boolean).join(', ');
+
 
           console.log('[Supervisor] Auto-escalating to boss:', reasonTags);
 
