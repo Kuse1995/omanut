@@ -276,10 +276,29 @@ ${supervisorConfig.outputFormat === 'structured_json' ? `Output a JSON object wi
   "recommendedResponse": "Suggested response content",
   "conversionTips": ["tip 1", "tip 2"],
   "avoidances": ["what NOT to say or do"],
+  "urgency": "low|medium|high|critical",
   "urgencyLevel": "low|medium|high|critical",
+  "conversionProbability": 0-100,
+  "buyingSignal": true|false,
+  "qualifiedLead": true|false,
+  "shouldEscalateToBoss": true|false,
+  "escalationReason": "One-line reason if shouldEscalateToBoss is true (e.g. 'demo request', 'buying intent', 'business qualifier shared')",
   "detectedPatterns": ["pattern1", "pattern2"],
   "researchUsed": ${researchInsights ? 'true' : 'false'}
-}` : supervisorConfig.outputFormat === 'narrative' ? 
+}
+
+REQUIRED FIELDS: urgency, conversionProbability, buyingSignal, qualifiedLead, shouldEscalateToBoss. Never omit these.
+
+ESCALATION RULES — set shouldEscalateToBoss=true when ANY of these apply:
+- Customer asks to book a call, demo, meeting, or provides a preferred date/time.
+- Customer shares business context: industry ("I sell X", "we run Y", "we supply Z"), team size, pain point, budget, or their phone/email.
+- Explicit buying intent ("I want to buy", "I'll take", "how do I pay", "MoMo/Airtel/MTN", "when can I get it").
+- Customer mentions a competitor by name.
+- Complaint, distrust, churn risk, or legal/fraud language.
+- 3+ back-and-forth messages with no resolution or clear next step.
+
+Set qualifiedLead=true whenever the customer volunteers business info or specific buying context, even without explicit intent.` : supervisorConfig.outputFormat === 'narrative' ? 
+
 'Provide a narrative response with clear sections for Analysis, Strategy, Recommendations, and Warnings.' :
 supervisorConfig.outputFormat === 'bullet_points' ?
 'Provide your analysis as concise bullet points organized by: Key Insights, Recommended Actions, Things to Avoid.' :
