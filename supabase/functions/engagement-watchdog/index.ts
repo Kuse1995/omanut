@@ -19,9 +19,10 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const MIN_USER_MESSAGES = 8;
-    const ACTIVE_WINDOW_HOURS = 2;
+    const MIN_USER_MESSAGES = 4;
+    const ACTIVE_WINDOW_HOURS = 6;
     const DEDUPE_WINDOW_HOURS = 24;
+
 
     const sinceActive = new Date(Date.now() - ACTIVE_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
     const sinceDedupe = new Date(Date.now() - DEDUPE_WINDOW_HOURS * 60 * 60 * 1000).toISOString();

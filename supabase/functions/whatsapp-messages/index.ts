@@ -2455,6 +2455,12 @@ You MUST call notify_boss the FIRST time any of these happen, with a clear summa
   13. **PRICE NEGOTIATION**: "can you do K…", "what's your best price", "any discount?", "is that final?". The owner decides on margins, not you.
   14. **TRUST / CREDIBILITY CONCERN**: "are you real?", "is this legit?", "is this a scam?", "how do I know I can trust you?", "I don't trust this". Set notification_type="trust_concern".
   15. **DEEP ENGAGEMENT WITHOUT RESOLUTION**: if the customer has sent 4+ messages and there is still no clear next step (no sale closed, no question fully answered, no reservation booked), call notify_boss with notification_type="long_engagement" so the owner can step in. Do this once per conversation.
+  16. **QUALIFIED LEAD — BUSINESS CONTEXT SHARED**: the customer volunteers ANY of these — their industry ("I sell LPG", "we run a spares shop", "we supply HVAC"), team/employee count, monthly volume, budget, or a specific pain point they need solved. Call notify_boss with notification_type="qualified_lead" IMMEDIATELY on that same turn, and include everything they shared in `collected_info`. This is a HOT SALES LEAD — the owner MUST see it.
+  17. **DEMO / CALL / MEETING BOOKING**: customer asks to book a call, demo, meeting, or "when can we talk", or gives you a specific time to reach them. Call notify_boss with notification_type="demo_booking" and include the requested time, their phone, and the topic in the summary.
+  18. **CONTACT DETAILS SHARED**: customer sends their phone number, email, or company name unprompted. Call notify_boss with notification_type="contact_shared".
+
+⚠️ Failing to escalate a qualified lead (#16) or a demo booking (#17) is a CRITICAL failure. These customers are ready to talk to a human. Do not "handle it yourself" — collect the info, answer their immediate question briefly, AND call notify_boss on the same turn.
+
 
 After calling notify_boss, only claim the owner has been notified if the tool returned success:true. If it returned success:false (boss_unreachable), say: "I've logged your request and the team will follow up shortly." — do NOT pretend the owner was reached.
 
@@ -5920,6 +5926,83 @@ Trust ONLY the information provided in this system prompt.
     } catch (autoMediaErr) {
       console.warn('[AUTO-SEND-MEDIA] Failed:', autoMediaErr);
     }
+
+    // ========== DETERMINISTIC HOT-LEAD ESCALATOR ==========
+    // Server-side guarantee that the boss is notified whenever the incoming customer message
+    // matches a hot-lead pattern, EVEN IF the model skipped calling notify_boss this turn.
+    // 30-minute dedupe piggybacks on the existing boss_conversations marker convention.
+    try {
+      const notifyBossWasCalled = allToolResults.some(tr => tr.fn === 'notify_boss')
+        || toolExecutionContext.some(c => /notify_boss (DELIVERED|deduped)|boss notified/i.test(c));
+
+      const msg = (userMessage || '').toString();
+      const msgLower = msg.toLowerCase();
+
+      // Hot-lead patterns (mirrors supervisor auto-escalation but stricter — high-precision):
+      const bookingHit    = /\b(book (?:a )?(?:call|demo|meeting)|schedule (?:a )?(?:call|demo|meeting)|set up (?:a )?(?:call|demo|meeting)|when can (?:we|you|i)|jump on a call|hop on a call|zoom (?:call|meeting)|demo)\b/i.test(msgLower);
+      const buyIntentHit  = /\b(i want to buy|i'?ll take|i'?ll go with|ready to buy|how do i pay|send me payment|payment details|checkout|place (?:the |an )?order|proceed to pay)\b/i.test(msgLower);
+      const qualifierHit  = /\b(i sell|we sell|we run|we supply|we install|our (?:shop|business|company|store)|my (?:shop|business|company|store)|(\d+)\s*employees?|staff of \d+|our budget|monthly (?:budget|volume)|our pain point|our challenge|track(?:ing)? (?:stock|sales|inventory|records)|manage (?:stock|inventory|records))\b/i.test(msgLower);
+      const phoneShared   = /(?:\+?\d[\d\s\-().]{8,}\d)/.test(msg) && !/\b(order|invoice|tracking|receipt|ref)\b/i.test(msgLower);
+      const emailShared   = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(msg);
+
+      const hotLead = bookingHit || buyIntentHit || qualifierHit || phoneShared || emailShared;
+
+      if (hotLead && !notifyBossWasCalled) {
+        const reasons = [
+          bookingHit   ? 'demo_booking' : null,
+          buyIntentHit ? 'buy_intent'   : null,
+          qualifierHit ? 'business_qualifier' : null,
+          phoneShared  ? 'phone_shared' : null,
+          emailShared  ? 'email_shared' : null,
+        ].filter(Boolean).join(', ');
+
+        // Dedupe: any boss ping for this customer in the last 30 minutes stops us re-alerting.
+        const { data: recentPing } = await supabase
+          .from('boss_conversations')
+          .select('id')
+          .eq('company_id', company.id)
+          .in('message_from', ['ai_agent_handoff', 'auto_hot_lead', 'system'])
+          .ilike('message_content', `%${customerPhone}%`)
+          .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+          .limit(1)
+          .maybeSingle();
+
+        if (!recentPing) {
+          console.log(`[AUTO-HOT-LEAD] Model skipped notify_boss for hot-lead message. Escalating server-side. Reasons: ${reasons}`);
+          try {
+            const summary = `[auto_hot_lead: ${reasons}] "${msg.slice(0, 240)}"`;
+            const sendResult = await sendBossHandoffNotification(
+              company,
+              customerPhone,
+              conversation.customer_name || 'Customer',
+              summary,
+              supabase,
+              'auto_hot_lead',
+              {
+                askingAbout: msg,
+                stage: 'auto_hot_lead',
+                triggerReason: reasons,
+                collectedInfo: {},
+              }
+            );
+            await supabase.from('boss_conversations').insert({
+              company_id: company.id,
+              message_from: 'auto_hot_lead',
+              message_content: `[auto_hot_lead:${reasons}] customer:${customerPhone} ${msg.slice(0, 240)}`,
+            });
+            console.log(`[AUTO-HOT-LEAD] Delivered to ${sendResult?.delivered || 0} recipient(s).`);
+          } catch (escErr) {
+            console.error('[AUTO-HOT-LEAD] Escalation failed:', escErr);
+          }
+        } else {
+          console.log(`[AUTO-HOT-LEAD] Skipping — boss already pinged within 30min for ${customerPhone}`);
+        }
+      }
+    } catch (hotLeadErr) {
+      console.warn('[AUTO-HOT-LEAD] Guard error (non-fatal):', hotLeadErr);
+    }
+
+
 
     // Ensure we have a response — synthesize from actual tool results instead of generic placeholder
     if (!assistantReply || assistantReply.trim() === '') {
