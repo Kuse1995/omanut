@@ -55,7 +55,7 @@ export interface GeminiChatOptions {
 
 /**
  * Call AI API for text/tool-calling models.
- * Routes GLM → Zhipu, DeepSeek → DeepSeek API, google/openai prefixed → Lovable Gateway, else Gemini direct.
+ * Routes GLM → Zhipu, DeepSeek → DeepSeek API, Kimi → Moonshot, Gemini → Google direct.
  */
 export async function geminiChat(options: GeminiChatOptions): Promise<Response> {
   const provider = getProvider(options.model);
@@ -210,7 +210,7 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
   // (DeepSeek "Insufficient Balance", Zhipu / OpenAI-style "insufficient_quota", etc.)
   const isBillingErrorBody = (text: string): boolean => {
     const t = text.toLowerCase();
-    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance/.test(t);
+    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance|余额不足|无可用资源包|请充值|账户余额/.test(t);
   };
 
   for (let i = 0; i < chain.length; i++) {
