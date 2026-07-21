@@ -188,13 +188,13 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
+    'kimi-k2-0711-preview',
+    'kimi-k2-turbo-preview',
     'glm-5.2',
-    'glm-5',
     'glm-4.6',
     FALLBACK_TEXT_MODEL,
     'gemini-2.5-flash',
     'deepseek-chat',
-    'kimi-k2-0711-preview',
   ];
 
   // Deduplicate
