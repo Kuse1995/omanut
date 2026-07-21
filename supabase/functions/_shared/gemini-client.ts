@@ -15,8 +15,8 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'glm-5.2' (Zhipu GLM-5.2, latest top text/tool-calling model). */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'glm-5.2';
+ *  Default: 'kimi-k2-0711-preview' (Moonshot Kimi K2, top tool-calling model). */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k2-0711-preview';
 export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'glm-4.6';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
@@ -188,13 +188,13 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
+    'kimi-k2-0711-preview',
+    'kimi-k2-turbo-preview',
     'glm-5.2',
-    'glm-5',
     'glm-4.6',
     FALLBACK_TEXT_MODEL,
     'gemini-2.5-flash',
     'deepseek-chat',
-    'kimi-k2-0711-preview',
   ];
 
   // Deduplicate
