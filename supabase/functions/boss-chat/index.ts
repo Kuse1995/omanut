@@ -1465,7 +1465,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
       console.log(`[BOSS-CHAT] Tool round ${round + 1}/${MAX_TOOL_ROUNDS}`);
 
-      const response = await geminiChat({
+      const response = await geminiChatWithFallback({
         model: primaryModel,
         messages: conversationMessages,
         temperature,
