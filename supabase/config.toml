@@ -144,3 +144,5 @@ project_id = "dzheddvoiauevcayifev"
   [functions.swarm-orchestrator]
     timeout = 60
     verify_jwt = false
+  [functions.check-rule-adherence]
+    verify_jwt = false

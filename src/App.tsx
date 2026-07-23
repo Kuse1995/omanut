@@ -41,6 +41,7 @@ import Setup from "./pages/Setup";
 import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
 import MediaStudio from "./pages/MediaStudio";
+import RuleViolations from "./pages/RuleViolations";
 import { CompanyProvider } from "./context/CompanyContext";
 
 const queryClient = new QueryClient();
@@ -85,6 +86,7 @@ const App = () => (
             <Route path="/reservations" element={<Reservations />} />
             <Route path="/billing" element={<Billing />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/rule-violations" element={<RuleViolations />} />
             <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />

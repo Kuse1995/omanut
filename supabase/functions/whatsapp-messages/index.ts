@@ -2576,16 +2576,27 @@ ${company.email ? `- Email: ${company.email}` : ''}`;
       instructions += `\n\n⚠️ CRITICAL: The PRODUCTS, STOCK and PRICING numbers in the BMS sync block above are a CACHED SNAPSHOT (refreshed every 15 min + on each sale). They CAN be stale. NEVER quote stock or prices from that snapshot to a customer. ALWAYS call check_stock or list_products first to get the live number from the BMS, then answer.`;
     }
 
-    // Add AI overrides if present
+    // Add AI overrides if present (sandwich pattern — repeated at end as HARD RULES)
+    let _hardRulesBlock = '';
     if (aiOverrides) {
       if (aiOverrides.system_instructions) {
-        instructions += `\n\n=== CUSTOM SYSTEM INSTRUCTIONS ===\n${aiOverrides.system_instructions}`;
+        instructions += `\n\n=== CUSTOM SYSTEM INSTRUCTIONS (HARD RULES — MUST FOLLOW) ===\n${aiOverrides.system_instructions}`;
+        _hardRulesBlock += `\n- CUSTOM INSTRUCTIONS: ${String(aiOverrides.system_instructions).slice(0, 800)}`;
       }
       if (aiOverrides.qa_style) {
-        instructions += `\n\n=== Q&A STYLE ===\n${aiOverrides.qa_style}`;
+        instructions += `\n\n=== Q&A STYLE (HARD RULE) ===\n${aiOverrides.qa_style}`;
+        _hardRulesBlock += `\n- TONE/STYLE: ${String(aiOverrides.qa_style).slice(0, 300)}`;
       }
       if (aiOverrides.banned_topics) {
-        instructions += `\n\n=== BANNED TOPICS ===\n${aiOverrides.banned_topics}`;
+        instructions += `\n\n=== BANNED TOPICS (NEVER DISCUSS) ===\n${aiOverrides.banned_topics}`;
+        _hardRulesBlock += `\n- NEVER DISCUSS: ${String(aiOverrides.banned_topics).slice(0, 300)}`;
+      }
+      if (_hardRulesBlock) {
+        // Repeat at the very end so the last thing the model reads before answering are the owner's rules.
+        // (Prompt-sandwich technique to reduce mid-context drift.)
+        instructions += `\n\n=== FINAL COMPLIANCE CHECK — RE-READ BEFORE ANSWERING ===
+Every reply you send is audited against the business owner's rules below. Violations are logged and shown to the owner.${_hardRulesBlock}
+Silently self-check your draft against these rules. If your reply would break any of them, rewrite it before sending.`;
       }
     }
 
