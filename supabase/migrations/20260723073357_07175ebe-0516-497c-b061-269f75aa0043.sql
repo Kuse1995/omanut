@@ -1,0 +1,1 @@
+UPDATE public.company_ai_overrides SET primary_model = 'kimi-k3' WHERE primary_model IN ('kimi-k2-thinking','kimi-k2-0711-preview','kimi-k2-turbo-preview','glm-5.2','glm-4.7','glm-4.6','MiniMax-M2','MiniMax-M3');
