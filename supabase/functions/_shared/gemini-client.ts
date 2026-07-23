@@ -200,10 +200,11 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
-  // GLM-5.2 is now GA and the primary brain. Kept env-gate for legacy toggle compatibility.
+  // Kimi K3 is the primary brain; cascade to K2 family then GLM/Gemini/DeepSeek on billing/quota failure.
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
+    'kimi-k3',
     'kimi-k2-thinking',
     'kimi-k2-turbo-preview',
     'kimi-k2-0711-preview',
