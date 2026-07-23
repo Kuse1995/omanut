@@ -51,6 +51,8 @@ export interface GeminiChatOptions {
   modalities?: string[];
   stream?: boolean;
   signal?: AbortSignal;
+  /** Kimi K3 only: 'low' | 'high' | 'max' (default 'max'). Use 'low' for latency-sensitive callers. */
+  reasoning_effort?: 'low' | 'high' | 'max';
 }
 
 /**
