@@ -15,9 +15,9 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'kimi-k2-thinking' (Moonshot Kimi K2.6). */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k2-thinking';
-export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'kimi-k2-0711-preview';
+ *  Default: 'kimi-k3' (Moonshot Kimi K3 flagship, 2.8T params, 1M context). */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k3';
+export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'kimi-k2-thinking';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
@@ -51,6 +51,8 @@ export interface GeminiChatOptions {
   modalities?: string[];
   stream?: boolean;
   signal?: AbortSignal;
+  /** Kimi K3 only: 'low' | 'high' | 'max' (default 'max'). Use 'low' for latency-sensitive callers. */
+  reasoning_effort?: 'low' | 'high' | 'max';
 }
 
 /**
@@ -135,13 +137,27 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       break;
   }
 
+  const isKimiK3 = provider === 'kimi' && /^kimi-k3(\b|-)/i.test(modelToSend);
+
   const body: any = {
     model: modelToSend,
     messages: options.messages,
   };
 
-  if (options.temperature !== undefined) body.temperature = options.temperature;
-  if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
+  if (isKimiK3) {
+    // K3 fixes temperature=1.0, top_p=0.95, n=1, presence_penalty=0, frequency_penalty=0.
+    // Sending these is rejected — omit them entirely.
+    // K3 uses max_completion_tokens (default 131072, max 1048576) instead of max_tokens.
+    if (options.max_tokens !== undefined) {
+      body.max_completion_tokens = Math.min(options.max_tokens, 1048576);
+    }
+    // Thinking is always on for K3; default 'max', callers can lower to 'low'/'high' for latency.
+    body.reasoning_effort = options.reasoning_effort || 'low';
+  } else {
+    if (options.temperature !== undefined) body.temperature = options.temperature;
+    if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
+  }
+
   if (options.tools) {
     // MiniMax rejects tool definitions whose `parameters` is missing or `{}` — coerce to a valid empty object schema.
     if (provider === 'minimax') {
@@ -184,10 +200,11 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
-  // GLM-5.2 is now GA and the primary brain. Kept env-gate for legacy toggle compatibility.
+  // Kimi K3 is the primary brain; cascade to K2 family then GLM/Gemini/DeepSeek on billing/quota failure.
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
+    'kimi-k3',
     'kimi-k2-thinking',
     'kimi-k2-turbo-preview',
     'kimi-k2-0711-preview',
