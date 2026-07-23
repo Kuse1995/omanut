@@ -137,13 +137,27 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       break;
   }
 
+  const isKimiK3 = provider === 'kimi' && /^kimi-k3(\b|-)/i.test(modelToSend);
+
   const body: any = {
     model: modelToSend,
     messages: options.messages,
   };
 
-  if (options.temperature !== undefined) body.temperature = options.temperature;
-  if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
+  if (isKimiK3) {
+    // K3 fixes temperature=1.0, top_p=0.95, n=1, presence_penalty=0, frequency_penalty=0.
+    // Sending these is rejected — omit them entirely.
+    // K3 uses max_completion_tokens (default 131072, max 1048576) instead of max_tokens.
+    if (options.max_tokens !== undefined) {
+      body.max_completion_tokens = Math.min(options.max_tokens, 1048576);
+    }
+    // Thinking is always on for K3; default 'max', callers can lower to 'low'/'high' for latency.
+    body.reasoning_effort = options.reasoning_effort || 'low';
+  } else {
+    if (options.temperature !== undefined) body.temperature = options.temperature;
+    if (options.max_tokens !== undefined) body.max_tokens = options.max_tokens;
+  }
+
   if (options.tools) {
     // MiniMax rejects tool definitions whose `parameters` is missing or `{}` — coerce to a valid empty object schema.
     if (provider === 'minimax') {
