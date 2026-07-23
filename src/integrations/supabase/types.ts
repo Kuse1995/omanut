@@ -3613,6 +3613,79 @@ export type Database = {
           },
         ]
       }
+      rule_violations: {
+        Row: {
+          assistant_content: string | null
+          auto_regenerated: boolean
+          channel: string
+          company_id: string
+          conversation_id: string | null
+          created_at: string
+          explanation: string | null
+          id: string
+          message_id: string | null
+          model: string | null
+          offending_excerpt: string | null
+          reviewed: boolean
+          rule_broken: string
+          severity: string
+        }
+        Insert: {
+          assistant_content?: string | null
+          auto_regenerated?: boolean
+          channel?: string
+          company_id: string
+          conversation_id?: string | null
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          message_id?: string | null
+          model?: string | null
+          offending_excerpt?: string | null
+          reviewed?: boolean
+          rule_broken: string
+          severity?: string
+        }
+        Update: {
+          assistant_content?: string | null
+          auto_regenerated?: boolean
+          channel?: string
+          company_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          explanation?: string | null
+          id?: string
+          message_id?: string | null
+          model?: string | null
+          offending_excerpt?: string | null
+          reviewed?: boolean
+          rule_broken?: string
+          severity?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rule_violations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rule_violations_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rule_violations_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduled_posts: {
         Row: {
           company_id: string
