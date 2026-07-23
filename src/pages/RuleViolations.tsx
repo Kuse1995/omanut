@@ -23,7 +23,8 @@ type Violation = {
 };
 
 export default function RuleViolations() {
-  const { activeCompanyId } = useCompany();
+  const { selectedCompany } = useCompany();
+  const activeCompanyId = selectedCompany?.id;
   const [items, setItems] = useState<Violation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
