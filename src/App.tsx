@@ -86,6 +86,7 @@ const App = () => (
             <Route path="/reservations" element={<Reservations />} />
             <Route path="/billing" element={<Billing />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/rule-violations" element={<RuleViolations />} />
             <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
