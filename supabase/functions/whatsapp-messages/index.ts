@@ -5956,15 +5956,32 @@ Trust ONLY the information provided in this system prompt.
       const phoneShared   = /(?:\+?\d[\d\s\-().]{8,}\d)/.test(msg) && !/\b(order|invoice|tracking|receipt|ref)\b/i.test(msgLower);
       const emailShared   = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(msg);
 
-      const hotLead = bookingHit || buyIntentHit || qualifierHit || phoneShared || emailShared;
+      // Softer buy-intent tier — fires only after the customer has been in the conversation
+      // for ≥2 user turns (past the initial greeting) to avoid spamming on every "how much".
+      const softBuyIntentHit = /\b(quote|quotation|price|pricing|how much|cost|rates?|interested in|need a|looking for|do you (?:have|offer|sell)|can i (?:get|order|buy))\b/i.test(msgLower);
+      let userTurnCount = 0;
+      if (softBuyIntentHit) {
+        try {
+          const { count } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('conversation_id', conversationId)
+            .eq('role', 'user');
+          userTurnCount = count || 0;
+        } catch { /* best-effort */ }
+      }
+      const qualifiedSoftBuy = softBuyIntentHit && userTurnCount >= 2;
+
+      const hotLead = bookingHit || buyIntentHit || qualifierHit || phoneShared || emailShared || qualifiedSoftBuy;
 
       if (hotLead && !notifyBossWasCalled) {
         const reasons = [
-          bookingHit   ? 'demo_booking' : null,
-          buyIntentHit ? 'buy_intent'   : null,
-          qualifierHit ? 'business_qualifier' : null,
-          phoneShared  ? 'phone_shared' : null,
-          emailShared  ? 'email_shared' : null,
+          bookingHit       ? 'demo_booking' : null,
+          buyIntentHit     ? 'buy_intent'   : null,
+          qualifiedSoftBuy ? 'soft_buy_intent' : null,
+          qualifierHit     ? 'business_qualifier' : null,
+          phoneShared      ? 'phone_shared' : null,
+          emailShared      ? 'email_shared' : null,
         ].filter(Boolean).join(', ');
 
         // Dedupe: any boss ping for this customer in the last 30 minutes stops us re-alerting.
