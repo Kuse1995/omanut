@@ -212,6 +212,8 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     'kimi-k2.5',
     'kimi-k3',
     FALLBACK_TEXT_MODEL,
+    'MiniMax-M2',
+    'MiniMax-M3',
     'glm-4.6',
     'gemini-2.5-flash',
     'deepseek-chat',
