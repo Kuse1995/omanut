@@ -5404,21 +5404,72 @@ Trust ONLY the information provided in this system prompt.
         console.warn('[RETRY-EXHAUSTED] All retries failed, using company fallback message');
         assistantReply = fallbackMessage;
 
-        // Notify boss about complete AI failure
+        // Classify error for a cleaner boss message
+        const errLower = (originalError || '').toLowerCase();
+        const errorClass =
+          /401|invalid.*auth|unauthorized|api.?key/.test(errLower) ? 'auth_invalid' :
+          /402|insufficient|quota|balance|billing|1113/.test(errLower) ? 'quota_exhausted' :
+          /429|rate.?limit|too many/.test(errLower) ? 'rate_limited' :
+          /5\d\d|overload|unavailable|timeout|timed out|abort/.test(errLower) ? 'provider_down' :
+          'unknown';
+
+        // Dedupe: skip if we already alerted for this error_class in the last 15 min
+        let shouldNotifyBoss = true;
         try {
-          const bossPhones = await getBossPhones(supabase, company.id);
-          for (const bp of bossPhones) {
+          const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+          const { data: recent } = await supabase
+            .from('boss_conversations')
+            .select('id')
+            .eq('company_id', company.id)
+            .ilike('message_content', `%[ai_failure:${errorClass}]%`)
+            .gte('created_at', since)
+            .limit(1)
+            .maybeSingle();
+          if (recent) shouldNotifyBoss = false;
+        } catch { /* best-effort */ }
+
+        // Upgrade the error log to critical severity
+        try {
+          await supabase.from('ai_error_logs').insert({
+            company_id: company.id,
+            conversation_id: conversationId,
+            error_type: 'ai_fallback_chain_exhausted',
+            severity: 'critical',
+            original_message: (fullUserMessage || userMessage || '').slice(0, 500),
+            ai_response: '',
+            analysis_details: { error_class: errorClass, original_error: originalError, notified_boss: shouldNotifyBoss },
+          });
+        } catch { /* best-effort */ }
+
+        if (shouldNotifyBoss) {
+          try {
+            const classLabels: Record<string, string> = {
+              auth_invalid: 'AI provider auth invalid — rotate the API key',
+              quota_exhausted: 'AI provider out of credit/quota — top up',
+              rate_limited: 'AI provider rate-limited — will recover shortly',
+              provider_down: 'All AI providers timing out or down — check status',
+              unknown: 'Unknown AI failure — see logs',
+            };
+            const bossMsg =
+              `⚠️ AI FAILURE [ai_failure:${errorClass}]\n` +
+              `Customer: ${conversation?.customer_name || customerPhone} (${customerPhone})\n` +
+              `Their last message: "${(userMessage || '').slice(0, 200)}"\n` +
+              `Why: ${classLabels[errorClass]}\n` +
+              `Detail: ${(originalError || '').slice(0, 180)}\n` +
+              `Please reply to the customer manually until this is fixed.`;
+
             await sendBossHandoffNotification(
               company,
               customerPhone,
               conversation?.customer_name || customerPhone,
-              `⚠️ AI completely failed for customer ${conversation?.customer_name || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
+              bossMsg,
               supabase,
               'ai_failure'
             );
-            break; // sendBossHandoffNotification fans out to all recipients itself
-          }
-        } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
+          } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
+        } else {
+          console.log(`[RETRY-EXHAUSTED] Boss already notified for error_class=${errorClass} in last 15min, skipping`);
+        }
       }
     }
 
