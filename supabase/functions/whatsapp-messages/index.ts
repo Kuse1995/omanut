@@ -1602,10 +1602,84 @@ async function _processAIResponseInner(
       // Fall through to regular processing
     }
   }
-  
+
+  // ========== REPEAT-SPAM MUTE ==========
+  // If the customer keeps sending near-identical messages after we've politely declined,
+  // stop burning tokens. Suppress the AI reply after 2 repeats; on the 3rd, ping the boss once.
+  try {
+    const normalize = (s: string) =>
+      (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    const currentNorm = normalize(userMessage);
+    if (currentNorm.length >= 3) {
+      const { data: recentMsgs } = await supabase
+        .from('messages')
+        .select('role, content, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      const priorUserSame = (recentMsgs || [])
+        .filter((m: any) => m.role === 'user' && normalize(m.content || '') === currentNorm)
+        .length - 1; // exclude the current message just inserted
+      const lastAssistant = (recentMsgs || []).find((m: any) => m.role === 'assistant');
+      const declineMarkers = /(sorry|can'?t help|cannot help|not able|unable to|won'?t be able|already (?:answered|explained|shared|told)|please stop|we don'?t|we do not|not available|out of stock|no longer)/i;
+      const assistantDeclined = lastAssistant ? declineMarkers.test(lastAssistant.content || '') : false;
+
+      if (priorUserSame >= 2 && assistantDeclined) {
+        console.log(`[SPAM-MUTE] Customer ${customerPhone} repeated the same message ${priorUserSame + 1}x after decline — muting AI reply`);
+
+        // On the 3rd+ repeat, ping the boss once (dedupe 60min per conversation)
+        if (priorUserSame >= 2) {
+          try {
+            const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+            const { data: recentSpamAlert } = await supabase
+              .from('boss_conversations')
+              .select('id')
+              .eq('company_id', companyId)
+              .ilike('message_content', `%[spam_repeat:${conversationId}]%`)
+              .gte('created_at', since)
+              .limit(1)
+              .maybeSingle();
+            if (!recentSpamAlert) {
+              const { data: convRow } = await supabase
+                .from('conversations')
+                .select('customer_name')
+                .eq('id', conversationId)
+                .maybeSingle();
+              const { data: companyRow } = await supabase
+                .from('companies')
+                .select('id, name, boss_phone, whatsapp_number, twilio_number')
+                .eq('id', companyId)
+                .maybeSingle();
+              if (companyRow) {
+                await sendBossHandoffNotification(
+                  companyRow,
+                  customerPhone,
+                  convRow?.customer_name || customerPhone,
+                  `🔕 REPEAT MESSAGES [spam_repeat:${conversationId}]\n` +
+                  `${convRow?.customer_name || customerPhone} (${customerPhone}) sent the same message ${priorUserSame + 1}× after we declined.\n` +
+                  `Message: "${(userMessage || '').slice(0, 200)}"\n` +
+                  `AI is now muted for this thread. Reply manually if needed.`,
+                  supabase,
+                  'spam_repeat'
+                );
+              }
+            }
+          } catch (spamNotifyErr) {
+            console.error('[SPAM-MUTE] Boss notify failed:', spamNotifyErr);
+          }
+        }
+        markResponseSent();
+        return;
+      }
+    }
+  } catch (spamErr) {
+    console.error('[SPAM-MUTE] Check failed (continuing):', spamErr);
+  }
+
   // Classify message complexity
   const messageComplexity = classifyMessageComplexity(userMessage);
   console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
+
   
   // Debug logging for reservation tracking
   const hasEmail = userMessage.includes('@');
@@ -5404,21 +5478,72 @@ Trust ONLY the information provided in this system prompt.
         console.warn('[RETRY-EXHAUSTED] All retries failed, using company fallback message');
         assistantReply = fallbackMessage;
 
-        // Notify boss about complete AI failure
+        // Classify error for a cleaner boss message
+        const errLower = (originalError || '').toLowerCase();
+        const errorClass =
+          /401|invalid.*auth|unauthorized|api.?key/.test(errLower) ? 'auth_invalid' :
+          /402|insufficient|quota|balance|billing|1113/.test(errLower) ? 'quota_exhausted' :
+          /429|rate.?limit|too many/.test(errLower) ? 'rate_limited' :
+          /5\d\d|overload|unavailable|timeout|timed out|abort/.test(errLower) ? 'provider_down' :
+          'unknown';
+
+        // Dedupe: skip if we already alerted for this error_class in the last 15 min
+        let shouldNotifyBoss = true;
         try {
-          const bossPhones = await getBossPhones(supabase, company.id);
-          for (const bp of bossPhones) {
+          const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+          const { data: recent } = await supabase
+            .from('boss_conversations')
+            .select('id')
+            .eq('company_id', company.id)
+            .ilike('message_content', `%[ai_failure:${errorClass}]%`)
+            .gte('created_at', since)
+            .limit(1)
+            .maybeSingle();
+          if (recent) shouldNotifyBoss = false;
+        } catch { /* best-effort */ }
+
+        // Upgrade the error log to critical severity
+        try {
+          await supabase.from('ai_error_logs').insert({
+            company_id: company.id,
+            conversation_id: conversationId,
+            error_type: 'ai_fallback_chain_exhausted',
+            severity: 'critical',
+            original_message: (fullUserMessage || userMessage || '').slice(0, 500),
+            ai_response: '',
+            analysis_details: { error_class: errorClass, original_error: originalError, notified_boss: shouldNotifyBoss },
+          });
+        } catch { /* best-effort */ }
+
+        if (shouldNotifyBoss) {
+          try {
+            const classLabels: Record<string, string> = {
+              auth_invalid: 'AI provider auth invalid — rotate the API key',
+              quota_exhausted: 'AI provider out of credit/quota — top up',
+              rate_limited: 'AI provider rate-limited — will recover shortly',
+              provider_down: 'All AI providers timing out or down — check status',
+              unknown: 'Unknown AI failure — see logs',
+            };
+            const bossMsg =
+              `⚠️ AI FAILURE [ai_failure:${errorClass}]\n` +
+              `Customer: ${conversation?.customer_name || customerPhone} (${customerPhone})\n` +
+              `Their last message: "${(userMessage || '').slice(0, 200)}"\n` +
+              `Why: ${classLabels[errorClass]}\n` +
+              `Detail: ${(originalError || '').slice(0, 180)}\n` +
+              `Please reply to the customer manually until this is fixed.`;
+
             await sendBossHandoffNotification(
               company,
               customerPhone,
               conversation?.customer_name || customerPhone,
-              `⚠️ AI completely failed for customer ${conversation?.customer_name || customerPhone}. All retries exhausted. Error: ${originalError.slice(0, 200)}. Please check manually.`,
+              bossMsg,
               supabase,
               'ai_failure'
             );
-            break; // sendBossHandoffNotification fans out to all recipients itself
-          }
-        } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
+          } catch (notifyErr) { console.error('[BOSS-NOTIFY] Failed:', notifyErr); }
+        } else {
+          console.log(`[RETRY-EXHAUSTED] Boss already notified for error_class=${errorClass} in last 15min, skipping`);
+        }
       }
     }
 
@@ -5956,15 +6081,32 @@ Trust ONLY the information provided in this system prompt.
       const phoneShared   = /(?:\+?\d[\d\s\-().]{8,}\d)/.test(msg) && !/\b(order|invoice|tracking|receipt|ref)\b/i.test(msgLower);
       const emailShared   = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(msg);
 
-      const hotLead = bookingHit || buyIntentHit || qualifierHit || phoneShared || emailShared;
+      // Softer buy-intent tier — fires only after the customer has been in the conversation
+      // for ≥2 user turns (past the initial greeting) to avoid spamming on every "how much".
+      const softBuyIntentHit = /\b(quote|quotation|price|pricing|how much|cost|rates?|interested in|need a|looking for|do you (?:have|offer|sell)|can i (?:get|order|buy))\b/i.test(msgLower);
+      let userTurnCount = 0;
+      if (softBuyIntentHit) {
+        try {
+          const { count } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('conversation_id', conversationId)
+            .eq('role', 'user');
+          userTurnCount = count || 0;
+        } catch { /* best-effort */ }
+      }
+      const qualifiedSoftBuy = softBuyIntentHit && userTurnCount >= 2;
+
+      const hotLead = bookingHit || buyIntentHit || qualifierHit || phoneShared || emailShared || qualifiedSoftBuy;
 
       if (hotLead && !notifyBossWasCalled) {
         const reasons = [
-          bookingHit   ? 'demo_booking' : null,
-          buyIntentHit ? 'buy_intent'   : null,
-          qualifierHit ? 'business_qualifier' : null,
-          phoneShared  ? 'phone_shared' : null,
-          emailShared  ? 'email_shared' : null,
+          bookingHit       ? 'demo_booking' : null,
+          buyIntentHit     ? 'buy_intent'   : null,
+          qualifiedSoftBuy ? 'soft_buy_intent' : null,
+          qualifierHit     ? 'business_qualifier' : null,
+          phoneShared      ? 'phone_shared' : null,
+          emailShared      ? 'email_shared' : null,
         ].filter(Boolean).join(', ');
 
         // Dedupe: any boss ping for this customer in the last 30 minutes stops us re-alerting.
