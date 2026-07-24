@@ -1,31 +1,49 @@
-## Goal
-Switch the primary text/tool-calling brain from `kimi-k2-thinking` to `kimi-k3` (Moonshot Kimi K3 flagship) across every edge function, and adapt the shared client to K3's stricter request contract so it doesn't 400 on the fixed params K3 rejects.
+# Messaging & Handoff Hardening
 
-## Changes
+Three targeted fixes based on the 24h analysis. All changes are backend/edge-function only — no UI work.
 
-### 1. `supabase/functions/_shared/gemini-client.ts`
-- Set `PRIMARY_TEXT_MODEL` default to `kimi-k3` (still overridable via env for instant rollback).
-- Set `FALLBACK_TEXT_MODEL` default to `kimi-k2-thinking`.
-- For the `kimi` provider branch, when `modelToSend === 'kimi-k3'` build the request body per K3 contract:
-  - Strip `temperature`, `top_p`, `presence_penalty`, `frequency_penalty`, `n` (K3 fixes these; sending them errors).
-  - Convert `max_tokens` → `max_completion_tokens` (default 131072, cap at 1,048,576).
-  - Pass through `reasoning_effort` when caller supplies it; default `low` for latency-sensitive callers (boss-chat / whatsapp-messages) via a new optional `reasoningEffort` option on `GeminiChatOptions`.
-  - Tool calling: keep as-is (K3 supports OpenAI-compatible `tools` + `tool_choice`).
-- Reorder `fallbackChain` in `geminiChatWithFallback`: `kimi-k3` → `kimi-k2-thinking` → `kimi-k2-turbo-preview` → `kimi-k2-0711-preview` → `glm-4.6` → `gemini-2.5-flash` → `deepseek-chat`.
-- Keep Moonshot base URL `api.moonshot.cn` (already working with current `KIMI_API_KEY`); K3 is served on the same endpoint per Moonshot's OpenAI-compatible surface.
+## 1. Tighten hot-lead escalation triggers
 
-### 2. Database — swap saved company overrides
-Update `public.company_ai_overrides` rows where `primary_model IN ('kimi-k2-thinking','kimi-k2-0711-preview','glm-5.2','glm-4.7','MiniMax-M2')` to `primary_model = 'kimi-k3'` so per-company settings match the new default.
+**Problem**: Taxi-app inquiry and similar high-intent leads didn't ping the boss because supervisor thresholds for `conversion_probability` / `urgency` were too high, and the deterministic escalator in `whatsapp-messages` requires signals that rarely fire together.
 
-### 3. Verification
-- `curl_edge_functions` → `boss-chat` for OmanutBMS to confirm K3 responds.
-- `curl_edge_functions` → `whatsapp-messages` with a synthetic inbound to confirm tool-calling (notify_boss / handoff) still fires under K3.
-- Check `edge_function_logs` for any `400` from Moonshot on rejected params; if seen, tighten the K3 body-shaping branch.
+**Change** (`supabase/functions/whatsapp-messages/index.ts` + `supabase/functions/supervisor-agent/index.ts`):
+- Lower deterministic hot-lead escalator to fire when **any** of:
+  - `conversion_probability >= 0.5` (was 0.7)
+  - `urgency in ('high','critical')`
+  - user message contains buying-intent keywords (`quote`, `price`, `how much`, `book`, `order`, `interested in`, `need a`, `want to buy`) AND conversation has ≥2 user turns
+- Supervisor: emit `hot_lead=true` at `conversion_probability >= 0.5`.
+- Keep 30-min dedupe via `boss_conversations` `[conv_id]` marker (existing convention).
 
-## No changes to
-- `KIMI_API_KEY` secret (already set).
-- OpenClaw pull loop, MCP server, image-gen paths.
-- Handoff / supervisor logic (already fixed in prior turn).
+## 2. Surface real AI failures instead of generic fallback
 
-## Rollback
-Set env `PRIMARY_TEXT_MODEL=kimi-k2-thinking` on the project; no redeploy needed since the client reads it at cold start.
+**Problem**: When the full fallback chain fails, the customer sees "I couldn't complete that just now" and the boss sees nothing actionable — the failure is invisible until you inspect logs.
+
+**Change** (`supabase/functions/whatsapp-messages/index.ts` + `_shared/fallback.ts` if present):
+- On terminal AI failure (all models in `geminiChatWithFallback` exhausted), in addition to the customer fallback text:
+  - Fire `send-boss-notification` with a compact alert: customer phone, last user message, error class (auth / quota / overload / unknown), conversation link.
+  - Dedupe to 1 alert per (company, error_class) per 15 min so a provider outage doesn't spam.
+- Log the failure to `ai_error_logs` with `severity='critical'` so `/rule-violations` (or an errors view) can surface it.
+
+## 3. Mute repeat-spam after first decline
+
+**Problem**: Once a customer has been declined / told "not available" / handed off, subsequent identical or near-identical inbound messages still cost a full AI round-trip and can re-trigger fallbacks.
+
+**Change** (`supabase/functions/whatsapp-messages/index.ts`):
+- Before running the AI, check the last 5 assistant turns for a "decline marker" (handoff sent, "we don't offer", explicit "no" answer). If found AND the new user message is:
+  - identical to a prior user message in this conversation, OR
+  - within Levenshtein similarity ≥ 0.9 of a prior declined message
+  → skip AI, do NOT reply, log to `ai_error_logs` as `suppressed_repeat` (info), and only ping boss if it's the 3rd repeat.
+- Reset suppression when the user sends a materially different message.
+
+## Technical details
+
+- Buying-intent keyword list lives in a small const array at top of `whatsapp-messages/index.ts`.
+- Error-class detection: parse error message for `401|invalid`, `402|quota|insufficient`, `429|overload|rate`, else `unknown`.
+- Dedupe queries use existing `boss_conversations.message_content ilike '%<marker>%'` pattern already in `meta-lead-alert` and `engagement-watchdog`.
+- No schema changes required — `ai_error_logs` already has `severity` and `error_type` columns; `boss_conversations` handles dedupe markers.
+
+## Out of scope
+
+- No UI changes.
+- No changes to model selection / fallback chain itself (Kimi K2.6 primary stays).
+- No changes to supervisor-agent's core scoring model — only its emission threshold.
