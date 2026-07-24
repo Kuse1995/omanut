@@ -15,9 +15,10 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'kimi-k3' (Moonshot Kimi K3 flagship, 2.8T params, 1M context). */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k3';
-export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'kimi-k2-thinking';
+ *  Default: 'kimi-k2.6' (Moonshot Kimi K2.6, 256K context — the flagship generally-available Moonshot model on this account.
+ *  Note: kimi-k3 exists on Moonshot but is currently staff-only for our API key and returns engine_overloaded; do not use as primary.) */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k2.6';
+export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'kimi-k2.5';
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
@@ -200,14 +201,16 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
-  // Kimi K3 is the primary brain; cascade to K2 family then GLM/Gemini/DeepSeek on billing/quota failure.
+  // Kimi K2.x family is the primary brain; cascade to GLM/Gemini/DeepSeek on billing/quota failure.
+  // K3 is left in the chain for accounts that have staff access; on accounts without access it will 404/overload
+  // and the chain moves on. Deprecated names (kimi-k2-thinking / kimi-k2-0711-preview / kimi-k2-turbo-preview)
+  // are removed — Moonshot no longer serves them.
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
+    'kimi-k2.6',
+    'kimi-k2.5',
     'kimi-k3',
-    'kimi-k2-thinking',
-    'kimi-k2-turbo-preview',
-    'kimi-k2-0711-preview',
     FALLBACK_TEXT_MODEL,
     'glm-4.6',
     'gemini-2.5-flash',
