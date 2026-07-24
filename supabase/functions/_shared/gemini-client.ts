@@ -212,6 +212,8 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     'kimi-k2.5',
     'kimi-k3',
     FALLBACK_TEXT_MODEL,
+    'MiniMax-M2',
+    'MiniMax-M3',
     'glm-4.6',
     'gemini-2.5-flash',
     'deepseek-chat',
@@ -230,7 +232,16 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
   // (DeepSeek "Insufficient Balance", Zhipu / OpenAI-style "insufficient_quota", etc.)
   const isBillingErrorBody = (text: string): boolean => {
     const t = text.toLowerCase();
-    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance|余额不足|无可用资源包|请充值|账户余额/.test(t);
+    return /insufficient[_ ]?balance|insufficient[_ ]?quota|payment[_ ]?required|out of credits|no credits|purchase credits|token plan usage limit|usage limit reached|quota[_ ]exceeded|exceeded[_ ]your[_ ]current[_ ]quota|account[_ ]suspended|invalid[_ ]request[_ ]error.*balance|余额不足|无可用资源包|请充值|账户余额/.test(t);
+  };
+
+  const hasUsableChoices = (text: string): boolean => {
+    try {
+      const parsed = JSON.parse(text);
+      return Array.isArray(parsed?.choices) && Boolean(parsed.choices[0]?.message);
+    } catch (_error) {
+      return /"choices"\s*:\s*\[\s*\{/.test(text) && /"message"\s*:/.test(text);
+    }
   };
 
   for (let i = 0; i < chain.length; i++) {
@@ -242,13 +253,11 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
         // Peek body to catch HTTP-200 billing errors before returning to caller
         const cloned = response.clone();
         const peek = await cloned.text();
-        if (isBillingErrorBody(peek) || /"choices"\s*:\s*\[\s*\]/.test(peek) || !/"choices"/.test(peek)) {
+        if (isBillingErrorBody(peek) || !hasUsableChoices(peek)) {
           if (isBillingErrorBody(peek)) {
             console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body is a billing/quota error: ${peek.substring(0, 200)}`);
-          } else if (!/"choices"/.test(peek)) {
-            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no choices: ${peek.substring(0, 200)}`);
           } else {
-            console.warn(`[AI-FALLBACK] Model ${model} returned 200 with empty choices array`);
+            console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no usable assistant message: ${peek.substring(0, 200)}`);
           }
           continue;
         }
