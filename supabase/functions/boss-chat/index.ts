@@ -1384,7 +1384,152 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const MAX_SOCIAL_POSTS_PER_SESSION = 1;
     const normalizedBody = Body.toLowerCase();
     const isPublishIntentMessage = /\b(post it|publish it|go live|put it live|share it|post this|publish this)\b/.test(normalizedBody);
+    const isHotLeadIntent = /\b(hot\s*leads?|leads?|new\s*inquiries|interested\s*clients?|handoffs?|escalations?|opportunities)\b/.test(normalizedBody);
+    const isAlertSnapshotIntent = /\b(alerts?|handoffs?|escalations?|action\s*required|what\s*happened|summary|brief|catch\s*me\s*up)\b/.test(normalizedBody);
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    const buildHotLeadsSnapshot = async (hoursBack = 24): Promise<string> => {
+      const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+      const leadKeywords = /price|quote|cost|how much|buy|book|booking|call|demo|interested|order|available|payment|deliver|delivery|need|want|send|reserve|reservation/i;
+
+      const [{ data: conversations, error: convError }, { data: bossAlerts, error: alertError }] = await Promise.all([
+        supabase
+          .from('conversations')
+          .select('customer_name, phone, platform, status, started_at, last_message_at, last_message_preview, quality_flag, human_takeover, is_paused_for_human, paused_reason')
+          .eq('company_id', company.id)
+          .gte('last_message_at', cutoff)
+          .order('last_message_at', { ascending: false })
+          .limit(25),
+        supabase
+          .from('boss_conversations')
+          .select('message_content, created_at')
+          .eq('company_id', company.id)
+          .eq('message_from', 'ai')
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(25),
+      ]);
+
+      if (convError) {
+        console.error('[BOSS-DIRECT] Hot lead conversation lookup failed:', convError);
+        return `I received you as management for ${company.name}, but I couldn't pull the latest leads right now.`;
+      }
+
+      if (alertError) {
+        console.error('[BOSS-DIRECT] Boss alert lookup failed:', alertError);
+      }
+
+      const hotLeads = (conversations || [])
+        .filter((lead: any) => {
+          const haystack = `${lead.last_message_preview || ''} ${lead.quality_flag || ''} ${lead.status || ''} ${lead.paused_reason || ''}`;
+          return Boolean(lead.human_takeover || lead.is_paused_for_human || leadKeywords.test(haystack));
+        })
+        .slice(0, 8);
+
+      const recentAlerts = (bossAlerts || [])
+        .filter((alert: any) => /action required|hot|handoff|interested client|lead|opportunity|customer issue|complaint|system_recalibration/i.test(alert.message_content || ''))
+        .slice(0, 5);
+
+      const lines: string[] = [];
+      lines.push(`Here’s the live lead snapshot for ${company.name} from the last ${hoursBack}h:`);
+
+      if (hotLeads.length === 0) {
+        lines.push('\nNo hot leads detected in recent conversations.');
+      } else {
+        lines.push(`\n🔥 Hot leads (${hotLeads.length}):`);
+        hotLeads.forEach((lead: any, index: number) => {
+          const customer = lead.customer_name || 'Unknown customer';
+          const phone = lead.phone || 'No phone';
+          const platform = lead.platform || 'whatsapp';
+          const preview = (lead.last_message_preview || 'No preview').slice(0, 120);
+          const statusFlags = [
+            lead.human_takeover ? 'handoff' : '',
+            lead.is_paused_for_human ? 'human paused' : '',
+            lead.quality_flag || '',
+          ].filter(Boolean).join(', ');
+          lines.push(`${index + 1}. ${customer} (${phone}) via ${platform}${statusFlags ? ` — ${statusFlags}` : ''}\n   “${preview}”`);
+        });
+      }
+
+      if (recentAlerts.length > 0) {
+        lines.push('\nRecent boss alerts:');
+        recentAlerts.forEach((alert: any, index: number) => {
+          const compact = String(alert.message_content || '').replace(/\s+/g, ' ').slice(0, 180);
+          lines.push(`${index + 1}. ${compact}`);
+        });
+      }
+
+      return lines.join('\n');
+    };
+
+    const buildAlertSnapshot = async (): Promise<string> => {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: alerts, error } = await supabase
+        .from('boss_conversations')
+        .select('message_content, created_at')
+        .eq('company_id', company.id)
+        .eq('message_from', 'ai')
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) {
+        console.error('[BOSS-DIRECT] Alert snapshot lookup failed:', error);
+        return `I received you as management for ${company.name}, but I couldn't pull the latest alerts right now.`;
+      }
+
+      if (!alerts?.length) {
+        return `No boss alerts or handoffs were logged for ${company.name} in the last 24h.`;
+      }
+
+      return [
+        `Recent alerts for ${company.name}:`,
+        ...alerts.map((alert: any, index: number) => `${index + 1}. ${String(alert.message_content || '').replace(/\s+/g, ' ').slice(0, 220)}`),
+      ].join('\n');
+    };
+
+    const buildProviderFailureFallback = async (error: unknown): Promise<string> => {
+      if (isHotLeadIntent) return buildHotLeadsSnapshot(24);
+      if (isAlertSnapshotIntent) return buildAlertSnapshot();
+
+      const errorText = error instanceof Error ? error.message : String(error);
+      console.error('[BOSS-DIRECT] Provider fallback activated:', errorText);
+      return `I received you as management for ${company.name}, but the AI provider chain is unavailable right now.\n\nI can still pull direct operational snapshots — try “any hot leads?” or “recent handoffs” while the model key/credits are being fixed.`;
+    };
+
+    if (isHotLeadIntent) {
+      const directResponse = await buildHotLeadsSnapshot(24);
+      await supabase
+        .from('boss_conversations')
+        .insert({
+          company_id: company.id,
+          message_from: 'management',
+          message_content: Body,
+          response: directResponse,
+          tool_context: { direct_route: 'hot_leads' },
+        });
+
+      return new Response(JSON.stringify({ response: directResponse }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (isAlertSnapshotIntent) {
+      const directResponse = await buildAlertSnapshot();
+      await supabase
+        .from('boss_conversations')
+        .insert({
+          company_id: company.id,
+          message_from: 'management',
+          message_content: Body,
+          response: directResponse,
+          tool_context: { direct_route: 'alerts' },
+        });
+
+      return new Response(JSON.stringify({ response: directResponse }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const getLatestRecentImage = async (waitMs = 0): Promise<string | null> => {
       const attempts = Math.max(1, Math.floor(waitMs / 3000) + 1);
@@ -1465,13 +1610,20 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       }
       console.log(`[BOSS-CHAT] Tool round ${round + 1}/${MAX_TOOL_ROUNDS}`);
 
-      const response = await geminiChatWithFallback({
-        model: primaryModel,
-        messages: conversationMessages,
-        temperature,
-        max_tokens: maxTokens,
-        tools: managementTools
-      });
+      let response: Response;
+      try {
+        response = await geminiChatWithFallback({
+          model: primaryModel,
+          messages: conversationMessages,
+          temperature,
+          max_tokens: maxTokens,
+          tools: managementTools
+        });
+      } catch (aiError) {
+        aiResponse = await buildProviderFailureFallback(aiError);
+        console.error('[BOSS-CHAT] AI provider chain failed; returning deterministic fallback:', aiError);
+        break;
+      }
 
       const data = await response.json();
 
@@ -2803,8 +2955,8 @@ CRITICAL: Show the EXACT product described in the request. Do NOT substitute wit
   } catch (error) {
     console.error("Error in management-chat:", error);
     return new Response(
-      '<?xml version="1.0" encoding="UTF-8"?><Response><Message>Error processing your request.</Message></Response>',
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'text/xml' } }
+      JSON.stringify({ response: 'I received your management message, but I could not complete that request right now. Try “any hot leads?” or “recent handoffs” for a direct snapshot while the AI provider is recovering.' }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
