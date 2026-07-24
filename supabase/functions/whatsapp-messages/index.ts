@@ -1602,10 +1602,84 @@ async function _processAIResponseInner(
       // Fall through to regular processing
     }
   }
-  
+
+  // ========== REPEAT-SPAM MUTE ==========
+  // If the customer keeps sending near-identical messages after we've politely declined,
+  // stop burning tokens. Suppress the AI reply after 2 repeats; on the 3rd, ping the boss once.
+  try {
+    const normalize = (s: string) =>
+      (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+    const currentNorm = normalize(userMessage);
+    if (currentNorm.length >= 3) {
+      const { data: recentMsgs } = await supabase
+        .from('messages')
+        .select('role, content, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      const priorUserSame = (recentMsgs || [])
+        .filter((m: any) => m.role === 'user' && normalize(m.content || '') === currentNorm)
+        .length - 1; // exclude the current message just inserted
+      const lastAssistant = (recentMsgs || []).find((m: any) => m.role === 'assistant');
+      const declineMarkers = /(sorry|can'?t help|cannot help|not able|unable to|won'?t be able|already (?:answered|explained|shared|told)|please stop|we don'?t|we do not|not available|out of stock|no longer)/i;
+      const assistantDeclined = lastAssistant ? declineMarkers.test(lastAssistant.content || '') : false;
+
+      if (priorUserSame >= 2 && assistantDeclined) {
+        console.log(`[SPAM-MUTE] Customer ${customerPhone} repeated the same message ${priorUserSame + 1}x after decline — muting AI reply`);
+
+        // On the 3rd+ repeat, ping the boss once (dedupe 60min per conversation)
+        if (priorUserSame >= 2) {
+          try {
+            const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+            const { data: recentSpamAlert } = await supabase
+              .from('boss_conversations')
+              .select('id')
+              .eq('company_id', companyId)
+              .ilike('message_content', `%[spam_repeat:${conversationId}]%`)
+              .gte('created_at', since)
+              .limit(1)
+              .maybeSingle();
+            if (!recentSpamAlert) {
+              const { data: convRow } = await supabase
+                .from('conversations')
+                .select('customer_name')
+                .eq('id', conversationId)
+                .maybeSingle();
+              const { data: companyRow } = await supabase
+                .from('companies')
+                .select('id, name, boss_phone, whatsapp_number, twilio_number')
+                .eq('id', companyId)
+                .maybeSingle();
+              if (companyRow) {
+                await sendBossHandoffNotification(
+                  companyRow,
+                  customerPhone,
+                  convRow?.customer_name || customerPhone,
+                  `🔕 REPEAT MESSAGES [spam_repeat:${conversationId}]\n` +
+                  `${convRow?.customer_name || customerPhone} (${customerPhone}) sent the same message ${priorUserSame + 1}× after we declined.\n` +
+                  `Message: "${(userMessage || '').slice(0, 200)}"\n` +
+                  `AI is now muted for this thread. Reply manually if needed.`,
+                  supabase,
+                  'spam_repeat'
+                );
+              }
+            }
+          } catch (spamNotifyErr) {
+            console.error('[SPAM-MUTE] Boss notify failed:', spamNotifyErr);
+          }
+        }
+        markResponseSent();
+        return;
+      }
+    }
+  } catch (spamErr) {
+    console.error('[SPAM-MUTE] Check failed (continuing):', spamErr);
+  }
+
   // Classify message complexity
   const messageComplexity = classifyMessageComplexity(userMessage);
   console.log(`[BACKGROUND] Message complexity: ${messageComplexity}`);
+
   
   // Debug logging for reservation tracking
   const hasEmail = userMessage.includes('@');
