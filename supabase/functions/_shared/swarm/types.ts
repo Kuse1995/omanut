@@ -1,8 +1,11 @@
-// Shared types for the Omanut Social Swarm orchestrator.
+// Omanut Agent Swarm v2 -> shared types.
+// Roles: Router -> Librarian -> Strategist -> Writer -> Critic -> Closer -> Safety Gate (overseen by Overseer).
 
 export type SwarmChannel = 'whatsapp' | 'social_post' | 'meta_dm' | 'meta_comment';
 export type SwarmProfile = 'full' | 'lite' | 'safety_only';
-export type SwarmMode = 'sync' | 'post_hoc_refine';
+export type SwarmMode = 'sync' | 'post_hoc_refine' | 'primary';
+export type SwarmAction = 'answer' | 'qualify' | 'close' | 'redirect' | 'escalate' | 'decline';
+export type LeadTier = 'hot' | 'warm' | 'cold' | 'unknown';
 
 export interface SwarmInput {
   company_id: string;
@@ -13,7 +16,7 @@ export interface SwarmInput {
   history?: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   /** Optional override; defaults are picked per channel. */
   profile?: SwarmProfile;
-  /** sync (default) returns final_text. post_hoc_refine compares against already_sent_text. */
+  /** sync (default) returns final_text. post_hoc_refine compares against already_sent_text. primary returns the swarm-owned reply. */
   mode?: SwarmMode;
   already_sent_text?: string;
   /** Free-form extra context (BMS snapshots, KB highlights, brand notes, etc.) */
@@ -27,6 +30,16 @@ export interface IntentObject {
   entities: Record<string, string | number | boolean>;
   cleaned_text: string;
   asks: string[];
+  lead_tier: LeadTier;
+  agent_mode: 'sales' | 'support' | 'auto';
+}
+
+export interface Decision {
+  action: SwarmAction;
+  reason: string;
+  next_step: string;
+  needs_boss: boolean;
+  lead_tier: LeadTier;
 }
 
 export interface RuleSet {
@@ -37,6 +50,11 @@ export interface RuleSet {
   language: string;
   bms_cache_hit?: boolean;
   bms_miss?: boolean;
+  escalation_triggers: string[];
+  payment_methods: string[];
+  authorized_phone?: string | null;
+  pay_url?: string | null;
+  plans: string[];
 }
 
 export interface CritiqueReport {
@@ -54,6 +72,7 @@ export interface SwarmRunResult {
   escalated: boolean;
   bypass_reason?: string | null;
   profile?: SwarmProfile;
+  decision?: Decision | null;
   bms_cache_hit?: boolean;
   stage_timings: Record<string, number>;
   critique_history: CritiqueReport[];
@@ -66,8 +85,8 @@ export const MAX_RETRIES = 3;
 
 /** Per-channel hard ceilings for total swarm wall-clock time. */
 export const SWARM_BUDGET_MS: Record<SwarmChannel, number> = {
-  whatsapp: 12000,
-  meta_dm: 12000,
+  whatsapp: 15000,
+  meta_dm: 15000,
   meta_comment: 20000,
   social_post: 25000,
 };
@@ -79,3 +98,8 @@ export const DEFAULT_PROFILE: Record<SwarmChannel, SwarmProfile> = {
   meta_comment: 'full',
   social_post: 'full',
 };
+
+/** Intents that force full-profile critique and boss awareness. */
+export const HIGH_RISK_INTENTS = new Set([
+  'complaint', 'refund', 'legal', 'escalation', 'chargeback', 'cancel', 'lawsuit', 'urgent',
+]);

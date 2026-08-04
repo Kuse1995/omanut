@@ -46,7 +46,11 @@ serve(async (req) => {
     });
   }
 
-  const mode: SwarmMode = body.mode === 'post_hoc_refine' ? 'post_hoc_refine' : 'sync';
+  // primary mode: the swarm owns the reply and the caller sends final_text as-is.
+  const mode: SwarmMode =
+    body.mode === 'primary' ? 'primary'
+    : body.mode === 'post_hoc_refine' ? 'post_hoc_refine'
+    : 'sync';
   const channel = body.channel || 'whatsapp';
   const input: SwarmInput = {
     company_id: String(body.company_id || ''),
