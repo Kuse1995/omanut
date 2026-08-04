@@ -15,10 +15,11 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'kimi-k2.6' (Moonshot Kimi K2.6, 256K context — the flagship generally-available Moonshot model on this account.
- *  Note: kimi-k3 exists on Moonshot but is currently staff-only for our API key and returns engine_overloaded; do not use as primary.) */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'kimi-k2.6';
-export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'kimi-k2.5';
+ *  Default: 'deepseek-v4-flash' (DeepSeek V4 Flash, direct DeepSeek API — fast reasoning + tool calling).
+ *  Rollback levers: set PRIMARY_TEXT_MODEL=kimi-k2.6 (Moonshot) or glm-4.7 (Zhipu). */
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'deepseek-v4-flash';
+export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'deepseek-v4-pro';
+
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
 function normalizeModel(model: string): string {
