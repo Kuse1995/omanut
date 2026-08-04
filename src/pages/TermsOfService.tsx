@@ -99,7 +99,7 @@ const TermsOfService = () => {
           <section>
             <h2 className="text-2xl font-semibold text-foreground">8. Intellectual Property</h2>
             <ul className="list-disc pl-6 space-y-1">
-              <li>The Service, including its design, features, and technology, is owned by Omanut Technologies.</li>
+              <li>The Service, including its design, features, and technology, is owned by Omanut Technologies Limited.</li>
               <li>You retain ownership of your business content and customer data.</li>
               <li>You grant us a limited license to process your content as necessary to provide the Service.</li>
               <li>AI-generated content created through our platform may be used by you for your business purposes.</li>
@@ -152,7 +152,7 @@ const TermsOfService = () => {
             <p>For questions about these Terms, contact us at:</p>
             <ul className="list-none space-y-1">
               <li><strong>Email:</strong> legal@omanut.com</li>
-              <li><strong>Company:</strong> Omanut Technologies</li>
+              <li><strong>Company:</strong> Omanut Technologies Limited</li>
             </ul>
           </section>
         </div>

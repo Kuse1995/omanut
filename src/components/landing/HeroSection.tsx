@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles, Clock, MessageSquare, CheckCircle2 } from "lucide-react";
 import LiveChatDemo from "./LiveChatDemo";
 
 const HeroSection = () => {
@@ -50,7 +50,7 @@ const HeroSection = () => {
             <div className="flex flex-wrap gap-4 pt-4">
               <Button
                 size="lg"
-                onClick={() => navigate("/admin/login")}
+                onClick={() => navigate("/signup")}
                 className="gap-2 text-base px-8"
               >
                 Start Free Trial
@@ -59,26 +59,27 @@ const HeroSection = () => {
               <Button
                 size="lg"
                 variant="outline"
-                onClick={() => navigate("/live-demo")}
+                onClick={() => navigate("/demo")}
                 className="text-base px-8"
               >
                 Watch Demo
               </Button>
             </div>
 
-            {/* Social Proof */}
-            <div className="flex items-center gap-6 pt-8 text-sm text-muted-foreground">
-              <div className="flex -space-x-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className="w-8 h-8 rounded-full bg-muted border-2 border-background"
-                  />
-                ))}
+            {/* Trust Points */}
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-8 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-primary" />
+                Replies 24/7, even at 2am
               </div>
-              <p>
-                <span className="text-foreground font-medium">500+</span> businesses trust Omanut
-              </p>
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-primary" />
+                WhatsApp, Messenger &amp; Instagram
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-primary" />
+                Free trial - no card required
+              </div>
             </div>
           </div>
 

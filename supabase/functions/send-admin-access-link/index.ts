@@ -75,7 +75,7 @@ const handler = async (req: Request): Promise<Response> => {
         <p style="color: #666; font-size: 14px;">This link will expire in 15 minutes.</p>
         <p style="color: #666; font-size: 14px;">If you didn't request this, please ignore this email.</p>
         <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-        <p style="color: #999; font-size: 12px;">© 2025 Omanut Technologies</p>
+        <p style="color: #999; font-size: 12px;">© ${new Date().getFullYear()} Omanut Technologies</p>
       </div>
     `;
 

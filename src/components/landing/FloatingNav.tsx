@@ -53,10 +53,10 @@ const FloatingNav = () => {
               Features
             </button>
             <button
-              onClick={() => scrollToSection("testimonials")}
+              onClick={() => scrollToSection("highlights")}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
-              Customers
+              Why Omanut
             </button>
             <button
               onClick={() => navigate("/demo")}
@@ -77,17 +77,17 @@ const FloatingNav = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => navigate("/admin/login")}
+              onClick={() => navigate("/login")}
               className="text-muted-foreground hover:text-foreground"
             >
-              Admin
+              Log In
             </Button>
             <Button
               size="sm"
-              onClick={() => navigate("/login")}
+              onClick={() => navigate("/signup")}
               className="bg-primary hover:bg-primary/90"
             >
-              Client Login
+              Start Free Trial
             </Button>
           </div>
 
@@ -114,10 +114,10 @@ const FloatingNav = () => {
               Features
             </button>
             <button
-              onClick={() => scrollToSection("testimonials")}
+              onClick={() => scrollToSection("highlights")}
               className="block w-full text-left text-sm text-muted-foreground hover:text-foreground py-2"
             >
-              Customers
+              Why Omanut
             </button>
             <button
               onClick={() => navigate("/demo")}
@@ -132,11 +132,11 @@ const FloatingNav = () => {
               Pricing
             </button>
             <div className="flex gap-3 pt-4">
-              <Button variant="outline" size="sm" onClick={() => navigate("/admin/login")} className="flex-1">
-                Admin
+              <Button variant="outline" size="sm" onClick={() => navigate("/login")} className="flex-1">
+                Log In
               </Button>
-              <Button size="sm" onClick={() => navigate("/login")} className="flex-1">
-                Client Login
+              <Button size="sm" onClick={() => navigate("/signup")} className="flex-1">
+                Start Free Trial
               </Button>
             </div>
           </div>

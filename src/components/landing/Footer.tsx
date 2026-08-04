@@ -17,13 +17,13 @@ const Footer = () => {
             customer experience?
           </h2>
           <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Join 500+ businesses using Omanut to automate customer service, 
-            increase bookings, and grow revenue. Start your free trial today.
+            Omanut answers your customers on WhatsApp, Messenger, and Instagram 24/7 -
+            so you never miss a booking, order, or inquiry. Start your free trial today.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Button
               size="lg"
-              onClick={() => navigate("/admin/login")}
+              onClick={() => navigate("/signup")}
               className="gap-2 text-base px-8"
             >
               Start Free Trial
@@ -55,8 +55,8 @@ const Footer = () => {
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              AI-powered customer service for African businesses. 
-              Available 24/7 on WhatsApp.
+              AI-powered customer service for African businesses.
+              Available 24/7 on WhatsApp, Messenger, and Instagram.
             </p>
           </div>
 
@@ -66,8 +66,8 @@ const Footer = () => {
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
               <li><a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a></li>
-              <li><button onClick={() => navigate("/live-demo")} className="hover:text-foreground transition-colors">Live Demo</button></li>
-              <li><a href="#" className="hover:text-foreground transition-colors">API Docs</a></li>
+              <li><button onClick={() => navigate("/demo")} className="hover:text-foreground transition-colors">Live Demo</button></li>
+              <li><button onClick={() => navigate("/signup")} className="hover:text-foreground transition-colors">Get Started</button></li>
             </ul>
           </div>
 
@@ -75,10 +75,19 @@ const Footer = () => {
           <div>
             <h4 className="font-medium mb-4">Company</h4>
             <ul className="space-y-3 text-sm text-muted-foreground">
-              <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
-              <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
-              <li><a href="#" className="hover:text-foreground transition-colors">Careers</a></li>
-              <li><a href="#" className="hover:text-foreground transition-colors">Contact</a></li>
+              <li>
+                <a
+                  href="https://wa.me/260971234567?text=Hi, I'd like to learn more about Omanut"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-foreground transition-colors"
+                >
+                  Contact Us
+                </a>
+              </li>
+              <li><button onClick={() => navigate("/demo")} className="hover:text-foreground transition-colors">Live Demo</button></li>
+              <li><button onClick={() => navigate("/login")} className="hover:text-foreground transition-colors">Log In</button></li>
+              <li><button onClick={() => navigate("/signup")} className="hover:text-foreground transition-colors">Create Account</button></li>
             </ul>
           </div>
 
@@ -89,7 +98,6 @@ const Footer = () => {
               <li><button onClick={() => navigate("/privacy")} className="hover:text-foreground transition-colors">Privacy Policy</button></li>
               <li><button onClick={() => navigate("/terms")} className="hover:text-foreground transition-colors">Terms of Service</button></li>
               <li><button onClick={() => navigate("/data-deletion")} className="hover:text-foreground transition-colors">Data Deletion</button></li>
-              <li><a href="#" className="hover:text-foreground transition-colors">GDPR</a></li>
             </ul>
           </div>
         </div>
@@ -97,13 +105,11 @@ const Footer = () => {
         {/* Bottom */}
         <div className="mt-12 pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Omanut Technologies. All rights reserved.
+            © {new Date().getFullYear()} Omanut Technologies Limited. All rights reserved.
           </p>
-          <div className="flex items-center gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground transition-colors">Twitter</a>
-            <a href="#" className="hover:text-foreground transition-colors">LinkedIn</a>
-            <a href="#" className="hover:text-foreground transition-colors">GitHub</a>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            Made for African businesses.
+          </p>
         </div>
       </div>
     </footer>

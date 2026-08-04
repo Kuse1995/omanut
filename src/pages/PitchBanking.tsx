@@ -297,7 +297,7 @@ const PitchBanking = () => {
       <footer className="py-8 px-6 border-t border-border/50 text-center">
         <div className="flex items-center justify-center gap-3">
           <img src={omanutLogo} alt="Omanut" className="w-8 h-8 object-contain" />
-          <span className="text-sm text-muted-foreground">© 2025 Omanut — AI Customer Service Platform</span>
+          <span className="text-sm text-muted-foreground">© {new Date().getFullYear()} Omanut - AI Customer Service Platform</span>
         </div>
       </footer>
     </div>

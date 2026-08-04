@@ -21,12 +21,13 @@ const DataDeletion = () => {
       toast.error("Please fill in all fields.");
       return;
     }
-    setLoading(true);
-    // Simulate submission
-    await new Promise((r) => setTimeout(r, 1000));
+    const subject = encodeURIComponent("Data Deletion Request");
+    const body = encodeURIComponent(
+      `Email: ${email}\n\nData to delete:\n${description}\n\nPlease confirm receipt of this request.`
+    );
+    window.location.href = `mailto:privacy@omanut.com?subject=${subject}&body=${body}`;
     setSubmitted(true);
-    setLoading(false);
-    toast.success("Your deletion request has been submitted.");
+    toast.success("Your email app should now be open - send the request to privacy@omanut.com.");
   };
 
   return (
@@ -65,7 +66,7 @@ const DataDeletion = () => {
             <p>You can request deletion of your personal data in any of the following ways:</p>
 
             <h3 className="text-xl font-medium text-foreground mt-4">Option 1: Submit a Request Below</h3>
-            <p>Use the form at the bottom of this page to submit a deletion request directly.</p>
+            <p>The form at the bottom of this page opens a pre-filled email to our privacy team - just press send.</p>
 
             <h3 className="text-xl font-medium text-foreground mt-4">Option 2: Email Us</h3>
             <p>Send an email to <strong>privacy@omanut.com</strong> with the subject line "Data Deletion Request" and include:</p>
@@ -123,7 +124,7 @@ const DataDeletion = () => {
               <CheckCircle className="w-16 h-16 text-primary mb-4" />
               <h3 className="text-xl font-semibold mb-2">Request Submitted</h3>
               <p className="text-muted-foreground max-w-md">
-                We've received your data deletion request. You'll receive a confirmation email within 48 hours, and your data will be deleted within 30 days.
+                Your email app should now be open with a pre-filled request to privacy@omanut.com. Send it and we'll confirm receipt within 48 hours, then delete your data within 30 days.
               </p>
             </div>
           ) : (
