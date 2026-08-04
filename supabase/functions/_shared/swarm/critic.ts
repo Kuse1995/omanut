@@ -1,6 +1,6 @@
 // Critic / QA: scores the Creative's draft against IntentObject + RuleSet.
 // Strict JSON output. GLM-4.7 t=0.0 — deterministic.
-import { geminiChat } from '../gemini-client.ts';
+import { geminiChatWithFallback } from '../gemini-client.ts';
 import type { CritiqueReport, IntentObject, RuleSet } from './types.ts';
 import { PASS_THRESHOLD } from './types.ts';
 
@@ -45,7 +45,7 @@ DRAFT TO JUDGE:
 
 Score it now. Output JSON only.`;
 
-  const resp = await geminiChat({
+  const resp = await geminiChatWithFallback({
     model,
     temperature: 0,
     max_tokens: 400,
@@ -104,7 +104,7 @@ DRAFT:
 
 Output JSON only.`;
   try {
-    const resp = await geminiChat({
+    const resp = await geminiChatWithFallback({
       model, temperature: 0, max_tokens: 200,
       messages: [{ role: 'system', content: SYSTEM_SAFETY }, { role: 'user', content: userMsg }],
     });

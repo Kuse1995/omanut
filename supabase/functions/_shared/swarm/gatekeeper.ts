@@ -1,6 +1,6 @@
 // Gatekeeper: normalizes raw inbound text into a clean IntentObject.
 // Cheap deterministic GLM call. Returns strict JSON.
-import { geminiChat } from '../gemini-client.ts';
+import { geminiChatWithFallback } from '../gemini-client.ts';
 import type { IntentObject, SwarmInput } from './types.ts';
 
 const SYSTEM = `You are the GATEKEEPER for an AI agent swarm.
@@ -26,7 +26,7 @@ Customer: ${input.customer_name || 'unknown'}
 Raw message:
 """${input.raw_text}"""`;
 
-  const resp = await geminiChat({
+  const resp = await geminiChatWithFallback({
     model,
     temperature: 0,
     max_tokens: 512,
