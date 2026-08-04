@@ -1,242 +1,99 @@
-# AI Front Desk Receptionist - Zambian Lodge
+# Omanut
 
-Complete AI voice receptionist system for restaurants and lodges in Zambia. Handles both live phone calls via Twilio and web-based voice demo using WebRTC.
+Omanut is an AI-powered customer engagement platform built for African SMEs.
+It answers customers 24/7 on WhatsApp, Facebook Messenger, and Instagram,
+handles reservations and orders, supports mobile-money payments, and keeps
+business owners in control with instant WhatsApp notifications and human
+handoff when needed.
 
-## 🌍 Built for Zambia
+## What it does
 
-- Polite Zambian receptionist personality (not American)
-- Uses Kwacha (K) for all prices
-- Handles noisy lines from Airtel/MTN networks
-- Collects phone numbers first (for WhatsApp/callback)
-- Optional email - works without it
-- Understands local accents (Lusaka, Copperbelt, North-Western)
+- AI assistant trained on each business (menu, prices, services, hours, policies)
+- Multi-channel: WhatsApp Business API (Twilio + Meta Cloud), Messenger,
+  Instagram DMs, and Facebook/Instagram comments
+- Voice AI for phone calls (OpenAI Realtime + Twilio)
+- Reservations and bookings with boss approval workflow and calendar sync
+- Mobile money payments (MTN, Airtel, Zamtel) via payment links
+- Live BMS sync (stock, pricing, sales) with a boss-facing agent
+- Content studio, image generation, and scheduled social posting
+- Ads: Meta ads launch, targeting search, and insight sync
+- Admin dashboard: per-company configuration, AI training, analytics,
+  API keys, and a public MCP server for external AI agents
 
-## ✨ Features
+## Tech stack
 
-### Voice Capabilities
-- **Live Phone Calls**: Twilio voice streaming integration
-- **Web Demo**: WebRTC voice interface for testing
-- **AI Agent**: OpenAI Realtime API with natural conversation
-- **Reservation System**: Automated booking with email confirmations
+- Frontend: React 18 + Vite + TypeScript, Tailwind CSS, shadcn/ui
+- Backend: Supabase (Postgres, Auth, Edge Functions, Storage)
+- AI: OpenAI (Realtime API, chat completions) with configurable model routing
+- Messaging: Twilio and Meta Cloud API
+- Email: Resend
 
-### Dashboard Pages
-- **Live Demo**: Test the AI receptionist with your microphone
-- **Conversations**: View all call history with real-time updates
-- **Reservations**: Manage bookings (date, time, guests, area, occasion)
-- **Settings**: Configure agent personality, menu, hours, pricing
+## Local development
 
-## 🚀 Setup Instructions
+1. Install dependencies:
 
-### 1. API Keys (Already Added)
+   ```bash
+   npm install
+   ```
 
-The following secrets have been configured in Lovable Cloud:
-- ✅ `OPENAI_API_KEY` - For AI voice agent
-- ✅ `RESEND_API_KEY` - For email confirmations
-- ✅ `SUPABASE_URL` - Auto-configured
-- ✅ `SUPABASE_SERVICE_ROLE_KEY` - Auto-configured
+2. Create `.env` from the template:
 
-### 2. Verify Sending Domain (Resend)
+   ```bash
+   cp .env.example .env
+   ```
 
-To send confirmation emails from `hi@build-loop.ai`:
+   Fill in your Supabase project URL and publishable (anon) key. The anon key is
+   safe for the browser; never put a service-role key in `.env`.
 
-1. Go to [https://resend.com/domains](https://resend.com/domains)
-2. Add and verify the domain `build-loop.ai`
-3. Add the required DNS records (MX, TXT, etc.)
-4. Wait for verification (usually 5-10 minutes)
+3. Start the dev server:
 
-### 3. Twilio Phone Number Setup
+   ```bash
+   npm run dev
+   ```
 
-To connect the AI receptionist to phone calls:
+4. Build for production:
 
-#### Get Your Edge Function URL
+   ```bash
+   npm run build
+   ```
 
-After deployment, your Twilio webhook URL will be:
-```
-https://dzheddvoiauevcayifev.supabase.co/functions/v1/twilio-voice/twiml
-```
+## Supabase Edge Functions
 
-#### Configure Twilio
+Edge functions live in `supabase/functions/`. The core ones are:
 
-1. Go to [Twilio Console → Phone Numbers](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
-2. Select your active phone number
-3. Under **"Voice & Fax"** → **"A CALL COMES IN"**:
-   - Set to: **Webhook**
-   - Method: **HTTP POST**
-   - URL: `https://dzheddvoiauevcayifev.supabase.co/functions/v1/twilio-voice/twiml`
+- `whatsapp-messages` - WhatsApp Business API inbound/outbound and the AI reply loop
+- `meta-webhook` - Messenger/Instagram/webhook ingestion
+- `twilio-voice` / `whatsapp-voice` / `realtime-session` - voice calls
+- `agent-api` - authenticated AI agent API for connected systems
+- `mcp-server` - MCP endpoint for external AI assistants (e.g. OpenClaw)
+- `boss-chat` - owner chat with the AI
+- `meta-ads-*` - Meta ads management
+- `_shared` - shared helpers and email templates
 
-#### Set Voice Region to Ireland (Critical for Zambia)
+Deploy a function with:
 
-For better latency from Zambia:
-
-1. In Twilio Console → Settings → Voice
-2. Set **Voice Region** to: **Ireland (IE1)** or **EU (Europe)**
-3. This reduces latency for callers from Zambia/Africa
-
-#### Note for Zambian Local Numbers
-
-Twilio doesn't sell direct +260 (Zambia) numbers. For a local experience:
-
-**Option**: Forward an Airtel or MTN SIM to your Twilio number
-- Get a local +260 number (Airtel/MTN SIM)
-- Set up call forwarding to your Twilio number
-- Callers dial the local +260 number
-- Calls forward to Twilio → AI answers
-
-This is a standard approach when Twilio doesn't have in-country numbers.
-
-## 🎨 Design
-
-- **Dark Theme**: #0A0A0A background, #1A1A1A sidebar
-- **Accent**: Lime green (#84CC16)
-- **Animations**: Pulsing glow on mic button, audio visualizer
-- **Responsive**: Works on mobile, tablet, desktop
-
-## 📊 Database Schema
-
-### Tables
-- `agent_config` - Restaurant settings, AI instructions, menu
-- `conversations` - Call history with duration tracking
-- `messages` - Conversation transcripts
-- `reservations` - Bookings with guest details, area preferences, occasions
-
-All tables have Row Level Security (RLS) enabled with public access for demo.
-
-## 🎯 Agent Behavior
-
-The AI receptionist:
-
-1. **Always asks for phone number first** (for callbacks/WhatsApp)
-2. **Uses Kwacha**: Prices like "K180" (never dollars)
-3. **Handles noisy lines**: Politely asks caller to repeat
-4. **Books reservations**: Poolside, VIP, conference hall, braai area, etc.
-5. **Captures occasions**: Birthdays, meetings, romantic dinners, Independence Day
-6. **Optional email**: Works fine without it
-7. **Speaks Zambian English**: Not American accent
-
-## 🛠️ Edge Functions
-
-### 1. `twilio-voice`
-- **`/twiml`**: Returns TwiML XML to start call
-- **`/media-stream`**: WebSocket for Twilio ↔ OpenAI streaming
-- Handles g711_ulaw audio at 24kHz
-- Creates conversations and reservations
-- Sends email confirmations if email provided
-
-### 2. `realtime-session`
-- Returns ephemeral OpenAI session token
-- Used by web demo for WebRTC
-- Configures AI personality from database
-
-### 3. `send-reservation-confirmation`
-- Sends email via Resend
-- Only called if customer provides email
-- Beautiful HTML template with reservation details
-
-## 🔧 Development
-
-### Local Development
 ```bash
-npm install
-npm run dev
+supabase functions deploy whatsapp-messages
 ```
 
-### Edge Function Deployment
-Edge functions auto-deploy with your project. No manual deployment needed!
+## Project structure
 
-## 🧪 Testing
+```text
+src/
+  components/          UI components (landing, dashboard, admin, inbox)
+  pages/               Route-level pages
+  context/             Global state (company, auth)
+  integrations/        Supabase and auth clients
+  utils/               Audio, formatting, helpers
+supabase/
+  functions/           Edge Functions
+  migrations/          SQL migrations
+public/                Static assets
+```
 
-### Web Demo
-1. Go to **Live Demo** page
-2. Click the pulsing lime green mic button
-3. Allow microphone access
-4. Speak naturally (as if calling a Zambian lodge)
-5. Watch the event log and audio visualizer
+## Security notes
 
-### Phone Testing
-1. Configure Twilio webhook URL (see above)
-2. Call your Twilio phone number
-3. AI receptionist answers and greets you
-4. Make a test reservation
-5. Check **Conversations** and **Reservations** pages
-
-## 📱 Status Indicators
-
-The Live Demo page shows real-time status:
-
-- **Ready**: Waiting for input
-- **Connecting…**: Setting up WebRTC connection
-- **Talking to Guest**: AI is responding
-- **Bad Network / Repeating Question**: Connection issues (common on mobile networks)
-
-## 🎭 Example Conversation Flow
-
-**AI**: "Hello! Thank you for calling Streamside Lodge. How may I help you today?"
-
-**Caller**: "Hi, I want to book a table for my birthday."
-
-**AI**: "Wonderful! Happy birthday! Let me help you with that. May I have your phone number first so I can call or WhatsApp you if needed?"
-
-**Caller**: "It's 0977 123 456."
-
-**AI**: "Thank you. For what date would you like to book?"
-
-**Caller**: "Saturday, 15th February."
-
-**AI**: "Perfect! What time works for you?"
-
-**Caller**: "Around 7 PM."
-
-**AI**: "Great! How many guests will be joining you?"
-
-**Caller**: "Five people."
-
-**AI**: "Excellent! Would you prefer any particular area? We have poolside, outdoor seating, inside dining, or our VIP section."
-
-**Caller**: "Poolside sounds nice."
-
-**AI**: "Perfect choice! Just to confirm: a table for 5 people on Saturday, February 15th at 7:00 PM by the poolside for your birthday celebration. Is that correct?"
-
-**Caller**: "Yes, that's right."
-
-**AI**: "Wonderful! Your reservation is confirmed. We look forward to celebrating with you at Streamside Lodge!"
-
-## 🌟 Customization
-
-Go to **Settings** page to customize:
-- Restaurant/Lodge name
-- Operating hours
-- Menu items (include local foods: fish, braai, nshima)
-- AI instructions and personality
-- Currency prefix (default: K)
-- Branches and seating areas
-
-Changes apply immediately to both phone and web interfaces.
-
-## 🔐 Security
-
-- All tables have RLS policies
-- Edge functions are public (no JWT required for webhooks)
-- API keys stored securely in Lovable Cloud
-- Service role key used only in backend functions
-
-## 📞 Support
-
-For issues or questions:
-1. Check the **Event Log** in Live Demo
-2. Review **Conversations** table for call history
-3. Test with web demo first before phone testing
-
-## 🎉 What's Next?
-
-- Analytics dashboard with call metrics
-- Multi-language support (add local languages)
-- SMS confirmations via Africa's Talking
-- Integration with payment systems (mobile money)
-- Calendar sync for restaurant staff
-- Customer loyalty tracking
-
----
-
-**Built with**: React + TypeScript + Tailwind CSS + Supabase + OpenAI Realtime API + Twilio
-
-**Optimized for**: Zambian restaurants, lodges, and hospitality businesses
+- `.env` and any real secrets are git-ignored. Rotate any key that was ever
+  committed to a public repository.
+- Supabase Row Level Security (RLS) is enabled on tenant tables; new tables
+  should ship with RLS policies in their migration.

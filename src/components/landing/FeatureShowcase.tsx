@@ -13,13 +13,13 @@ const features = [
   {
     icon: MessageSquare,
     title: "WhatsApp Integration",
-    description: "Native WhatsApp Business API integration. Handle account inquiries, card services, branch information, and more — instantly on your customers' favorite platform.",
+    description: "Native WhatsApp Business API integration. Answer customer questions, take orders and reservations, and share your menu, prices, and location - instantly on your customers' favorite platform.",
     size: "large",
   },
   {
     icon: Phone,
     title: "Voice AI Calls",
-    description: "Handle phone calls with natural AI voice. Perfect for complex inquiries.",
+    description: "Handle phone calls with natural AI voice - bookings, orders, and FAQs handled instantly.",
     size: "small",
   },
   {
@@ -55,7 +55,7 @@ const features = [
   {
     icon: Shield,
     title: "Enterprise Security",
-    description: "RLS policies, JWT auth, encrypted data.",
+    description: "Bank-grade security with role-based access controls and encrypted data storage.",
     size: "small",
   },
 ];

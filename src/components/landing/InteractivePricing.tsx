@@ -157,7 +157,11 @@ const InteractivePricing = () => {
               <Button
                 className="w-full mb-6"
                 variant={plan.popular ? "default" : "outline"}
-                onClick={() => navigate("/admin/login")}
+                onClick={() =>
+                  plan.cta === "Contact Sales"
+                    ? window.open("https://wa.me/260971234567?text=Hi, I'd like to learn more about Omanut pricing", "_blank")
+                    : navigate("/signup")
+                }
               >
                 {plan.cta}
               </Button>

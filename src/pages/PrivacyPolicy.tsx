@@ -29,7 +29,7 @@ const PrivacyPolicy = () => {
         <div className="prose prose-neutral dark:prose-invert max-w-none space-y-8 text-foreground/90">
           <section>
             <h2 className="text-2xl font-semibold text-foreground">1. Introduction</h2>
-            <p>Omanut Technologies ("Omanut," "we," "us," or "our") operates an AI-powered customer engagement platform that integrates with messaging services including WhatsApp, Facebook Messenger, and Instagram Direct. This Privacy Policy explains how we collect, use, store, share, and protect your personal information when you use our services or interact with businesses that use Omanut.</p>
+            <p>Omanut Technologies Limited ("Omanut," "we," "us," or "our") operates an AI-powered customer engagement platform that integrates with messaging services including WhatsApp, Facebook Messenger, and Instagram Direct. This Privacy Policy explains how we collect, use, store, share, and protect your personal information when you use our services or interact with businesses that use Omanut.</p>
           </section>
 
           <section>
@@ -166,7 +166,7 @@ const PrivacyPolicy = () => {
             <p>If you have questions about this Privacy Policy or wish to exercise your data rights, contact us at:</p>
             <ul className="list-none space-y-1">
               <li><strong>Email:</strong> privacy@omanut.com</li>
-              <li><strong>Company:</strong> Omanut Technologies</li>
+              <li><strong>Company:</strong> Omanut Technologies Limited</li>
             </ul>
           </section>
         </div>

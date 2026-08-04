@@ -72,7 +72,7 @@ const handler = async (req: Request): Promise<Response> => {
                 </div>
                 <div class="footer">
                   <p>This is an automated security notification from Omanut Assistant</p>
-                  <p>© 2025 Omanut Technologies. Transforming Zambian businesses with AI.</p>
+                  <p>© ${new Date().getFullYear()} Omanut Technologies. Transforming Zambian businesses with AI.</p>
                 </div>
               </div>
             </body>
