@@ -15,10 +15,10 @@ const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
- *  Default: 'deepseek-v4-flash' (DeepSeek V4 Flash, direct DeepSeek API — fast reasoning + tool calling).
+ *  Default: 'deepseek-chat' (DeepSeek Chat, direct DeepSeek API - fast reasoning + tool calling).
  *  Rollback levers: set PRIMARY_TEXT_MODEL=kimi-k2.6 (Moonshot) or glm-4.7 (Zhipu). */
-export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'deepseek-v4-flash';
-export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'deepseek-v4-pro';
+export const PRIMARY_TEXT_MODEL = Deno.env.get('PRIMARY_TEXT_MODEL') || 'deepseek-chat';
+export const FALLBACK_TEXT_MODEL = Deno.env.get('FALLBACK_TEXT_MODEL') || 'deepseek-reasoner';
 
 
 /** Strip provider prefix from model names (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash", "zai/glm-4.7" → "glm-4.7") */
@@ -202,12 +202,12 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
  * Optional GLM-5 tier injected when ZHIPU_GLM5_ENABLED=true (gated to avoid 404s before GA).
  */
 export async function geminiChatWithFallback(options: GeminiChatOptions): Promise<Response> {
-  // DeepSeek V4 is the primary brain; cascade to Kimi/GLM/Gemini on billing/quota/provider failure.
+  // DeepSeek is the primary brain; cascade to Kimi/GLM/Gemini on billing/quota/provider failure.
   const fallbackChain = [
     options.model,
     PRIMARY_TEXT_MODEL,
-    'deepseek-v4-flash',
-    'deepseek-v4-pro',
+    'deepseek-chat',
+    'deepseek-reasoner',
     FALLBACK_TEXT_MODEL,
     'kimi-k2.6',
     'kimi-k2.5',
