@@ -1,0 +1,1 @@
+UPDATE public.company_ai_overrides SET primary_model = 'deepseek-v4-flash', updated_at = now() WHERE primary_model IS DISTINCT FROM 'deepseek-v4-flash';
