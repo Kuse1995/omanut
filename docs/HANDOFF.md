@@ -41,6 +41,24 @@
 - **Root cause:** the deployed Omanut `bms-agent` forwards `action: health_check` to the company's bridge at `https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge`; that **bridge does not implement `health_check`** (contract mismatch). Probing the bridge directly shows other actions work (`list_products`, `get_outstanding_receivables` succeed; `get_sales_summary`, `who_owes`, `daily_report` also rejected as unknown).
 - **Fix:** PR #5 (`fix/bms-health-check-fallback`) — when a bridge rejects `health_check` with an unknown-action error, fall back to a `list_products` (limit 1) probe; report healthy if that succeeds. Needs merge + deploy, then Finch health rows should flip to `healthy`.
 
+### 5b. omanut-harness — external LLM decision layer (NEW, proposed)
+
+- **Pattern**: copy of the proven `bms-harness` (DeepSeek router on the farm at
+  `bms-harness.omanut.online`, port 3002) applied to Omanut's WhatsApp brain.
+- **Local mirror**: `C:\Users\user\Documents\Codex\2026-08-01\hell\outputs\omanut-harness`
+  — zero-dep Node, 28/28 test suite (fake DeepSeek in-process), guardrails
+  (price guard → 502 llm_price_invention; tool-name guard; reply cap; content-free
+  turn log).
+- **Kill switch**: `companies.metadata.harness_mode = off|pilot|on` +
+  `harness_pilot_phones`. Default off — no behavior change until a company opts in.
+- **Integration**: `_shared/harness-client.ts` + two seams in
+  `whatsapp-messages/index.ts` (main call + tool-loop rounds) — harness first,
+  in-house fallback on any failure. Never double-reply, never fail-open.
+- **Design doc**: `docs/HARNESS-INTEGRATION.md`.
+- **Deploy steps (human)**: farm-deploy.sh omanut-harness 3003 → add-harness.sh →
+  Supabase env (OMANUT_HARNESS_URL, OMANUT_HARNESS_API_KEY) → pilot on boss line →
+  widen to OmanutBMS.
+
 ### 5. OpenClaw (this machine) — what was fixed
 
 - **Root cause of 3-week outage:** `C:\Users\user\.openclaw\openclaw.json` had `channels.telegram.streaming: {"mode":"partial"}` — an **object**, but the schema (OpenClaw 2026.3.22) requires a **string** (`"off" | "partial" | "block" | "progress"`). Every gateway start failed: `channels.telegram.streaming: Invalid input (allowed: true, false, "off", "partial", "block", "progress")`. 20 `gateway.startup_failed` stability logs (Jul 21 → Aug 2).

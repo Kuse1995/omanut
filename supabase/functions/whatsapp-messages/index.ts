@@ -3,6 +3,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from 'https://deno.land/x/zod@v3.21.4/mod.ts';
 import { geminiChat, geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { isHarnessEnabled, callHarness } from "../_shared/harness-client.ts";
 import { classifyAiError } from "../_shared/safe-error.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import {
@@ -1806,6 +1807,16 @@ async function _processAIResponseInner(
 
     // Check if agent routing is enabled for this company
     const agentRoutingEnabled = company.agent_routing_enabled !== false;
+
+    // ========== OMANUT-HARNESS KILL SWITCH ==========
+    // Per-company opt-in: companies.metadata.harness_mode = off|pilot|on (+
+    // harness_pilot_phones). Default off — no behavior change. When enabled,
+    // the LLM decision moves to the external harness; the in-house pipeline
+    // remains the fallback on any harness error (see callHarness usage).
+    const harnessEnabled = isHarnessEnabled(company?.metadata, customerPhone);
+    if (harnessEnabled) {
+      console.log(`[HARNESS] Harness enabled for company ${company.id} phone ${customerPhone}`);
+    }
     
     // Fetch AI overrides EARLY - needed for routing configuration
     const { data: aiOverrides } = await supabase
@@ -3813,15 +3824,40 @@ Trust ONLY the information provided in this system prompt.
     let aiData: any = null; // Store AI response for tool loop
 
     try {
-      const response = await geminiChatWithFallback({
-        model: selectedModel,
-        messages: sanitizeMessages(messages),
-        temperature,
-        max_tokens: maxTokens,
-        tools: filteredTools,
-        tool_choice: "auto",
-        signal: controller.signal,
-      });
+      let response: Response | null = null;
+
+      // OMANUT-HARNESS: when enabled for this company+phone, ask the external
+      // harness first. It returns OpenAI-shaped responses, so the rest of the
+      // loop (tool executors, sends, persistence) is unchanged. On ANY harness
+      // failure we fall straight through to the in-house fallback chain.
+      if (harnessEnabled) {
+        const harnessResult = await callHarness({
+          session_id: `${company.id}:${customerPhone}`,
+          messages: sanitizeMessages(messages) as any,
+          tools: filteredTools || [],
+          max_tokens: maxTokens,
+          temperature,
+        });
+        if (harnessResult.ok && harnessResult.message) {
+          const harnessBody = { choices: [{ message: harnessResult.message }] };
+          response = new Response(JSON.stringify(harnessBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          console.log('[HARNESS] main turn answered by harness');
+        } else {
+          console.warn('[HARNESS] main turn harness failed (', harnessResult.reason || harnessResult.http_status, ') — falling back in-house');
+        }
+      }
+
+      if (!response) {
+        response = await geminiChatWithFallback({
+          model: selectedModel,
+          messages: sanitizeMessages(messages),
+          temperature,
+          max_tokens: maxTokens,
+          tools: filteredTools,
+          tool_choice: "auto",
+          signal: controller.signal,
+        });
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -5615,16 +5651,39 @@ Trust ONLY the information provided in this system prompt.
         const roundController = new AbortController();
         const roundTimeoutId = setTimeout(() => roundController.abort(), 60000);
         
-        // Call AI WITH tools still available for multi-step chains
-        const roundResponse = await geminiChat({
-          model: selectedModel,
-          messages: sanitizeMessages(currentMessages),
-          temperature: 1.0,
-          max_tokens: maxTokens,
-          tools: filteredTools,
-          tool_choice: "auto",
-          signal: roundController.signal,
-        });
+        // Call AI WITH tools still available for multi-step chains.
+        // OMANUT-HARNESS: when enabled, the round decision goes to the harness
+        // (same OpenAI-shaped contract); on any failure fall back to in-house.
+        let roundResponse: Response | null = null;
+        if (harnessEnabled) {
+          const harnessRound = await callHarness({
+            session_id: `${company.id}:${customerPhone}`,
+            messages: sanitizeMessages(currentMessages) as any,
+            tools: filteredTools || [],
+            max_tokens: maxTokens,
+            temperature: 1.0,
+          });
+          if (harnessRound.ok && harnessRound.message) {
+            roundResponse = new Response(JSON.stringify({ choices: [{ message: harnessRound.message }] }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+            console.log('[HARNESS] tool-loop round answered by harness');
+          } else {
+            console.warn('[HARNESS] tool-loop round harness failed (', harnessRound.reason || harnessRound.http_status, ') — falling back in-house');
+          }
+        }
+        if (!roundResponse) {
+          roundResponse = await geminiChat({
+            model: selectedModel,
+            messages: sanitizeMessages(currentMessages),
+            temperature: 1.0,
+            max_tokens: maxTokens,
+            tools: filteredTools,
+            tool_choice: "auto",
+            signal: roundController.signal,
+          });
+        }
         
         clearTimeout(roundTimeoutId);
         
