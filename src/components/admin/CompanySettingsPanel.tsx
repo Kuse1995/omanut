@@ -503,7 +503,8 @@ function SLARow({ priority, responseTime, resolutionTime, escalationTime, onSave
   );
 }
 
-const DEFAULT_BRIDGE_URL = 'https://pkiajhllkihkuchbwrgz.supabase.co/functions/v1/bms-api-bridge';
+// Matches _shared/bms-connection.ts FINCH_BRIDGE_URL (the live Finch BMS bridge project).
+const DEFAULT_BRIDGE_URL = 'https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge';
 const CALLBACK_URL = `https://dzheddvoiauevcayifev.supabase.co/functions/v1/bms-callback`;
 
 function generateSecret(length = 32): string {

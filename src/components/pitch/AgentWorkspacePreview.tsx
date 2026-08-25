@@ -74,7 +74,7 @@ const AgentWorkspacePreview = () => {
 
   const fetchFeed = async () => {
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         { headers: { "Content-Type": "application/json" } }
@@ -104,7 +104,7 @@ const AgentWorkspacePreview = () => {
     setStatusOverrides((prev) => ({ ...prev, [id]: 'resolved' }));
     // Also update in database
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
       await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         {

@@ -89,3 +89,22 @@
 ---
 
 *This doc is the single source of truth for the next harness. Read AGENTS.md first, then this.*
+
+### 5c. UI dead-client fix (PR #8 — fix/ui-env-build, 2026-08-25)
+
+- **Symptom**: `omanut.lovable.app` loads but every authenticated call fails
+  (login/dashboard/inbox dead) while the backend is healthy.
+- **Root cause**: deployed bundle had `createClient(void 0, void 0)` — the
+  Lovable build ran WITHOUT the VITE_SUPABASE_* env vars (also
+  `undefined.supabase.co` ×5 in demo URLs, stale bridge project ×1).
+- **Fix (PR #8)**: committable `.env.production` with publishable VITE_ values
+  (AGENTS.md §2) → future builds bake in the correct config; demo-feed URLs fall
+  back to the live project ref; CompanySettingsPanel bridge URL aligned with the
+  backend; AGENTS.md §8b/8c/8d brought to reality.
+- **Verified**: local build produces `index-B6Xt5CC9.js` with real URL + anon
+  key, 0 undefined URLs.
+- **REMAINING (human)**: merge PR #8 → Lovable redeploy → verify login works.
+  If Lovable still complains, mirror the 3 VITE_ values in its dashboard env.
+- **Tip for future harnesses**: never rely on Lovable dashboard env alone; keep
+  the publishable VITE_ values in `.env.production` in the repo.
+

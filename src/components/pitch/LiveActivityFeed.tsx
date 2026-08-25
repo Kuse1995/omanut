@@ -46,7 +46,7 @@ const LiveActivityFeed = () => {
 
   const fetchFeed = async () => {
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         { headers: { "Content-Type": "application/json" } }
