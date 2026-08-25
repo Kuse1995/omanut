@@ -1,5 +1,20 @@
 # OpenClaw → Omanut Integration (v3 — Pull Mode)
 
+> ⚠️ **DEPRECATED (June 2026).** The pull-mode endpoints documented below
+> (`openclaw-pull`, `openclaw-reply`, `openclaw-stream`, `openclaw-lookup`,
+> `openclaw-worker`) were **removed from the codebase and are not deployed** —
+> they return 404. OpenClaw was removed from the message path; the in-house
+> pipeline (MiniMax/DeepSeek via `_shared/gemini-client.ts`) handles every
+> channel.
+>
+> The **supported** external-agent surface is the **MCP server**:
+> `POST https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server`
+> (JSON-RPC, header `x-api-key`). See `openclaw-skill.json` (repo root) for a
+> ready `mcp-remote` transport, and AGENTS.md §8b. The rest of this file is kept
+> for historical reference only.
+
+
+
 OpenClaw no longer needs an inbound tunnel. Omanut hosts the queue; OpenClaw **pulls** events out of it. The reply path is unchanged.
 
 ```
