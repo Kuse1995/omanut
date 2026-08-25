@@ -108,3 +108,5 @@
 - **Tip for future harnesses**: never rely on Lovable dashboard env alone; keep
   the publishable VITE_ values in `.env.production` in the repo.
 
+
+- **UI FIX DEPLOYED 2026-08-25**: bundle index-B6Xt5CC9.js live, real URL baked, UI confirmed working.
