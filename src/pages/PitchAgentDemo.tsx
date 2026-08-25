@@ -92,7 +92,7 @@ const PitchAgentDemo = () => {
 
   const fetchFeed = useCallback(async () => {
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         { headers: { "Content-Type": "application/json" } }
@@ -133,7 +133,7 @@ const PitchAgentDemo = () => {
     setReplyText("");
 
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
         {

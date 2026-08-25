@@ -175,20 +175,47 @@ Recommended agent PR discipline for this repo:
 - Any change to `_shared/gemini-client.ts`, `whatsapp-messages`, `boss-chat`, or the handoff path is **high blast radius** — describe the customer-visible effect in the PR body.
 - Prefer flipping an env var (`PRIMARY_TEXT_MODEL`) over editing the fallback chain.
 
-### 8b. Runtime control — via the pull protocol
-An external agent can *be the brain* without touching code. Full spec in `OPENCLAW_INTEGRATION.md`. Summary:
+### 8b. Runtime control — via the MCP control plane (replaces the pull protocol)
+An external agent can *be the brain* without touching code. **The pull-mode endpoints (`openclaw-pull`, `openclaw-reply`, `openclaw-stream`, `openclaw-worker`) were removed in June 2026** — they return 404 and must not be used. The supported runtime surface is the MCP server. Summary:
 
-- Long-poll `GET /functions/v1/openclaw-pull?max=10&wait=25` with `Authorization: Bearer $OPENCLAW_GATEWAY_TOKEN` (optional `X-Openclaw-Company` to scope to one tenant).
-- Each event is a self-contained **envelope**: company context, knowledge base, brand voice, custom instructions, BMS snapshot, recent history, inbound text/media, and `reply_to_url`.
-- Reply with `POST /functions/v1/openclaw-reply`, HMAC-signed: `X-Openclaw-Signature: sha256=<HMAC-SHA256(rawBody, OPENCLAW_WEBHOOK_SECRET)>`.
-- Omanut performs the actual Twilio/Meta send, persists the message, and runs the supervisor/critic passes.
-- Claiming is atomic via the `claim_pending_events` RPC — do not hand-roll status flips, or events get processed multiple times.
-- `mcp-server` exposes the same surface as MCP tools for MCP-native agents. It reads `inbound_events` only.
-- Per company, `openclaw_mode = 'primary'` makes the external agent authoritative and the in-house worker releases events back to `pending`. `OPENCLAW_INHOUSE_FALLBACK_ENABLED` (default false) controls whether the in-house brain rescues stalled events after the grace window (`OPENCLAW_PULL_GRACE_SECONDS`).
+- Connect to `POST /functions/v1/mcp-server` (JSON-RPC) with header `x-api-key: <admin or company API key>` (keys are minted in Settings → API Keys). `openclaw-skill.json` in the repo root has a ready `mcp-remote` transport definition.
+- Tools include `list_conversations`, `get_conversation`, `get_conversation_trace`, `get_ai_errors`, `list_pending_events` (reads the shared `inbound_events` queue), `send_message`, `mark_event_handled`, `bms_*`, and more. An admin-scoped key sees all companies (call `list_my_companies`, then `set_active_company`).
+- Claiming pending events is atomic via the `claim_pending_events` RPC — do not hand-roll status flips, or events get processed multiple times. Always pair `list_pending_events` with `mark_event_handled`.
+- The in-house pipeline (MiniMax/DeepSeek via `_shared/gemini-client.ts`) is authoritative for outbound replies by default; an external agent that claims an event must actually reply, or it is released back to `pending` after the grace window (`OPENCLAW_PULL_GRACE_SECONDS`).
 
-**Choosing a plane:** change behaviour permanently → GitHub. Own the conversation live → pull protocol. Swap models or thresholds → env vars / `company_ai_overrides` rows, no deploy.
+**Choosing a plane:** change behaviour permanently → GitHub. Own the conversation live → MCP control plane (or `swarm-orchestrator` sync mode for one-shot drafts). Swap models or thresholds → env vars / `company_ai_overrides` rows, no deploy.
 
 ---
+
+## 8c. External LLM harness (omanut-harness)
+
+WhatsApp replies can optionally be decided by an external DeepSeek router on the
+farm (`https://omanut-harness.omanut.online`, port 3003) — the same pattern as
+`bms-harness`. It is a **drop-in replacement for the LLM call** inside
+`whatsapp-messages`' multi-round tool loop (same OpenAI-shaped wire format).
+
+- **Kill switch (per company, default off):** `companies.metadata.harness_mode`
+  = `off` | `pilot` | `on` plus `harness_pilot_phones`. Pilot routes only
+  listed phones. Flip back to `off` for instant rollback.
+- **Never fail-open:** on ANY harness non-200/timeout the caller falls through to
+  the in-house pipeline. The harness can only advise — it has no send capability.
+- **Client:** `_shared/harness-client.ts` (`isHarnessEnabled`, `callHarness`).
+- **Guardrails (server-enforced):** price guard (502 `llm_price_invention` when a
+  reply quotes money not in the input), tool-name guard, reply cap, content-free
+  turn log. Never weaken the price guard.
+- **Farm:** local mirror `hell/outputs/omanut-harness` (28/28 tests), service
+  `omanut-harness`, .env chmod 600 (`HARNESS_API_KEY` + `DEEPSEEK_API_KEY`).
+- **Edge secrets:** `OMANUT_HARNESS_URL`, `OMANUT_HARNESS_API_KEY`.
+- Full design: `docs/HARNESS-INTEGRATION.md`.
+
+## 8d. Frontend build env (.env.production)
+
+The hosted frontend build (Lovable/Supabase pipeline) must have the Supabase
+**publishable** values baked in. They live in the repo as `.env.production`
+(committable — AGENTS.md §2: project ref + anon key + function base URL are
+publishable). If the deployed UI shows a dead Supabase client (`undefined`
+URL/key in the bundle), check `.env.production` is present and redeploy.
+Never put service-role or provider keys in `.env.production`.
 
 ## 9. Debugging playbook
 
