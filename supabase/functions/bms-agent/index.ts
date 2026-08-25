@@ -393,6 +393,37 @@ Deno.serve(async (req) => {
       isHealthCheck: health_check === true || resolvedIntent === "health_check",
     });
 
+    // HEALTH-CHECK CONTRACT FALLBACK: some bridges (e.g. legacy single-tenant
+    // bridges) do not implement the `health_check` action and answer
+    // "Unknown action: health_check". That is a contract mismatch, not an
+    // outage — the bridge may still be healthy. Fall back to a lightweight
+    // supported read probe (list_products, limit 1) so the health log stays
+    // meaningful instead of showing perpetual "degraded" rows.
+    if (!result.success && (health_check === true || resolvedIntent === "health_check")) {
+      const errText = String((result as any).message || (result as any).error || "").toLowerCase();
+      if (errText.includes("unknown action") || errText.includes("not implemented") || errText.includes("unsupported action")) {
+        console.warn(`[BMS-AGENT] Bridge does not support health_check (\"${(result as any).message}\"); probing list_products instead`);
+        const probe = await callBMS(connection, "list_products", { limit: 1 }, {
+          companyId,
+          conversationId: conversation_id,
+          isHealthCheck: false,
+        });
+        if (probe.success) {
+          result = {
+            success: true,
+            code: "OK",
+            data: {
+              probe: "list_products",
+              health_check_supported: false,
+              note: "Bridge reachable; health_check action not implemented, list_products probe succeeded",
+            },
+          } as any;
+        } else {
+          console.warn(`[BMS-AGENT] list_products probe also failed: \"${(probe as any).message || probe.code}\"`);
+        }
+      }
+    }
+
     console.log(`[BMS-AGENT] ${resolvedIntent} result: success=${result.success} code=${(result as any).code} latency=${(result as any).latency_ms}ms attempts=${(result as any).attempts}`);
 
     // SMART FALLBACK: external BMS check_stock often returns a generic product list
