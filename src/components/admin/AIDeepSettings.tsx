@@ -12,6 +12,7 @@ import { ToolControlPanel } from "./deep-settings/ToolControlPanel";
 import { ABTestPanel } from "./deep-settings/ABTestPanel";
 import { QualitySafetyPanel } from "./deep-settings/QualitySafetyPanel";
 import { SwarmModeToggler } from "./deep-settings/SwarmModeToggler";
+import { HarnessModePanel } from "./deep-settings/HarnessModePanel";
 
 interface AIDeepSettingsProps {
   companyId: string;
@@ -343,7 +344,7 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-6">
+            <TabsList className="grid w-full grid-cols-7">
               <TabsTrigger value="models" className="flex items-center gap-2">
                 <Cpu className="h-4 w-4" />
                 <span className="hidden lg:inline">Models</span>
@@ -367,6 +368,10 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
               <TabsTrigger value="testing" className="flex items-center gap-2">
                 <FlaskConical className="h-4 w-4" />
                 <span className="hidden lg:inline">A/B Test</span>
+              </TabsTrigger>
+              <TabsTrigger value="harness" className="flex items-center gap-2">
+                <Cpu className="h-4 w-4" />
+                <span className="hidden lg:inline">Harness</span>
               </TabsTrigger>
             </TabsList>
 
@@ -393,6 +398,10 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
 
               <TabsContent value="testing">
                 <ABTestPanel config={config} updateConfig={updateConfig} />
+              </TabsContent>
+
+              <TabsContent value="harness">
+                <HarnessModePanel companyId={companyId} />
               </TabsContent>
             </div>
           </Tabs>
