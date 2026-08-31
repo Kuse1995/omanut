@@ -2926,8 +2926,14 @@ CRITICAL HANDOFF PROTOCOL:
       }
     }
 
-    // Take last N messages based on complexity: 8 for simple, 12 for complex
-    const historyWindow = messageComplexity === 'simple' ? -8 : -12;
+    // Take last N messages based on complexity: 8 for simple, 12 for complex.
+    // OMANUT-HARNESS: the external harness is stateless — it only knows what is
+    // in this window (no memory, no embeddings). Give it a much wider window so
+    // older context (bookings, earlier requests) survives. In-house behavior
+    // (harness disabled) is unchanged.
+    const historyWindow = harnessEnabled
+      ? (messageComplexity === 'simple' ? -30 : -40)
+      : (messageComplexity === 'simple' ? -8 : -12);
     const recentMessages = parsedMessages.slice(historyWindow);
 
     const messages = [
