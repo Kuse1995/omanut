@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { geminiChat, geminiImageGenerate, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { harnessChatWithFallback } from "../_shared/harness-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -201,10 +202,28 @@ Return ONLY the caption text, nothing else.`;
     }
 
     if (!caption) {
-      const captionResponse = await geminiChat({
-        model: PRIMARY_TEXT_MODEL,
-        messages: [{ role: 'user', content: captionPrompt }],
-      });
+      // OMANUT-HARNESS: try the external harness first (content mode = company
+      // harness_mode on), fall back to in-house Gemini on any failure.
+      const harnessAttempt = await harnessChatWithFallback(
+        [{ role: 'user', content: captionPrompt }],
+        [],
+        { companyId: company_id, metadata: (company as any)?.metadata || null, mode: 'content' }
+      );
+
+      let captionResponse: Response | null = null;
+      if (harnessAttempt.ok && harnessAttempt.message) {
+        captionResponse = new Response(
+          JSON.stringify({ choices: [{ message: harnessAttempt.message }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+        console.log('[HARNESS] auto-content-creator caption by harness');
+      } else {
+        console.warn('[HARNESS] auto-content-creator harness failed (', harnessAttempt.reason, ') — falling back in-house');
+        captionResponse = await geminiChat({
+          model: PRIMARY_TEXT_MODEL,
+          messages: [{ role: 'user', content: captionPrompt }],
+        });
+      }
 
       if (!captionResponse.ok) {
         const status = captionResponse.status;
