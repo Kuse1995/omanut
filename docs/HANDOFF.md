@@ -41,6 +41,22 @@
 - **Root cause:** the deployed Omanut `bms-agent` forwards `action: health_check` to the company's bridge at `https://hnyzymyfirumjclqheit.supabase.co/functions/v1/bms-api-bridge`; that **bridge does not implement `health_check`** (contract mismatch). Probing the bridge directly shows other actions work (`list_products`, `get_outstanding_receivables` succeed; `get_sales_summary`, `who_owes`, `daily_report` also rejected as unknown).
 - **Fix:** PR #5 (`fix/bms-health-check-fallback`) — when a bridge rejects `health_check` with an unknown-action error, fall back to a `list_products` (limit 1) probe; report healthy if that succeeds. Needs merge + deploy, then Finch health rows should flip to `healthy`.
 
+### 5b. omanut-harness — external LLM decision layer (LIVE + ALL COMPANIES + ALL CHANNELS)
+
+**STATUS 2026-08-31:**
+- Farm harness live: `https://omanut-harness.omanut.online` (port 3003, DeepSeek, 31/31 tests).
+- **All 7 companies: `harness_mode = on`** (verified live) — WhatsApp DMs for every tenant route through the harness (seam deployed since PR #7).
+- **Date-awareness fix** deployed to farm (harness prepends its own "TODAY (Africa/Lusaka)" block + reconciliation rule — bookings in the past are never repeated as "tomorrow").
+- **History-window fix (PR #10)** merged: whatsapp-messages sends 30/40 messages to the stateless harness (was 8/12) when harness enabled.
+- **Master batch (PR #11)** merged — ON MAIN, needs ONE more Lovable deploy:
+  - `harnessChatWithFallback` wrapper in `_shared/harness-client.ts`
+  - `generate-reply-draft` (boss handoff drafts) → harness
+  - `auto-content-creator` (posts/captions) → harness
+  - **NEW `meta-auto-reply` worker** — drains `inbound_events` for FB/IG DMs + comments (these had ZERO auto-replies before); harness-generated, 45-120s comment anti-spam delay, gated by harness_mode
+- **Known gap to remember:** the previous Lovable deploy did NOT include `meta-auto-reply` (it wasn't on main then). A final deploy from current main is required to activate it.
+
+**Pilot line:** OmanutBMS metadata keeps `harness_pilot_phones: ["+260972064502"]` (boss test line) alongside `harness_mode: on` — harmless.
+
 ### 5b. omanut-harness — external LLM decision layer (LIVE on farm, integration pending)
 
 - **Pattern**: copy of the proven `bms-harness` (DeepSeek router on the farm at
