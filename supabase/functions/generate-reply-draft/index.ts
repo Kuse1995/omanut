@@ -252,15 +252,35 @@ Message: ${sourceContent}
 
 Generate a professional reply:`;
 
-    // Generate AI reply using Gemini API
-    const aiResponse = await geminiChat({
-      model: PRIMARY_TEXT_MODEL,
-      messages: [
+    // Generate AI reply — try the external harness first (content mode,
+    // company-level harness_mode=on), fall back to in-house Gemini on any failure.
+    const harnessAttempt = await harnessChatWithFallback(
+      [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 500,
-    });
+      [],
+      { companyId: verifiedCompanyId, metadata: (company as any)?.metadata || null, mode: "content" }
+    );
+
+    let aiResponse: Response | null = null;
+    if (harnessAttempt.ok && harnessAttempt.message) {
+      aiResponse = new Response(
+        JSON.stringify({ choices: [{ message: harnessAttempt.message }] }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+      console.log("[HARNESS] generate-reply-draft answered by harness");
+    } else {
+      console.warn("[HARNESS] generate-reply-draft harness failed (", harnessAttempt.reason, ") — falling back in-house");
+      aiResponse = await geminiChat({
+        model: PRIMARY_TEXT_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 500,
+      });
+    }
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();

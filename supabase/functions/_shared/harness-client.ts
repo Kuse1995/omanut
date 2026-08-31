@@ -115,3 +115,38 @@ export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
 }
 
 export { OMANUT_HARNESS_URL };
+
+
+/**
+ * Generic drop-in wrapper: try the harness, fall back to null.
+ * Returns { ok, message? } — message is OpenAI-shaped (content + tool_calls).
+ * For stateless channels (content gen, drafts) pass mode: 'content' which
+ * treats the company as enabled when harness_mode === 'on' (no phone check).
+ */
+export interface HarnessFallbackOpts {
+  companyId: string;
+  phone?: string | null;
+  metadata?: HarnessCompanyMeta | null;
+  /** 'chat' (default, uses phone pilot check) or 'content' (company-level on only) */
+  mode?: 'chat' | 'content';
+}
+
+export async function harnessChatWithFallback(
+  messages: Array<Record<string, unknown>>,
+  tools: unknown[],
+  opts: HarnessFallbackOpts
+): Promise<{ ok: boolean; message?: { content?: string | null; tool_calls?: unknown[] }; reason?: string }> {
+  const mode = opts.mode || 'chat';
+  const enabled = mode === 'content'
+    ? String(opts.metadata?.harness_mode || 'off').toLowerCase() === 'on'
+    : isHarnessEnabled(opts.metadata, opts.phone);
+  if (!enabled) return { ok: false, reason: 'harness_disabled' };
+
+  const result = await callHarness({
+    session_id: `${opts.companyId}:${opts.phone || mode}`,
+    messages,
+    tools: tools || [],
+  });
+  if (result.ok && result.message) return { ok: true, message: result.message };
+  return { ok: false, reason: result.reason || 'harness_error' };
+}
