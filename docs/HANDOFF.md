@@ -152,3 +152,11 @@
 
 
 - **UI FIX DEPLOYED 2026-08-25**: bundle index-B6Xt5CC9.js live, real URL baked, UI confirmed working.
+
+### 5e. Harness upgrade (2026-09-01): GLM-5.3-Flash + format rules + meta-auto-reply cron
+
+- **Model switch**: harness now runs `glm-5.3-flash` (Zhipu, `LLM_PROVIDER=glm`, `GLM_MODEL=glm-5.3-flash`, GLM_API_KEY). Provider-agnostic client added (deepseek | glm).
+- **Format fix**: `FORMAT_RULES` always appended to every system prompt — plain WhatsApp text, NO markdown/lists/robotic openers. Verified: Finch water-filter reply now natural ("Nice, we've got some great options..."), not a formatted catalogue.
+- **Natural tone**: SYSTEM_PROMPT rewritten (conversational, no "Welcome to...", max 1 question).
+- **meta-auto-reply cron**: migration `20260901000000_schedule_meta_auto_reply.sql` schedules it every 30s via pg_cron (net.http_post). FB/IG DMs + comments now auto-answered for harness_mode=on companies.
+- **Farm**: harness restarted, `/health` shows `provider: glm, model: glm-5.3-flash`. Test suite 33/33.
