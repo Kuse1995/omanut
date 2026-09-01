@@ -118,6 +118,10 @@ serve(async (req) => {
             body: {
               company_id: row.company_id,
               comment_id: payload.comment_id,
+              // Contract: send-facebook-comment-reply Mode 2 expects `message`
+              // (same field the mcp-server sends). Without it the call 400s and
+              // the event loops forever. reply_text kept for older variants.
+              message: reply,
               reply_text: reply,
               source_type: "auto",
             },
