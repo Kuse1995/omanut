@@ -161,6 +161,17 @@
 - **meta-auto-reply cron**: migration `20260901000000_schedule_meta_auto_reply.sql` schedules it every 30s via pg_cron (net.http_post). FB/IG DMs + comments now auto-answered for harness_mode=on companies.
 - **Farm**: harness restarted, `/health` shows `provider: glm, model: glm-5.3-flash`. Test suite 33/33.
 
+### 5g. FB page webhook re-pointed to Supabase meta-webhook (2026-09-02, DSH)
+
+- **Symptom**: no FB page feed-comment events since Jul 29.
+- **Root cause**: app 882548657500573 ("Omanut AI2025") app-level webhook for object=page still pointed at the legacy bot `https://bot.omanut.online/webhooks/meta` (zambia-swarm). The instagram + user topics already pointed at Supabase; the page topic was missed.
+- **Fix**: `POST /{app}/subscriptions` with an app access token — object=page, callback_url=`https://dzheddvoiauevcayifev.supabase.co/functions/v1/meta-webhook`, verify_token = the existing META_VERIFY_TOKEN edge-secret value, fields feed+messages (Meta preserved leadgen).
+- **Verified**: Meta's own callback re-verification passed on subscribe (subscription `active:true`); manual hub.challenge handshake against the function returns 200 echo (wrong token → 403); POST liveness 200 `{"status":"received"}`. `meta-auto-reply` is deployed + live (`{"ok":true,"processed":0}`); `claim_pending_events` RPC works; 0 pending events for OmanutBMS.
+- **Side effects**: (1) bot.omanut.online no longer receives page/leadgen events — E Library leadgen leads now deliver to the Supabase function, which ignores leadgen. If those ads are still live, re-handle or pause them. (2) All pages subscribed to the app (incl. E Library page 776455652221283) now deliver to the platform; entries without a `meta_credentials` row are skipped harmlessly.
+- **Acceptance test**: comment on the Omanut Technologies FB page → should enqueue `inbound_events` (channel public_comment) → `meta-auto-reply-30s` pg_cron drains → harness (GLM-5.3-Flash) replies in ~45–120s. If events stay pending, run migration `20260901000000` and check `cron.job` for 'meta-auto-reply-30s'.
+- **Live verification + second bug found (2026-09-02)**: webhook delivery, enqueue, dedupe, 30s cron, claim and release all verified with a real comment. The reply send failed in an infinite retry loop (claim → 45–120s delay → fail → release every ~2 min, nothing logged). Root cause: `meta-auto-reply` invoked `send-facebook-comment-reply` with `reply_text`, but the function's Mode 2 contract (and the mcp-server) expect `message` → 400 → throw → release. The stored page token was healthy (reconnect done as a precaution; also refreshed last_verified_at). **Fixed in PR #14 (merged)** — needs the usual Lovable edge deploy; after deploy the queued comment auto-replies without re-commenting.
+- **Follow-up (DM path)**: `meta-auto-reply`'s `direct_message` branch invokes `send-facebook-message-reply`, which on main is draft-only (requires `draft_id`, 400s otherwise) → autonomous FB/IG DM auto-replies still fail+release the same way. Wire it to a conversation-resolved `send-meta-dm` call (or add an autonomous mode) in a follow-up PR. See PR #14 body.
+
 ### 5f. ZAI API endpoint fix (2026-09-01)
 
 - **API key, not coding plan**: the ZAI key is a standard API key. The coding-plan endpoint (`api.z.ai/api/coding/paas/v4`) returns 429; the standard endpoint (`api.z.ai/api/paas/v4`) returns 200.
