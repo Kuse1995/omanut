@@ -160,3 +160,10 @@
 - **Natural tone**: SYSTEM_PROMPT rewritten (conversational, no "Welcome to...", max 1 question).
 - **meta-auto-reply cron**: migration `20260901000000_schedule_meta_auto_reply.sql` schedules it every 30s via pg_cron (net.http_post). FB/IG DMs + comments now auto-answered for harness_mode=on companies.
 - **Farm**: harness restarted, `/health` shows `provider: glm, model: glm-5.3-flash`. Test suite 33/33.
+
+### 5f. ZAI API endpoint fix (2026-09-01)
+
+- **API key, not coding plan**: the ZAI key is a standard API key. The coding-plan endpoint (`api.z.ai/api/coding/paas/v4`) returns 429; the standard endpoint (`api.z.ai/api/paas/v4`) returns 200.
+- **Fixed**: farm harness `ZHIPU_BASE_URL=https://api.z.ai/api/paas/v4` — live, verified turn works.
+- **PR #12 merged**: meta-auto-reply 30s cron schedule is on main (needs migration run + deploy).
+- GLM-5.3-Flash live on the harness with natural WhatsApp formatting (verified: "Hey! Yes, we've got a nice range...").
