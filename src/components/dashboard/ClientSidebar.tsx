@@ -15,7 +15,8 @@ import {
   Info,
   Plug,
   Inbox as InboxIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Sparkles
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Setup", href: "/setup", icon: Plug },
   { name: "Inbox", href: "/inbox", icon: InboxIcon },
+  { name: "AI Agent", href: "/agent", icon: Sparkles },
   { name: "Media & Images", href: "/media", icon: ImageIcon },
   { name: "Conversations", href: "/conversations", icon: MessageSquare },
   { name: "Reservations", href: "/reservations", icon: Calendar },
