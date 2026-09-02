@@ -62,7 +62,7 @@ serve(async (req) => {
         // Company + harness gate
         const { data: company } = await supabase
           .from("companies")
-          .select("id, name, metadata, whatsapp_number")
+          .select("id, name, metadata, voice_style, hours, services, quick_reference_info")
           .eq("id", row.company_id)
           .maybeSingle();
         const mode = String(company?.metadata?.harness_mode || "off").toLowerCase();
@@ -81,11 +81,27 @@ serve(async (req) => {
           continue;
         }
 
-        // Harness reply (chat mode — but for Meta we gate on company 'on')
+        // Harness reply — with real context: company facts + post + thread history
+        let systemPrompt = "You are the friendly social media assistant for " + (company?.name || "this business") + ". Reply to the customer on Facebook/Instagram in the brand voice. 1-3 short lines. Never invent prices or claims.";
+        let userPrompt = text;
+        if (row.channel === "public_comment") {
+          const ctx = await buildCommentContext(supabase, payload);
+          const facts = [
+            company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
+            company?.hours ? "BUSINESS HOURS: " + company.hours : "",
+            company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + company.services : "",
+            company?.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
+          ].filter(Boolean).join("\n");
+          systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
+            + (facts ? facts + "\n\n" : "")
+            + (ctx ? ctx + "\n\n" : "")
+            + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Ground the reply in the POST and the facts above; only quote prices/claims that appear in them, never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
+          userPrompt = "Their comment: \"" + text + "\"";
+        }
         const harnessResult = await harnessChatWithFallback(
           [
-            { role: "system", content: "You are the friendly social media assistant for " + (company?.name || "this business") + ". Reply to the customer on Facebook/Instagram in the brand voice. 1-3 short lines. Never invent prices or claims." },
-            { role: "user", content: text },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           [],
           { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
@@ -146,3 +162,55 @@ serve(async (req) => {
     return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 500, headers: corsHeaders });
   }
 });
+
+// Context for public comment replies: the post they're commenting on, the
+// parent comment (when replying to a reply), and the person's recent comments
+// on that post — so the AI answers WITH the conversation, not from thin air.
+// Every part is optional; a failure here degrades to the bare comment text.
+async function buildCommentContext(supabase: any, payload: any): Promise<string> {
+  const parts: string[] = [];
+  try {
+    if (payload.page_id && payload.post_id) {
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("access_token")
+        .eq("page_id", payload.page_id)
+        .maybeSingle();
+      if (cred?.access_token) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6000);
+        const res = await fetch(
+          "https://graph.facebook.com/v21.0/" + payload.post_id + "?fields=message&access_token=" + encodeURIComponent(cred.access_token),
+          { signal: ctrl.signal }
+        );
+        clearTimeout(timer);
+        const j: any = await res.json().catch(() => ({}));
+        if (j?.message) parts.push("THE POST THEY ARE COMMENTING ON:\n\"" + String(j.message).slice(0, 800) + "\"");
+      }
+    }
+  } catch { /* post context is optional */ }
+  try {
+    if (payload.parent_comment_id) {
+      const { data: parent } = await supabase
+        .from("facebook_comments")
+        .select("comment_text, commenter_name")
+        .eq("comment_id", payload.parent_comment_id)
+        .maybeSingle();
+      if (parent?.comment_text) parts.push("THEY ARE REPLYING TO THIS COMMENT by " + (parent.commenter_name || "someone") + ":\n\"" + String(parent.comment_text).slice(0, 400) + "\"");
+    }
+  } catch { /* optional */ }
+  try {
+    if (payload.post_id && payload.commenter_id) {
+      const { data: prior } = await supabase
+        .from("facebook_comments")
+        .select("comment_text, created_at")
+        .eq("post_id", payload.post_id)
+        .eq("commenter_id", payload.commenter_id)
+        .order("created_at", { ascending: false })
+        .limit(6);
+      const items = (prior || []).filter((c: any) => c.comment_text).slice(0, 5);
+      if (items.length) parts.push("THIS PERSON'S RECENT COMMENTS ON THIS POST (newest first):\n" + items.map((c: any, i: number) => (i + 1) + ". \"" + String(c.comment_text).slice(0, 200) + "\"").join("\n"));
+    }
+  } catch { /* optional */ }
+  return parts.join("\n\n");
+}
