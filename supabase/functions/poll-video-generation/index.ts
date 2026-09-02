@@ -49,6 +49,8 @@ Deno.serve(async (req) => {
 
         if (provider === 'minimax') {
           await handleMinimaxPoll(supabase, job);
+        } else if (provider === 'seedance') {
+          await handleSeedancePoll(supabase, job);
         } else {
           await handleVeoPoll(supabase, job);
         }
@@ -154,6 +156,67 @@ async function handleMinimaxPoll(supabase: any, job: any) {
     await uploadAndComplete(supabase, job, videoBytes, mimeType);
   } catch (dlErr: any) {
     console.error(`[POLL-VIDEO] MiniMax download error for job ${job.id}:`, dlErr);
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: `Download failed: ${dlErr.message}`, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video generated but download failed: ${dlErr.message}`);
+  }
+}
+
+// ============ SEEDANCE (fal.ai queue) POLLING ============
+async function handleSeedancePoll(supabase: any, job: any) {
+  const FAL_KEY = Deno.env.get('FAL_KEY');
+  if (!FAL_KEY) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: 'FAL_KEY not configured', updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, '❌ Video generation failed: FAL_KEY not configured.');
+    return;
+  }
+
+  const res = await fetch(`https://queue.fal.run/requests/${job.operation_name}/status`, {
+    headers: { Authorization: `Key ${FAL_KEY}` },
+  });
+  if (!res.ok) {
+    console.error(`[POLL-VIDEO] fal status error for job ${job.id}: ${res.status}`);
+    return; // transient — next poll retries
+  }
+  const data: any = await res.json();
+
+  if (data.status !== 'COMPLETED') {
+    if (['failed', 'nsfw', 'canceled'].includes(data.status)) {
+      const reason = data.error || data.status;
+      await supabase
+        .from('video_generation_jobs')
+        .update({ status: 'failed', error_message: `fal: ${reason}`, updated_at: new Date().toISOString() })
+        .eq('id', job.id);
+      await sendWhatsAppMessage(job, `❌ Video generation failed: ${reason}`);
+      return;
+    }
+    console.log(`[POLL-VIDEO] Seedance job ${job.id} still ${data.status} (poll ${job.poll_count + 1})`);
+    return;
+  }
+
+  const videoUrl: string | undefined = data.response?.videos?.[0]?.url || data.response?.video?.url;
+  if (!videoUrl) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: 'fal completed but no video url returned', updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, '❌ Video completed but no download link was provided.');
+    return;
+  }
+
+  try {
+    const dlRes = await fetch(videoUrl);
+    if (!dlRes.ok) throw new Error(`Download failed: ${dlRes.status}`);
+    const videoBytes = new Uint8Array(await dlRes.arrayBuffer());
+    const mimeType = dlRes.headers.get('content-type') || 'video/mp4';
+    console.log(`[POLL-VIDEO] Downloaded Seedance video for job ${job.id}: bytes=${videoBytes.byteLength}`);
+    await uploadAndComplete(supabase, job, videoBytes, mimeType);
+  } catch (dlErr: any) {
     await supabase
       .from('video_generation_jobs')
       .update({ status: 'failed', error_message: `Download failed: ${dlErr.message}`, updated_at: new Date().toISOString() })
