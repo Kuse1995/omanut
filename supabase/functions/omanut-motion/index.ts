@@ -1,22 +1,20 @@
-// Omanut Motion — brand-grounded AI video generation for tenants.
+// Omanut Motion v2 — multi-sub-agent video pipeline ("our own Higgsfield").
+//
+// Workflow adapted from NatiDvir/video-skills (MIT) — the Script Writer /
+// Director / Generator role structure demonstrated with Higgsfield MCP:
+//   Stage 1  MARKETING (Script Writer): brief + company facts -> style lock,
+//            2-second hook, beat timeline, CTA.
+//   Stage 2  CREATIVE DIRECTOR: beat plan -> shot-by-shot plan (camera,
+//            lighting, action) with a production-ready Seedance prompt per
+//            shot, and a designated HERO shot.
+//   Stage 3  GENERATOR: renders the hero shot via fal.ai (Seedance v1 Pro,
+//            queue API); the full shot plan is stored on the job so extra
+//            shots can be rendered on approval (preview -> hero).
 //
 // POST { company_id, brief, aspect_ratio?, resolution?, duration?, input_image_url? }
+// Auth: Authorization: Bearer <CRON_SECRET> when CRON_SECRET is set.
 //
-// Flow (the "own Higgsfield" play — models called directly, no middleman):
-//   1. Harness (GLM-5.3-Flash) turns the marketer's brief into ONE cinematic
-//      Seedance prompt, grounded in company facts (services, voice).
-//   2. Submits to fal.ai's queue API (Seedance v1 Pro; text-to-video or
-//      image-to-video with a brand product shot).
-//   3. Inserts a video_generation_jobs row (provider='seedance',
-//      operation_name = fal request_id) so poll-video-generation owns the
-//      lifecycle: poll -> download -> storage -> WhatsApp the boss.
-//
-// Auth: requires Authorization: Bearer <CRON_SECRET> when CRON_SECRET is set
-// (same pattern as the other watchdogs); callers are platform-internal.
-//
-// Cost note: Seedance v1 Pro on fal is ~$0.62 per 1080p 5s video, ~$0.28 at
-// 720p. Default here is 720p (draft quality) — spend lives in the tenant's
-// existing credit accounting.
+// Cost: Seedance v1 Pro ~$0.62/1080p-5s, ~$0.28/720p-5s, ~$0.12/480p-5s.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -30,6 +28,18 @@ const corsHeaders = {
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const FAL_TEXT_MODEL = "fal-ai/bytedance/seedance/v1/pro/text-to-video";
 const FAL_IMAGE_MODEL = "fal-ai/bytedance/seedance/v1/pro/image-to-video";
+
+function extractJson(text: string): any | null {
+  if (!text) return null;
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  try { return JSON.parse(cleaned); } catch { /* try braces */ }
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
+  }
+  return null;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -66,14 +76,13 @@ serve(async (req) => {
 
     const { data: company } = await supabase
       .from("companies")
-      .select("id, name, metadata, voice_style, services, whatsapp_number")
+      .select("id, name, metadata, voice_style, services, quick_reference_info, whatsapp_number")
       .eq("id", company_id)
       .maybeSingle();
     if (!company) {
       return new Response(JSON.stringify({ error: "Company not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Boss phone (NOT NULL on the job row): boss list first, WhatsApp number fallback.
     let bossPhone = "";
     const { data: bossRow } = await supabase
       .from("company_boss_phones")
@@ -90,31 +99,61 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "No boss phone or WhatsApp number on file for this company" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // 1) Harness writes the cinematic prompt (grounded in company facts).
     const facts = [
       company.voice_style ? "BRAND VOICE: " + company.voice_style : "",
       company.services ? "PRODUCTS/SERVICES: " + company.services : "",
+      company.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
     ].filter(Boolean).join("\n");
-    const harnessResult = await harnessChatWithFallback(
+
+    // ── STAGE 1: MARKETING (Script Writer) ─────────────────────────────
+    const scriptSystem = [
+      "You are the Marketing Strategist for " + (company.name || "a business") + ".",
+      facts ? facts : "",
+      "Convert the brief into a video script plan. The FIRST 2 SECONDS must hook (a bold visual statement, a surprising motion, or the product as hero).",
+      'Output STRICT JSON only — no markdown, no code fences: {"style": "<one of: motion_design | ecommerce | cinematic | social_hook | product_360>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>"}.',
+      "2-4 beats. Each beat is one visual moment that fits a 5-second shot.",
+    ].filter(Boolean).join("\n");
+    const scriptRes = await harnessChatWithFallback(
+      [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }],
+      [],
+      { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
+    );
+    const script = extractJson(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "") || {
+      style: "cinematic",
+      hook: String(brief),
+      beats: [String(brief)],
+      cta: "",
+    };
+
+    // ── STAGE 2: CREATIVE DIRECTOR ─────────────────────────────────────
+    const directorSystem = [
+      "You are the Creative Director and cinematographer. Convert the marketing plan into a shot-by-shot plan for Seedance (5-second shots).",
+      'Output STRICT JSON only — no markdown, no code fences: {"shots": [{"n": 1, "camera": "<camera movement, e.g. slow push-in / orbit / whip pan>", "lighting": "<lighting setup>", "action": "<what happens>", "seedance_prompt": "<ONE paragraph: subject + action + camera movement + lighting + style. No text overlays, no captions, no on-screen words.>"}], "hero_shot": 1}.',
+      "2-4 shots. Each seedance_prompt must be self-contained (the model sees only that prompt). Shot n=hero_shot is the strongest single frame of the whole ad.",
+    ].join("\n");
+    const directorRes = await harnessChatWithFallback(
       [
-        {
-          role: "system",
-          content: "You convert a marketer's brief into ONE self-contained cinematic video-generation prompt for the Seedance text-to-video model. Output ONLY the prompt — a single vivid paragraph describing subject, action, camera movement, lighting, setting and mood. No markdown, no lists, no preamble, no quotes around it. If the brief mentions a product, feature it as the hero. Never include text overlays or spoken words."
-            + (facts ? "\n" + facts : ""),
-        },
-        { role: "user", content: String(brief) },
+        { role: "system", content: directorSystem },
+        { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) + (input_image_url ? "\n\nA reference product image will be attached as the first frame input." : "") },
       ],
       [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
-    const falPrompt = harnessResult.ok && harnessResult.message?.content
-      ? String(harnessResult.message.content).trim().slice(0, 1500)
-      : String(brief).trim();
+    const plan = extractJson(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    const shots: any[] = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : [{
+      n: 1,
+      camera: "slow push-in",
+      lighting: "clean natural light",
+      action: String(brief),
+      seedance_prompt: String(brief).trim(),
+    }];
+    const heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
+    const heroShot = shots[heroIdx];
 
-    // 2) Submit to the fal.ai queue.
+    // ── STAGE 3: GENERATOR (fal.ai queue — hero shot first) ────────────
     const model = input_image_url ? FAL_IMAGE_MODEL : FAL_TEXT_MODEL;
     const submitBody: Record<string, unknown> = {
-      prompt: falPrompt,
+      prompt: String(heroShot.seedance_prompt || brief).slice(0, 1500),
       aspect_ratio,
       resolution,
       duration,
@@ -123,10 +162,7 @@ serve(async (req) => {
 
     const submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
       method: "POST",
-      headers: {
-        Authorization: "Key " + FAL_KEY,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: "Key " + FAL_KEY, "Content-Type": "application/json" },
       body: JSON.stringify(submitBody),
     });
     const submitJson: any = await submitRes.json().catch(() => ({}));
@@ -135,14 +171,13 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "fal submit failed", details: submitJson }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // 3) Job row — poll-video-generation owns the lifecycle from here.
     const { data: job, error: jobErr } = await supabase
       .from("video_generation_jobs")
       .insert({
         company_id,
         operation_name: submitJson.request_id,
         status: "pending",
-        prompt: falPrompt,
+        prompt: submitBody.prompt,
         aspect_ratio,
         boss_phone: bossPhone,
         video_provider: "seedance",
@@ -154,6 +189,10 @@ serve(async (req) => {
           fal_status_url: submitJson.status_url ?? null,
           resolution,
           duration,
+          style: script.style ?? null,
+          shot_plan: shots,
+          hero_shot: heroIdx + 1,
+          marketing_plan: script,
         },
       })
       .select("id")
@@ -162,7 +201,6 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Job insert failed", details: jobErr?.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Kick the first poll immediately (cron keeps it going afterwards).
     await supabase.functions.invoke("poll-video-generation", { body: {} });
 
     return new Response(
@@ -170,7 +208,12 @@ serve(async (req) => {
         job_id: job.id,
         fal_request_id: submitJson.request_id,
         provider: "seedance",
-        prompt: falPrompt,
+        style: script.style ?? null,
+        hero_shot: heroIdx + 1,
+        shots_planned: shots.length,
+        shot_plan: shots,
+        hook: script.hook ?? null,
+        cta: script.cta ?? null,
         status: "pending",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
