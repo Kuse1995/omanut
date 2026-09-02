@@ -86,17 +86,20 @@ serve(async (req) => {
         let userPrompt = text;
         if (row.channel === "public_comment") {
           const ctx = await buildCommentContext(supabase, payload);
-          const facts = [
-            company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
-            company?.hours ? "BUSINESS HOURS: " + company.hours : "",
-            company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + company.services : "",
-            company?.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
-          ].filter(Boolean).join("\n");
+          const facts = buildFacts(company);
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
             + (facts ? facts + "\n\n" : "")
             + (ctx ? ctx + "\n\n" : "")
             + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Ground the reply in the POST and the facts above; only quote prices/claims that appear in them, never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
           userPrompt = "Their comment: \"" + text + "\"";
+        } else if (row.channel === "direct_message") {
+          const history = await buildDmContext(supabase, payload, text);
+          const facts = buildFacts(company);
+          systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", chatting one-on-one with a customer in the company's Facebook/Instagram DMs.\n"
+            + (facts ? facts + "\n\n" : "")
+            + (history ? history + "\n\n" : "")
+            + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing.";
+          userPrompt = text;
         }
         const harnessResult = await harnessChatWithFallback(
           [
@@ -119,16 +122,21 @@ serve(async (req) => {
 
         // Send via existing functions (persist + Meta send; is-live-gate on their side)
         if (row.channel === "direct_message") {
-          await supabase.functions.invoke("send-facebook-message-reply", {
-            body: {
-              company_id: row.company_id,
-              message_id: payload.message_id,
-              sender_id: payload.sender_id,
-              page_id: payload.page_id,
-              reply_text: reply,
-              source_type: "auto",
-            },
+          // Autonomous Meta DM reply. meta-webhook v2 creates the conversation
+          // (fbdm:/igdm: phone) and persists each inbound turn; send-meta-dm
+          // sends via Graph /me/messages and persists the outbound turn.
+          const conversationId = payload.conversation_id;
+          if (!conversationId) {
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null }).eq("id", row.id);
+            results.push({ event_id: row.id, skipped: "no_conversation" });
+            continue;
+          }
+          const dmRes: any = await supabase.functions.invoke("send-meta-dm", {
+            body: { conversationId, text: reply, sent_by: "ai_agent" },
           });
+          if (dmRes?.error) {
+            throw new Error("send-meta-dm failed: " + JSON.stringify(dmRes.error).slice(0, 300));
+          }
         } else {
           await supabase.functions.invoke("send-facebook-comment-reply", {
             body: {
@@ -213,4 +221,35 @@ async function buildCommentContext(supabase: any, payload: any): Promise<string>
     }
   } catch { /* optional */ }
   return parts.join("\n\n");
+}
+
+// Company facts block shared by comment + DM prompts (KB grounding for the
+// harness price guard: quoted prices must exist in the input).
+function buildFacts(company: any): string {
+  return [
+    company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
+    company?.hours ? "BUSINESS HOURS: " + company.hours : "",
+    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + company.services : "",
+    company?.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
+  ].filter(Boolean).join("\n");
+}
+
+// Recent conversation turns for DM replies. meta-webhook v2 persists the
+// inbound turn before enqueueing, so drop it from the history (it arrives
+// via userPrompt) and feed the rest as grounding.
+async function buildDmContext(supabase: any, payload: any, currentText: string): Promise<string> {
+  if (!payload.conversation_id) return "";
+  try {
+    const { data: history } = await supabase
+      .from("messages")
+      .select("role, content, created_at")
+      .eq("conversation_id", payload.conversation_id)
+      .order("created_at", { ascending: false })
+      .limit(12);
+    const items = (history || []).filter((m: any) => m.content);
+    if (items.length && items[0].role === "user" && String(items[0].content) === currentText) items.shift();
+    const ordered = items.reverse().slice(-10);
+    if (!ordered.length) return "";
+    return "CONVERSATION SO FAR:\n" + ordered.map((m: any) => (m.role === "user" ? "Customer: " : "You: ") + String(m.content).slice(0, 300)).join("\n");
+  } catch { return ""; }
 }
