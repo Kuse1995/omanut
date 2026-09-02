@@ -41,6 +41,7 @@ const navItems = [
   { id: 'image-gen', icon: Sparkles, label: 'Image Generation' },
   { id: 'media', icon: Image, label: 'Media Library' },
   { id: 'tickets', icon: Ticket, label: 'Support Tickets' },
+  { id: 'ai-agent', icon: Sparkles, label: 'AI Agent' },
   { id: 'workspace', icon: Headset, label: 'Agent Workspace' },
   { id: 'settings', icon: Settings, label: 'Company Settings' },
   { id: 'billing', icon: CreditCard, label: 'Billing & Credits' },
@@ -130,7 +131,7 @@ export const AdminIconSidebar = ({ activeTab, onTabChange, onOpenCommandPalette 
               <Tooltip key={item.id}>
                 <TooltipTrigger asChild>
                   <button
-                    onClick={() => onTabChange(item.id)}
+                    onClick={() => item.id === 'ai-agent' ? navigate('/agent') : onTabChange(item.id)}
                     className={cn(
                       "w-full flex items-center gap-3 px-3 h-10 rounded-lg transition-all text-sm",
                       isActive
