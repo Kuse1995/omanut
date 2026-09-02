@@ -179,3 +179,19 @@
 - **Fixed**: farm harness `ZHIPU_BASE_URL=https://api.z.ai/api/paas/v4` — live, verified turn works.
 - **PR #12 merged**: meta-auto-reply 30s cron schedule is on main (needs migration run + deploy).
 - GLM-5.3-Flash live on the harness with natural WhatsApp formatting (verified: "Hey! Yes, we've got a nice range...").
+
+### 5h. Agents-as-a-Service foundation: Company Brain + full Meta channel coverage (2026-09-02)
+
+PRs **#16, #17, #18** (all merged; need ONE Lovable edge-function deploy of main):
+
+- **#17 meta-webhook v2**: Instagram credential resolution (`page_id` OR `ig_user_id` — IG events were silently dropped before); Instagram comment ingestion (persisted to `facebook_comments`, enqueued as `public_comment` source `meta_comment_ig`); FB+IG DM conversation lifecycle (conversations with `fbdm:<psid>` / `igdm:<igsid>` phones, every inbound turn persisted to `messages`, `conversation_id` in the event payload).
+- **#16 meta-auto-reply DM branch**: autonomous FB/IG DM replies via `send-meta-dm` (conversation-based, Graph `/me/messages`, is-live-gate respected, outbound turn persisted, `sent_by=ai_agent`), grounded in company facts + conversation history. Events without a conversation → `skipped: no_conversation`.
+- **#18 `_shared/company-context.ts` — the Company Brain**: `buildCompanyFacts` (KB grounding; the pricing input that satisfies the harness price guard), `buildCommentContext` (post text via Graph + parent comment + commenter thread), `buildDmContext` (conversation turns). `meta-auto-reply` refactored onto it (−81 duplicated lines). Future adopters: `auto-content-creator`, `generate-reply-draft`.
+
+**Channel state after deploy**: WhatsApp full brain ✅ · FB comments grounded ✅ · FB/IG DMs autonomous + grounded ✅ (NEW) · IG comments ingested + auto-replied ✅ (NEW).
+
+**Test**: DM the Omanut Technologies page "how much is the pro plan?" → DM quotes K799 from the KB within ~30–60s. IG: comment on a linked IG post → reply appears (needs the IG account linked in Meta Integrations).
+
+**AaaS onboarding per tenant** (no code): fill KB (`services`, `quick_reference_info`, `voice_style`) → connect Meta + WhatsApp in Meta Integrations → `harness_mode=on` (per-company kill switch + `harness_pilot_phones` = the pilot→live funnel). Billing tiers already in schema (`credit_usage`, plans).
+
+**Gotcha**: `messaging_type: RESPONSE` in send-meta-dm means Meta's 24h DM window applies — replies only work within 24h of the customer's last message (standard FB rule).
