@@ -16,6 +16,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { buildCompanyFacts, buildCommentContext, buildDmContext } from "../_shared/company-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -171,85 +172,3 @@ serve(async (req) => {
   }
 });
 
-// Context for public comment replies: the post they're commenting on, the
-// parent comment (when replying to a reply), and the person's recent comments
-// on that post — so the AI answers WITH the conversation, not from thin air.
-// Every part is optional; a failure here degrades to the bare comment text.
-async function buildCommentContext(supabase: any, payload: any): Promise<string> {
-  const parts: string[] = [];
-  try {
-    if (payload.page_id && payload.post_id) {
-      const { data: cred } = await supabase
-        .from("meta_credentials")
-        .select("access_token")
-        .eq("page_id", payload.page_id)
-        .maybeSingle();
-      if (cred?.access_token) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 6000);
-        const res = await fetch(
-          "https://graph.facebook.com/v21.0/" + payload.post_id + "?fields=message&access_token=" + encodeURIComponent(cred.access_token),
-          { signal: ctrl.signal }
-        );
-        clearTimeout(timer);
-        const j: any = await res.json().catch(() => ({}));
-        if (j?.message) parts.push("THE POST THEY ARE COMMENTING ON:\n\"" + String(j.message).slice(0, 800) + "\"");
-      }
-    }
-  } catch { /* post context is optional */ }
-  try {
-    if (payload.parent_comment_id) {
-      const { data: parent } = await supabase
-        .from("facebook_comments")
-        .select("comment_text, commenter_name")
-        .eq("comment_id", payload.parent_comment_id)
-        .maybeSingle();
-      if (parent?.comment_text) parts.push("THEY ARE REPLYING TO THIS COMMENT by " + (parent.commenter_name || "someone") + ":\n\"" + String(parent.comment_text).slice(0, 400) + "\"");
-    }
-  } catch { /* optional */ }
-  try {
-    if (payload.post_id && payload.commenter_id) {
-      const { data: prior } = await supabase
-        .from("facebook_comments")
-        .select("comment_text, created_at")
-        .eq("post_id", payload.post_id)
-        .eq("commenter_id", payload.commenter_id)
-        .order("created_at", { ascending: false })
-        .limit(6);
-      const items = (prior || []).filter((c: any) => c.comment_text).slice(0, 5);
-      if (items.length) parts.push("THIS PERSON'S RECENT COMMENTS ON THIS POST (newest first):\n" + items.map((c: any, i: number) => (i + 1) + ". \"" + String(c.comment_text).slice(0, 200) + "\"").join("\n"));
-    }
-  } catch { /* optional */ }
-  return parts.join("\n\n");
-}
-
-// Company facts block shared by comment + DM prompts (KB grounding for the
-// harness price guard: quoted prices must exist in the input).
-function buildFacts(company: any): string {
-  return [
-    company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
-    company?.hours ? "BUSINESS HOURS: " + company.hours : "",
-    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + company.services : "",
-    company?.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
-  ].filter(Boolean).join("\n");
-}
-
-// Recent conversation turns for DM replies. meta-webhook v2 persists the
-// inbound turn before enqueueing, so drop it from the history (it arrives
-// via userPrompt) and feed the rest as grounding.
-async function buildDmContext(supabase: any, payload: any, currentText: string): Promise<string> {
-  if (!payload.conversation_id) return "";
-  try {
-    const { data: history } = await supabase
-      .from("messages")
-      .select("role, content, created_at")
-      .eq("conversation_id", payload.conversation_id)
-      .order("created_at", { ascending: false })
-      .limit(12);
-    const items = (history || []).filter((m: any) => m.content);
-    if (items.length && items[0].role === "user" && String(items[0].content) === currentText) items.shift();
-    const ordered = items.reverse().slice(-10);
-    if (!ordered.length) return "";
-    return "CONVERSATION SO FAR:\n" + ordered.map((m: any) => (m.role === "user" ? "Customer: " : "You: ") + String(m.content).slice(0, 300)).join("\n");
-  } catch { return ""; }
-}
