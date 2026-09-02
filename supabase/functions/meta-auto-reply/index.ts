@@ -87,7 +87,7 @@ serve(async (req) => {
         let userPrompt = text;
         if (row.channel === "public_comment") {
           const ctx = await buildCommentContext(supabase, payload);
-          const facts = buildFacts(company);
+          const facts = buildCompanyFacts(company);
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
             + (facts ? facts + "\n\n" : "")
             + (ctx ? ctx + "\n\n" : "")
@@ -95,7 +95,7 @@ serve(async (req) => {
           userPrompt = "Their comment: \"" + text + "\"";
         } else if (row.channel === "direct_message") {
           const history = await buildDmContext(supabase, payload, text);
-          const facts = buildFacts(company);
+          const facts = buildCompanyFacts(company);
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", chatting one-on-one with a customer in the company's Facebook/Instagram DMs.\n"
             + (facts ? facts + "\n\n" : "")
             + (history ? history + "\n\n" : "")
