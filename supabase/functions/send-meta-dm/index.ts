@@ -19,7 +19,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { conversationId, text } = await req.json();
+    const { conversationId, text, sent_by } = await req.json();
 
     if (!conversationId || !text) {
       return new Response(JSON.stringify({ error: 'conversationId and text are required' }), {
@@ -137,7 +137,7 @@ serve(async (req) => {
       message_metadata: {
         source: isInstagramDM ? 'instagram_dm' : 'facebook_messenger',
         message_id: result.message_id,
-        sent_by: 'human_agent',
+        sent_by: sent_by || 'human_agent',
       },
     });
 
