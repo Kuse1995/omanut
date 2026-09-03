@@ -339,7 +339,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // without an Omanut admin touching the DB. Sends a signed ping to verify
   // reachability before persisting.
   server.tool("register_webhook", {
-    description: "Register or rotate the AI Agent webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.AI Agent_webhook_url, AI Agent_mode, and AI Agent_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
+    description: "Register or rotate the AI Agent webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
     inputSchema: z.object({
       webhook_url: z.string().url().describe("Public HTTPS URL AI Agent exposes (e.g. https://abc.trycloudflare.com/webhook)."),
       webhook_token: z.string().optional().describe("Optional bearer/api token enforced by the AI Agent gateway (gateway.auth.token in AI Agent.json). Sent on every dispatch as both `Authorization: Bearer <token>` and `X-Api-Key: <token>`. Omit to keep the existing token; pass an empty string to clear."),
@@ -365,23 +365,23 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       // Fetch current config for sensible defaults on merge
       const { data: current, error: cErr } = await supabase
         .from("companies")
-        .select("AI Agent_mode, AI Agent_owns, AI Agent_webhook_token")
+        .select("openclaw_mode, openclaw_owns, openclaw_webhook_token")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
 
-      const nextMode = params.mode ?? current?.AI Agent_mode ?? "assist";
-      const nextOwns = { ...(current?.AI Agent_owns ?? {}), ...(params.owns ?? {}) };
+      const nextMode = params.mode ?? current?.openclaw_mode ?? "assist";
+      const nextOwns = { ...(current?.openclaw_owns ?? {}), ...(params.owns ?? {}) };
       // webhook_token: undefined = keep, "" = clear, anything else = set
       const nextToken: string | null = params.webhook_token === undefined
-        ? (current?.AI Agent_webhook_token ?? null)
+        ? (current?.openclaw_webhook_token ?? null)
         : (params.webhook_token === "" ? null : params.webhook_token);
       const gatewayToken = nextToken
-        || Deno.env.get("AI Agent_GATEWAY_TOKEN")
+        || Deno.env.get("OPENCLAW_GATEWAY_TOKEN")
         || "";
 
       // Send signed ping
-      const secret = Deno.env.get("AI Agent_WEBHOOK_SECRET") ?? "";
+      const secret = Deno.env.get("OPENCLAW_WEBHOOK_SECRET") ?? "";
       const bodyString = JSON.stringify({
         event_id: "ping",
         company_id: companyId,
@@ -457,10 +457,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const { error: uErr } = await supabase
         .from("companies")
         .update({
-          AI Agent_webhook_url: webhookUrl,
-          AI Agent_webhook_token: nextToken,
-          AI Agent_mode: nextMode,
-          AI Agent_owns: nextOwns,
+          openclaw_webhook_url: webhookUrl,
+          openclaw_webhook_token: nextToken,
+          openclaw_mode: nextMode,
+          openclaw_owns: nextOwns,
           agent_last_heartbeat: new Date().toISOString(),
         })
         .eq("id", companyId);
@@ -490,8 +490,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const { error } = await supabase
         .from("companies")
         .update({
-          AI Agent_webhook_url: null,
-          AI Agent_mode: "off",
+          openclaw_webhook_url: null,
+          openclaw_mode: "off",
         })
         .eq("id", companyId);
       if (error) throw error;
@@ -512,7 +512,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const companyId = await resolveCompanyId(params?.company_id);
       const { data: company, error: cErr } = await supabase
         .from("companies")
-        .select("AI Agent_webhook_url, AI Agent_mode, AI Agent_owns, agent_last_heartbeat")
+        .select("openclaw_webhook_url, openclaw_mode, openclaw_owns, agent_last_heartbeat")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
@@ -524,9 +524,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .limit(5);
       return { content: [{ type: "text" as const, text: JSON.stringify({
         company_id: companyId,
-        webhook_url: company?.AI Agent_webhook_url ?? null,
-        mode: company?.AI Agent_mode ?? null,
-        owns: company?.AI Agent_owns ?? {},
+        webhook_url: company?.openclaw_webhook_url ?? null,
+        mode: company?.openclaw_mode ?? null,
+        owns: company?.openclaw_owns ?? {},
         last_heartbeat: company?.agent_last_heartbeat ?? null,
         recent_events: events ?? [],
       }, null, 2) }] };
@@ -2249,7 +2249,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // NOTE: These tools read/write `inbound_events` â€” the SAME queue that
   // whatsapp-messages enqueues into and that AI Agent-pull / AI Agent-worker
-  // drain. The legacy `AI Agent_events` table is no longer the source of truth.
+  // drain. The legacy `openclaw_events` table is no longer the source of truth.
   server.tool("list_pending_events", {
     description: "List inbound customer events that are still pending (not yet handled). Each event is returned as a FULL ENVELOPE containing the company's knowledge base, voice style, custom instructions, payment numbers, hours, services, recent message history, BMS snapshot, inbound text/media, and reply guidance. Ground every reply in this envelope â€” do NOT rely on general model knowledge. Reads from the shared inbound_events queue.",
     inputSchema: z.object({

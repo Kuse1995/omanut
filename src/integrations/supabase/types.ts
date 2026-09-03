@@ -889,7 +889,9 @@ export type Database = {
       companies: {
         Row: {
           admin_last_active: string | null
+          agent_last_heartbeat: string | null
           agent_routing_enabled: boolean | null
+          agent_takeover_enabled: boolean
           booking_buffer_minutes: number | null
           boss_phone: string | null
           branches: string | null
@@ -914,10 +916,8 @@ export type Database = {
           openclaw_consecutive_failures: number
           openclaw_drafter: boolean
           openclaw_last_failure_at: string | null
-          openclaw_last_heartbeat: string | null
           openclaw_mode: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns: Json
-          openclaw_takeover_enabled: boolean
           openclaw_webhook_token: string | null
           openclaw_webhook_url: string | null
           payment_instructions: string | null
@@ -942,7 +942,9 @@ export type Database = {
         }
         Insert: {
           admin_last_active?: string | null
+          agent_last_heartbeat?: string | null
           agent_routing_enabled?: boolean | null
+          agent_takeover_enabled?: boolean
           booking_buffer_minutes?: number | null
           boss_phone?: string | null
           branches?: string | null
@@ -967,10 +969,8 @@ export type Database = {
           openclaw_consecutive_failures?: number
           openclaw_drafter?: boolean
           openclaw_last_failure_at?: string | null
-          openclaw_last_heartbeat?: string | null
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
-          openclaw_takeover_enabled?: boolean
           openclaw_webhook_token?: string | null
           openclaw_webhook_url?: string | null
           payment_instructions?: string | null
@@ -995,7 +995,9 @@ export type Database = {
         }
         Update: {
           admin_last_active?: string | null
+          agent_last_heartbeat?: string | null
           agent_routing_enabled?: boolean | null
+          agent_takeover_enabled?: boolean
           booking_buffer_minutes?: number | null
           boss_phone?: string | null
           branches?: string | null
@@ -1020,10 +1022,8 @@ export type Database = {
           openclaw_consecutive_failures?: number
           openclaw_drafter?: boolean
           openclaw_last_failure_at?: string | null
-          openclaw_last_heartbeat?: string | null
           openclaw_mode?: Database["public"]["Enums"]["openclaw_mode_t"]
           openclaw_owns?: Json
-          openclaw_takeover_enabled?: boolean
           openclaw_webhook_token?: string | null
           openclaw_webhook_url?: string | null
           payment_instructions?: string | null
