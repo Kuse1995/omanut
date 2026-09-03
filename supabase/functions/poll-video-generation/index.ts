@@ -176,7 +176,20 @@ async function handleSeedancePoll(supabase: any, job: any) {
     return;
   }
 
-  const res = await fetch(`https://queue.fal.run/requests/${job.operation_name}/status`, {
+  // fal queue status: use the canonical status_url returned at submit time
+  // (stored in scheduled_post_data.fal_status_url) — it carries the app's own
+  // path shape. fal queue endpoints reject GETs on hand-built generic paths.
+  const stored: any = job.scheduled_post_data || {};
+  const statusUrl: string | undefined = stored.fal_status_url;
+  if (!statusUrl) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: 'No fal status URL stored for this job', updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    return;
+  }
+
+  const res = await fetch(statusUrl, {
     headers: { Authorization: `Key ${FAL_KEY}` },
   });
   if (!res.ok) {
@@ -199,11 +212,33 @@ async function handleSeedancePoll(supabase: any, job: any) {
     return;
   }
 
-  const videoUrl: string | undefined = data.response?.videos?.[0]?.url || data.response?.video?.url;
+  // COMPLETED: the status response carries response_url — the result lives
+  // there (video.url), not in the status body.
+  const responseUrl: string | undefined = data.response_url || stored.fal_response_url;
+  if (!responseUrl) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: 'fal completed but no response_url returned', updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, '❌ Video completed but no result link was provided.');
+    return;
+  }
+
+  const resultRes = await fetch(responseUrl, { headers: { Authorization: `Key ${FAL_KEY}` } });
+  if (!resultRes.ok) {
+    await supabase
+      .from('video_generation_jobs')
+      .update({ status: 'failed', error_message: `fal result fetch failed: ${resultRes.status}`, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
+    await sendWhatsAppMessage(job, `❌ Video completed but the result could not be fetched (${resultRes.status}).`);
+    return;
+  }
+  const resultJson: any = await resultRes.json();
+  const videoUrl: string | undefined = resultJson?.video?.url || resultJson?.videos?.[0]?.url;
   if (!videoUrl) {
     await supabase
       .from('video_generation_jobs')
-      .update({ status: 'failed', error_message: 'fal completed but no video url returned', updated_at: new Date().toISOString() })
+      .update({ status: 'failed', error_message: 'fal result has no video url', updated_at: new Date().toISOString() })
       .eq('id', job.id);
     await sendWhatsAppMessage(job, '❌ Video completed but no download link was provided.');
     return;
