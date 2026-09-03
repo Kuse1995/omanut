@@ -94,6 +94,10 @@ serve(async (req) => {
     );
     let reply = result.ok && result.message?.content ? String(result.message.content).trim() : "I couldn't process that just now — please try again.";
     let action: any = { type: null };
+    // Diagnostic: surface WHY the harness fell back (timeout / rate limit /
+    // not_configured) so failures are visible in the client's network tab
+    // instead of a silent generic error.
+    const harness_reason = result.ok ? null : (result.reason || "harness_error");
 
     // Route tool escapes.
     if (reply.toUpperCase().startsWith("VIDEO:")) {
@@ -142,7 +146,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ reply, action }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ reply, action, harness_reason }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[AGENT-CONSOLE] fatal:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

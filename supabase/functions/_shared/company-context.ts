@@ -16,13 +16,14 @@ export interface CompanyFacts {
   quick_reference_info?: string | null;
 }
 
-// Authoritative company facts block (KB grounding).
+// Authoritative company facts block (KB grounding). Long fields are capped
+// so the harness call stays fast (client timeout is 12s by default).
 export function buildCompanyFacts(company: CompanyFacts | null | undefined): string {
   return [
     company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
     company?.hours ? "BUSINESS HOURS: " + company.hours : "",
-    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + company.services : "",
-    company?.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
+    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + String(company.services).slice(0, 1500) : "",
+    company?.quick_reference_info ? "QUICK FACTS: " + String(company.quick_reference_info).slice(0, 1200) : "",
   ].filter(Boolean).join("\n");
 }
 
