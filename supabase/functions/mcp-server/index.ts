@@ -1,9 +1,10 @@
-﻿import { Hono } from "hono";
+import { Hono } from "hono";
 import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "zod";
 import zodToJsonSchema from "zod-to-json-schema";
 import { buildEnvelope } from "../_shared/agent-envelope.ts";
+import { searchKnowledgeBase } from "../_shared/company-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -862,41 +863,19 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const q = String(params.query ?? "").trim();
       if (!q) return { content: [{ type: "text" as const, text: JSON.stringify({ error: "missing_query" }) }] };
 
-      const [{ data: company }, { data: docs }, { data: bmsRow }] = await Promise.all([
-        supabase.from("companies").select("name, quick_reference_info, payment_instructions, services, hours, branches, service_locations, currency_prefix, business_type").eq("id", companyId).maybeSingle(),
-        supabase.from("company_documents").select("filename, parsed_content").eq("company_id", companyId).limit(20),
-        supabase.from("bms_connections").select("last_kb_text").eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+      // Delegated to the shared Company Brain implementation (single source of
+      // truth — the same search grounds agent-console and meta-auto-reply).
+      const limit = Math.max(1, Math.min(Number(params?.limit) || 8, 20));
+      const [matches, companyRow] = await Promise.all([
+        searchKnowledgeBase(supabase, companyId, q, limit),
+        supabase.from("companies").select("name").eq("id", companyId).maybeSingle(),
       ]);
 
-      const terms = q.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-      const matches: Array<{ source: string; snippet: string; score: number }> = [];
-      const scan = (source: string, text: string | null | undefined) => {
-        if (!text) return;
-        const paragraphs = text.split(/\n{2,}|\r\n\r\n/);
-        for (const p of paragraphs) {
-          const lower = p.toLowerCase();
-          let score = 0;
-          for (const t of terms) if (lower.includes(t)) score++;
-          if (score > 0) matches.push({ source, snippet: p.trim().slice(0, 800), score });
-        }
-      };
-
-      scan("quick_reference_info", company?.quick_reference_info);
-      scan("payment_instructions", company?.payment_instructions);
-      scan("services", company?.services);
-      scan("hours", company?.hours);
-      scan("branches", company?.branches);
-      scan("service_locations", company?.service_locations);
-      scan("bms_catalog", bmsRow?.last_kb_text);
-      for (const d of docs ?? []) scan(`document:${d.filename}`, d.parsed_content);
-
-      matches.sort((a, b) => b.score - a.score);
-      const limit = params?.limit ?? 8;
       return { content: [{ type: "text" as const, text: JSON.stringify({
         query: q,
-        company_name: company?.name ?? null,
+        company_name: companyRow?.data?.name ?? null,
         result_count: matches.length,
-        results: matches.slice(0, limit),
+        results: matches,
         hint: matches.length === 0 ? "No matches. Try broader keywords or call bms_list_products / bms_check_stock for product/inventory questions." : undefined,
       }, null, 2) }] };
     },
