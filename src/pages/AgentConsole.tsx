@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { Send, Sparkles, Video, PenLine, Loader2 } from "lucide-react";
+import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClientSidebar from "@/components/dashboard/ClientSidebar";
 import { useCompany } from "@/context/CompanyContext";
@@ -26,6 +26,9 @@ const AgentConsole = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +72,23 @@ const AgentConsole = () => {
     );
   }
 
+  const uploadReference = async (file: File) => {
+    if (!selectedCompany) return;
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop() || "jpg";
+      const path = `references/${selectedCompany.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await supabase.storage.from("company-media").upload(path, file, { upsert: false });
+      if (error) throw error;
+      const { data } = supabase.storage.from("company-media").getPublicUrl(path);
+      setAttachedUrl(data.publicUrl);
+    } catch (e: any) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Image upload failed: " + (e?.message || "unknown error") }]);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const send = async (text: string) => {
     const message = text.trim();
     if (!message || busy) return;
@@ -79,7 +99,7 @@ const AgentConsole = () => {
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
-        body: { company_id: selectedCompany.id, message, history },
+        body: { company_id: selectedCompany.id, message, history, image_urls: attachedUrl ? [attachedUrl] : [] },
       });
       if (error) throw new Error(error.message || "Agent request failed");
       const reply: string = data?.reply || "I couldn't process that just now.";
@@ -92,6 +112,7 @@ const AgentConsole = () => {
       ]);
     } finally {
       setBusy(false);
+      setAttachedUrl(null);
     }
   };
 
@@ -180,6 +201,18 @@ const AgentConsole = () => {
 
         {/* Composer */}
         <div className="border-t px-4 py-3">
+          {attachedUrl && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-muted rounded-lg px-3 py-2">
+              <span className="text-foreground">📎 Reference image attached</span>
+              <button
+                type="button"
+                onClick={() => setAttachedUrl(null)}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <form
             className="max-w-3xl mx-auto flex items-end gap-2"
             onSubmit={(e) => {
@@ -187,6 +220,26 @@ const AgentConsole = () => {
               send(input);
             }}
           >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadReference(file);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || busy}
+              title="Attach a reference image (product shot, brand asset)"
+              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            </button>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

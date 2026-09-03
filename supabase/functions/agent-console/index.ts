@@ -38,7 +38,8 @@ serve(async (req) => {
     }
     const user = userData.user;
 
-    const { company_id, message, history } = await req.json().catch(() => ({}));
+    const { company_id, message, history, image_urls } = await req.json().catch(() => ({}));
+    const refs: string[] = Array.isArray(image_urls) ? image_urls.filter((u: any) => !!u).slice(0, 4) : [];
     if (!company_id || !message || !String(message).trim()) {
       return new Response(JSON.stringify({ error: "company_id and message are required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -102,8 +103,15 @@ serve(async (req) => {
     // Route tool escapes.
     if (reply.toUpperCase().startsWith("VIDEO:")) {
       const brief = reply.slice(6).trim() || String(message);
+      // A long, scene-structured message (or one with reference images)
+      // passes through verbatim as the video script — the caller already
+      // did the creative direction. Sub-agents are skipped.
+      const looksLikeScript = refs.length > 0 && message.length > 400;
+      const motionBody: Record<string, unknown> = looksLikeScript
+        ? { company_id, brief: message.slice(0, 200), script_override: message, image_urls: refs }
+        : { company_id, brief, image_urls: refs };
       const motionRes: any = await supabase.functions.invoke("omanut-motion", {
-        body: { company_id, brief },
+        body: motionBody,
       });
       if (motionRes?.error) {
         console.error("[AGENT-CONSOLE] omanut-motion failed:", motionRes.error);
