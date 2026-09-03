@@ -10,7 +10,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { buildCompanyFacts } from "../_shared/company-context.ts";
 
 const corsHeaders = {
@@ -88,21 +88,25 @@ serve(async (req) => {
       "Otherwise answer normally from the FACTS: warm, concise (1-5 short lines), no markdown, no invented prices or claims.",
     ].filter(Boolean).join("\n");
 
-    // GLM failures (rate limits, cold latency) are bursty — one retry after
-    // a short backoff recovers most of them without bothering the user.
+    // Direct platform AI — multi-provider fallback chain (DeepSeek -> Kimi ->
+    // GLM -> Gemini -> MiniMax) on the project's own keys. The farm harness is
+    // WhatsApp-specific (tone rules, price guard, 12-25s client timeout) and
+    // was failing on long grounded prompts; the console needs longer
+    // generations without that ceiling.
     const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: String(message) }];
-    const harnessOpts = { companyId: company_id, metadata: company?.metadata || null, mode: "content" as const };
-    let result = await harnessChatWithFallback(agentMessages, [], harnessOpts);
-    if (!result.ok) {
-      await new Promise((r) => setTimeout(r, 3000));
-      result = await harnessChatWithFallback(agentMessages, [], harnessOpts);
+    const aiResponse = await geminiChatWithFallback({
+      model: PRIMARY_TEXT_MODEL,
+      messages: agentMessages,
+      temperature: 0.7,
+      max_tokens: 1200,
+    });
+    const aiData: any = await aiResponse.json();
+    let reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
+    if (!reply && aiData?.choices?.[0]?.message?.reasoning_content) {
+      reply = String(aiData.choices[0].message.reasoning_content).trim();
     }
-    let reply = result.ok && result.message?.content ? String(result.message.content).trim() : "I couldn't process that just now — please try again.";
+    if (!reply) reply = "I couldn't process that just now — please try again.";
     let action: any = { type: null };
-    // Diagnostic: surface WHY the harness fell back (timeout / rate limit /
-    // not_configured) so failures are visible in the client's network tab
-    // instead of a silent generic error.
-    const harness_reason = result.ok ? null : (result.reason || "harness_error");
 
     // Route tool escapes.
     if (reply.toUpperCase().startsWith("VIDEO:")) {
@@ -158,7 +162,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ reply, action, harness_reason }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ reply, action }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[AGENT-CONSOLE] fatal:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
