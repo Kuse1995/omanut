@@ -156,6 +156,20 @@ export async function searchKnowledgeBase(
   }
 }
 
+// Robust JSON extraction from a model reply that may wrap the object in
+// code fences or carry trailing prose. Returns the first balanced {...}, or null.
+export function extractJson(text: string): any | null {
+  if (!text) return null;
+  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  try { return JSON.parse(cleaned); } catch { /* try braces */ }
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
+  }
+  return null;
+}
+
 // Format KB snippets as a system-prompt block.
 export function formatKbMatches(matches: KbSnippet[]): string {
   if (!matches.length) return "";

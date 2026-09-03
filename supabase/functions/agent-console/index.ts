@@ -17,6 +17,7 @@ import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-cl
 import {
   buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
+  extractJson,
 } from "../_shared/company-context.ts";
 
 const corsHeaders = {
@@ -105,7 +106,7 @@ serve(async (req) => {
         "1. Answer questions about the business from the FACTS and KNOWLEDGE BASE MATCHES above (pricing, hours, services, policies).",
         "2. Create video ads — if the user wants a video/ad/reel, begin your reply with exactly \"VIDEO:\" followed by a one-sentence cinematic brief (nothing else after describing it).",
         "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else).",
-        "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), no markdown, no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
+        "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), PLAIN TEXT only (no markdown, no asterisks, no bullets), no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
         "",
         "ONBOARDING (your most important job): this company's profile is still missing: " + (missing.length ? missing.join(", ") : "nothing — profile complete!") + ".",
         "Ask about ONE or TWO missing pieces at a time, conversationally, woven into your replies (never a form, never a list of questions).",
@@ -121,7 +122,7 @@ serve(async (req) => {
         "FIRST ask for the business name. Then, as the conversation allows: what they sell + prices, opening hours, location/areas served, anything else worth remembering.",
         "As soon as you know at least the business NAME (ideally + what they sell), begin your reply with exactly \"CREATE_COMPANY:\" followed by a STRICT JSON object: {\"name\": \"...\", \"business_type\": \"...\", \"services\": \"...\", \"hours\": \"...\", \"currency_prefix\": \"K\", \"quick_reference_info\": \"...\"} — then one short confirmation line (e.g. \"🎉 Your business is live — now tell me about your hours…\").",
         "If they mention a claim code from Omanut instead, reply with exactly \"CLAIM_CODE:\" followed by the code (nothing else).",
-        "Never invent facts they didn't give you. Keep every reply 1-4 short lines, warm and human. When you've created the company, keep interviewing for the remaining profile details.",
+        "Never invent facts they didn't give you. Keep every reply 1-4 short lines, warm and human, PLAIN TEXT only (no markdown, no asterisks). When you've created the company, keep interviewing for the remaining profile details.",
       ].join("\n");
     }
 
@@ -147,8 +148,7 @@ serve(async (req) => {
 
     // ── Self-serve onboarding: company creation + claim codes ──────────
     if (reply.toUpperCase().startsWith("CREATE_COMPANY:")) {
-      let parsed: any = null;
-      try { parsed = JSON.parse(reply.slice(15).trim()); } catch { parsed = null; }
+      const parsed: any = extractJson(reply.slice(15));
       const name = String(parsed?.name || "").trim();
       if (!name) {
         reply = "I just need the business name to set you up — what's it called?";
@@ -211,8 +211,7 @@ serve(async (req) => {
 
     // ── Conversational onboarding: the agent WRITES the company profile ──
     if (company && reply.toUpperCase().startsWith("SAVE_FACTS:")) {
-      let parsed: any = null;
-      try { parsed = JSON.parse(reply.slice(11).trim()); } catch { parsed = null; }
+      const parsed: any = extractJson(reply.slice(11));
       try {
         const { saved } = await updateCompanyFacts(supabase, company.id, parsed);
         const stillMissing = profileMissingList(company).filter((m) => !saved.some((s) => m.startsWith(s)));
