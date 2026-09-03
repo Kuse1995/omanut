@@ -97,3 +97,68 @@ export async function buildDmContext(supabase: any, payload: any, currentText: s
     return "CONVERSATION SO FAR:\n" + ordered.map((m: any) => (m.role === "user" ? "Customer: " : "You: ") + String(m.content).slice(0, 300)).join("\n");
   } catch { return ""; }
 }
+
+// ── Knowledge Base search (strict grounding) ────────────────────────────
+// Keyword-scored search across the company's ENTIRE knowledge estate:
+// curated KB fields, payment instructions, BMS catalog snapshot, and
+// uploaded documents. Returns ranked, source-tagged snippets. Every
+// channel injects the top matches into its system prompt so replies are
+// grounded STRICTLY in company knowledge (and the harness price guard
+// then allows exactly those prices).
+
+export interface KbSnippet {
+  source: string;
+  snippet: string;
+  score: number;
+}
+
+export async function searchKnowledgeBase(
+  supabase: any,
+  companyId: string,
+  query: string,
+  limit = 6,
+): Promise<KbSnippet[]> {
+  const q = String(query ?? "").trim();
+  if (!q) return [];
+  try {
+    const [{ data: company }, { data: docs }, { data: bmsRow }] = await Promise.all([
+      supabase.from("companies").select("quick_reference_info, payment_instructions, services, hours, branches, service_locations").eq("id", companyId).maybeSingle(),
+      supabase.from("company_documents").select("filename, parsed_content").eq("company_id", companyId).limit(20),
+      supabase.from("bms_connections").select("last_kb_text").eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+    ]);
+
+    const terms = q.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+    const matches: KbSnippet[] = [];
+    const scan = (source: string, text: string | null | undefined) => {
+      if (!text) return;
+      const paragraphs = String(text).split(/\n{2,}|\r\n\r\n/);
+      for (const p of paragraphs) {
+        const lower = p.toLowerCase();
+        let score = 0;
+        for (const t of terms) if (lower.includes(t)) score++;
+        if (score > 0) matches.push({ source, snippet: p.trim().slice(0, 800), score });
+      }
+    };
+
+    scan("quick_reference_info", company?.quick_reference_info);
+    scan("payment_instructions", company?.payment_instructions);
+    scan("services", company?.services);
+    scan("hours", company?.hours);
+    scan("branches", company?.branches);
+    scan("service_locations", company?.service_locations);
+    scan("bms_catalog", bmsRow?.last_kb_text);
+    for (const d of docs ?? []) scan("document:" + (d.filename || "doc"), d.parsed_content);
+
+    matches.sort((a, b) => b.score - a.score);
+    return matches.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// Format KB snippets as a system-prompt block.
+export function formatKbMatches(matches: KbSnippet[]): string {
+  if (!matches.length) return "";
+  return "KNOWLEDGE BASE MATCHES (authoritative — quote only prices/details that appear here):\n" +
+    matches.map((m, i) => (i + 1) + ". [" + m.source + "] " + m.snippet).join("\n");
+}
