@@ -20,7 +20,7 @@ const QUICK_ACTIONS = [
 ];
 
 const AgentConsole = () => {
-  const { selectedCompany } = useCompany();
+  const { selectedCompany, refreshCompanies } = useCompany();
   const [session, setSession] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -29,6 +29,9 @@ const AgentConsole = () => {
   const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The company the chat is working with — null while we're still onboarding
+  // a brand-new owner (the agent creates the company mid-conversation).
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(selectedCompany?.id || null);
   const [collapsed, setCollapsed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -60,17 +63,8 @@ const AgentConsole = () => {
     );
   }
   if (!session) return <Navigate to="/login" replace />;
-  if (!selectedCompany) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Sparkles className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
-          <p className="text-foreground font-medium">Select a company first</p>
-          <p className="text-sm text-muted-foreground mt-1">The AI Agent works per company.</p>
-        </div>
-      </div>
-    );
-  }
+  // No selectedCompany = self-serve onboarding mode: the chat runs without a
+  // company and the agent creates one mid-conversation (CREATE_COMPANY).
 
   const uploadReference = async (file: File) => {
     if (!selectedCompany) return;
@@ -126,7 +120,7 @@ const AgentConsole = () => {
       (async () => {
         try {
           const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
-            body: { code: ev.data.code, redirect_uri: window.location.origin + '/auth/meta/callback', company_id: selectedCompany.id },
+            body: { code: ev.data.code, redirect_uri: window.location.origin + '/auth/meta/callback', company_id: activeCompanyId },
           });
           if (error) throw error;
           const pages = data?.pages || [];
@@ -172,11 +166,15 @@ const AgentConsole = () => {
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
-        body: { company_id: selectedCompany.id, message, history, image_urls: attachedUrl ? [attachedUrl] : [] },
+        body: { company_id: activeCompanyId, message, history, image_urls: attachedUrl ? [attachedUrl] : [] },
       });
       if (error) throw new Error(error.message || "Agent request failed");
       const reply: string = data?.reply || "I couldn't process that just now.";
       const action = data?.action || null;
+      if (action?.type === "company_created" || action?.type === "company_claimed") {
+        if (action.company_id) setActiveCompanyId(action.company_id);
+        refreshCompanies();
+      }
       setMessages((prev) => [...prev, { role: "assistant", content: reply, action }]);
     } catch (e: any) {
       setMessages((prev) => [
@@ -202,7 +200,9 @@ const AgentConsole = () => {
           <div>
             <h1 className="text-lg font-semibold text-foreground leading-tight">AI Agent</h1>
             <p className="text-xs text-muted-foreground">
-              {selectedCompany.name} · answers from your knowledge base, makes videos, drafts posts
+              {activeCompanyId
+                ? "Answers from your knowledge base, makes videos, drafts posts"
+                : "Let's set up your business — chat me through it, I'll do the heavy lifting"}
             </p>
           </div>
         </div>
@@ -214,22 +214,28 @@ const AgentConsole = () => {
               <div className="text-center py-10">
                 <Sparkles className="h-10 w-10 mx-auto text-primary/60 mb-4" />
                 <h2 className="text-xl font-semibold text-foreground">
-                  Hey! I'm your {selectedCompany.name} agent.
+                  {activeCompanyId
+                    ? "Hey! I'm your " + (selectedCompany?.name || "business") + " agent."
+                    : "Hey! Let's set up your business."}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
-                  Ask me anything about your business, or tell me what to make — videos, posts, answers for customers.
+                  {activeCompanyId
+                    ? "Ask me anything about your business, or tell me what to make — videos, posts, answers for customers."
+                    : "Just tell me about your business — name, what you sell, hours. I'll build your profile, knowledge base and connect your channels as we chat."}
                 </p>
-                <div className="flex flex-wrap justify-center gap-2 mt-6">
-                  {QUICK_ACTIONS.map((qa) => (
-                    <button
-                      key={qa.label}
-                      onClick={() => send(qa.prompt)}
-                      className="text-sm px-3 py-2 rounded-full border bg-card hover:bg-accent transition-colors text-foreground"
-                    >
-                      {qa.label}
-                    </button>
-                  ))}
-                </div>
+                {activeCompanyId && (
+                  <div className="flex flex-wrap justify-center gap-2 mt-6">
+                    {QUICK_ACTIONS.map((qa) => (
+                      <button
+                        key={qa.label}
+                        onClick={() => send(qa.prompt)}
+                        className="text-sm px-3 py-2 rounded-full border bg-card hover:bg-accent transition-colors text-foreground"
+                      >
+                        {qa.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
