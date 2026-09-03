@@ -218,3 +218,20 @@ The "build our own Higgsfield" play: models called directly (Seedance via fal.ai
 **AGENT CONSOLE CONFIRMED LIVE (2026-09-03)**: `agent-console` deployed; first console test answered KB pricing from the Company Brain ("How much is the Pro plan?" → K799) via the harness. The one earlier failure was the harness call timing out on the bigger console prompt (12s client timeout) — fixed by capping the facts block in `buildCompanyFacts` (services 1500 / quick-facts 1200 chars) and adding `harness_reason` to the response for diagnosability. Console is the AaaS customer surface: KB answers, video requests (→ omanut-motion), post drafts (→ scheduled_posts approval flow) — all from one chat at `/agent`.
 
 **FIRST OMANUT MOTION RENDER DELIVERED (2026-09-03, 14:53 UTC)**: end-to-end live test — Hot Magic Shito 20s comedic commercial (5 scenes, dialogue, jar locked via Seedance 2.5 reference-to-video at 480p) rendered on fal (mp4 2.78MB on fal CDN), agent-console → omanut-motion → fal queue all verified in production. Delivery to the boss's WhatsApp went via Twilio direct link message because notify_boss/send_media are gated by the OpenClaw-takeover company setting (disabled for OmanutBMS — enable in Company Settings → OpenClaw Agent for automatic in-platform media delivery). Job bookkeeping note: the render job was marked 'failed — Timed out' during the URL-bug debug window (60-poll budget consumed pre-fix); future renders complete automatically within the poll window.
+
+### 5j. OPENCLAW RETIRED — replaced by the Agent (harness) layer (2026-09-03, PR #30)
+
+**OpenClaw is gone from the codebase.** PR #30 (merged):
+
+- **Migration `20260902140000`**: `companies.openclaw_takeover_enabled`/`openclaw_last_heartbeat` → `agent_takeover_enabled`/`agent_last_heartbeat`. OmanutBMS opted in — agent media delivery + boss notifications work without the OpenClaw gate.
+- **mcp-server**: `requireAgentTakeover` gate (reads the new column — the error now points to Company Settings → AI Agent); heartbeat writes the new column; `claimed_by`/`consumed_by` tags rebranded; descriptions/comments rebranded.
+- **Stubs deleted**: `_shared/openclaw-gate.ts` + `_shared/openclaw-envelope.ts` → replaced by `_shared/agent-envelope.ts`; the dead OpenClaw skill-gate blocks removed from `bms-agent`, `auto-content-creator`, `whatsapp-image-gen` (they never delegated).
+- **Frontend**: ApiKeysSection training-key text rebranded (d1a9f14).
+
+**Remaining OpenClaw traces (intentional / follow-ups)**:
+1. DB columns `openclaw_webhook_url/mode/owns/webhook_token` on companies — unused legacy, drop in a later cleanup migration.
+2. The three legacy MCP webhook tools (`register_webhook`, `clear_webhook`, `get_webhook_status`) — served the dead local-gateway dispatch flow. Remove in the ops cleanup.
+3. **The local OpenClaw gateway on this machine** (`C:\Users\user\.openclaw` — Abraham's personal assistant + the crons: ANZ watchdog, sales briefing, daily post, afternoon nudge, hot-lead monitor) is Phase 2: rebuild those crons as platform pg_cron jobs or farm services, THEN decommission the gateway. Do not delete it before the crons are re-homed.
+4. The MCP admin key is still NAMED "OpenClaw Training" — rename it in Settings → API Keys (cosmetic).
+
+**Deploy**: sync main (HEAD d1a9f14+) → Lovable applies migration `20260902140000` + redeploys `mcp-server`. After deploy: the AI Agent console, `notify_boss` and `send_media` all work for OmanutBMS with zero OpenClaw dependency.
