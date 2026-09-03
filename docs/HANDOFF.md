@@ -235,3 +235,14 @@ The "build our own Higgsfield" play: models called directly (Seedance via fal.ai
 4. The MCP admin key is still NAMED "OpenClaw Training" — rename it in Settings → API Keys (cosmetic).
 
 **Deploy**: sync main (HEAD d1a9f14+) → Lovable applies migration `20260902140000` + redeploys `mcp-server`. After deploy: the AI Agent console, `notify_boss` and `send_media` all work for OmanutBMS with zero OpenClaw dependency.
+
+### 5k. Self-serve conversational onboarding + strict KB grounding (2026-09-03, PRs #31-#34)
+
+- PR #31 - strict KB grounding: searchKnowledgeBase extracted into the Company Brain (keyword-scored over curated fields + payment instructions + BMS catalog + uploaded documents); wired into agent-console AND meta-auto-reply (comments + DMs). Every system prompt is grounded STRICTLY in company knowledge; the harness price guard then allows exactly those prices. The dashboard is the single source of truth - a tenant KB edit reaches every channel on the next message.
+- PR #32 - single-source search: mcp-server search_knowledge_base delegates to the shared searchKnowledgeBase (one implementation).
+- PR #33 - conversational onboarding: the agent WRITES the company profile. Company Brain gained AGENT_FACT_FIELDS whitelist + updateCompanyFacts / upsertKbDocument / buildMetaConnectUrl (mirrors MetaIntegrationsPanel) / profileStatus. agent-console system prompt knows the profile gaps and interviews the owner; escapes SAVE_FACTS (strict JSON), SAVE_KB, CONNECT_META execute with confirmation cards. The console UI runs the full Meta popup OAuth chain (exchange + connect-pages auto-linking every page found).
+- PR #34 - self-serve onboarding: company-less signups now land in the AI Agent (Login/Signup route to /agent, not /claim-company). The agent interviews the owner and CREATES the company mid-chat (CREATE_COMPANY + strict JSON): companies insert (agent_takeover_enabled=true, harness_mode on, test_mode sandbox, 1000 trial credits) + company_users owner link + legacy users mirror + client role (mirrors claim_company). Claim codes still work via CLAIM_CODE + the secure claim_company RPC as the user. UI stores the new company id and refreshes memberships.
+
+The AaaS onboarding flow is now: sign up -> chat -> the agent interviews (name, what you sell, prices, hours) -> creates the company -> saves your KB as you talk -> shows the Meta connect button -> your channels go live and the agent answers customers. No admin, no forms, no claim codes required (codes remain for existing flows).
+
+Deploy for #31-#34: sync main -> redeploy agent-console + meta-auto-reply (+ mcp-server if not already). Frontend auto-syncs.
