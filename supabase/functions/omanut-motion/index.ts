@@ -214,6 +214,7 @@ serve(async (req) => {
           model,
           input_image_url,
           fal_status_url: submitJson.status_url ?? null,
+          fal_response_url: submitJson.response_url ?? null,
           resolution,
           duration,
           style: script.style ?? null,
