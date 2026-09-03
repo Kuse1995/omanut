@@ -16,6 +16,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { buildCompanyFacts, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
 import { buildCompanyFacts, buildCommentContext, buildDmContext } from "../_shared/company-context.ts";
 
 const corsHeaders = {
@@ -88,16 +89,20 @@ serve(async (req) => {
         if (row.channel === "public_comment") {
           const ctx = await buildCommentContext(supabase, payload);
           const facts = buildCompanyFacts(company);
+          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 4));
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
             + (facts ? facts + "\n\n" : "")
+            + (kb ? kb + "\n\n" : "")
             + (ctx ? ctx + "\n\n" : "")
             + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Ground the reply in the POST and the facts above; only quote prices/claims that appear in them, never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
           userPrompt = "Their comment: \"" + text + "\"";
         } else if (row.channel === "direct_message") {
           const history = await buildDmContext(supabase, payload, text);
           const facts = buildCompanyFacts(company);
+          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 4));
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", chatting one-on-one with a customer in the company's Facebook/Instagram DMs.\n"
             + (facts ? facts + "\n\n" : "")
+            + (kb ? kb + "\n\n" : "")
             + (history ? history + "\n\n" : "")
             + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing.";
           userPrompt = text;

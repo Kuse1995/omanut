@@ -11,7 +11,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
-import { buildCompanyFacts } from "../_shared/company-context.ts";
+import { buildCompanyFacts, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -73,6 +73,10 @@ serve(async (req) => {
     }
 
     const facts = buildCompanyFacts(company);
+    // Strict grounding: search the FULL knowledge base (curated fields,
+    // payment instructions, BMS catalog, uploaded documents) for whatever
+    // the user is asking about, and inject the ranked matches.
+    const kb = formatKbMatches(await searchKnowledgeBase(supabase, company_id, String(message), 6));
     const historyMsgs = (Array.isArray(history) ? history : [])
       .slice(-8)
       .map((h: any) => ({ role: h.role === "user" ? "user" : "assistant", content: String(h.content || "").slice(0, 500) }));
@@ -80,12 +84,13 @@ serve(async (req) => {
     const system = [
       "You are the AI agent for " + (company.name || "this business") + " — the owner is chatting with you in their console.",
       facts ? facts : "",
+      kb ? kb : "",
       "",
       "CAPABILITIES:",
-      "1. Answer questions about the business from the FACTS above (pricing, hours, services).",
+      "1. Answer questions about the business from the FACTS and KNOWLEDGE BASE MATCHES above (pricing, hours, services, policies).",
       "2. Create video ads — if the user wants a video/ad/reel, begin your reply with exactly \"VIDEO:\" followed by a one-sentence cinematic brief (nothing else after describing it).",
       "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else).",
-      "Otherwise answer normally from the FACTS: warm, concise (1-5 short lines), no markdown, no invented prices or claims.",
+      "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), no markdown, no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
     ].filter(Boolean).join("\n");
 
     // Direct platform AI — multi-provider fallback chain (DeepSeek -> Kimi ->
