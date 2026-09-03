@@ -162,3 +162,86 @@ export function formatKbMatches(matches: KbSnippet[]): string {
   return "KNOWLEDGE BASE MATCHES (authoritative — quote only prices/details that appear here):\n" +
     matches.map((m, i) => (i + 1) + ". [" + m.source + "] " + m.snippet).join("\n");
 }
+
+// ── Conversational onboarding: the agent WRITES the company profile ─────
+// The owner chats; the agent extracts facts and saves them here. The
+// whitelisted fields are exactly what the company form edits — nothing
+// billing/infra related is reachable from chat.
+
+export const AGENT_FACT_FIELDS = [
+  "name", "industry", "business_type", "voice_style", "hours",
+  "services", "branches", "service_locations", "currency_prefix",
+  "quick_reference_info", "payment_instructions",
+] as const;
+
+export function profileStatus(company: any): { field: string; label: string; set: boolean }[] {
+  return AGENT_FACT_FIELDS.map((f) => ({
+    field: f,
+    label: f.replace(/_/g, " "),
+    set: !!(company && String(company[f] || "").trim()),
+  }));
+}
+
+export function profileMissingList(company: any): string[] {
+  return profileStatus(company).filter((p) => !p.set).map((p) => p.label);
+}
+
+export function sanitizeFacts(raw: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const f of AGENT_FACT_FIELDS) {
+    if (raw[f] !== undefined && raw[f] !== null) {
+      out[f] = String(raw[f]).slice(0, 4000).trim();
+    }
+  }
+  return out;
+}
+
+export async function updateCompanyFacts(supabase: any, companyId: string, raw: any): Promise<{ saved: string[] }> {
+  const patch = sanitizeFacts(raw);
+  const saved = Object.keys(patch);
+  if (saved.length) {
+    const { error } = await supabase.from("companies").update(patch).eq("id", companyId);
+    if (error) throw new Error("Company update failed: " + error.message);
+  }
+  return { saved };
+}
+
+export async function upsertKbDocument(supabase: any, companyId: string, filename: string, content: string): Promise<void> {
+  const cleanName = String(filename || "").trim().slice(0, 120) || ("kb-" + Date.now() + ".md");
+  const cleanContent = String(content || "").slice(0, 40000);
+  const { data: existing } = await supabase
+    .from("company_documents")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("filename", cleanName)
+    .maybeSingle();
+  if (existing?.id) {
+    const { error } = await supabase.from("company_documents").update({ parsed_content: cleanContent }).eq("id", existing.id);
+    if (error) throw new Error("KB update failed: " + error.message);
+  } else {
+    const { error } = await supabase.from("company_documents").insert({
+      company_id: companyId, filename: cleanName, parsed_content: cleanContent,
+    });
+    if (error) throw new Error("KB insert failed: " + error.message);
+  }
+}
+
+// Meta OAuth connect URL — mirrors MetaIntegrationsPanel exactly
+// (Facebook Login for Business requires response_type=code; the JS SDK
+// would force response_type=token, so we build the dialog URL ourselves).
+export function buildMetaConnectUrl(
+  origin: string, appId: string, configId: string | null | undefined, state: string,
+): string {
+  const url = new URL("https://www.facebook.com/v19.0/dialog/oauth");
+  url.searchParams.set("client_id", appId);
+  if (configId) url.searchParams.set("config_id", configId);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("redirect_uri", origin.replace(/\/+$/, "") + "/auth/meta/callback");
+  url.searchParams.set("state", state);
+  url.searchParams.set("scope",
+    "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging," +
+    "pages_manage_posts,instagram_basic,instagram_manage_messages," +
+    "instagram_manage_comments,instagram_content_publish,business_management");
+  return url.toString();
+}
