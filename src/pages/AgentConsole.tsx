@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
-  action?: { type: string | null; job_id?: string | null; post_id?: string | null } | null;
+  action?: { type: string | null; job_id?: string | null; post_id?: string | null; connect_url?: string; state?: string; saved?: string[]; filename?: string } | null;
 }
 
 const QUICK_ACTIONS = [
@@ -89,6 +89,77 @@ const AgentConsole = () => {
     } finally {
       setUploading(false);
     }
+  };
+
+  // Meta connect: mirror the MetaIntegrationsPanel popup flow — popup →
+  // postMessage(code) → meta-oauth-exchange → meta-oauth-connect-pages
+  // (auto-connects every Page found on the owner's account).
+  const startMetaConnect = (connectUrl: string, state: string) => {
+    sessionStorage.setItem('meta_oauth_state', state);
+    const popup = window.open(connectUrl, 'meta-oauth', 'width=600,height=720,menubar=no,toolbar=no,location=no');
+    if (!popup) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Could not open the Facebook window — allow popups for this site and try again." }]);
+      return;
+    }
+    let settled = false;
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      window.clearInterval(closedPoll);
+      window.clearTimeout(timeoutId);
+    };
+    const onMessage = (ev: MessageEvent) => {
+      if (ev.origin !== window.location.origin) return;
+      if (!ev.data || ev.data.source !== 'meta-oauth' || settled) return;
+      settled = true;
+      cleanup();
+      const expected = sessionStorage.getItem('meta_oauth_state');
+      sessionStorage.removeItem('meta_oauth_state');
+      if (ev.data.error) {
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login failed: " + ev.data.error }]);
+        return;
+      }
+      if (!ev.data.code || ev.data.state !== expected) {
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login was cancelled or failed the security check. Say \"connect\" to try again." }]);
+        return;
+      }
+      setMessages((prev) => [...prev, { role: "assistant", content: "🔗 Pages found — linking them to your agent now…" }]);
+      (async () => {
+        try {
+          const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
+            body: { code: ev.data.code, redirect_uri: window.location.origin + '/auth/meta/callback', company_id: selectedCompany.id },
+          });
+          if (error) throw error;
+          const pages = data?.pages || [];
+          if (!pages.length) {
+            setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ No Facebook Pages were found on that account. Create one, then say \"connect\" here." }]);
+            return;
+          }
+          const { data: connData, error: connErr } = await supabase.functions.invoke('meta-oauth-connect-pages', {
+            body: { session_id: data.session_id, page_ids: pages.map((pg: any) => pg.id) },
+          });
+          if (connErr) throw connErr;
+          const okCount = (connData?.connected || []).filter((c: any) => !c.error).length;
+          setMessages((prev) => [...prev, {
+            role: "assistant",
+            content: "✅ Connected " + okCount + " page" + (okCount === 1 ? "" : "s") + "! Comments and DMs are now answered by your agent automatically. Anything else you'd like me to remember about the business?",
+          }]);
+        } catch (e: any) {
+          setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Meta connect failed: " + (e?.message || "unknown error") }]);
+        }
+      })();
+    };
+    const closedPoll = window.setInterval(() => {
+      if (popup.closed && !settled) { settled = true; cleanup(); }
+    }, 700);
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        try { popup.close(); } catch { /* ignore */ }
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login timed out — say \"connect\" to try again." }]);
+      }
+    }, 5 * 60 * 1000);
+    window.addEventListener('message', onMessage);
   };
 
   const send = async (text: string) => {
@@ -183,6 +254,29 @@ const AgentConsole = () => {
                     <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
                       <PenLine className="h-3.5 w-3.5" />
                       <span>Draft saved — approve it in the Content Scheduler</span>
+                    </div>
+                  )}
+                  {m.action?.type === "facts_saved" && m.action.saved && m.action.saved.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Saved to your profile: {m.action.saved.join(", ")}</span>
+                    </div>
+                  )}
+                  {m.action?.type === "kb_saved" && (
+                    <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Knowledge base updated: {m.action.filename}</span>
+                    </div>
+                  )}
+                  {m.action?.type === "meta_connect" && m.action.connect_url && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => startMetaConnect(m.action!.connect_url!, m.action!.state!)}
+                        className="w-full text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                      >
+                        Connect Facebook &amp; Instagram →
+                      </button>
                     </div>
                   )}
                 </div>

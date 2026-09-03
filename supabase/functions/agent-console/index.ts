@@ -11,7 +11,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
-import { buildCompanyFacts, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
+import {
+  buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
+  profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
+} from "../_shared/company-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,7 +41,7 @@ serve(async (req) => {
     }
     const user = userData.user;
 
-    const { company_id, message, history, image_urls } = await req.json().catch(() => ({}));
+    const { company_id, message, history, image_urls, origin } = await req.json().catch(() => ({}));
     const refs: string[] = Array.isArray(image_urls) ? image_urls.filter((u: any) => !!u).slice(0, 4) : [];
     if (!company_id || !message || !String(message).trim()) {
       return new Response(JSON.stringify({ error: "company_id and message are required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -77,6 +80,8 @@ serve(async (req) => {
     // payment instructions, BMS catalog, uploaded documents) for whatever
     // the user is asking about, and inject the ranked matches.
     const kb = formatKbMatches(await searchKnowledgeBase(supabase, company_id, String(message), 6));
+    // Conversational onboarding: what the profile already knows vs missing.
+    const missing = profileMissingList(company);
     const historyMsgs = (Array.isArray(history) ? history : [])
       .slice(-8)
       .map((h: any) => ({ role: h.role === "user" ? "user" : "assistant", content: String(h.content || "").slice(0, 500) }));
@@ -91,6 +96,13 @@ serve(async (req) => {
       "2. Create video ads — if the user wants a video/ad/reel, begin your reply with exactly \"VIDEO:\" followed by a one-sentence cinematic brief (nothing else after describing it).",
       "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else).",
       "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), no markdown, no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
+      "",
+      "ONBOARDING (your most important job): this company's profile is still missing: " + (missing.length ? missing.join(", ") : "nothing — profile complete!") + ".",
+      "Ask about ONE or TWO missing pieces at a time, conversationally, woven into your replies (never a form, never a list of questions).",
+      "When the user's reply contains facts (services, prices, hours, location, tone, anything worth remembering), begin your reply with exactly \"SAVE_FACTS:\" followed by a STRICT JSON object mapping field names to values (fields: " + "name, industry, business_type, voice_style, hours, services, branches, service_locations, currency_prefix, quick_reference_info, payment_instructions" + ") — then add one short confirmation line after it.",
+      "When the user shares a longer knowledge document (policies, menus, FAQs, training material), begin with exactly \"SAVE_KB:\" + filename + \":\" on the first line, then the document text on the following lines.",
+      "When the user wants to connect Facebook/Instagram, reply with exactly \"CONNECT_META\" on its own — the console will show the connect button.",
+      "After saving, confirm warmly what you remembered and ask for the next missing piece. Never invent facts the owner did not give you.",
     ].filter(Boolean).join("\n");
 
     // Direct platform AI — multi-provider fallback chain (DeepSeek -> Kimi ->
@@ -112,6 +124,47 @@ serve(async (req) => {
     }
     if (!reply) reply = "I couldn't process that just now — please try again.";
     let action: any = { type: null };
+
+    // ── Conversational onboarding: the agent WRITES the company profile ──
+    if (reply.toUpperCase().startsWith("SAVE_FACTS:")) {
+      let parsed: any = null;
+      try { parsed = JSON.parse(reply.slice(11).trim()); } catch { parsed = null; }
+      try {
+        const { saved } = await updateCompanyFacts(supabase, company_id, parsed);
+        reply = saved.length
+          ? "✅ Got it — saved to your company profile: " + saved.join(", ") + ". " + (missing.length ? "Next up: " + missing.filter((m) => !saved.some((s) => m.startsWith(s))).join(", ") + "." : "Your profile is complete!")
+          : "I couldn't find any profile facts in that — tell me the details in your own words and I'll remember them.";
+        action = { type: "facts_saved", saved };
+      } catch (e: any) {
+        reply = "⚠️ Save failed: " + (e?.message || "unknown error");
+      }
+    } else if (reply.toUpperCase().startsWith("SAVE_KB:")) {
+      const rest = reply.slice(8).trim();
+      const nl = rest.indexOf("\n");
+      const filename = (nl >= 0 ? rest.slice(0, nl) : rest).trim() || "knowledge-" + Date.now() + ".md";
+      const content = nl >= 0 ? rest.slice(nl + 1).trim() : rest;
+      try {
+        await upsertKbDocument(supabase, company_id, filename, content);
+        reply = "📚 Saved to your knowledge base as \"" + filename + "\". Every channel now answers from it.";
+        action = { type: "kb_saved", filename };
+      } catch (e: any) {
+        reply = "⚠️ KB save failed: " + (e?.message || "unknown error");
+      }
+    } else if (reply.toUpperCase().trim() === "CONNECT_META") {
+      const appId = Deno.env.get("META_APP_ID");
+      const configId = Deno.env.get("META_CONFIG_ID");
+      if (!appId) {
+        reply = "⚠️ Meta connect isn't configured on this project yet — an operator needs to add META_APP_ID.";
+      } else {
+        const state = crypto.randomUUID();
+        const connectUrl = buildMetaConnectUrl(
+          String(origin || "https://omanut.lovable.app"),
+          appId, configId, state,
+        );
+        action = { type: "meta_connect", connect_url: connectUrl, state };
+        reply = "🔗 Connect your Facebook & Instagram — one click, and your pages link to this agent automatically. (Popups must be allowed.)";
+      }
+    }
 
     // Route tool escapes.
     if (reply.toUpperCase().startsWith("VIDEO:")) {
