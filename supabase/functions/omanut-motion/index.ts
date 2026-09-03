@@ -63,9 +63,17 @@ serve(async (req) => {
       resolution = "720p",
       duration = "5",
       input_image_url = null,
+      // v2.5 additions: a full caller-written script is passed through
+      // verbatim (skipping the sub-agents), plus multimodal reference
+      // images (product packshots) for Seedance 2.5 reference-to-video.
+      script_override = null,
+      image_urls = null,
+      model_choice = null,
     } = body ?? {};
 
-    if (!company_id || !brief || !String(brief).trim()) {
+    const refs: string[] = Array.isArray(image_urls) ? image_urls.filter((u: any) => !!u) : [];
+    const useScript = script_override && String(script_override).trim().length > 0;
+    if (!company_id || (!brief || !String(brief).trim()) && !useScript) {
       return new Response(JSON.stringify({ error: "company_id and brief are required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -105,7 +113,26 @@ serve(async (req) => {
       company.quick_reference_info ? "QUICK FACTS: " + company.quick_reference_info : "",
     ].filter(Boolean).join("\n");
 
-    // ── STAGE 1: MARKETING (Script Writer) ─────────────────────────────
+    // ── STAGE 1+2: MARKETING (Script Writer) + CREATIVE DIRECTOR ───────
+    // When the caller supplies a full script (script_override), the user has
+    // already done the creative work — it passes through verbatim and the
+    // sub-agents are skipped.
+    let script: any = {
+      style: "cinematic",
+      hook: String(brief),
+      beats: [String(brief)],
+      cta: "",
+    };
+    let shots: any[] = [{
+      n: 1,
+      camera: "director's choice",
+      lighting: "natural",
+      action: useScript ? "(caller-supplied script)" : String(brief),
+      seedance_prompt: useScript ? String(script_override).trim() : String(brief).trim(),
+    }];
+    let heroIdx = 0;
+
+    if (!useScript) {
     const scriptSystem = [
       "You are the Marketing Strategist for " + (company.name || "a business") + ".",
       facts ? facts : "",
@@ -118,12 +145,7 @@ serve(async (req) => {
       [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
-    const script = extractJson(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "") || {
-      style: "cinematic",
-      hook: String(brief),
-      beats: [String(brief)],
-      cta: "",
-    };
+    script = extractJson(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "") || script;
 
     // ── STAGE 2: CREATIVE DIRECTOR ─────────────────────────────────────
     const directorSystem = [
@@ -140,25 +162,30 @@ serve(async (req) => {
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
     const plan = extractJson(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
-    const shots: any[] = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : [{
-      n: 1,
-      camera: "slow push-in",
-      lighting: "clean natural light",
-      action: String(brief),
-      seedance_prompt: String(brief).trim(),
-    }];
-    const heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
+    shots = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : shots;
+    heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
+    } // end sub-agent bypass (script_override)
+
     const heroShot = shots[heroIdx];
 
     // ── STAGE 3: GENERATOR (fal.ai queue — hero shot first) ────────────
-    const model = input_image_url ? FAL_IMAGE_MODEL : FAL_TEXT_MODEL;
+    // Seedance 2.5 (reference-to-video) when reference images are supplied:
+    // it locks product/character/set across up to a 30-second take, with
+    // native audio (dialogue) included. Resolution defaults to 480p for 2.5.
+    const use25 = refs.length > 0 || model_choice === "seedance-2.5";
+    const model = use25
+      ? "bytedance/seedance-2.5/reference-to-video"
+      : (input_image_url ? FAL_IMAGE_MODEL : FAL_TEXT_MODEL);
+    const effectiveResolution = use25 && resolution === "720p" && !body?.resolution ? "480p" : resolution;
+    const effectiveDuration = use25 && duration === "5" && !body?.duration ? "auto" : duration;
     const submitBody: Record<string, unknown> = {
-      prompt: String(heroShot.seedance_prompt || brief).slice(0, 1500),
+      prompt: String(heroShot.seedance_prompt || brief).slice(0, 4000),
       aspect_ratio,
-      resolution,
-      duration,
+      resolution: effectiveResolution,
+      duration: effectiveDuration,
     };
     if (input_image_url) submitBody.image_url = input_image_url;
+    if (use25 && refs.length) submitBody.image_urls = refs;
 
     const submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
       method: "POST",
