@@ -30,9 +30,19 @@ const AgentConsole = () => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
+    let alive = true;
+    // Never spin forever: if the session check stalls (stale token, storage
+    // hiccup), fall through to the login redirect after 4 seconds.
+    const timeout = setTimeout(() => {
+      if (alive) setAuthLoading(false);
+    }, 4000);
+    supabase.auth.getSession()
+      .then(({ data }) => { if (alive) { setSession(data.session); setAuthLoading(false); } })
+      .catch(() => { if (alive) setAuthLoading(false); });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (alive) { setSession(s); setAuthLoading(false); }
+    });
+    return () => { alive = false; clearTimeout(timeout); sub.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
