@@ -77,7 +77,9 @@ const AgentConsole = () => {
     setUploading(true);
     try {
       const ext = file.name.split(".").pop() || "jpg";
-      const path = `references/${selectedCompany.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      // First path segment MUST be the company UUID — company-media storage
+      // policies cast it (user_has_company_access(foldername[1])::uuid).
+      const path = `${selectedCompany.id}/references/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error } = await supabase.storage.from("company-media").upload(path, file, { upsert: false });
       if (error) throw error;
       const { data } = supabase.storage.from("company-media").getPublicUrl(path);
