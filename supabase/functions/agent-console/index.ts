@@ -88,11 +88,15 @@ serve(async (req) => {
       "Otherwise answer normally from the FACTS: warm, concise (1-5 short lines), no markdown, no invented prices or claims.",
     ].filter(Boolean).join("\n");
 
-    const result = await harnessChatWithFallback(
-      [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: String(message) }],
-      [],
-      { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
-    );
+    // GLM failures (rate limits, cold latency) are bursty — one retry after
+    // a short backoff recovers most of them without bothering the user.
+    const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: String(message) }];
+    const harnessOpts = { companyId: company_id, metadata: company?.metadata || null, mode: "content" as const };
+    let result = await harnessChatWithFallback(agentMessages, [], harnessOpts);
+    if (!result.ok) {
+      await new Promise((r) => setTimeout(r, 3000));
+      result = await harnessChatWithFallback(agentMessages, [], harnessOpts);
+    }
     let reply = result.ok && result.message?.content ? String(result.message.content).trim() : "I couldn't process that just now — please try again.";
     let action: any = { type: null };
     // Diagnostic: surface WHY the harness fell back (timeout / rate limit /
