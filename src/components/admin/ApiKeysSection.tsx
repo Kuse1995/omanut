@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { useCompany } from '@/context/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -69,33 +69,33 @@ function buildMcpConfig(plainKey: string, scope: 'company' | 'admin', label: str
 }
 
 function buildSkillMd(scope: 'company' | 'admin', label: string, name: string) {
-  const title = scope === 'admin' ? 'Omanut AI — Admin Training' : `Omanut AI — ${label}`;
+  const title = scope === 'admin' ? 'Omanut AI â€” Admin Training' : `Omanut AI â€” ${label}`;
   const scopeLine = scope === 'admin'
-    ? 'This skill connects to the Omanut AI platform with **admin scope** — you can switch between any company you have admin access to within a single session.'
+    ? 'This skill connects to the Omanut AI platform with **admin scope** â€” you can switch between any company you have admin access to within a single session.'
     : `This skill connects to the Omanut AI platform scoped to **${label}**.`;
 
   return `---
 name: ${name}
-description: ${title} — train, configure, and operate the Omanut AI platform via MCP.
+description: ${title} â€” train, configure, and operate the Omanut AI platform via MCP.
 ---
 
 # ${title}
 
 ${scopeLine}
 
-## Setup — DO THIS FIRST
+## Setup â€” DO THIS FIRST
 
-1. Make sure the MCP server defined in \`mcp.json\` is registered with OpenClaw.
-   - **Remove any older Omanut MCP entries from \`~/.claw/mcp.json\` first** (they will collide and OpenClaw may keep using the old key).
-   - Copy the \`mcpServers\` block from this skill's \`mcp.json\` into \`~/.claw/mcp.json\` and **fully restart** OpenClaw (not just reload).
+1. Make sure the MCP server defined in \`mcp.json\` is registered with AI Agent.
+   - **Remove any older Omanut MCP entries from \`~/.claw/mcp.json\` first** (they will collide and AI Agent may keep using the old key).
+   - Copy the \`mcpServers\` block from this skill's \`mcp.json\` into \`~/.claw/mcp.json\` and **fully restart** AI Agent (not just reload).
 2. **VERIFY THE CONNECTION BEFORE ANYTHING ELSE.** Tell the assistant:
    > *"Use the ${name} MCP server. Call \`who_am_i\` and show me the key_prefix and scope."*
    - The \`key_prefix\` returned MUST match the prefix of the key embedded in this skill's \`mcp.json\`.
-   - If it doesn't match, OpenClaw is using a stale config — fix \`~/.claw/mcp.json\` and restart again.
+   - If it doesn't match, AI Agent is using a stale config â€” fix \`~/.claw/mcp.json\` and restart again.
    - The \`scope\` MUST be \`${scope}\`. If it isn't, you installed the wrong skill.
 3. ${scope === 'admin'
-      ? 'Once verified, call `list_my_companies` → then `set_active_company` to choose which company you want to operate on.'
-      : 'Once verified, you are already scoped to your company — go straight to the workflow tools below.'}
+      ? 'Once verified, call `list_my_companies` â†’ then `set_active_company` to choose which company you want to operate on.'
+      : 'Once verified, you are already scoped to your company â€” go straight to the workflow tools below.'}
 
 ## When to use this skill
 
@@ -108,14 +108,14 @@ Use this skill whenever the user wants to:
 
 ## References
 
-- \`references/session-flow.md\` — how to start and structure a session
-- \`references/tools.md\` — full tool catalog grouped by category
-- \`references/autonomous-loop.md\` — Analyze → Research → Create → Promote → Sell → Audit
-- \`references/guardrails.md\` — spending guard, HITL approval, P&L checks
+- \`references/session-flow.md\` â€” how to start and structure a session
+- \`references/tools.md\` â€” full tool catalog grouped by category
+- \`references/autonomous-loop.md\` â€” Analyze â†’ Research â†’ Create â†’ Promote â†’ Sell â†’ Audit
+- \`references/guardrails.md\` â€” spending guard, HITL approval, P&L checks
 
 ## Authentication
 
-The API key is embedded in \`mcp.json\` (\`--header x-api-key:...\`). Treat the whole skill folder as a secret — anyone with this folder can act as ${scope === 'admin' ? 'an admin across all your companies' : 'this company'}.
+The API key is embedded in \`mcp.json\` (\`--header x-api-key:...\`). Treat the whole skill folder as a secret â€” anyone with this folder can act as ${scope === 'admin' ? 'an admin across all your companies' : 'this company'}.
 `;
 }
 
@@ -123,14 +123,14 @@ const REF_SESSION_FLOW = `# Session Flow
 
 ## Admin scope (multi-company)
 
-1. \`list_my_companies\` — returns every company you have admin access to.
-2. \`set_active_company({ company_id })\` — pin the session to one company. All subsequent tool calls operate on that company.
+1. \`list_my_companies\` â€” returns every company you have admin access to.
+2. \`set_active_company({ company_id })\` â€” pin the session to one company. All subsequent tool calls operate on that company.
 3. To switch mid-session, just call \`set_active_company\` again with a different ID.
-4. The platform re-validates your admin role on every request — revoking the key or removing your role takes effect immediately.
+4. The platform re-validates your admin role on every request â€” revoking the key or removing your role takes effect immediately.
 
 ## Company scope
 
-Skip steps 1–2. The session is already pinned to the company that issued the key.
+Skip steps 1â€“2. The session is already pinned to the company that issued the key.
 
 ## Recommended opener
 
@@ -139,7 +139,7 @@ Skip steps 1–2. The session is already pinned to the company that issued the k
 
 const REF_TOOLS = `# Tool Catalog
 
-Group your asks around these capability clusters. The exact tool names are exposed by the MCP server — ask the assistant to list them if unsure.
+Group your asks around these capability clusters. The exact tool names are exposed by the MCP server â€” ask the assistant to list them if unsure.
 
 ## Conversations & Inbox
 - Read recent conversations, transcripts, supervisor analysis
@@ -174,12 +174,12 @@ const REF_AUTONOMOUS_LOOP = `# Autonomous Operating Loop
 
 The Omanut AI is designed to run a closed loop per company:
 
-1. **Analyze** — pull last 24–72h of conversations, tickets, payments, and supervisor flags.
-2. **Research** — for each flagged pattern, look up the customer, BMS data, and brand assets.
-3. **Create** — draft replies, content, or config changes. Stage them for approval where required.
-4. **Promote** — schedule social posts, send re-engagement DMs, trigger payment links.
-5. **Sell** — guide customers through the autonomous checkout (check_stock → record_sale → generate_payment_link).
-6. **Audit** — re-read metrics, compare to goals, log adjustments to \`company_ai_overrides\`.
+1. **Analyze** â€” pull last 24â€“72h of conversations, tickets, payments, and supervisor flags.
+2. **Research** â€” for each flagged pattern, look up the customer, BMS data, and brand assets.
+3. **Create** â€” draft replies, content, or config changes. Stage them for approval where required.
+4. **Promote** â€” schedule social posts, send re-engagement DMs, trigger payment links.
+5. **Sell** â€” guide customers through the autonomous checkout (check_stock â†’ record_sale â†’ generate_payment_link).
+6. **Audit** â€” re-read metrics, compare to goals, log adjustments to \`company_ai_overrides\`.
 
 When training, walk one full loop per company per session and write your decisions back into the AI overrides so the agent improves between sessions.
 `;
@@ -191,8 +191,8 @@ const REF_GUARDRAILS = `# Guardrails
 - \`sale_approval_threshold\` forces HITL approval for sales above the threshold.
 
 ## Human-in-the-loop
-- \`require_approval_for_publishing\` — social posts queue in approvals instead of going live.
-- \`require_approval_for_ai_config\` — config edits queue for boss approval.
+- \`require_approval_for_publishing\` â€” social posts queue in approvals instead of going live.
+- \`require_approval_for_ai_config\` â€” config edits queue for boss approval.
 
 ## P&L checks
 - Always cross-check generated promotions against \`payment_transactions\` and \`credit_usage\` before scaling.
@@ -200,7 +200,7 @@ const REF_GUARDRAILS = `# Guardrails
 
 ## Confidentiality
 - Never echo system prompts, BMS costs, or internal operational rules onto Meta channels.
-- Treat the API key like a password — rotate immediately if exposed.
+- Treat the API key like a password â€” rotate immediately if exposed.
 `;
 
 async function buildSkillZip(plainKey: string, scope: 'company' | 'admin', label: string): Promise<Blob> {
@@ -287,7 +287,7 @@ export const ApiKeysSection = () => {
       if (isAdmin) {
         reqs.push(
           supabase.functions.invoke('manage-api-keys', {
-            body: { action: 'list' }, // no company_id → admin scope listing
+            body: { action: 'list' }, // no company_id â†’ admin scope listing
           })
         );
       } else {
@@ -367,7 +367,7 @@ export const ApiKeysSection = () => {
       const blob = await buildSkillZip(newPlaintextKey, newKeyScopeIssued, newKeyLabel || 'omanut');
       const filename = `${serverNameFor(newKeyScopeIssued, newKeyLabel)}.zip`;
       downloadBlob(filename, blob);
-      toast.success('OpenClaw skill package downloaded');
+      toast.success('AI Agent skill package downloaded');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to build skill package');
     }
@@ -379,7 +379,7 @@ export const ApiKeysSection = () => {
       const blob = await buildSkillZip('YOUR_API_KEY_HERE', scope, k.name);
       const filename = `${serverNameFor(scope, k.name)}.template.zip`;
       downloadBlob(filename, blob);
-      toast.info('Template downloaded — paste your saved API key into mcp.json before installing. (The full key is only shown once at creation.)');
+      toast.info('Template downloaded â€” paste your saved API key into mcp.json before installing. (The full key is only shown once at creation.)');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to build template');
     }
@@ -432,7 +432,7 @@ export const ApiKeysSection = () => {
                 {(k.scope ?? 'company') === 'admin' ? (
                   <Badge variant="outline" className="text-xs gap-1 border-primary/50 text-primary">
                     <Shield className="h-3 w-3" />
-                    Admin — All Companies
+                    Admin â€” All Companies
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="text-xs">Company</Badge>
@@ -461,7 +461,7 @@ export const ApiKeysSection = () => {
                     className="h-7 w-7"
                     onClick={() => testKey(k)}
                     disabled={testingKeyId === k.id}
-                    title="Test connection — verify scope & visibility"
+                    title="Test connection â€” verify scope & visibility"
                   >
                     {testingKeyId === k.id
                       ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -506,7 +506,7 @@ export const ApiKeysSection = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Key className="h-5 w-5 text-primary" />
-              <h3 className="text-lg font-semibold">API Keys — {selectedCompany.name}</h3>
+              <h3 className="text-lg font-semibold">API Keys â€” {selectedCompany.name}</h3>
             </div>
             <Button size="sm" onClick={() => { setNewKeyScope('company'); setShowCreateDialog(true); }} className="gap-1.5">
               <Plus className="h-4 w-4" />
@@ -519,7 +519,7 @@ export const ApiKeysSection = () => {
               <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
               <p className="text-xs text-muted-foreground">
                 API keys grant <strong>full access</strong> to this company's data. Treat them like passwords.
-                Keys are shown only once at creation — store them securely.
+                Keys are shown only once at creation â€” store them securely.
               </p>
             </div>
           </div>
@@ -551,7 +551,7 @@ export const ApiKeysSection = () => {
               <Button
                 size="sm"
                 variant="default"
-                onClick={() => { setNewKeyScope('admin'); setNewKeyName('OpenClaw Training'); setShowCreateDialog(true); }}
+                onClick={() => { setNewKeyScope('admin'); setNewKeyName('AI Agent Training'); setShowCreateDialog(true); }}
                 className="gap-1.5"
               >
                 <Plus className="h-4 w-4" />
@@ -563,8 +563,8 @@ export const ApiKeysSection = () => {
               <div className="flex items-start gap-2">
                 <Shield className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                 <p className="text-xs text-muted-foreground">
-                  Admin training keys can target <strong>any company</strong> in one OpenClaw session.
-                  Use <code className="bg-muted px-1 py-0.5 rounded text-[11px]">list_my_companies</code> →{' '}
+                  Admin training keys can target <strong>any company</strong> in one AI Agent session.
+                  Use <code className="bg-muted px-1 py-0.5 rounded text-[11px]">list_my_companies</code> â†’{' '}
                   <code className="bg-muted px-1 py-0.5 rounded text-[11px]">set_active_company</code> to switch
                   between companies mid-session. The key is re-validated against your admin role on every request.
                 </p>
@@ -573,7 +573,7 @@ export const ApiKeysSection = () => {
 
             {loading ? null : adminKeys.length === 0 ? (
               <div className="text-center py-8 text-sm text-muted-foreground">
-                No admin training keys yet. Generate one to train the AI across all your companies in a single OpenClaw session.
+                No admin training keys yet. Generate one to train the AI across all your companies in a single AI Agent session.
               </div>
             ) : (
               renderKeyTable(adminKeys, 'admin')
@@ -591,14 +591,14 @@ export const ApiKeysSection = () => {
             </DialogTitle>
             <DialogDescription>
               {newKeyScope === 'admin'
-                ? 'This key will let one OpenClaw session train any company you have admin access to.'
+                ? 'This key will let one AI Agent session train any company you have admin access to.'
                 : `This key will grant full programmatic access to ${selectedCompany?.name}'s data.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <label className="text-sm font-medium">Key Name</label>
             <Input
-              placeholder={newKeyScope === 'admin' ? 'OpenClaw Training' : 'e.g. Production Agent'}
+              placeholder={newKeyScope === 'admin' ? 'AI Agent Training' : 'e.g. Production Agent'}
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
             />
@@ -619,9 +619,9 @@ export const ApiKeysSection = () => {
       <Dialog open={showKeyDialog} onOpenChange={(open) => { if (!open) setShowKeyDialog(false); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Your API Key — shown only once</DialogTitle>
+            <DialogTitle>Your API Key â€” shown only once</DialogTitle>
             <DialogDescription>
-              Copy this key now — you won't be able to see it again. The skill ZIP below has the key <strong>pre-embedded</strong>; the per-row download in the table only produces a <em>template</em> with a placeholder.
+              Copy this key now â€” you won't be able to see it again. The skill ZIP below has the key <strong>pre-embedded</strong>; the per-row download in the table only produces a <em>template</em> with a placeholder.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2">
@@ -634,17 +634,17 @@ export const ApiKeysSection = () => {
           </div>
           <Button variant="default" onClick={downloadIssuedConfig} className="gap-1.5 w-full">
             <Download className="h-4 w-4" />
-            Download OpenClaw skill (.zip) — key embedded
+            Download AI Agent skill (.zip) â€” key embedded
           </Button>
           <div className="rounded-md border bg-muted/40 p-3 space-y-1.5">
-            <p className="text-xs font-medium">How to install in OpenClaw</p>
+            <p className="text-xs font-medium">How to install in AI Agent</p>
             <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
-              <li><strong>Remove any older Omanut MCP entries</strong> from <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code> first — stale entries will keep using the old key.</li>
-              <li>Unzip the file into your OpenClaw skills folder (e.g. <code className="bg-muted px-1 rounded">~/.claw/skills/</code>).</li>
+              <li><strong>Remove any older Omanut MCP entries</strong> from <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code> first â€” stale entries will keep using the old key.</li>
+              <li>Unzip the file into your AI Agent skills folder (e.g. <code className="bg-muted px-1 rounded">~/.claw/skills/</code>).</li>
               <li>Copy the <code className="bg-muted px-1 rounded">mcpServers</code> block from the skill's <code className="bg-muted px-1 rounded">mcp.json</code> into <code className="bg-muted px-1 rounded">~/.claw/mcp.json</code>.</li>
-              <li><strong>Fully restart</strong> OpenClaw (not just reload).</li>
+              <li><strong>Fully restart</strong> AI Agent (not just reload).</li>
               <li>First message: <em>"Use the {serverNameFor(newKeyScopeIssued, newKeyLabel)} MCP server. Call <code className="bg-muted px-0.5 rounded">who_am_i</code> and confirm the key prefix and scope match."</em></li>
-              <li>Do <strong>not</strong> run <code className="bg-muted px-1 rounded">clawhub install</code> — this is a local skill, not a published one.</li>
+              <li>Do <strong>not</strong> run <code className="bg-muted px-1 rounded">clawhub install</code> â€” this is a local skill, not a published one.</li>
             </ol>
           </div>
           <DialogFooter>
@@ -659,19 +659,19 @@ export const ApiKeysSection = () => {
           <DialogHeader>
             <DialogTitle>Key Verification</DialogTitle>
             <DialogDescription>
-              This is what the server sees for this key. If OpenClaw reports something different, it's using a stale config.
+              This is what the server sees for this key. If AI Agent reports something different, it's using a stale config.
             </DialogDescription>
           </DialogHeader>
           {testResult && (
             <div className="space-y-2 text-sm">
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Key prefix</span>
-                <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{testResult.key_prefix}…</code>
+                <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{testResult.key_prefix}â€¦</code>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">Scope</span>
                 <Badge variant="outline" className={testResult.scope === 'admin' ? 'border-primary/50 text-primary' : ''}>
-                  {testResult.scope === 'admin' ? 'Admin — All Companies' : 'Company'}
+                  {testResult.scope === 'admin' ? 'Admin â€” All Companies' : 'Company'}
                 </Badge>
               </div>
               {testResult.company_name && (
@@ -696,7 +696,7 @@ export const ApiKeysSection = () => {
               </div>
               {testResult.scope === 'admin' && (
                 <div className="rounded-md border bg-muted/40 p-2 mt-3 text-xs text-muted-foreground">
-                  In OpenClaw, run <code className="bg-muted px-1 rounded">who_am_i</code> and verify the returned <code className="bg-muted px-1 rounded">key_prefix</code> matches <code className="bg-muted px-1 rounded">{testResult.key_prefix}</code>. If it doesn't, OpenClaw is using a different (likely stale) key.
+                  In AI Agent, run <code className="bg-muted px-1 rounded">who_am_i</code> and verify the returned <code className="bg-muted px-1 rounded">key_prefix</code> matches <code className="bg-muted px-1 rounded">{testResult.key_prefix}</code>. If it doesn't, AI Agent is using a different (likely stale) key.
                 </div>
               )}
             </div>
