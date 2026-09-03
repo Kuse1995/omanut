@@ -1,9 +1,9 @@
-import { Hono } from "hono";
+﻿import { Hono } from "hono";
 import { McpServer, StreamableHttpTransport } from "mcp-lite";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "zod";
 import zodToJsonSchema from "zod-to-json-schema";
-import { buildEnvelope } from "../_shared/openclaw-envelope.ts";
+import { buildEnvelope } from "../_shared/agent-envelope.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -154,30 +154,30 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     if (!c) throw new Error(`Company not found: ${companyId}`);
   }
 
-  // Gate for any tool that lets OpenClaw act AS a human inside a customer conversation
+  // Gate for any tool that lets AI Agent act AS a human inside a customer conversation
   // (sending messages, taking over chats). Companies must explicitly opt in.
-  async function requireOpenClawEnabled(companyId: string): Promise<void> {
+  async function requireAgentTakeover(companyId: string): Promise<void> {
     const { data, error } = await supabase
       .from("companies")
-      .select("openclaw_takeover_enabled, name")
+      .select("agent_takeover_enabled, name")
       .eq("id", companyId)
       .maybeSingle();
     if (error) throw error;
-    if (!data?.openclaw_takeover_enabled) {
+    if (!data?.agent_takeover_enabled) {
       throw new Error(
-        `OpenClaw takeover is disabled for ${data?.name || "this company"}. ` +
-        `An operator must enable it in Company Settings → OpenClaw Agent before this tool can run.`
+        `AI Agent takeover is disabled for ${data?.name || "this company"}. ` +
+        `An operator must enable it in Company Settings â†’ AI Agent Agent before this tool can run.`
       );
     }
   }
 
   // Wrap server.tool so handler errors become structured tool results (isError: true)
-  // instead of bubbling up as JSON-RPC -32603 Internal Error. OpenClaw can then read the message.
+  // instead of bubbling up as JSON-RPC -32603 Internal Error. AI Agent can then read the message.
   const originalTool = server.tool.bind(server);
   (server as any).tool = (name: string, def: any) => {
     const userHandler = def.handler;
     def.handler = async (params: any, ctx: any) => {
-      // Heartbeat bump: every MCP tool call proves OpenClaw is alive.
+      // Heartbeat bump: every MCP tool call proves AI Agent is alive.
       // Best-effort, never blocks the tool call.
       (async () => {
         try {
@@ -189,7 +189,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           if (companyId) {
             await supabase
               .from("companies")
-              .update({ openclaw_last_heartbeat: new Date().toISOString() })
+              .update({ agent_last_heartbeat: new Date().toISOString() })
               .eq("id", companyId);
           }
         } catch (_e) { /* swallow */ }
@@ -218,12 +218,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     return originalTool(name, def);
   };
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // SESSION / COMPANY-SWITCHING TOOLS (admin keys only useful here)
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   server.tool("who_am_i", {
-    description: "Debug: report which API key is currently authenticated, its scope, and the active company. ALWAYS call this first when setting up the connection — verify the key prefix matches the key you intended to install before running any other tools.",
+    description: "Debug: report which API key is currently authenticated, its scope, and the active company. ALWAYS call this first when setting up the connection â€” verify the key prefix matches the key you intended to install before running any other tools.",
     inputSchema: z.object({}),
     handler: async () => {
       const active = await getActiveCompany(supabase, auth.keyId, sessionId);
@@ -334,15 +334,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // Helper for tool schemas: optional per-call company_id override
   const companyOverride = z.object({ company_id: z.string().optional().describe("Optional: target a specific company (admin keys only). If omitted, uses set_active_company or the key's default.") });
 
-  // ── register_webhook ──
-  // Lets a local OpenClaw instance self-register (and rotate) its webhook URL
+  // â”€â”€ register_webhook â”€â”€
+  // Lets a local AI Agent instance self-register (and rotate) its webhook URL
   // without an Omanut admin touching the DB. Sends a signed ping to verify
   // reachability before persisting.
   server.tool("register_webhook", {
-    description: "Register or rotate the OpenClaw webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.openclaw_webhook_url, openclaw_mode, and openclaw_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
+    description: "Register or rotate the AI Agent webhook URL for the active company. Sends a signed ping to verify reachability, then updates companies.AI Agent_webhook_url, AI Agent_mode, and AI Agent_owns. Auth-gated tunnels (401/403/405 at the proxy) are accepted as reachable. Pass force=true to save without a successful ping.",
     inputSchema: z.object({
-      webhook_url: z.string().url().describe("Public HTTPS URL OpenClaw exposes (e.g. https://abc.trycloudflare.com/webhook)."),
-      webhook_token: z.string().optional().describe("Optional bearer/api token enforced by the OpenClaw gateway (gateway.auth.token in openclaw.json). Sent on every dispatch as both `Authorization: Bearer <token>` and `X-Api-Key: <token>`. Omit to keep the existing token; pass an empty string to clear."),
+      webhook_url: z.string().url().describe("Public HTTPS URL AI Agent exposes (e.g. https://abc.trycloudflare.com/webhook)."),
+      webhook_token: z.string().optional().describe("Optional bearer/api token enforced by the AI Agent gateway (gateway.auth.token in AI Agent.json). Sent on every dispatch as both `Authorization: Bearer <token>` and `X-Api-Key: <token>`. Omit to keep the existing token; pass an empty string to clear."),
       mode: z.enum(["off", "assist", "primary"]).optional().describe("Routing mode. Defaults to current value, or 'assist' on first call."),
       force: z.boolean().optional().describe("If true, save the URL even if the ping check fails (e.g. tunnel proxy blocks our POST). Default false."),
       owns: z.object({
@@ -365,23 +365,23 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       // Fetch current config for sensible defaults on merge
       const { data: current, error: cErr } = await supabase
         .from("companies")
-        .select("openclaw_mode, openclaw_owns, openclaw_webhook_token")
+        .select("AI Agent_mode, AI Agent_owns, AI Agent_webhook_token")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
 
-      const nextMode = params.mode ?? current?.openclaw_mode ?? "assist";
-      const nextOwns = { ...(current?.openclaw_owns ?? {}), ...(params.owns ?? {}) };
+      const nextMode = params.mode ?? current?.AI Agent_mode ?? "assist";
+      const nextOwns = { ...(current?.AI Agent_owns ?? {}), ...(params.owns ?? {}) };
       // webhook_token: undefined = keep, "" = clear, anything else = set
       const nextToken: string | null = params.webhook_token === undefined
-        ? (current?.openclaw_webhook_token ?? null)
+        ? (current?.AI Agent_webhook_token ?? null)
         : (params.webhook_token === "" ? null : params.webhook_token);
       const gatewayToken = nextToken
-        || Deno.env.get("OPENCLAW_GATEWAY_TOKEN")
+        || Deno.env.get("AI Agent_GATEWAY_TOKEN")
         || "";
 
       // Send signed ping
-      const secret = Deno.env.get("OPENCLAW_WEBHOOK_SECRET") ?? "";
+      const secret = Deno.env.get("AI Agent_WEBHOOK_SECRET") ?? "";
       const bodyString = JSON.stringify({
         event_id: "ping",
         company_id: companyId,
@@ -415,7 +415,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(sigHeader ? { "X-Openclaw-Signature": sigHeader } : {}),
+            ...(sigHeader ? { "X-Agent-Signature": sigHeader } : {}),
             ...(gatewayToken ? {
               "Authorization": `Bearer ${gatewayToken}`,
               "X-Api-Key": gatewayToken,
@@ -429,7 +429,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           pingStatus = "delivered";
         } else if (resp.status === 401 || resp.status === 403 || resp.status === 405) {
           // Tunnel/proxy is up but blocking our POST. Endpoint is reachable;
-          // OpenClaw's own auth/method handling is its concern, not ours.
+          // AI Agent's own auth/method handling is its concern, not ours.
           pingStatus = "reachable_auth_gated";
           pingError = `http_${resp.status} at proxy (treated as reachable)`;
         } else {
@@ -457,11 +457,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const { error: uErr } = await supabase
         .from("companies")
         .update({
-          openclaw_webhook_url: webhookUrl,
-          openclaw_webhook_token: nextToken,
-          openclaw_mode: nextMode,
-          openclaw_owns: nextOwns,
-          openclaw_last_heartbeat: new Date().toISOString(),
+          AI Agent_webhook_url: webhookUrl,
+          AI Agent_webhook_token: nextToken,
+          AI Agent_mode: nextMode,
+          AI Agent_owns: nextOwns,
+          agent_last_heartbeat: new Date().toISOString(),
         })
         .eq("id", companyId);
       if (uErr) throw uErr;
@@ -480,18 +480,18 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── clear_webhook ──
-  // Lets OpenClaw null out a stale tunnel URL on shutdown/rotation.
+  // â”€â”€ clear_webhook â”€â”€
+  // Lets AI Agent null out a stale tunnel URL on shutdown/rotation.
   server.tool("clear_webhook", {
-    description: "Clear the OpenClaw webhook URL for the active company and set mode='off'. Use on shutdown or before rotating to a new tunnel.",
+    description: "Clear the AI Agent webhook URL for the active company and set mode='off'. Use on shutdown or before rotating to a new tunnel.",
     inputSchema: z.object({}).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
       const { error } = await supabase
         .from("companies")
         .update({
-          openclaw_webhook_url: null,
-          openclaw_mode: "off",
+          AI Agent_webhook_url: null,
+          AI Agent_mode: "off",
         })
         .eq("id", companyId);
       if (error) throw error;
@@ -504,15 +504,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_webhook_status ──
+  // â”€â”€ get_webhook_status â”€â”€
   server.tool("get_webhook_status", {
-    description: "Read current OpenClaw webhook config for the active company plus the last 5 dispatch events. Use this to self-diagnose whether you're wired up correctly.",
+    description: "Read current AI Agent webhook config for the active company plus the last 5 dispatch events. Use this to self-diagnose whether you're wired up correctly.",
     inputSchema: z.object({}).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
       const { data: company, error: cErr } = await supabase
         .from("companies")
-        .select("openclaw_webhook_url, openclaw_mode, openclaw_owns, openclaw_last_heartbeat")
+        .select("AI Agent_webhook_url, AI Agent_mode, AI Agent_owns, agent_last_heartbeat")
         .eq("id", companyId)
         .single();
       if (cErr) throw cErr;
@@ -524,16 +524,16 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .limit(5);
       return { content: [{ type: "text" as const, text: JSON.stringify({
         company_id: companyId,
-        webhook_url: company?.openclaw_webhook_url ?? null,
-        mode: company?.openclaw_mode ?? null,
-        owns: company?.openclaw_owns ?? {},
-        last_heartbeat: company?.openclaw_last_heartbeat ?? null,
+        webhook_url: company?.AI Agent_webhook_url ?? null,
+        mode: company?.AI Agent_mode ?? null,
+        owns: company?.AI Agent_owns ?? {},
+        last_heartbeat: company?.agent_last_heartbeat ?? null,
         recent_events: events ?? [],
       }, null, 2) }] };
     },
   });
 
-  // ── list_conversations ──
+  // â”€â”€ list_conversations â”€â”€
   server.tool("list_conversations", {
     description: "List recent conversations with customers. Filter by status (active/ended).",
     inputSchema: z.object({
@@ -556,7 +556,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_conversation ──
+  // â”€â”€ get_conversation â”€â”€
   server.tool("get_conversation", {
     description: "Get full conversation details and all messages for analysis.",
     inputSchema: z.object({
@@ -581,7 +581,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_analytics ──
+  // â”€â”€ get_analytics â”€â”€
   server.tool("get_analytics", {
     description: "Get business analytics: conversation count, revenue, reservations over a period.",
     inputSchema: z.object({
@@ -612,7 +612,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_customers ──
+  // â”€â”€ list_customers â”€â”€
   server.tool("list_customers", {
     description: "List customer segments with engagement scores, interests, and conversion potential.",
     inputSchema: z.object({
@@ -631,7 +631,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_tickets ──
+  // â”€â”€ list_tickets â”€â”€
   server.tool("list_tickets", {
     description: "List support tickets. Filter by status or priority.",
     inputSchema: z.object({
@@ -650,7 +650,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── create_ticket ──
+  // â”€â”€ create_ticket â”€â”€
   server.tool("create_ticket", {
     description: "Create a support ticket for tracking an issue.",
     inputSchema: z.object({
@@ -677,7 +677,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── send_message ──
+  // â”€â”€ send_message â”€â”€
   server.tool("send_message", {
     description: "Send a WhatsApp message to an EXISTING customer of this company. Refuses if the phone number has no prior conversation with the company (no unsolicited cross-tenant messaging).",
     inputSchema: z.object({
@@ -688,7 +688,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
 
       const auditAttempt = async (decision: string, reason: string, extra: Record<string, unknown> = {}) => {
         try {
@@ -746,7 +746,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_ai_config ──
+  // â”€â”€ get_ai_config â”€â”€
   server.tool("get_ai_config", {
     description: "Get AI configuration and overrides: model, temperature, system prompt, tools, supervisor settings.",
     inputSchema: companyOverride,
@@ -762,7 +762,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_ai_errors ──
+  // â”€â”€ list_ai_errors â”€â”€
   server.tool("list_ai_errors", {
     description: "List AI error logs to identify quality issues, hallucinations, and misroutes.",
     inputSchema: z.object({
@@ -786,7 +786,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_media ──
+  // â”€â”€ list_media â”€â”€
   server.tool("list_media", {
     description: "List company media assets (images, videos, documents).",
     inputSchema: companyOverride,
@@ -801,7 +801,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_reservations ──
+  // â”€â”€ list_reservations â”€â”€
   server.tool("list_reservations", {
     description: "List reservations/bookings.",
     inputSchema: z.object({
@@ -820,7 +820,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_products ──
+  // â”€â”€ list_products â”€â”€
   server.tool("list_products", {
     description: "List active payment products.",
     inputSchema: companyOverride,
@@ -836,7 +836,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_company_info ──
+  // â”€â”€ get_company_info â”€â”€
   server.tool("get_company_info", {
     description: "Get company profile and settings.",
     inputSchema: companyOverride,
@@ -848,7 +848,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── search_knowledge_base ──
+  // â”€â”€ search_knowledge_base â”€â”€
   // Scans ALL company knowledge sources (curated KB, payment info, services, hours,
   // BMS catalog snapshot, uploaded documents) and returns ranked paragraph snippets.
   server.tool("search_knowledge_base", {
@@ -902,7 +902,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── update_knowledge_base ──
+  // â”€â”€ update_knowledge_base â”€â”€
   server.tool("update_knowledge_base", {
     description: "Add or update a knowledge base document. Provide filename and content to upsert.",
     inputSchema: z.object({
@@ -946,7 +946,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_scheduled_posts ──
+  // â”€â”€ list_scheduled_posts â”€â”€
   server.tool("list_scheduled_posts", {
     description: "List scheduled social media posts. Filter by status: pending_approval, approved, published, failed.",
     inputSchema: z.object({
@@ -970,7 +970,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── review_scheduled_post ──
+  // â”€â”€ review_scheduled_post â”€â”€
   server.tool("review_scheduled_post", {
     description: "Approve, reject, or edit a scheduled post. Use to act as a content approval agent.",
     inputSchema: z.object({
@@ -999,7 +999,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── create_scheduled_post ──
+  // â”€â”€ create_scheduled_post â”€â”€
   server.tool("create_scheduled_post", {
     description: "Create a new scheduled social media post with caption, image, platform, and timing.",
     inputSchema: z.object({
@@ -1087,7 +1087,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_generated_images ──
+  // â”€â”€ list_generated_images â”€â”€
   server.tool("list_generated_images", {
     description: "List AI-generated images with prompts, approval status, brand assets used, and URLs.",
     inputSchema: z.object({
@@ -1109,7 +1109,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_image_generation_settings ──
+  // â”€â”€ get_image_generation_settings â”€â”€
   server.tool("get_image_generation_settings", {
     description: "Read the company's image generation config: style, tone, brand colors, visual guidelines, best posting times.",
     inputSchema: companyOverride,
@@ -1125,7 +1125,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── update_image_generation_settings ──
+  // â”€â”€ update_image_generation_settings â”€â”€
   server.tool("update_image_generation_settings", {
     description: "Update image generation settings: style description, brand tone, visual guidelines, brand colors.",
     inputSchema: z.object({
@@ -1152,8 +1152,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_product_media ──
-  // Lets OpenClaw browse the company's media library so it can pick reference IDs
+  // â”€â”€ list_product_media â”€â”€
+  // Lets AI Agent browse the company's media library so it can pick reference IDs
   // (instead of guessing or smuggling URLs into style_description).
   server.tool("list_product_media", {
     description: "List images from the company media library so you can pick reference IDs for image generation. Filter by category (products / logos / promotional / other) and/or search term. Returns id, public_url, file_name, description, bms_product_id, category.",
@@ -1193,12 +1193,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── set_image_reference_assets ──
+  // â”€â”€ set_image_reference_assets â”€â”€
   // Writes image_generation_settings.reference_asset_ids properly (the existing
-  // update_image_generation_settings only exposes text fields — that's why OpenClaw
+  // update_image_generation_settings only exposes text fields â€” that's why AI Agent
   // was smuggling URLs into style_description).
   server.tool("set_image_reference_assets", {
-    description: "Pin specific company_media items as visual anchors for ALL future AI-generated images (1–4 IDs recommended). These are passed directly to the image model so generations look like the real products. Pass an empty array to clear.",
+    description: "Pin specific company_media items as visual anchors for ALL future AI-generated images (1â€“4 IDs recommended). These are passed directly to the image model so generations look like the real products. Pass an empty array to clear.",
     inputSchema: z.object({
       media_ids: z.array(z.string()).describe("UUIDs from list_product_media. Up to 4 are used."),
     }).merge(companyOverride),
@@ -1230,9 +1230,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── generate_business_image ──
-  // On-demand product-anchored image generation. Gated by the OpenClaw safety switch
-  // so a disabled company can't have OpenClaw spend image-gen credits on its behalf.
+  // â”€â”€ generate_business_image â”€â”€
+  // On-demand product-anchored image generation. Gated by the AI Agent safety switch
+  // so a disabled company can't have AI Agent spend image-gen credits on its behalf.
   server.tool("generate_business_image", {
     description: "Generate a brand-on, product-anchored image. Uses the company's saved reference_asset_ids by default, or pass explicit reference_media_ids to override. Returns the image URL plus the references that were actually fed to the model so you can self-evaluate.",
     inputSchema: z.object({
@@ -1243,7 +1243,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
       const result = await callEdgeFunction("generate-business-image", {
         company_id: companyId,
         prompt: params.prompt,
@@ -1255,7 +1255,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── notify_boss ──
+  // â”€â”€ notify_boss â”€â”€
   // Fires a WhatsApp alert to the company's configured boss phone(s) via send-boss-notification.
   // Use this when a hot lead picks a plan, a customer escalates, or anything urgent the human owner must see.
   server.tool("notify_boss", {
@@ -1270,13 +1270,13 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       ]).optional().describe("Type of alert. Defaults to 'interested_client'."),
       customer_name: z.string().optional().describe("Customer's name if known"),
       customer_phone: z.string().optional().describe("Customer's phone number"),
-      summary: z.string().describe("What the boss needs to know — short, action-oriented"),
+      summary: z.string().describe("What the boss needs to know â€” short, action-oriented"),
       priority: z.enum(["low", "medium", "high"]).optional().describe("Priority level (used for action_required)"),
       media_url: z.string().optional().describe("Optional image/video URL to attach to the alert"),
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
 
       const type = params.notification_type || "interested_client";
 
@@ -1308,7 +1308,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           break;
       }
 
-      // List boss phones up-front so we can echo them back to OpenClaw.
+      // List boss phones up-front so we can echo them back to AI Agent.
       const { data: bossRows } = await supabase
         .from("company_boss_phones")
         .select("phone, label, is_primary")
@@ -1339,20 +1339,20 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── send_media ──
-  // Dedicated media-send path. Wraps send-whatsapp-message so OpenClaw can ship a video/image
+  // â”€â”€ send_media â”€â”€
+  // Dedicated media-send path. Wraps send-whatsapp-message so AI Agent can ship a video/image
   // (e.g. a demo clip) into a customer's WhatsApp thread without juggling the message tool.
   server.tool("send_media", {
     description: "Send a video or image to a customer's WhatsApp conversation. Provide either conversation_id or customer_phone. Caption is optional but recommended.",
     inputSchema: z.object({
       conversation_id: z.string().optional().describe("Conversation UUID (preferred if known)"),
-      customer_phone: z.string().optional().describe("Customer phone number — used if conversation_id not provided"),
+      customer_phone: z.string().optional().describe("Customer phone number â€” used if conversation_id not provided"),
       media_url: z.string().describe("Public HTTPS URL of the image or video to send"),
       caption: z.string().optional().describe("Optional caption text shown alongside the media"),
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
 
       if (!params.conversation_id && !params.customer_phone) {
         throw new Error("Provide either conversation_id or customer_phone.");
@@ -1383,8 +1383,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── unpause_conversation ──
-  // Release a conversation from human/OpenClaw takeover so the AI resumes.
+  // â”€â”€ unpause_conversation â”€â”€
+  // Release a conversation from human/AI Agent takeover so the AI resumes.
   // Mirrors the "Release all" admin button but scoped to a single conversation,
   // with strict (conversation, company) binding to prevent cross-tenant unpause.
   server.tool("unpause_conversation", {
@@ -1395,7 +1395,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
 
       // Strict binding: conversation must belong to the active company.
       const { data: convo, error: convoErr } = await supabase
@@ -1459,14 +1459,14 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // DIAGNOSTIC / SELF-TRAINING TOOLS — read-only, company-scoped
-  // Lets OpenClaw inspect why the AI failed without round-tripping
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // DIAGNOSTIC / SELF-TRAINING TOOLS â€” read-only, company-scoped
+  // Lets AI Agent inspect why the AI failed without round-tripping
   // through Lovable. All gated by active company; no system prompts
   // or wholesale costs are ever returned (confidentiality memory).
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-  // ── get_conversation_trace ──
+  // â”€â”€ get_conversation_trace â”€â”€
   // Full message-by-message trace with tool calls + errors. System
   // role messages are stripped so internal prompts never leak out.
   server.tool("get_conversation_trace", {
@@ -1521,13 +1521,13 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_ai_errors ──
+  // â”€â”€ get_ai_errors â”€â”€
   // Reads ai_error_logs for the active company, with optional search/since filters.
   server.tool("get_ai_errors", {
     description: "List recent AI failures for this company from ai_error_logs: error type, severity, original message, AI response, detected flags, and quality score. Use to spot recurring failure patterns.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results, newest first (default 20, max 100)"),
-      since: z.string().optional().describe("ISO timestamp — only return errors created after this time"),
+      since: z.string().optional().describe("ISO timestamp â€” only return errors created after this time"),
       search: z.string().optional().describe("Case-insensitive substring filter against original_message + ai_response"),
       severity: z.string().optional().describe("Filter: low, medium, high, critical"),
     }).merge(companyOverride),
@@ -1555,7 +1555,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_ai_override_summary ──
+  // â”€â”€ get_ai_override_summary â”€â”€
   // Returns metadata about the company_ai_overrides row WITHOUT the raw
   // system_instructions / agent prompts. Confidentiality memory: never leak prompts.
   server.tool("get_ai_override_summary", {
@@ -1599,8 +1599,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_boss_notification_history ──
-  // Lets OpenClaw verify what was actually sent to Abraham via notify_boss.
+  // â”€â”€ get_boss_notification_history â”€â”€
+  // Lets AI Agent verify what was actually sent to Abraham via notify_boss.
   server.tool("get_boss_notification_history", {
     description: "List the most recent boss/owner notifications sent for this company (via notify_boss or other paths). Returns message content and any boss reply, so you can confirm an alert really went out.",
     inputSchema: z.object({
@@ -1623,12 +1623,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── get_function_logs ──
+  // â”€â”€ get_function_logs â”€â”€
   // Honest implementation: raw Supabase Edge runtime logs require the
   // Management API personal access token, which the MCP service-role key
   // does NOT have. Instead we surface the most actionable signal we DO
   // have: ai_error_logs filtered by function context, and recent failed
-  // messages. Tool description tells OpenClaw exactly what it gets.
+  // messages. Tool description tells AI Agent exactly what it gets.
   const FUNCTION_ALLOWLIST = new Set([
     "whatsapp-messages",
     "mcp-server",
@@ -1641,7 +1641,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     "bms-agent",
   ]);
   server.tool("get_function_logs", {
-    description: "Get diagnostic signal for a deployed edge function. NOTE: raw runtime logs require Lovable; this tool returns the actionable equivalent — recent ai_error_logs whose error_type or detected_flags reference the function, plus recent messages with errors in their metadata. Whitelisted functions only.",
+    description: "Get diagnostic signal for a deployed edge function. NOTE: raw runtime logs require Lovable; this tool returns the actionable equivalent â€” recent ai_error_logs whose error_type or detected_flags reference the function, plus recent messages with errors in their metadata. Whitelisted functions only.",
     inputSchema: z.object({
       function_name: z.string().describe("Edge function name. Allowed: " + Array.from(FUNCTION_ALLOWLIST).join(", ")),
       search: z.string().optional().describe("Optional substring to filter on (matches error_type, ai_response, original_message)"),
@@ -1681,9 +1681,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── read_function_source ──
+  // â”€â”€ read_function_source â”€â”€
   // Reads edge function source from the deployed bundle. Whitelisted only.
-  // Truncates large files. Lets OpenClaw understand tool internals before
+  // Truncates large files. Lets AI Agent understand tool internals before
   // calling them, instead of guessing from the schema.
   server.tool("read_function_source", {
     description: "Read the source code of a deployed edge function (whitelisted). Returns text. Truncates at max_bytes. Use this to understand what a tool actually does before calling it.",
@@ -1726,7 +1726,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           function_name: fn,
           tried: candidates,
           last_error: lastErr,
-          hint: "Use a GitHub read-only token in OpenClaw's integration settings to read source via the repo instead.",
+          hint: "Use a GitHub read-only token in AI Agent's integration settings to read source via the repo instead.",
         }, null, 2) }] };
       }
       const truncated = source.length > cap;
@@ -1735,12 +1735,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         path: foundPath,
         bytes: source.length,
         truncated,
-        source: truncated ? source.slice(0, cap) + `\n\n/* …truncated, ${source.length - cap} more bytes. Increase max_bytes (max 100000). */` : source,
+        source: truncated ? source.slice(0, cap) + `\n\n/* â€¦truncated, ${source.length - cap} more bytes. Increase max_bytes (max 100000). */` : source,
       }, null, 2) }] };
     },
   });
 
-  // ── list_product_identity_profiles ──
+  // â”€â”€ list_product_identity_profiles â”€â”€
   server.tool("list_product_identity_profiles", {
     description: "List all product identity fingerprints: hex colors, labels, packaging shapes, exclusion keywords.",
     inputSchema: companyOverride,
@@ -1755,7 +1755,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── update_product_identity_profile ──
+  // â”€â”€ update_product_identity_profile â”€â”€
   server.tool("update_product_identity_profile", {
     description: "Edit a product identity profile: exclusion keywords, visual fingerprints, brand colors.",
     inputSchema: z.object({
@@ -1782,7 +1782,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ── list_video_jobs ──
+  // â”€â”€ list_video_jobs â”€â”€
   server.tool("list_video_jobs", {
     description: "List video generation jobs with status, provider, aspect ratio, prompt, and result URL.",
     inputSchema: z.object({
@@ -1804,9 +1804,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // BMS PROXY TOOLS — route through bms-agent edge function
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // BMS PROXY TOOLS â€” route through bms-agent edge function
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async function callBmsViaEdge(intent: string, companyId: string, params: Record<string, any> = {}) {
     const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bms-agent`;
@@ -1857,9 +1857,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     });
   }
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // META PLATFORM OUTBOUND TOOLS
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   server.tool("send_facebook_message", {
     description: "Send a Facebook Messenger DM to a customer via their conversation.",
@@ -1869,7 +1869,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -1883,7 +1883,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }).merge(companyOverride),
     handler: async (params: any) => {
       const companyId = await resolveCompanyId(params?.company_id);
-      await requireOpenClawEnabled(companyId);
+      await requireAgentTakeover(companyId);
       const result = await callEdgeFunction("send-meta-dm", { conversationId: params.conversation_id, text: params.text });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
     },
@@ -1990,9 +1990,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // OPERATIONAL CONTROL TOOLS
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   server.tool("update_ai_config", {
     description: "Update AI configuration: model, temperature, system prompt, enabled tools, response style.",
@@ -2056,9 +2056,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // SAFETY GUARDRAIL TOOLS
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   server.tool("get_spending_guard", {
     description: "Check if the agent is within daily spending limits. MUST be called before any spend action.",
@@ -2120,7 +2120,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
       const { data: company } = await supabase.from("companies").select("boss_phone, name").eq("id", companyId).single();
       if (company?.boss_phone) {
-        const msg = `🤖 *Agent Approval Request*\n\nAction: ${params.action_type}\n${params.action_summary}\n\nReply YES to approve or NO to reject.\n\n_Request ID: ${request.id}_`;
+        const msg = `ðŸ¤– *Agent Approval Request*\n\nAction: ${params.action_type}\n${params.action_summary}\n\nReply YES to approve or NO to reject.\n\n_Request ID: ${request.id}_`;
         await callEdgeFunction("send-whatsapp-message", {
           company_id: companyId,
           phone: company.boss_phone,
@@ -2162,9 +2162,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // BMS DIAGNOSTIC TOOLS — for OpenClaw self-serve debugging
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // BMS DIAGNOSTIC TOOLS â€” for AI Agent self-serve debugging
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   server.tool("get_bms_health", {
     description: "Get recent BMS health-check results for the company: status, latency stats, and error-code histogram. Lets you spot whether BMS is down before customers complain.",
@@ -2243,21 +2243,21 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // ═══════════════════════════════════════════════════════════
-  // OPENCLAW EVENT COORDINATION
-  // ═══════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // AI Agent EVENT COORDINATION
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-  // NOTE: These tools read/write `inbound_events` — the SAME queue that
-  // whatsapp-messages enqueues into and that openclaw-pull / openclaw-worker
-  // drain. The legacy `openclaw_events` table is no longer the source of truth.
+  // NOTE: These tools read/write `inbound_events` â€” the SAME queue that
+  // whatsapp-messages enqueues into and that AI Agent-pull / AI Agent-worker
+  // drain. The legacy `AI Agent_events` table is no longer the source of truth.
   server.tool("list_pending_events", {
-    description: "List inbound customer events that are still pending (not yet handled). Each event is returned as a FULL ENVELOPE containing the company's knowledge base, voice style, custom instructions, payment numbers, hours, services, recent message history, BMS snapshot, inbound text/media, and reply guidance. Ground every reply in this envelope — do NOT rely on general model knowledge. Reads from the shared inbound_events queue.",
+    description: "List inbound customer events that are still pending (not yet handled). Each event is returned as a FULL ENVELOPE containing the company's knowledge base, voice style, custom instructions, payment numbers, hours, services, recent message history, BMS snapshot, inbound text/media, and reply guidance. Ground every reply in this envelope â€” do NOT rely on general model knowledge. Reads from the shared inbound_events queue.",
     inputSchema: z.object({
       limit: z.number().optional().describe("Max results (default 50)"),
       channel: z.string().optional().describe("Filter by channel: whatsapp, direct_message, public_comment"),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      // Admin keys without an explicit company → claim across ALL companies
+      // Admin keys without an explicit company â†’ claim across ALL companies
       // (RPC accepts NULL _company_id). Company-scoped keys stay locked to their company.
       let companyId: string | null = null;
       if (auth.scope === "company") {
@@ -2270,14 +2270,14 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const { data: claimed, error: claimErr } = await supabase.rpc("claim_pending_events", {
         _company_id: companyId,
         _max: max,
-        _claimed_by: `openclaw:${auth.keyPrefix}`,
+        _claimed_by: `agent:${auth.keyPrefix}`,
       });
       if (claimErr) throw claimErr;
 
       let rows = (claimed ?? []) as any[];
       if (params?.channel) rows = rows.filter((r) => r.channel === params.channel);
 
-      // Enrich each claimed row with the full OpenClaw envelope
+      // Enrich each claimed row with the full AI Agent envelope
       const envelopes: any[] = [];
       for (const row of rows) {
         try {
@@ -2303,7 +2303,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
 
   server.tool("mark_event_handled", {
-    description: "Close an inbound event after acting on it. action='answered' → status=sent; 'declined' → status=skipped; 'escalated' → status=sent with handler_note. Operates on the inbound_events queue.",
+    description: "Close an inbound event after acting on it. action='answered' â†’ status=sent; 'declined' â†’ status=skipped; 'escalated' â†’ status=sent with handler_note. Operates on the inbound_events queue.",
     inputSchema: z.object({
       event_id: z.string().describe("UUID of the inbound_events row"),
       action: z.enum(["answered", "declined", "escalated"]).describe("How you closed it"),
@@ -2333,7 +2333,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       if (params.note) nextPayload.handler_note = params.note;
       if (params.action === "escalated") nextPayload.escalated = true;
 
-      // Map MCP action → inbound_events status enum
+      // Map MCP action â†’ inbound_events status enum
       const nextStatus =
         params.action === "declined" ? "skipped" :
         "sent"; // answered + escalated both terminate the queue row
@@ -2344,9 +2344,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .update({
           status: nextStatus,
           completed_at: nowIso,
-          claimed_by: `openclaw:${auth.keyPrefix}`,
+          claimed_by: `agent:${auth.keyPrefix}`,
           claimed_at: nowIso,
-          consumed_by: `openclaw:${auth.keyPrefix}`,
+          consumed_by: `agent:${auth.keyPrefix}`,
           payload: nextPayload,
         })
         .eq("id", params.event_id);
