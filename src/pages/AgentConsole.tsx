@@ -55,6 +55,22 @@ const AgentConsole = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  // Load the persistent ChatGPT-style thread on mount (server owns history).
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      try {
+        const { data } = await supabase.functions.invoke("agent-console", {
+          body: { message: "", history_only: true, company_id: activeCompanyId },
+        });
+        if (data?.thread?.length) {
+          setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+        }
+      } catch { /* thread load is best-effort */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, activeCompanyId]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -162,20 +178,23 @@ const AgentConsole = () => {
     setInput("");
     setBusy(true);
     const userMsg: ChatMessage = { role: "user", content: message };
-    const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }));
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
-        body: { company_id: activeCompanyId, message, history, image_urls: attachedUrl ? [attachedUrl] : [] },
+        body: { company_id: activeCompanyId, message, image_urls: attachedUrl ? [attachedUrl] : [] },
       });
       if (error) throw new Error(error.message || "Agent request failed");
-      const reply: string = data?.reply || "I couldn't process that just now.";
       const action = data?.action || null;
       if (action?.type === "company_created" || action?.type === "company_claimed") {
         if (action.company_id) setActiveCompanyId(action.company_id);
         refreshCompanies();
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: reply, action }]);
+      if (data?.thread?.length) {
+        // Server-authoritative thread (ChatGPT-style) — replaces local messages.
+        setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: data?.reply || "I couldn't process that just now.", action: data?.action || null }]);
+      }
     } catch (e: any) {
       setMessages((prev) => [
         ...prev,
