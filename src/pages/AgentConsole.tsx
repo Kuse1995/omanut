@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+﻿import { useState, useRef, useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images } from "lucide-react";
+import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClientSidebar from "@/components/dashboard/ClientSidebar";
 import { useCompany } from "@/context/CompanyContext";
@@ -28,14 +28,13 @@ const AgentConsole = () => {
   const [busy, setBusy] = useState(false);
   const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [showMedia, setShowMedia] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [threads, setThreads] = useState<{ id: string; title: string; updated_at: string }[]>([]);
-  const [showThreads, setShowThreads] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // The company the chat is working with — null while we're still onboarding
+  // The company the chat is working with â€” null while we're still onboarding
   // a brand-new owner (the agent creates the company mid-conversation).
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(selectedCompany?.id || null);
   const [collapsed, setCollapsed] = useState(false);
@@ -93,7 +92,7 @@ const AgentConsole = () => {
     setUploading(true);
     try {
       const ext = file.name.split(".").pop() || "jpg";
-      // First path segment MUST be the company UUID — company-media storage
+      // First path segment MUST be the company UUID â€” company-media storage
       // policies cast it (user_has_company_access(foldername[1])::uuid).
       const path = `${selectedCompany.id}/references/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error } = await supabase.storage.from("company-media").upload(path, file, { upsert: false });
@@ -101,20 +100,20 @@ const AgentConsole = () => {
       const { data } = supabase.storage.from("company-media").getPublicUrl(path);
       setAttachedUrl(data.publicUrl);
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Image upload failed: " + (e?.message || "unknown error") }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Image upload failed: " + (e?.message || "unknown error") }]);
     } finally {
       setUploading(false);
     }
   };
 
-  // Meta connect: mirror the MetaIntegrationsPanel popup flow — popup →
-  // postMessage(code) → meta-oauth-exchange → meta-oauth-connect-pages
+  // Meta connect: mirror the MetaIntegrationsPanel popup flow â€” popup â†’
+  // postMessage(code) â†’ meta-oauth-exchange â†’ meta-oauth-connect-pages
   // (auto-connects every Page found on the owner's account).
   const startMetaConnect = (connectUrl: string, state: string) => {
     sessionStorage.setItem('meta_oauth_state', state);
     const popup = window.open(connectUrl, 'meta-oauth', 'width=600,height=720,menubar=no,toolbar=no,location=no');
     if (!popup) {
-      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Could not open the Facebook window — allow popups for this site and try again." }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Could not open the Facebook window â€” allow popups for this site and try again." }]);
       return;
     }
     let settled = false;
@@ -131,14 +130,14 @@ const AgentConsole = () => {
       const expected = sessionStorage.getItem('meta_oauth_state');
       sessionStorage.removeItem('meta_oauth_state');
       if (ev.data.error) {
-        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login failed: " + ev.data.error }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Facebook login failed: " + ev.data.error }]);
         return;
       }
       if (!ev.data.code || ev.data.state !== expected) {
-        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login was cancelled or failed the security check. Say \"connect\" to try again." }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Facebook login was cancelled or failed the security check. Say \"connect\" to try again." }]);
         return;
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: "🔗 Pages found — linking them to your agent now…" }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "ðŸ”— Pages found â€” linking them to your agent nowâ€¦" }]);
       (async () => {
         try {
           const { data, error } = await supabase.functions.invoke('meta-oauth-exchange', {
@@ -147,7 +146,7 @@ const AgentConsole = () => {
           if (error) throw error;
           const pages = data?.pages || [];
           if (!pages.length) {
-            setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ No Facebook Pages were found on that account. Create one, then say \"connect\" here." }]);
+            setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ No Facebook Pages were found on that account. Create one, then say \"connect\" here." }]);
             return;
           }
           const { data: connData, error: connErr } = await supabase.functions.invoke('meta-oauth-connect-pages', {
@@ -157,10 +156,10 @@ const AgentConsole = () => {
           const okCount = (connData?.connected || []).filter((c: any) => !c.error).length;
           setMessages((prev) => [...prev, {
             role: "assistant",
-            content: "✅ Connected " + okCount + " page" + (okCount === 1 ? "" : "s") + "! Comments and DMs are now answered by your agent automatically. Anything else you'd like me to remember about the business?",
+            content: "âœ… Connected " + okCount + " page" + (okCount === 1 ? "" : "s") + "! Comments and DMs are now answered by your agent automatically. Anything else you'd like me to remember about the business?",
           }]);
         } catch (e: any) {
-          setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Meta connect failed: " + (e?.message || "unknown error") }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Meta connect failed: " + (e?.message || "unknown error") }]);
         }
       })();
     };
@@ -172,14 +171,14 @@ const AgentConsole = () => {
         settled = true;
         cleanup();
         try { popup.close(); } catch { /* ignore */ }
-        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Facebook login timed out — say \"connect\" to try again." }]);
+        setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Facebook login timed out â€” say \"connect\" to try again." }]);
       }
     }, 5 * 60 * 1000);
     window.addEventListener('message', onMessage);
   };
 
   // Load the company's media (product references, generated images, videos)
-  // from company-media storage — a ChatGPT-style media library, browsable.
+  // from company-media storage â€” a ChatGPT-style media library, browsable.
   // ChatGPT-style thread rail: list this context's conversations.
   const loadThreads = async () => {
     try {
@@ -190,15 +189,18 @@ const AgentConsole = () => {
     } catch { /* best-effort */ }
   };
 
+  const openSidebar = () => {
+    setShowSidebar((v) => !v);
+    if (!showSidebar) { loadThreads(); loadMedia(); }
+  };
+
   const startNewThread = () => {
     setCurrentThreadId(null);
     setMessages([]);
-    setShowThreads(false);
   };
 
   const openThread = (id: string) => {
     setCurrentThreadId(id);
-    setShowThreads(false);
     setMessages([]);
     (async () => {
       try {
@@ -211,7 +213,6 @@ const AgentConsole = () => {
   };
 
   const loadMedia = async () => {
-    setShowMedia(true);
     setMediaLoading(true);
     try {
       if (!activeCompanyId) { setMediaItems([]); return; }
@@ -255,7 +256,7 @@ const AgentConsole = () => {
         refreshCompanies();
       }
       if (data?.thread?.length) {
-        // Server-authoritative thread (ChatGPT-style) — replaces local messages.
+        // Server-authoritative thread (ChatGPT-style) â€” replaces local messages.
         setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
       } else {
         setMessages((prev) => [...prev, { role: "assistant", content: data?.reply || "I couldn't process that just now.", action: data?.action || null }]);
@@ -263,7 +264,7 @@ const AgentConsole = () => {
     } catch (e: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "⚠️ " + (e?.message || "Something went wrong. Please try again.") },
+        { role: "assistant", content: "âš ï¸ " + (e?.message || "Something went wrong. Please try again.") },
       ]);
     } finally {
       setBusy(false);
@@ -287,66 +288,90 @@ const AgentConsole = () => {
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold text-foreground leading-tight">AI Agent</h1>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 font-medium">● online</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 font-medium">â— online</span>
             </div>
             <p className="text-xs text-muted-foreground">
               {activeCompanyId
                 ? "Answers from your knowledge base, makes videos, drafts posts"
-                : "Let's set up your business — chat me through it, I'll do the heavy lifting"}
+                : "Let's set up your business â€” chat me through it, I'll do the heavy lifting"}
             </p>
           </div>
           <button
             type="button"
-            onClick={() => { setShowThreads((v) => !v); loadThreads(); }}
+            onClick={openSidebar}
             className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
-            title="Your conversations"
+            title="Open conversations & media"
           >
-            <PenLine className="h-4 w-4" /> Threads
-          </button>
-          <button
-            type="button"
-            onClick={loadMedia}
-            className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
-            title="Your media library — product references, generated images & videos"
-          >
-            <Images className="h-4 w-4" /> Media
+            <PanelLeft className="h-4 w-4" /> Chats &amp; media
           </button>
         </div>
 
-        {/* ChatGPT-style thread rail */}
-        {showThreads && (
-          <div className="border-b px-6 py-4 bg-muted/30">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-foreground">Your conversations</h3>
-                <button type="button" onClick={() => setShowThreads(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
-              </div>
+        {/* ChatGPT-style left sidebar: conversations + media in one rail */}
+        {showSidebar && (
+          <div className="w-80 border-r border-border flex flex-col bg-muted/20 max-h-[calc(100vh-4rem)] overflow-hidden">
+            <div className="p-3 border-b border-border">
               <button
                 type="button"
                 onClick={startNewThread}
-                className="w-full text-left text-sm px-3 py-2.5 mb-2 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                className="w-full text-left text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
               >
                 + New chat
               </button>
-              <div className="max-h-56 overflow-y-auto space-y-1">
-                {threads.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No conversations yet — start a new chat.</p>
-                ) : threads.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => openThread(t.id)}
-                    className={"w-full text-left text-sm px-3 py-2.5 rounded-lg border transition-colors " + (currentThreadId === t.id ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent border-border")}
-                  >
-                    {t.title}
-                  </button>
-                ))}
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              {/* Conversations */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversations</h4>
+                </div>
+                <div className="space-y-1">
+                  {threads.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No conversations yet.</p>
+                  ) : threads.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => openThread(t.id)}
+                      className={"w-full text-left text-sm px-3 py-2.5 rounded-lg border transition-colors " + (currentThreadId === t.id ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent border-border")}
+                    >
+                      {t.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Media */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Media</h4>
+                  <Images className="h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                {mediaLoading ? (
+                  <p className="text-xs text-muted-foreground">Loadingâ€¦</p>
+                ) : mediaItems.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {activeCompanyId ? "Upload a product photo with ðŸ“Ž, or ask for a video/image â€” it appears here." : "Connect a business first, then your media lives here."}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {mediaItems.map((item) => (
+                      <a key={item.name + item.url} href={item.url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-card border">
+                        {item.type === "image" ? (
+                          <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
+                        ) : item.type === "video" ? (
+                          <video src={item.url} className="w-full h-full object-cover" preload="metadata" muted />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground p-1 text-center">file</div>
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Media gallery (ChatGPT-style media library) */}
+        {/* Media gallery (ChatGPT-style media library) [legacy â€” kept out when sidebar on] */}
         {showMedia && (
           <div className="border-b px-6 py-4 bg-muted/30">
             <div className="max-w-3xl mx-auto">
@@ -355,10 +380,10 @@ const AgentConsole = () => {
                 <button type="button" onClick={() => setShowMedia(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
               </div>
               {mediaLoading ? (
-                <p className="text-xs text-muted-foreground">Loading…</p>
+                <p className="text-xs text-muted-foreground">Loadingâ€¦</p>
               ) : mediaItems.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  {activeCompanyId ? "No media yet — upload a product photo with 📎, or ask for a video/image, and it appears here." : "Connect a business first, then your media lives here."}
+                  {activeCompanyId ? "No media yet â€” upload a product photo with ðŸ“Ž, or ask for a video/image, and it appears here." : "Connect a business first, then your media lives here."}
                 </p>
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
@@ -395,8 +420,8 @@ const AgentConsole = () => {
                 </h2>
                 <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
                   {activeCompanyId
-                    ? "Ask me anything about your business, or tell me what to make — videos, posts, answers for customers."
-                    : "Just tell me about your business — name, what you sell, hours. I'll build your profile, knowledge base and connect your channels as we chat."}
+                    ? "Ask me anything about your business, or tell me what to make â€” videos, posts, answers for customers."
+                    : "Just tell me about your business â€” name, what you sell, hours. I'll build your profile, knowledge base and connect your channels as we chat."}
                 </p>
                 {activeCompanyId && (
                   <div className="flex flex-wrap justify-center gap-2 mt-6">
@@ -428,13 +453,13 @@ const AgentConsole = () => {
                   {m.action?.type === "video" && (
                     <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
                       <Video className="h-3.5 w-3.5" />
-                      <span>Rendering — lands in Media Studio + WhatsApp in 1-3 min</span>
+                      <span>Rendering â€” lands in Media Studio + WhatsApp in 1-3 min</span>
                     </div>
                   )}
                   {m.action?.type === "post" && (
                     <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
                       <PenLine className="h-3.5 w-3.5" />
-                      <span>Draft saved — approve it in the Content Scheduler</span>
+                      <span>Draft saved â€” approve it in the Content Scheduler</span>
                     </div>
                   )}
                   {m.action?.type === "facts_saved" && m.action.saved && m.action.saved.length > 0 && (
@@ -456,7 +481,7 @@ const AgentConsole = () => {
                         onClick={() => startMetaConnect(m.action!.connect_url!, m.action!.state!)}
                         className="w-full text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
                       >
-                        Connect Facebook &amp; Instagram →
+                        Connect Facebook &amp; Instagram â†’
                       </button>
                     </div>
                   )}
@@ -468,7 +493,7 @@ const AgentConsole = () => {
               <div className="flex justify-start">
                 <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm text-muted-foreground">Thinking…</span>
+                  <span className="text-sm text-muted-foreground">Thinkingâ€¦</span>
                 </div>
               </div>
             )}
@@ -480,7 +505,7 @@ const AgentConsole = () => {
         <div className="border-t px-4 py-3">
           {attachedUrl && (
             <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-muted rounded-lg px-3 py-2">
-              <span className="text-foreground">📎 Reference image attached</span>
+              <span className="text-foreground">ðŸ“Ž Reference image attached</span>
               <button
                 type="button"
                 onClick={() => setAttachedUrl(null)}
@@ -527,7 +552,7 @@ const AgentConsole = () => {
                 }
               }}
               rows={1}
-              placeholder={"Message your agent…"}
+              placeholder={"Message your agentâ€¦"}
               className="flex-1 resize-none max-h-32 rounded-xl border bg-card px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <Button type="submit" size="icon" className="h-11 w-11 rounded-xl" disabled={busy || !input.trim()}>
