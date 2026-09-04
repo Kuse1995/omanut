@@ -377,39 +377,6 @@ const AgentConsole = () => {
           </div>
         )}
 
-        {/* Media gallery (ChatGPT-style media library) [legacy â€” kept out when sidebar on] */}
-        {showMedia && (
-          <div className="border-b px-6 py-4 bg-muted/30">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-foreground">Your media library</h3>
-                <button type="button" onClick={() => setShowMedia(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
-              </div>
-              {mediaLoading ? (
-                <p className="text-xs text-muted-foreground">Loadingâ€¦</p>
-              ) : mediaItems.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {activeCompanyId ? "No media yet â€” upload a product photo with ðŸ“Ž, or ask for a video/image, and it appears here." : "Connect a business first, then your media lives here."}
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
-                  {mediaItems.map((item) => (
-                    <a key={item.name + item.url} href={item.url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-card border">
-                      {item.type === "image" ? (
-                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
-                      ) : item.type === "video" ? (
-                        <video src={item.url} className="w-full h-full object-cover" preload="metadata" muted />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground p-1 text-center">file</div>
-                      )}
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Thread */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
