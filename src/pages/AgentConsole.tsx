@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft, Settings } from "lucide-react";
+import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft, Settings, FileText, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,12 +28,17 @@ const AgentConsole = () => {
   const [busy, setBusy] = useState(false);
   const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [postMedia, setPostMedia] = useState<{ url: string; type: "image" | "video"; name?: string } | null>(null);
+  const [docUploading, setDocUploading] = useState(false);
+  const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [threads, setThreads] = useState<{ id: string; title: string; updated_at: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const postMediaInputRef = useRef<HTMLInputElement>(null);
   // The company the chat is working with â€” null while we're still onboarding
   // a brand-new owner (the agent creates the company mid-conversation).
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(selectedCompany?.id || null);
@@ -105,6 +110,76 @@ const AgentConsole = () => {
       setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Image upload failed: " + (e?.message || "unknown error") }]);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // Knowledge document upload — stored to company-documents + parsed by
+  // parse-document, so the agent can answer from it (searchKnowledgeBase
+  // reads company_documents.parsed_content).
+  const uploadKnowledgeDocument = async (file: File) => {
+    if (!selectedCompany) return;
+    const allowed = ["application/pdf", "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/csv", "text/plain"];
+    if (!allowed.includes(file.type)) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ That file type isn't supported for knowledge. Upload PDF, Word, Excel, CSV, or text." }]);
+      return;
+    }
+    setDocUploading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      // company-documents bucket policy keys on the first path segment = user id.
+      const filePath = user.id + "/" + Date.now() + "-" + file.name;
+      const { error: upErr } = await supabase.storage.from("company-documents").upload(filePath, file);
+      if (upErr) throw upErr;
+      const { data: doc, error: docErr } = await supabase
+        .from("company_documents")
+        .insert({
+          company_id: selectedCompany.id,
+          filename: file.name,
+          file_path: filePath,
+          file_type: file.type,
+          file_size: file.size,
+          uploaded_by: user.id,
+        })
+        .select("id")
+        .single();
+      if (docErr) throw docErr;
+      // Parse in the background so the agent can ground on it.
+      supabase.functions.invoke("parse-document", { body: { documentId: doc.id } }).catch(() => {});
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: "ðŸ“„ Got it — I've added \u201c" + file.name + "\u201d to your knowledge base. It may take a moment to process; after that I can answer questions straight from it.",
+      }]);
+    } catch (e: any) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Document upload failed: " + (e?.message || "unknown error") }]);
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  // Post/schedule media upload — stored to company-media; the agent attaches
+  // it to a drafted post (image_url / video_url on scheduled_posts).
+  const uploadPostMedia = async (file: File) => {
+    const companyId = activeCompanyId || selectedCompany?.id;
+    if (!companyId) return;
+    setPostMediaUploading(true);
+    try {
+      const ext = file.name.split(".").pop() || "image";
+      const type = file.type.startsWith("video") ? "video" : "image";
+      // First path segment MUST be the company UUID (company-media RLS).
+      const p = companyId + "/posts/" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "." + ext;
+      const { error } = await supabase.storage.from("company-media").upload(p, file, { upsert: false });
+      if (error) throw error;
+      const { data } = supabase.storage.from("company-media").getPublicUrl(p);
+      setPostMedia({ url: data.publicUrl, type, name: file.name });
+    } catch (e: any) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "âš ï¸ Media upload failed: " + (e?.message || "unknown error") }]);
+    } finally {
+      setPostMediaUploading(false);
     }
   };
 
@@ -252,6 +327,8 @@ const AgentConsole = () => {
           company_id: activeCompanyId,
           message,
           image_urls: attachedUrl ? [attachedUrl] : [],
+          post_media_url: postMedia?.url ?? null,
+          post_media_type: postMedia?.type ?? null,
           thread_id: currentThreadId,
           new_thread: !currentThreadId,
           // Guests have no server thread — carry the in-state conversation so
@@ -280,6 +357,7 @@ const AgentConsole = () => {
     } finally {
       setBusy(false);
       setAttachedUrl(null);
+      setPostMedia(null);
     }
   };
 
@@ -521,6 +599,21 @@ const AgentConsole = () => {
               </button>
             </div>
           )}
+          {postMedia && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
+              <span className="text-foreground flex items-center gap-1.5">
+                {postMedia.type === "video" ? <Video className="h-3.5 w-3.5" /> : <Images className="h-3.5 w-3.5" />}
+                {postMedia.name || (postMedia.type === "video" ? "Video" : "Image")} — ready to post/schedule
+              </span>
+              <button
+                type="button"
+                onClick={() => setPostMedia(null)}
+                className="ml-auto text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
           <form
             className="max-w-3xl mx-auto flex items-end gap-2"
             onSubmit={(e) => {
@@ -539,6 +632,46 @@ const AgentConsole = () => {
                 e.target.value = "";
               }}
             />
+            <input
+              ref={docInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadKnowledgeDocument(file);
+                e.target.value = "";
+              }}
+            />
+            <input
+              ref={postMediaInputRef}
+              type="file"
+              accept="image/*,video/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadPostMedia(file);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => docInputRef.current?.click()}
+              disabled={docUploading || busy}
+              title="Upload a knowledge document (PDF, Word, Excel, CSV, text) so the agent can answer from it"
+              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              {docUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => postMediaInputRef.current?.click()}
+              disabled={postMediaUploading || busy}
+              title="Upload media to post or schedule (image or video)"
+              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              {postMediaUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -566,7 +699,7 @@ const AgentConsole = () => {
             </Button>
           </form>
           <p className="max-w-3xl mx-auto text-[11px] text-muted-foreground mt-1.5 text-center">
-            The agent answers from your company knowledge base. Videos cost generation credits.
+            Upload a document to teach your agent, or media to post &mdash; say &quot;post this&quot; or &quot;schedule this&quot;. Videos cost generation credits.
           </p>
         </div>
       </div>
