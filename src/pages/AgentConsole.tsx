@@ -1,10 +1,11 @@
-﻿import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClientSidebar from "@/components/dashboard/ClientSidebar";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
+import omanutLogo from "@/assets/omanut-logo-new.png";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -280,8 +281,8 @@ const AgentConsole = () => {
         {/* Header */}
         <div className="border-b px-6 py-4 flex items-center gap-3">
           <div className="relative">
-            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
+            <div className="h-10 w-10 rounded-full bg-white flex items-center justify-center border border-border shadow-sm overflow-hidden">
+              <img src={omanutLogo} alt="Omanut" className="h-7 w-7 object-contain" />
             </div>
             <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-background"></span>
           </div>
@@ -308,9 +309,14 @@ const AgentConsole = () => {
 
         {/* ChatGPT-style left sidebar: conversations + media in one rail */}
         {showSidebar && (
-          <div className="w-80 border-r border-border flex flex-col bg-muted/20 max-h-[calc(100vh-4rem)] overflow-hidden">
-            <div className="p-3 border-b border-border">
-              <button
+          <div className="w-80 border-r border-border flex flex-col bg-muted/20 max-h-[calc(100vh-4rem)] overflow-hidden animate-sidebar-in">
+            <div className="p-3 border-b border-border flex items-center gap-2">
+              <img src={omanutLogo} alt="Omanut" className="h-6 w-6 object-contain" />
+              <span className="text-sm font-semibold text-foreground">Omanut Agent</span>
+              <button type="button" onClick={() => setShowSidebar(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="p-3">
+            <button
                 type="button"
                 onClick={startNewThread}
                 className="w-full text-left text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
@@ -440,7 +446,7 @@ const AgentConsole = () => {
             )}
 
             {messages.map((m, i) => (
-              <div key={i} className={"flex " + (m.role === "user" ? "justify-end" : "justify-start")}>
+              <div key={i} className={"flex animate-msg-in " + (m.role === "user" ? "justify-end" : "justify-start")}>
                 <div
                   className={
                     "max-w-[80%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed " +
@@ -491,9 +497,13 @@ const AgentConsole = () => {
 
             {busy && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-2xl px-4 py-3 flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm text-muted-foreground">Thinkingâ€¦</span>
+                <div className="bg-card rounded-2xl px-4 py-3.5 flex items-center gap-2 border border-border shadow-sm">
+                  <div className="flex items-center gap-1 text-primary">
+                    <span className="typing-dot"></span>
+                    <span className="typing-dot"></span>
+                    <span className="typing-dot"></span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">Thinking…</span>
                 </div>
               </div>
             )}
