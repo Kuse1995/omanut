@@ -32,25 +32,30 @@ serve(async (req) => {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const anon = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
 
+    // Guest mode: signed-out visitors can chat with the onboarding agent
+    // (company-less). Company creation / claim / any company-bound action
+    // prompts sign-up instead, so we never write orphan rows.
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Authorization required" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    let user: any = null;
+    let userClient: any = null;
+    if (authHeader) {
+      userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      if (userData?.user) user = userData.user;
     }
-    const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData } = await userClient.auth.getUser();
-    if (!userData?.user) {
-      return new Response(JSON.stringify({ error: "Invalid session" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const user = userData.user;
+    const isGuest = !user;
 
     const bodyData = await req.json().catch(() => ({}));
     const message = String(bodyData.message ?? "").trim();
     const history = Array.isArray(bodyData.history) ? bodyData.history : [];
     const imageUrls: string[] = Array.isArray(bodyData.image_urls) ? bodyData.image_urls.filter((u: any) => !!u).slice(0, 4) : [];
     const origin = String(bodyData.origin || "https://omanut.lovable.app");
-    if (!message) {
+    // A genuinely empty chat turn is invalid, but list_threads / history_only
+    // requests legitimately carry an empty message (handled below).
+    const isThreadReq = bodyData.list_threads === true || bodyData.history_only === true;
+    if (!message && !isThreadReq) {
       return new Response(JSON.stringify({ error: "message is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -90,11 +95,18 @@ serve(async (req) => {
 
     // ── Persistent threads (ChatGPT-style). A company (or user, while
     // onboarding) can hold MULTIPLE conversations. History is server-owned.
-    const threadBase = companyId ? ("agent:" + companyId) : ("agent:user:" + user.id);
+    const threadBase = companyId ? ("agent:" + companyId) : (isGuest ? "guest" : ("agent:user:" + user.id));
     const isListThreads = bodyData.list_threads === true;
     let threadConvoId: string | null = bodyData.thread_id ?? null;
     let newThreadCreated = false;
     let threadAlreadyUntitled = false;
+
+    // Guests have no persisted threads (no owner) — keep it ephemeral.
+    if (isGuest) threadConvoId = null;
+    if (isGuest && isListThreads) {
+      return new Response(JSON.stringify({ reply: "", action: { type: null }, company_id: null, guest: true, threads: [] }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     if (isListThreads) {
       const { data: threads } = await supabase
@@ -123,7 +135,7 @@ serve(async (req) => {
         threadConvoId = null;
       }
     }
-    if (!threadConvoId) {
+    if (!threadConvoId && !isGuest) {
       if (bodyData.new_thread === true) {
         const { data: created } = await supabase
           .from("conversations")
@@ -174,13 +186,14 @@ serve(async (req) => {
     const missing = company ? profileMissingList(company) : [];
 
     // Server-authoritative conversation history (last 10 for AI context).
+    // Guests have no persisted thread, so we carry the client-supplied
+    // history (the console keeps the ephemeral guest conversation in state).
     const { data: priorThread } = threadConvoId
       ? await supabase.from("messages").select("role, content").eq("conversation_id", threadConvoId).order("created_at", { ascending: false }).limit(10)
       : { data: null };
-    const historyMsgs = (priorThread || []).reverse().map((h: any) => ({
-      role: h.role === "user" ? "user" : "assistant",
-      content: String(h.content || "").slice(0, 500),
-    }));
+    const historyMsgs = isGuest
+      ? history.slice(-10).map((h: any) => ({ role: h.role === "user" ? "user" : "assistant", content: String(h.content || "").slice(0, 500) }))
+      : (priorThread || []).reverse().map((h: any) => ({ role: h.role === "user" ? "user" : "assistant", content: String(h.content || "").slice(0, 500) }));
 
     // History-only call (message empty) — return the full thread, no generation.
     if (!message) {
@@ -251,7 +264,11 @@ serve(async (req) => {
     if (reply.toUpperCase().startsWith("CREATE_COMPANY:")) {
       const parsed: any = extractJson(reply.slice(15));
       const name = String(parsed?.name || "").trim();
-      if (!name) {
+      if (isGuest) {
+        // No account yet — we can't create an owned company. Prompt sign-up.
+        action = { type: "signup_required", name };
+        reply = "🎉 " + (name || "Your business") + " is ready to go live! Create a free Omanut account and I'll set up your business profile and connect your channels in one click.";
+      } else if (!name) {
         reply = "I just need the business name to set you up — what's it called?";
       } else {
         const { data: newCo, error: cErr } = await supabase
@@ -294,6 +311,10 @@ serve(async (req) => {
       }
     } else if (reply.toUpperCase().startsWith("CLAIM_CODE:")) {
       const code = reply.slice(11).trim();
+      if (isGuest) {
+        action = { type: "signup_required" };
+        reply = "🔒 To claim that business you'll need an account first. Create a free one and I'll link you instantly.";
+      } else {
       const { data: claimData, error: claimErr } = await userClient.rpc("claim_company", { _code: code });
       if (claimErr || !claimData?.success) {
         reply = "⚠️ That claim code didn't work: " + (claimErr?.message || "invalid code") + ". Check it and try again — or just tell me about your business and I'll set you up fresh.";
@@ -307,6 +328,7 @@ serve(async (req) => {
         company = claimedCo || null;
         action = { type: "company_claimed", company_id: companyId, name: claimData.company_name ?? null };
         reply = "✅ Claimed " + (claimData.company_name || "your business") + "! Your agent is live — everything you tell me now is remembered across every channel.";
+      }
       }
     }
 
