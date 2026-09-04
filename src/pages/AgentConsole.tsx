@@ -31,6 +31,9 @@ const AgentConsole = () => {
   const [showMedia, setShowMedia] = useState(false);
   const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [threads, setThreads] = useState<{ id: string; title: string; updated_at: string }[]>([]);
+  const [showThreads, setShowThreads] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The company the chat is working with — null while we're still onboarding
   // a brand-new owner (the agent creates the company mid-conversation).
@@ -177,6 +180,36 @@ const AgentConsole = () => {
 
   // Load the company's media (product references, generated images, videos)
   // from company-media storage — a ChatGPT-style media library, browsable.
+  // ChatGPT-style thread rail: list this context's conversations.
+  const loadThreads = async () => {
+    try {
+      const { data } = await supabase.functions.invoke("agent-console", {
+        body: { message: "", list_threads: true, company_id: activeCompanyId },
+      });
+      if (data?.threads) setThreads(data.threads);
+    } catch { /* best-effort */ }
+  };
+
+  const startNewThread = () => {
+    setCurrentThreadId(null);
+    setMessages([]);
+    setShowThreads(false);
+  };
+
+  const openThread = (id: string) => {
+    setCurrentThreadId(id);
+    setShowThreads(false);
+    setMessages([]);
+    (async () => {
+      try {
+        const { data } = await supabase.functions.invoke("agent-console", {
+          body: { message: "", history_only: true, company_id: activeCompanyId, thread_id: id },
+        });
+        if (data?.thread) setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+      } catch { /* best-effort */ }
+    })();
+  };
+
   const loadMedia = async () => {
     setShowMedia(true);
     setMediaLoading(true);
@@ -212,9 +245,10 @@ const AgentConsole = () => {
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
-        body: { company_id: activeCompanyId, message, image_urls: attachedUrl ? [attachedUrl] : [] },
+        body: { company_id: activeCompanyId, message, image_urls: attachedUrl ? [attachedUrl] : [], thread_id: currentThreadId, new_thread: !currentThreadId },
       });
       if (error) throw new Error(error.message || "Agent request failed");
+      if (data?.thread_id) setCurrentThreadId(data.thread_id);
       const action = data?.action || null;
       if (action?.type === "company_created" || action?.type === "company_claimed") {
         if (action.company_id) setActiveCompanyId(action.company_id);
@@ -263,6 +297,14 @@ const AgentConsole = () => {
           </div>
           <button
             type="button"
+            onClick={() => { setShowThreads((v) => !v); loadThreads(); }}
+            className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
+            title="Your conversations"
+          >
+            <PenLine className="h-4 w-4" /> Threads
+          </button>
+          <button
+            type="button"
             onClick={loadMedia}
             className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
             title="Your media library — product references, generated images & videos"
@@ -270,6 +312,39 @@ const AgentConsole = () => {
             <Images className="h-4 w-4" /> Media
           </button>
         </div>
+
+        {/* ChatGPT-style thread rail */}
+        {showThreads && (
+          <div className="border-b px-6 py-4 bg-muted/30">
+            <div className="max-w-3xl mx-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-foreground">Your conversations</h3>
+                <button type="button" onClick={() => setShowThreads(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
+              </div>
+              <button
+                type="button"
+                onClick={startNewThread}
+                className="w-full text-left text-sm px-3 py-2.5 mb-2 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+              >
+                + New chat
+              </button>
+              <div className="max-h-56 overflow-y-auto space-y-1">
+                {threads.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No conversations yet — start a new chat.</p>
+                ) : threads.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => openThread(t.id)}
+                    className={"w-full text-left text-sm px-3 py-2.5 rounded-lg border transition-colors " + (currentThreadId === t.id ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent border-border")}
+                  >
+                    {t.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Media gallery (ChatGPT-style media library) */}
         {showMedia && (

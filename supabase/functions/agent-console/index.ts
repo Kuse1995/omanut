@@ -88,35 +88,84 @@ serve(async (req) => {
       company = c;
     }
 
-    // ── Persistent thread (ChatGPT-style): one conversation per company (or
-    // per user while onboarding). History is owned by the server, not the UI.
-    const threadKey = companyId ? "agent:" + companyId : "agent:user:" + user.id;
-    let threadConvoId: string | null = null;
-    {
-      const { data: conv } = await supabase
+    // ── Persistent threads (ChatGPT-style). A company (or user, while
+    // onboarding) can hold MULTIPLE conversations. History is server-owned.
+    const threadBase = companyId ? ("agent:" + companyId) : ("agent:user:" + user.id);
+    const isListThreads = bodyData.list_threads === true;
+    let threadConvoId: string | null = bodyData.thread_id ?? null;
+    let newThreadCreated = false;
+    let threadAlreadyUntitled = false;
+
+    if (isListThreads) {
+      const { data: threads } = await supabase
         .from("conversations")
-        .select("id")
-        .eq("phone", threadKey)
+        .select("id, customer_name, updated_at")
+        .ilike("phone", threadBase + "%")
         .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      const threadList = (threads || []).map((t: any) => ({ id: t.id, title: t.customer_name || "New chat", updated_at: t.updated_at }));
+      return new Response(JSON.stringify({ reply: "", action: { type: null }, company_id: companyId, threads: threadList }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    if (threadConvoId) {
+      // Validate the thread belongs to this context before using it.
+      const { data: owned } = await supabase
+        .from("conversations")
+        .select("id, phone, customer_name")
+        .eq("id", threadConvoId)
         .maybeSingle();
-      if (conv?.id) {
-        threadConvoId = conv.id;
+      threadAlreadyUntitled = !!(owned && !String(owned.customer_name || "").trim());
+      if (owned && String(owned.phone || "").startsWith(threadBase)) {
+        // ok
       } else {
+        threadConvoId = null;
+      }
+    }
+    if (!threadConvoId) {
+      if (bodyData.new_thread === true) {
         const { data: created } = await supabase
           .from("conversations")
           .insert({
             company_id: companyId,
-            phone: threadKey,
+            phone: threadBase + ":" + crypto.randomUUID().slice(0, 8),
             status: "active",
-            customer_name: company?.name || "Agent Chat",
+            customer_name: "",
             active_agent: "agent",
             platform: "agent",
           })
           .select("id")
           .single();
         threadConvoId = created?.id || null;
+        newThreadCreated = true;
+      } else {
+        // Default (backward-compat): the persistent "main" thread for this context.
+        const mainPhone = threadBase;
+        const { data: conv } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("phone", mainPhone)
+          .eq("status", "active")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (conv?.id) threadConvoId = conv.id;
+        else {
+          const { data: created } = await supabase
+            .from("conversations")
+            .insert({
+              company_id: companyId,
+              phone: mainPhone,
+              status: "active",
+              customer_name: company?.name || "Agent Chat",
+              active_agent: "agent",
+              platform: "agent",
+            })
+            .select("id")
+            .single();
+          threadConvoId = created?.id || null;
+        }
       }
     }
 
@@ -142,6 +191,7 @@ serve(async (req) => {
         reply: "",
         action: { type: null },
         company_id: companyId,
+        thread_id: threadConvoId,
         thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -356,6 +406,10 @@ serve(async (req) => {
     if (threadConvoId) {
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000) });
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000) });
+      // Auto-title a fresh thread from its first user message (ChatGPT-style).
+      if (newThreadCreated || threadAlreadyUntitled) {
+        await supabase.from("conversations").update({ customer_name: message.slice(0, 48) }).eq("id", threadConvoId);
+      }
     }
     const { data: threadRows } = threadConvoId
       ? await supabase.from("messages").select("role, content, created_at").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
@@ -365,6 +419,7 @@ serve(async (req) => {
       reply,
       action,
       company_id: companyId,
+      thread_id: threadConvoId,
       thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
