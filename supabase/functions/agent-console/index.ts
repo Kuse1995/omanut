@@ -51,6 +51,9 @@ serve(async (req) => {
     const message = String(bodyData.message ?? "").trim();
     const history = Array.isArray(bodyData.history) ? bodyData.history : [];
     const imageUrls: string[] = Array.isArray(bodyData.image_urls) ? bodyData.image_urls.filter((u: any) => !!u).slice(0, 4) : [];
+    // Media attached specifically for posting/scheduling (image or video).
+    const postMediaUrl = String(bodyData.post_media_url || "").trim() || null;
+    const postMediaType = String(bodyData.post_media_type || "").trim().toLowerCase(); // "image" | "video"
     const origin = String(bodyData.origin || "https://omanut.lovable.app");
     // A genuinely empty chat turn is invalid, but list_threads / history_only
     // requests legitimately carry an empty message (handled below).
@@ -219,8 +222,10 @@ serve(async (req) => {
         "CAPABILITIES:",
         "1. Answer questions about the business from the FACTS and KNOWLEDGE BASE MATCHES above (pricing, hours, services, policies).",
         "2. Create video ads — if the user wants a video/ad/reel, begin your reply with exactly \"VIDEO:\" followed by a one-sentence cinematic brief (nothing else after describing it).",
-        "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else).",
+        "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else). If they attached media and ask to post/schedule it, still use \"POST:\" — the attached media is saved with the draft automatically.",
         "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), PLAIN TEXT only (no markdown, no asterisks, no bullets), no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
+        "",
+        "UPLOADS: When the owner uploads a knowledge document, acknowledge it by name and note that your answers can now draw from it. When they upload media and ask to post/schedule it, confirm you've attached it to the draft and that it will appear for approval in the Content Scheduler.",
         "",
         "ONBOARDING (your most important job): this company's profile is still missing: " + (missing.length ? missing.join(", ") : "nothing — profile complete!") + ".",
         "Ask about ONE or TWO missing pieces at a time, conversationally, woven into your replies (never a form, never a list of questions).",
@@ -411,6 +416,9 @@ serve(async (req) => {
             scheduled_time: new Date(Date.now() + 3600000).toISOString(),
             status: "pending_approval",
             created_by: user.id,
+            // Media the owner attached for this post.
+            image_url: postMediaType === "image" ? postMediaUrl : null,
+            video_url: postMediaType === "video" ? postMediaUrl : null,
           })
           .select("id")
           .single();
