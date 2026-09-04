@@ -88,12 +88,63 @@ serve(async (req) => {
       company = c;
     }
 
+    // ── Persistent thread (ChatGPT-style): one conversation per company (or
+    // per user while onboarding). History is owned by the server, not the UI.
+    const threadKey = companyId ? "agent:" + companyId : "agent:user:" + user.id;
+    let threadConvoId: string | null = null;
+    {
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("phone", threadKey)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (conv?.id) {
+        threadConvoId = conv.id;
+      } else {
+        const { data: created } = await supabase
+          .from("conversations")
+          .insert({
+            company_id: companyId,
+            phone: threadKey,
+            status: "active",
+            customer_name: company?.name || "Agent Chat",
+            active_agent: "agent",
+            platform: "agent",
+          })
+          .select("id")
+          .single();
+        threadConvoId = created?.id || null;
+      }
+    }
+
     const facts = company ? buildCompanyFacts(company) : "";
     const kb = company ? formatKbMatches(await searchKnowledgeBase(supabase, company.id, message, 6)) : "";
     const missing = company ? profileMissingList(company) : [];
-    const historyMsgs = history
-      .slice(-8)
-      .map((h: any) => ({ role: h.role === "user" ? "user" : "assistant", content: String(h.content || "").slice(0, 500) }));
+
+    // Server-authoritative conversation history (last 10 for AI context).
+    const { data: priorThread } = threadConvoId
+      ? await supabase.from("messages").select("role, content").eq("conversation_id", threadConvoId).order("created_at", { ascending: false }).limit(10)
+      : { data: null };
+    const historyMsgs = (priorThread || []).reverse().map((h: any) => ({
+      role: h.role === "user" ? "user" : "assistant",
+      content: String(h.content || "").slice(0, 500),
+    }));
+
+    // History-only call (message empty) — return the full thread, no generation.
+    if (!message) {
+      const { data: threadRows } = threadConvoId
+        ? await supabase.from("messages").select("role, content, created_at").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
+        : { data: [] };
+      return new Response(JSON.stringify({
+        reply: "",
+        action: { type: null },
+        company_id: companyId,
+        thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     let system: string;
     if (company) {
@@ -301,7 +352,21 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ reply, action, company_id: companyId }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Persist the turn, then return the full thread (ChatGPT-style history).
+    if (threadConvoId) {
+      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000) });
+      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000) });
+    }
+    const { data: threadRows } = threadConvoId
+      ? await supabase.from("messages").select("role, content, created_at").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
+      : { data: [] };
+
+    return new Response(JSON.stringify({
+      reply,
+      action,
+      company_id: companyId,
+      thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[AGENT-CONSOLE] fatal:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
