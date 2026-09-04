@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,11 +13,26 @@ import { CompanyDocuments } from '@/components/CompanyDocuments';
 import CompanyMedia from '@/components/CompanyMedia';
 import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
-import ClientLayout from '@/components/dashboard/ClientLayout';
 import PhoneInput from '@/components/setup/PhoneInput';
-import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check } from 'lucide-react';
+import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check, LayoutDashboard, Plug, Inbox as InboxIcon, MessageSquare, Brain, Info, Users, CreditCard, Sparkles, ArrowLeft, LogOut, Images } from 'lucide-react';
 import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
 import { formatPhone } from '@/lib/format';
+
+// Every module that used to live in the app sidebar now lives here, in the
+// Settings hub. Tapping one launches that route.
+const MODULES = [
+  { name: 'AI Agent', desc: 'Chat with your business agent', href: '/agent', icon: Sparkles },
+  { name: 'Dashboard', desc: 'Overview and essentials', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Setup', desc: 'Onboard your business', href: '/setup', icon: Plug },
+  { name: 'Inbox', desc: 'Customer messages', href: '/inbox', icon: InboxIcon },
+  { name: 'Media & Images', desc: 'Generated and uploaded media', href: '/media', icon: Images },
+  { name: 'Conversations', desc: 'Threaded chats', href: '/conversations', icon: MessageSquare },
+  { name: 'Reservations', desc: 'Bookings and scheduling', href: '/reservations', icon: CalendarIcon },
+  { name: 'Supervisor AI', desc: 'Quality and oversight', href: '/supervisor-insights', icon: Brain },
+  { name: 'Client Insights', desc: 'Analytics and trends', href: '/client-insights', icon: Info },
+  { name: 'Segments', desc: 'Customer segments', href: '/customer-segments', icon: Users },
+  { name: 'Billing', desc: 'Plan, payments, credits', href: '/billing', icon: CreditCard },
+];
 
 const Settings = () => {
   const navigate = useNavigate();
@@ -112,8 +127,13 @@ const Settings = () => {
 
   const update = (patch: Partial<typeof config>) => setConfig({ ...config, ...patch });
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/agent', { replace: true });
+  };
+
   return (
-    <ClientLayout>
+    <div className="min-h-screen bg-background">
       <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
         <header className="flex items-start sm:items-center justify-between mb-6 gap-4 flex-col sm:flex-row">
           <div>
@@ -124,12 +144,37 @@ const Settings = () => {
           </div>
           <div className="flex items-center gap-2 self-end sm:self-auto">
             <ThemeToggle />
+            <Button variant="outline" onClick={() => navigate('/agent')} className="gap-2">
+              <ArrowLeft className="w-4 h-4" /> Back to agent
+            </Button>
             <Button onClick={handleSave} disabled={saving || loading} className="gap-2">
               <Save className="w-4 h-4" />
               {saving ? 'Saving…' : 'Save changes'}
             </Button>
+            <Button variant="ghost" onClick={handleSignOut} className="gap-2 text-muted-foreground hover:text-destructive">
+              <LogOut className="w-4 h-4" /> Sign out
+            </Button>
           </div>
         </header>
+
+        {/* All modules (formerly the app sidebar) live here now */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-8">
+          {MODULES.map((m) => (
+            <Link
+              key={m.href}
+              to={m.href}
+              className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-all hover:border-primary/40 hover:shadow-sm"
+            >
+              <div className="h-10 w-10 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                <m.icon className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">{m.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{m.desc}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
 
         <Tabs defaultValue="business" className="w-full">
           <TabsList className="grid grid-cols-2 sm:grid-cols-5 w-full sm:w-auto h-auto sm:h-10 mb-6">
@@ -366,7 +411,7 @@ const Settings = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </ClientLayout>
+    </div>
   );
 };
 

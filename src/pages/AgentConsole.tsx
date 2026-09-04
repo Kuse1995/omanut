@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { Navigate } from "react-router-dom";
-import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import ClientSidebar from "@/components/dashboard/ClientSidebar";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
 import omanutLogo from "@/assets/omanut-logo-new.png";
@@ -38,8 +37,8 @@ const AgentConsole = () => {
   // The company the chat is working with â€” null while we're still onboarding
   // a brand-new owner (the agent creates the company mid-conversation).
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(selectedCompany?.id || null);
-  const [collapsed, setCollapsed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let alive = true;
@@ -84,9 +83,11 @@ const AgentConsole = () => {
       </div>
     );
   }
-  if (!session) return <Navigate to="/login" replace />;
-  // No selectedCompany = self-serve onboarding mode: the chat runs without a
-  // company and the agent creates one mid-conversation (CREATE_COMPANY).
+  // Guest mode: the agent console IS the public homepage, so signed-out
+  // visitors can chat and get onboarded. No selectedCompany = self-serve
+  // onboarding mode: the agent runs without a company and prompts sign-up
+  // when it's time to create/save one.
+  const isGuest = !session;
 
   const uploadReference = async (file: File) => {
     if (!selectedCompany) return;
@@ -247,7 +248,16 @@ const AgentConsole = () => {
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
-        body: { company_id: activeCompanyId, message, image_urls: attachedUrl ? [attachedUrl] : [], thread_id: currentThreadId, new_thread: !currentThreadId },
+        body: {
+          company_id: activeCompanyId,
+          message,
+          image_urls: attachedUrl ? [attachedUrl] : [],
+          thread_id: currentThreadId,
+          new_thread: !currentThreadId,
+          // Guests have no server thread — carry the in-state conversation so
+          // onboarding memory survives across turns.
+          history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+        },
       });
       if (error) throw new Error(error.message || "Agent request failed");
       if (data?.thread_id) setCurrentThreadId(data.thread_id);
@@ -275,8 +285,6 @@ const AgentConsole = () => {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <ClientSidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-
       <div className="flex-1 flex flex-col h-screen">
         {/* Header */}
         <div className="border-b px-6 py-4 flex items-center gap-3">
@@ -297,14 +305,35 @@ const AgentConsole = () => {
                 : "Let's set up your business â€” chat me through it, I'll do the heavy lifting"}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openSidebar}
-            className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
-            title="Open conversations & media"
-          >
-            <PanelLeft className="h-4 w-4" /> Chats &amp; media
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={openSidebar}
+              className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
+              title="Open conversations & media"
+            >
+              <PanelLeft className="h-4 w-4" /> Chats &amp; media
+            </button>
+            {isGuest ? (
+              <Button
+                size="sm"
+                className="h-9 px-4 gap-2"
+                onClick={() => navigate("/signup")}
+              >
+                Get my agent
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 px-3 gap-2"
+                onClick={() => navigate("/settings")}
+                title="Settings & modules"
+              >
+                <Settings className="h-4 w-4" /> Settings
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* ChatGPT-style left sidebar: conversations + media in one rail */}
