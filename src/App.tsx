@@ -40,7 +40,6 @@ import MetaOAuthCallback from "./pages/MetaOAuthCallback";
 import Setup from "./pages/Setup";
 import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
-import AgentConsole from "./pages/AgentConsole";
 import MediaStudio from "./pages/MediaStudio";
 import RuleViolations from "./pages/RuleViolations";
 import { CompanyProvider } from "./context/CompanyContext";

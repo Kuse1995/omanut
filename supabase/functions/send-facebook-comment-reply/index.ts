@@ -109,9 +109,10 @@ serve(async (req) => {
 
       const { data: originalComment, error: ocErr } = await supabase
         .from("facebook_comments")
-        .select("comment_id, page_id")
+        .select("comment_id, page_id, company_id")
         .eq("id", draft.source_id)
         .single();
+
 
       if (ocErr || !originalComment) {
         return new Response(JSON.stringify({ error: "Original comment not found" }), {

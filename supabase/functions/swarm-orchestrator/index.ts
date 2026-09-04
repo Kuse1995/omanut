@@ -72,8 +72,9 @@ serve(async (req) => {
   }
 
   const t0 = Date.now();
-  const result = await runSwarm(supabase, input);
+  const result = await runSwarm(supabase as ReturnType<typeof createClient>, input);
   const total_ms = Date.now() - t0;
+
 
   // Divergence + optional follow-up send for post_hoc_refine
   let divergence_score: number | null = null;
@@ -134,7 +135,7 @@ serve(async (req) => {
     console.warn('[swarm-orchestrator] failed to write audit row:', e);
   }
 
-  return new Response(JSON.stringify({ ok: result.ok, ...result, total_ms, divergence_score, follow_up_sent }), {
+  return new Response(JSON.stringify({ ...result, total_ms, divergence_score, follow_up_sent }), {
     status: result.ok ? 200 : 500,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
