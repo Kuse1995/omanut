@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X } from "lucide-react";
+import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClientSidebar from "@/components/dashboard/ClientSidebar";
 import { useCompany } from "@/context/CompanyContext";
@@ -28,6 +28,9 @@ const AgentConsole = () => {
   const [busy, setBusy] = useState(false);
   const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [showMedia, setShowMedia] = useState(false);
+  const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The company the chat is working with — null while we're still onboarding
   // a brand-new owner (the agent creates the company mid-conversation).
@@ -172,6 +175,34 @@ const AgentConsole = () => {
     window.addEventListener('message', onMessage);
   };
 
+  // Load the company's media (product references, generated images, videos)
+  // from company-media storage — a ChatGPT-style media library, browsable.
+  const loadMedia = async () => {
+    setShowMedia(true);
+    setMediaLoading(true);
+    try {
+      if (!activeCompanyId) { setMediaItems([]); return; }
+      const folders = [activeCompanyId + "/references", activeCompanyId + "/images", "videos/" + activeCompanyId];
+      const items: { name: string; url: string; type: "image" | "video" | "file" }[] = [];
+      for (const folder of folders) {
+        try {
+          const { data, error } = await supabase.storage.from("company-media").list(folder, { limit: 50 });
+          if (error || !data) continue;
+          for (const fileObj of data) {
+            if (fileObj.id === null) continue; // sub-folder
+            const ext = (fileObj.name.split(".").pop() || "").toLowerCase();
+            const type: "image" | "video" | "file" = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext) ? "image" : (["mp4", "mov", "webm"].includes(ext) ? "video" : "file");
+            const { data: pub } = supabase.storage.from("company-media").getPublicUrl(folder + "/" + fileObj.name);
+            items.push({ name: fileObj.name, url: pub.publicUrl, type });
+          }
+        } catch { /* folder may not exist */ }
+      }
+      setMediaItems(items);
+    } finally {
+      setMediaLoading(false);
+    }
+  };
+
   const send = async (text: string) => {
     const message = text.trim();
     if (!message || busy) return;
@@ -216,7 +247,7 @@ const AgentConsole = () => {
           <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
             <Sparkles className="h-5 w-5 text-primary" />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-semibold text-foreground leading-tight">AI Agent</h1>
             <p className="text-xs text-muted-foreground">
               {activeCompanyId
@@ -224,7 +255,48 @@ const AgentConsole = () => {
                 : "Let's set up your business — chat me through it, I'll do the heavy lifting"}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={loadMedia}
+            className="h-9 px-3 rounded-lg border bg-card flex items-center gap-2 text-xs text-foreground hover:bg-accent transition-colors"
+            title="Your media library — product references, generated images & videos"
+          >
+            <Images className="h-4 w-4" /> Media
+          </button>
         </div>
+
+        {/* Media gallery (ChatGPT-style media library) */}
+        {showMedia && (
+          <div className="border-b px-6 py-4 bg-muted/30">
+            <div className="max-w-3xl mx-auto">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-foreground">Your media library</h3>
+                <button type="button" onClick={() => setShowMedia(false)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
+              </div>
+              {mediaLoading ? (
+                <p className="text-xs text-muted-foreground">Loading…</p>
+              ) : mediaItems.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {activeCompanyId ? "No media yet — upload a product photo with 📎, or ask for a video/image, and it appears here." : "Connect a business first, then your media lives here."}
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto">
+                  {mediaItems.map((item) => (
+                    <a key={item.name + item.url} href={item.url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-card border">
+                      {item.type === "image" ? (
+                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
+                      ) : item.type === "video" ? (
+                        <video src={item.url} className="w-full h-full object-cover" preload="metadata" muted />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground p-1 text-center">file</div>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Thread */}
         <div className="flex-1 overflow-y-auto">
