@@ -275,3 +275,14 @@
 .animate-fade-up {
   animation: fadeUp 0.6s ease-out forwards;
 }
+
+/* Agent chat motion */
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.animate-msg-in { animation: msgIn 0.25s ease-out; }
+@keyframes sidebarIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+.animate-sidebar-in { animation: sidebarIn 0.2s ease-out; }
+@keyframes dotPulse { 0%, 80%, 100% { transform: scale(0.5); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
+.typing-dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; animation: dotPulse 1.2s infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
