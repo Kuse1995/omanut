@@ -244,11 +244,17 @@ const AgentConsole = () => {
       <div className="flex-1 flex flex-col h-screen">
         {/* Header */}
         <div className="border-b px-6 py-4 flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center">
-            <Sparkles className="h-5 w-5 text-primary" />
+          <div className="relative">
+            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+              <Sparkles className="h-5 w-5 text-primary-foreground" />
+            </div>
+            <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-background"></span>
           </div>
           <div className="flex-1">
-            <h1 className="text-lg font-semibold text-foreground leading-tight">AI Agent</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-foreground leading-tight">AI Agent</h1>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 font-medium">● online</span>
+            </div>
             <p className="text-xs text-muted-foreground">
               {activeCompanyId
                 ? "Answers from your knowledge base, makes videos, drafts posts"
@@ -304,7 +310,10 @@ const AgentConsole = () => {
             {messages.length === 0 && (
               <div className="text-center py-10">
                 <Sparkles className="h-10 w-10 mx-auto text-primary/60 mb-4" />
-                <h2 className="text-xl font-semibold text-foreground">
+                <div className="mx-auto h-14 w-14 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center mb-4 shadow-lg">
+                  <Sparkles className="h-7 w-7 text-primary-foreground" />
+                </div>
+                <h2 className="text-2xl font-bold text-foreground">
                   {activeCompanyId
                     ? "Hey! I'm your " + (selectedCompany?.name || "business") + " agent."
                     : "Hey! Let's set up your business."}
@@ -336,8 +345,8 @@ const AgentConsole = () => {
                   className={
                     "max-w-[80%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed " +
                     (m.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-br-sm"
-                      : "bg-muted text-foreground rounded-bl-sm")
+                      ? "bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-br-sm shadow-md"
+                      : "bg-card text-foreground rounded-bl-sm border border-border shadow-sm")
                   }
                 >
                   {m.content}

@@ -29,40 +29,39 @@ const HeroSection = () => {
             {/* Badge */}
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-sm">
               <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-muted-foreground">Now with Voice AI</span>
-              <ArrowRight className="w-3 h-3 text-primary" />
+              <span className="text-muted-foreground">Your business's AI agent — live now</span>
             </div>
 
             {/* Headline */}
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.1]">
-              Your AI-powered
+              Talk to your
               <br />
-              <span className="text-primary">business assistant</span>
+              <span className="text-primary">AI business agent</span>
             </h1>
 
             {/* Subtext */}
             <p className="text-xl text-muted-foreground max-w-lg leading-relaxed">
-              Never miss a customer inquiry. Omanut handles reservations, answers questions, 
-              and processes payments 24/7 via WhatsApp — while you focus on what matters.
+              One agent on WhatsApp, Messenger &amp; Instagram that answers customers, takes orders,
+              fields questions and even makes your ads — built from your own knowledge, 24/7.
             </p>
 
             {/* CTAs */}
             <div className="flex flex-wrap gap-4 pt-4">
               <Button
                 size="lg"
-                onClick={() => navigate("/signup")}
+                onClick={() => navigate("/agent")}
                 className="gap-2 text-base px-8"
               >
-                Start Free Trial
+                Chat with your AI agent
                 <ArrowRight className="w-4 h-4" />
               </Button>
               <Button
                 size="lg"
                 variant="outline"
-                onClick={() => navigate("/demo")}
+                onClick={() => navigate("/signup")}
                 className="text-base px-8"
               >
-                Watch Demo
+                Get my free agent
               </Button>
             </div>
 
