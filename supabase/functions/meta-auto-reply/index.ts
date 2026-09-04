@@ -16,8 +16,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
-import { buildCompanyFacts, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
-import { buildCompanyFacts, buildCommentContext, buildDmContext } from "../_shared/company-context.ts";
+import { buildCompanyFacts, buildCommentContext, buildDmContext, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
