@@ -13,7 +13,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { geminiChatWithFallback, geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import {
   buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
@@ -302,18 +302,52 @@ serve(async (req) => {
       : userText;
     const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userContent }];
     const aiController = new AbortController();
-    const aiTimer = setTimeout(() => aiController.abort(), 45000);
-    const aiResponse = await geminiChatWithFallback({
-      // deepseek-chat has no vision — image turns go straight to Gemini Flash.
-      model: sawImage ? "google/gemini-2.5-flash" : PRIMARY_TEXT_MODEL,
-      messages: agentMessages,
-      temperature: 0.7,
-      max_tokens: 2000,
-      signal: aiController.signal,
-    });
+    const aiTimer = setTimeout(() => aiController.abort(), 60000);
+    let reply = "";
+    if (sawImage) {
+      // Vision turns: try ONLY vision-capable models, directly (no fallback
+      // chain through blind text models — that cascade was exhausting and
+      // ending in a 500). GLM first per the owner's stack, then Gemini Flash.
+      const visionModels = [
+        Deno.env.get("VISION_MODEL") || "glm-5.3-flash",
+        "glm-4.5v",
+        "google/gemini-2.5-flash",
+      ];
+      for (const vm of visionModels) {
+        try {
+          const vRes = await geminiChat({
+            model: vm,
+            messages: agentMessages,
+            temperature: 0.7,
+            max_tokens: 2000,
+            signal: aiController.signal,
+          });
+          const vData: any = await vRes.json();
+          const vText = String(vData?.choices?.[0]?.message?.content || "").trim();
+          if (vText) { reply = vText; console.log("[AGENT-CONSOLE] vision answered by", vm); break; }
+          console.warn("[AGENT-CONSOLE] vision model returned empty content:", vm);
+        } catch (vErr: any) {
+          console.warn("[AGENT-CONSOLE] vision model failed:", vm, vErr?.message || vErr);
+        }
+      }
+    }
+    if (!reply) {
+      // Text path (also the guaranteed fallback when vision fails) — never 500s.
+      try {
+        const aiResponse = await geminiChatWithFallback({
+          model: PRIMARY_TEXT_MODEL,
+          messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
+          temperature: 0.7,
+          max_tokens: 2000,
+          signal: aiController.signal,
+        });
+        const aiData: any = await aiResponse.json();
+        reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
+      } catch (aiErr: any) {
+        console.error("[AGENT-CONSOLE] text fallback failed:", aiErr?.message || aiErr);
+      }
+    }
     clearTimeout(aiTimer);
-    const aiData: any = await aiResponse.json();
-    let reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
     // NEVER surface raw reasoning_content as the reply — when the model spends
     // its whole token budget thinking, content comes back empty and the leaked
     // chain-of-thought was being dumped into the chat verbatim.

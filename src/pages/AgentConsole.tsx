@@ -10,6 +10,7 @@ import omanutLogo from "@/assets/omanut-logo-new.png";
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  attachments?: { url: string; type: "image" | "video" }[];
   action?: { type: string | null; job_id?: string | null; post_id?: string | null; connect_url?: string; state?: string; saved?: string[]; filename?: string } | null;
 }
 
@@ -328,7 +329,13 @@ const AgentConsole = () => {
     if (!message || busy) return;
     setInput("");
     setBusy(true);
-    const userMsg: ChatMessage = { role: "user", content: message };
+    // ChatGPT-style: the attachment travels WITH the sent message and stays
+    // visible in the bubble, not just as a composer chip.
+    const pendingAttachments: ChatMessage["attachments"] = [
+      ...(attachedUrl ? [{ url: attachedUrl, type: "image" as const }] : []),
+      ...(postMedia ? [{ url: postMedia.url, type: postMedia.type }] : []),
+    ];
+    const userMsg: ChatMessage = { role: "user", content: message, attachments: pendingAttachments };
     setMessages((prev) => [...prev, userMsg]);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
@@ -354,7 +361,15 @@ const AgentConsole = () => {
       }
       if (data?.thread?.length) {
         // Server-authoritative thread (ChatGPT-style) — replaces local messages.
-        setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+        const thread: ChatMessage[] = data.thread.map((m: any) => ({ role: m.role, content: m.content }));
+        // The server stores text only; re-attach this turn's media so the
+        // sent bubble keeps showing the image/video.
+        if (pendingAttachments.length) {
+          for (let i = thread.length - 1; i >= 0; i--) {
+            if (thread[i].role === "user") { thread[i] = { ...thread[i], attachments: pendingAttachments }; break; }
+          }
+        }
+        setMessages(thread);
       } else {
         setMessages((prev) => [...prev, { role: "assistant", content: data?.reply || "I couldn't process that just now.", action: data?.action || null }]);
       }
@@ -538,6 +553,29 @@ const AgentConsole = () => {
                       : "bg-card text-foreground rounded-bl-sm border border-border shadow-sm")
                   }
                 >
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {m.attachments.map((a, ai) => (
+                        a.type === "video" ? (
+                          <video
+                            key={ai}
+                            src={a.url}
+                            controls
+                            preload="metadata"
+                            className="max-w-[240px] rounded-xl border border-white/30 bg-black/20"
+                          />
+                        ) : (
+                          <img
+                            key={ai}
+                            src={a.url}
+                            alt="Attachment"
+                            className="max-w-[240px] max-h-[240px] w-auto rounded-xl border border-white/30 object-cover cursor-zoom-in"
+                            onClick={(ev) => window.open(a.url, "_blank")}
+                          />
+                        )
+                      ))}
+                    </div>
+                  )}
                   {m.content}
                   {m.action?.type === "video" && (
                     <div className="mt-2 flex items-center gap-2 text-xs bg-background/60 rounded-lg px-2 py-1.5">
