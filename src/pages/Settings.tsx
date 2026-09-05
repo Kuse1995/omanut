@@ -14,7 +14,7 @@ import CompanyMedia from '@/components/CompanyMedia';
 import { ImageGenerationSettings } from '@/components/ImageGenerationSettings';
 import ThemeToggle from '@/components/ThemeToggle';
 import PhoneInput from '@/components/setup/PhoneInput';
-import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check, LayoutDashboard, Plug, Inbox as InboxIcon, MessageSquare, Brain, Info, Users, CreditCard, Sparkles, ArrowLeft, LogOut, Images } from 'lucide-react';
+import { Building2, Phone, Calendar as CalendarIcon, Image as ImageIcon, FileText, Save, Lock, Copy, Check, LayoutDashboard, Plug, Inbox as InboxIcon, MessageSquare, Brain, Info, Users, CreditCard, Sparkles, ArrowLeft, LogOut, Images, TrendingUp } from 'lucide-react';
 import { useIsPlatformAdmin } from '@/hooks/useIsPlatformAdmin';
 import { formatPhone } from '@/lib/format';
 
@@ -22,6 +22,7 @@ import { formatPhone } from '@/lib/format';
 // Settings hub. Tapping one launches that route.
 const MODULES = [
   { name: 'AI Agent', desc: 'Chat with your business agent', href: '/agent', icon: Sparkles },
+  { name: 'Growth', desc: 'Campaigns, A/B variants, scoring', href: '/growth', icon: TrendingUp },
   { name: 'Dashboard', desc: 'Overview and essentials', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Setup', desc: 'Onboard your business', href: '/setup', icon: Plug },
   { name: 'Inbox', desc: 'Customer messages', href: '/inbox', icon: InboxIcon },
