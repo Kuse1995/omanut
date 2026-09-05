@@ -19,6 +19,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { buildBrandBlock } from "../_shared/marketing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -120,6 +121,13 @@ serve(async (req) => {
     const remainingCredits = Number(deducted.credit_balance ?? 0);
     console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
 
+    // Brand Kit — the on-brand guardrail for every video the agent makes.
+    let brandBlock = "";
+    try {
+      const { data: kit } = await supabase.from("brand_kits").select("tone, colors, no_go_phrases, guidelines").eq("company_id", company_id).maybeSingle();
+      brandBlock = buildBrandBlock(kit);
+    } catch { /* brand kit is optional */ }
+
     let bossPhone = "";
     const { data: bossRow } = await supabase
       .from("company_boss_phones")
@@ -165,6 +173,7 @@ serve(async (req) => {
     const scriptSystem = [
       "You are the Marketing Strategist for " + (company.name || "a business") + ".",
       facts ? facts : "",
+      brandBlock ? brandBlock : "",
       "Convert the brief into a video script plan. The FIRST 2 SECONDS must hook (a bold visual statement, a surprising motion, or the product as hero).",
       'Output STRICT JSON only — no markdown, no code fences: {"style": "<one of: motion_design | ecommerce | cinematic | social_hook | product_360>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
       "2-4 beats. Each beat is one visual moment that fits a 5-second shot.",
