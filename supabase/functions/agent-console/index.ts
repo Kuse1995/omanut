@@ -294,12 +294,65 @@ serve(async (req) => {
 
       const t = message.trim();
       const short = t.length <= 100;
-      const confirmish = short && /(post\s*(it|this|that|now)|publish|share\s*(it|this|that)?|go\s*live|send\s*it|push\s*it|approv(e|ed|al)|i\s+approve|go\s*ahead|confirm)/i.test(t);
-      const wantsNow = /\b(now|right now|immediately|asap)\b/i.test(t);
-      const approveIntent = /\bapprove\b/i.test(t) && /\b(it|that|this|them|the post|post)\b/i.test(t);
-      const publishNowIntent = /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(t);
 
-      if (pendingPost && (confirmish || approveIntent || publishNowIntent)) {
+      // "post it with a caption" after generating an image: draft a FRESH
+      // captioned post with THAT image and publish it — never approve an
+      // unrelated older draft when the owner asks for a caption.
+      const lastImage = ((company as any)?.metadata?.last_generated_image) || postMediaUrl || null;
+      const captionIntent = !!lastImage && /\bcaption\b/i.test(t) && /\b(post|publish|share|write|add|draft|make)\b/i.test(t);
+      const confirmish = short && !captionIntent && /(post\s*(it|this|that|now)|publish|share\s*(it|this|that)?|go\s*live|send\s*it|push\s*it|approv(e|ed|al)|i\s+approve|go\s*ahead|confirm)/i.test(t);
+      const wantsNow = /\b(now|right now|immediately|asap)\b/i.test(t);
+      const approveIntent = !captionIntent && /\bapprove\b/i.test(t) && /\b(it|that|this|them|the post|post)\b/i.test(t);
+      const publishNowIntent = !captionIntent && /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(t);
+
+      if (captionIntent && /(post|publish|share)\b/i.test(t)) {
+        // Caption the freshly generated image, then post it.
+        let caption = "";
+        const capMessages = [
+          { role: "system", content: "You write Facebook post captions for " + (company?.name || "a business") + ". 1-3 short lines, warm and social, max 2 emojis, no hashtags. Output ONLY the caption." },
+          { role: "user", content: "Write the caption to accompany the image this request is about. The owner's request: \"" + message + "\"" },
+        ];
+        try {
+          const h = await callHarness({ session_id: "console:" + company.id + ":caption:" + Date.now(), messages: capMessages, tools: [] });
+          if (h.ok && h.message?.content) caption = String(h.message.content).trim();
+        } catch { /* fall through */ }
+        if (!caption) {
+          try {
+            const r = await geminiChat({ model: PRIMARY_TEXT_MODEL, messages: capMessages, temperature: 0.8, max_tokens: 300 });
+            const d: any = await r.json();
+            caption = String(d?.choices?.[0]?.message?.content || "").trim();
+          } catch { /* fall through */ }
+        }
+        if (!caption) caption = t;
+        const { data: cred2 } = await supabase.from("meta_credentials").select("page_id").eq("company_id", company.id).limit(1).maybeSingle();
+        if (!cred2?.page_id) {
+          reply = "I wrote the caption, but no Facebook page is connected yet — say \"connect\" in chat and link your pages first.";
+          action = { type: "post_failed", reason: "no_page" };
+          preHandled = true;
+        } else {
+          const { data: newPost, error: npErr } = await supabase.from("scheduled_posts").insert({
+            company_id: company.id,
+            page_id: cred2.page_id,
+            content: caption,
+            scheduled_time: new Date(Date.now() + 60000).toISOString(),
+            status: "approved",
+            created_by: user.id,
+            image_url: lastImage,
+          }).select("id").single();
+          if (npErr) throw npErr;
+          const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: newPost.id } });
+          if (pub?.error || pub?.data?.error) {
+            reply = "📝 Captioned post saved in your Content Scheduler (publishing hiccup: " + String(pub?.data?.error || pub?.error?.message || "unknown").slice(0, 80) + ").";
+            action = { type: "post", post_id: newPost.id };
+          } else {
+            reply = "🚀 Posted with your image and caption — it's live on your page!";
+            action = { type: "post_published", post_id: newPost.id, meta_post_id: pub?.data?.meta_post_id ?? null };
+          }
+          preHandled = true;
+        }
+      }
+
+      if (pendingPost && !preHandled && (confirmish || approveIntent || publishNowIntent)) {
         if (wantsNow || publishNowIntent) {
           await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
           const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pendingPost.id } });
@@ -778,7 +831,9 @@ serve(async (req) => {
           if (upErr) throw upErr;
           const { data: pub } = supabase.storage.from("company-media").getPublicUrl(path);
           const imageUrl = pub.publicUrl;
-          await supabase.from("companies").update({ credit_balance: balance - 1 }).eq("id", company.id).gte("credit_balance", 1);
+          // Remember it so a follow-up "post it with a caption" uses THIS image.
+          const nextMeta = { ...(((company as any)?.metadata) || {}), last_generated_image: imageUrl };
+          await supabase.from("companies").update({ metadata: nextMeta, credit_balance: balance - 1 }).eq("id", company.id).gte("credit_balance", 1);
           reply = "🖼️ Here's your image — saved to your media library. Want me to draft a post around it, or turn the concept into a video?";
           action = { type: "image_created", url: imageUrl };
           assistantAttachments = [{ url: imageUrl, type: "image" }];
