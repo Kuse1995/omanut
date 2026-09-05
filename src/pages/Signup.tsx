@@ -39,11 +39,15 @@ const Signup = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signUp({
+      const signUpCall = supabase.auth.signUp({
         email,
         password,
         options: { emailRedirectTo: `${window.location.origin}/claim-company` },
       });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("The sign-up service is busy right now - please try again in a few minutes.")), 30000)
+      );
+      const { error } = await Promise.race([signUpCall, timeout]);
       if (error) throw error;
       toast({
         title: "Account created",
