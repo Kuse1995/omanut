@@ -374,6 +374,11 @@ const AgentConsole = () => {
         if (action.company_id) setActiveCompanyId(action.company_id);
         refreshCompanies();
       }
+      // A generated image becomes the "last media" — a follow-up "post it"
+      // attaches it without re-uploading.
+      if (action?.type === "image_created" && action.url) {
+        setLastPostMedia({ url: action.url, type: "image" });
+      }
       if (data?.thread?.length) {
         // Server-authoritative thread (ChatGPT-style) — replaces local messages.
         const thread: ChatMessage[] = data.thread.map((m: any) => ({ role: m.role, content: m.content, attachments: Array.isArray(m.attachments) && m.attachments.length ? m.attachments : undefined }));

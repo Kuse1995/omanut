@@ -298,14 +298,40 @@ serve(async (req) => {
       // "post it with a caption" after generating an image: draft a FRESH
       // captioned post with THAT image and publish it — never approve an
       // unrelated older draft when the owner asks for a caption.
-      const lastImage = ((company as any)?.metadata?.last_generated_image) || postMediaUrl || null;
-      const captionIntent = !!lastImage && /\bcaption\b/i.test(t) && /\b(post|publish|share|write|add|draft|make)\b/i.test(t);
-      const confirmish = short && !captionIntent && /(post\s*(it|this|that|now)|publish|share\s*(it|this|that)?|go\s*live|send\s*it|push\s*it|approv(e|ed|al)|i\s+approve|go\s*ahead|confirm)/i.test(t);
+      // lastImage resolution: metadata -> this turn's media -> chat history
+      // (the generated image is persisted as an assistant attachment).
+      let lastImage = ((company as any)?.metadata?.last_generated_image) || postMediaUrl || null;
+      if (!lastImage) {
+        try {
+          const { data: convs } = await supabase.from("conversations").select("id").eq("company_id", company.id).like("phone", "agent:" + company.id + "%").limit(20);
+          const convIds = (convs || []).map((c: any) => c.id);
+          if (convIds.length) {
+            const { data: mm } = await supabase.from("messages")
+              .select("attachments, created_at")
+              .in("conversation_id", convIds)
+              .eq("role", "assistant")
+              .not("attachments", "is", null)
+              .order("created_at", { ascending: false })
+              .limit(1);
+            const atts = mm?.[0]?.attachments;
+            if (Array.isArray(atts) && atts.length && atts[0]?.url) lastImage = String(atts[0].url);
+          }
+        } catch { /* history lookup is best-effort */ }
+      }
+      const wantsApprove = /\bapprove\b/i.test(t);
+      // IMAGE-post intent: an image exists (generated or attached) and the
+      // owner says "post it/this" — post THAT image with a fresh caption
+      // written by the brain. Never approve an unrelated older draft.
+      const imagePostIntent = !!lastImage && short && !wantsApprove
+        && /(post|publish|share)\b/i.test(t)
+        && /\b(it|this|that|them|caption)\b/i.test(t);
+      const captionIntent = imagePostIntent;
+      const confirmish = short && !imagePostIntent && /(post\s*(it|this|that|now)|publish|share\s*(it|this|that)?|go\s*live|send\s*it|push\s*it|approv(e|ed|al)|i\s+approve|go\s*ahead|confirm)/i.test(t);
       const wantsNow = /\b(now|right now|immediately|asap)\b/i.test(t);
-      const approveIntent = !captionIntent && /\bapprove\b/i.test(t) && /\b(it|that|this|them|the post|post)\b/i.test(t);
-      const publishNowIntent = !captionIntent && /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(t);
+      const approveIntent = wantsApprove && /\b(it|that|this|them|the post|post)\b/i.test(t);
+      const publishNowIntent = !imagePostIntent && /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(t);
 
-      if (captionIntent && /(post|publish|share)\b/i.test(t)) {
+      if (imagePostIntent) {
         // Caption the freshly generated image, then post it.
         let caption = "";
         const capMessages = [
@@ -352,7 +378,7 @@ serve(async (req) => {
         }
       }
 
-      if (pendingPost && !preHandled && (confirmish || approveIntent || publishNowIntent)) {
+      if (pendingPost && !preHandled && !imagePostIntent && (approveIntent || (confirmish && !lastImage) || publishNowIntent)) {
         if (wantsNow || publishNowIntent) {
           await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
           const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pendingPost.id } });
