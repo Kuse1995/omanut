@@ -29,7 +29,7 @@ const corsHeaders = {
 };
 
 // Deploy marker — bump per release; lets us verify what's actually live with one probe.
-const AGENT_CONSOLE_BUILD = "2026-09-05-harness-first-v3";
+const AGENT_CONSOLE_BUILD = "2026-09-06-thread-rail-v4";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -118,14 +118,17 @@ serve(async (req) => {
     }
 
     if (isListThreads) {
-      const { data: threads } = await supabase
+      // Order by last_message_at (exists since the March migration);
+      // updated_at only came into existence with the Sept migration.
+      const { data: threads, error: threadsErr } = await supabase
         .from("conversations")
-        .select("id, customer_name, updated_at")
+        .select("id, customer_name, updated_at, last_message_at")
         .ilike("phone", threadBase + "%")
         .eq("status", "active")
-        .order("updated_at", { ascending: false })
+        .order("last_message_at", { ascending: false, nullsFirst: false })
         .limit(50);
-      const threadList = (threads || []).map((t: any) => ({ id: t.id, title: t.customer_name || "New chat", updated_at: t.updated_at }));
+      if (threadsErr) console.error("[AGENT-CONSOLE] list_threads failed:", threadsErr.message);
+      const threadList = (threads || []).map((t: any) => ({ id: t.id, title: t.customer_name || "New chat", updated_at: t.last_message_at || t.updated_at }));
       return new Response(JSON.stringify({ reply: "", action: { type: null }, company_id: companyId, threads: threadList }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -904,10 +907,11 @@ serve(async (req) => {
     if (threadConvoId) {
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000), attachments: turnAttachments });
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000), attachments: assistantAttachments });
+      // Keep the rail ordering truthful: bump on every turn.
+      const convUpdate: any = { last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() };
       // Auto-title a fresh thread from its first user message (ChatGPT-style).
-      if (newThreadCreated || threadAlreadyUntitled) {
-        await supabase.from("conversations").update({ customer_name: message.slice(0, 48) }).eq("id", threadConvoId);
-      }
+      if (newThreadCreated || threadAlreadyUntitled) convUpdate.customer_name = message.slice(0, 48);
+      await supabase.from("conversations").update(convUpdate).eq("id", threadConvoId);
     }
     const { data: threadRows } = threadConvoId
       ? await supabase.from("messages").select("role, content, created_at, attachments").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
