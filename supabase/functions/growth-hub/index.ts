@@ -30,7 +30,7 @@ serve(async (req) => {
 
     // Aggregates (all scoped to company + within the last 7 days).
     const [
-      postsRes, videosRes, convRes, msgsRes, inboundRes, bmsRes, docsRes,
+      postsRes, videosRes, convRes, msgsRes, inboundRes, bmsRes, docsRes, payRes,
     ] = await Promise.all([
       supabase.from("scheduled_posts").select("status, meta_post_id, content").eq("company_id", companyId).gte("created_at", since),
       supabase.from("generated_images").select("id").eq("company_id", companyId).gte("created_at", since),
@@ -39,6 +39,7 @@ serve(async (req) => {
       supabase.from("inbound_events").select("id, event_type, status").eq("company_id", companyId).gte("created_at", since),
       supabase.from("bms_connections").select("last_kb_text").eq("company_id", companyId).eq("is_active", true).maybeSingle(),
       supabase.from("company_documents").select("id, parsed_content").eq("company_id", companyId).limit(50),
+      supabase.from("payment_transactions").select("amount, payment_status").eq("company_id", companyId).gte("created_at", since),
     ]);
 
     const posts = postsRes.data || [];
@@ -65,6 +66,11 @@ serve(async (req) => {
     // Lead funnel
     const leads = inbound.filter((e: any) => /lead|enquir|price|quote|book|order|buy/i.test(String(e.event_type || "") + " " + String(e.payload || ""))).length;
 
+    // Revenue attribution — completed payment transactions this week.
+    const paid = (payRes.data || []).filter((t: any) => /paid|success|completed/i.test(String(t.payment_status || "")));
+    const revenue = paid.reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+    const transactions = paid.length;
+
     const metrics = {
       company: company?.name || "your business",
       period: "last 7 days",
@@ -83,6 +89,8 @@ serve(async (req) => {
       kb_documents: docs,
       kb_grounded_docs: kbDocs,
       bms_catalog: bmsCatalog,
+      revenue,
+      transactions,
     };
 
     let summary = "";

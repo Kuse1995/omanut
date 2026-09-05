@@ -217,6 +217,7 @@ const Growth = () => {
             {stat("Missed", m.unanswered_missed, <MessageSquare className="w-5 h-5" />)}
             {stat("Campaigns running", m.campaigns_running, <Rocket className="w-5 h-5" />)}
             {stat("KB documents", m.kb_grounded_docs, <FileText className="w-5 h-5" />)}
+            {stat("Revenue", m.revenue != null ? m.revenue : "--", <TrendingUp className="w-5 h-5" />, m.transactions ? m.transactions + " payments" : undefined)}
           </div>
           {summary && (
             <Card className="card-glass">
