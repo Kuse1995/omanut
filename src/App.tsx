@@ -15,6 +15,7 @@ import LiveDemo from "./pages/LiveDemo";
 import Conversations from "./pages/Conversations";
 import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
+import Growth from "./pages/Growth";
 import Billing from "./pages/Billing";
 import ClientInsights from "./pages/ClientInsights";
 import CustomerSegments from "./pages/CustomerSegments";
@@ -87,6 +88,7 @@ const App = () => (
             <Route path="/reservations" element={<Reservations />} />
             <Route path="/billing" element={<Billing />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/growth" element={<Growth />} />
             <Route path="/rule-violations" element={<RuleViolations />} />
             <Route path="/test-agent-routing" element={<TestAgentRoutingSQL />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />

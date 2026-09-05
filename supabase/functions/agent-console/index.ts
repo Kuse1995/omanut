@@ -223,6 +223,8 @@ serve(async (req) => {
         "1. Answer questions about the business from the FACTS and KNOWLEDGE BASE MATCHES above (pricing, hours, services, policies).",
         "2. Create video ads — if the user wants a video/ad/reel, begin your reply with exactly \"VIDEO:\" followed by a one-sentence cinematic brief (nothing else after describing it).",
         "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else). If they attached media and ask to post/schedule it, still use \"POST:\" — the attached media is saved with the draft automatically.",
+        "4. RUN A CAMPAIGN — if the user asks to run a promo/campaign (e.g. \"run a flash sale\", \"launch campaign\", \"promo\"), begin your reply with exactly \"CAMPAIGN:\" followed by a one-line brief (what's being offered/promoted). The console launches a multi-variant campaign for you.",
+        "5. BRAND KIT — if the user shares brand details (colours, tone, fonts, phrases to avoid), reply with exactly \"BRAND:\" followed by those details so they're saved as the brand guardrail.",
         "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), PLAIN TEXT only (no markdown, no asterisks, no bullets), no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
         "",
         "UPLOADS: When the owner uploads a knowledge document, acknowledge it by name and note that your answers can now draw from it. When they upload media and ask to post/schedule it, confirm you've attached it to the draft and that it will appear for approval in the Content Scheduler.",
@@ -430,6 +432,36 @@ serve(async (req) => {
           action = { type: "post", post_id: post?.id ?? null };
         }
       }
+    } else if (company && reply.toUpperCase().startsWith("CAMPAIGN:")) {
+      // Launch a multi-variant Grow Engine campaign through campaign-engine.
+      const brief = reply.slice(9).trim() || message;
+      const playbook = String(bodyData.playbook || "").trim() || "custom";
+      try {
+        const campRes: any = await supabase.functions.invoke("campaign-engine", {
+          body: { action: "create", company_id: company.id, brief: brief.slice(0, 500), playbook, channels: ["facebook", "instagram"], variant_count: 3, user_id: user.id },
+        });
+        if (campRes?.error || campRes?.data?.error) {
+          console.error("[AGENT-CONSOLE] campaign-engine failed:", campRes?.error || campRes?.data?.error);
+          reply = "I couldn't launch the campaign just now — please try again in a moment.";
+        } else {
+          reply = "🚀 Campaign launched! I created 3 on-brand variants and scheduled them for approval in your Growth hub. Watch them, then I can promote the best performer.";
+          action = { type: "campaign", campaign_id: campRes.data?.campaign_id ?? null };
+        }
+      } catch (e2: any) {
+        console.error("[AGENT-CONSOLE] campaign invoke threw:", e2);
+        reply = "I couldn't launch the campaign just now — please try again in a moment.";
+      }
+    } else if (company && reply.toUpperCase().startsWith("BRAND:")) {
+      // Save the brand kit guardrail (upsert one per company).
+      const detail = reply.slice(6).trim();
+      const { data: existing } = await supabase.from("brand_kits").select("id").eq("company_id", company.id).maybeSingle();
+      if (existing?.id) {
+        await supabase.from("brand_kits").update({ guidelines: detail.slice(0, 2000), updated_by: user.id, updated_at: new Date().toISOString() }).eq("id", existing.id);
+      } else {
+        await supabase.from("brand_kits").insert({ company_id: company.id, guidelines: detail.slice(0, 2000), updated_by: user.id });
+      }
+      reply = "🎨 Brand guardrail saved — I'll keep every post and video on-brand from now on. Tell me your colours, tone, and any phrases to avoid and I'll remember those too.";
+      action = { type: "brand_saved" };
     }
 
     // Persist the turn, then return the full thread (ChatGPT-style history).
