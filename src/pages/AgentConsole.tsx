@@ -31,6 +31,9 @@ const AgentConsole = () => {
   const [attachedUrl, setAttachedUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [postMedia, setPostMedia] = useState<{ url: string; type: "image" | "video"; name?: string } | null>(null);
+  // The last media the owner shared — lets a follow-up "post it" refer back to
+  // it even though the composer chip cleared when that message was sent.
+  const [lastPostMedia, setLastPostMedia] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const [docUploading, setDocUploading] = useState(false);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -186,6 +189,7 @@ const AgentConsole = () => {
       if (error) throw error;
       const { data } = supabase.storage.from("company-media").getPublicUrl(p);
       setPostMedia({ url: data.publicUrl, type, name: file.name });
+      setLastPostMedia({ url: data.publicUrl, type });
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Media upload failed: " + (e?.message || "unknown error") }]);
     } finally {
@@ -342,14 +346,18 @@ const AgentConsole = () => {
     setAttachedUrl(null);
     const userMsg: ChatMessage = { role: "user", content: message, attachments: pendingAttachments };
     setMessages((prev) => [...prev, userMsg]);
+    // "post it" / "schedule this" after the fact: fall back to the last media
+    // the owner shared, so the follow-up refers to the thing they just showed.
+    const refersToIt = /\b(post|schedule|publish)\b[^.!?]*\b(it|this|that|them)\b/i.test(message) || /^(post|schedule|publish)\b/i.test(message.trim());
+    const mediaForPost = postMedia ?? (refersToIt ? lastPostMedia : null);
     try {
       const { data, error } = await supabase.functions.invoke("agent-console", {
         body: {
           company_id: activeCompanyId,
           message,
           image_urls: attachedUrl ? [attachedUrl] : [],
-          post_media_url: postMedia?.url ?? null,
-          post_media_type: postMedia?.type ?? null,
+          post_media_url: mediaForPost?.url ?? null,
+          post_media_type: mediaForPost?.type ?? null,
           thread_id: currentThreadId,
           new_thread: !currentThreadId,
           // Guests have no server thread — carry the in-state conversation so

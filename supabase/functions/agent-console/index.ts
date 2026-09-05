@@ -333,18 +333,25 @@ serve(async (req) => {
     }
     if (!reply) {
       // Text path (also the guaranteed fallback when vision fails) — never 500s.
-      try {
-        const aiResponse = await geminiChatWithFallback({
-          model: PRIMARY_TEXT_MODEL,
-          messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
-          temperature: 0.7,
-          max_tokens: 2000,
-          signal: aiController.signal,
-        });
-        const aiData: any = await aiResponse.json();
-        reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
-      } catch (aiErr: any) {
-        console.error("[AGENT-CONSOLE] text fallback failed:", aiErr?.message || aiErr);
+      // Retry across two text models: when the primary burns its whole budget
+      // reasoning, content comes back empty and a second opinion fixes it.
+      const textModels = [PRIMARY_TEXT_MODEL, "google/gemini-2.5-flash"];
+      for (const tm of textModels) {
+        try {
+          const aiResponse = await geminiChat({
+            model: tm,
+            messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
+            temperature: 0.7,
+            max_tokens: 2000,
+            signal: aiController.signal,
+          });
+          const aiData: any = await aiResponse.json();
+          const t = String(aiData?.choices?.[0]?.message?.content || "").trim();
+          if (t) { reply = t; break; }
+          console.warn("[AGENT-CONSOLE] text model returned empty content:", tm);
+        } catch (aiErr: any) {
+          console.warn("[AGENT-CONSOLE] text model failed:", tm, aiErr?.message || aiErr);
+        }
       }
     }
     clearTimeout(aiTimer);
@@ -354,9 +361,30 @@ serve(async (req) => {
     if (!reply) reply = "I couldn't process that just now — please try again in a moment.";
     let action: any = { type: null };
 
+    // ── Tool escapes: model-proof parsing ──────────────────────────────
+    // Models wrap escapes in code fences, indent them, or drop the prefix
+    // entirely (bare JSON). Parse every escape regardless of formatting.
+    const normReply = reply.replace(/```[a-z]*/gi, "").trim();
+    const findAfter = (tag: string): string | null => {
+      const re = new RegExp("(?:^|\\n)\\s*" + tag + "\\s*:?\\s*", "i");
+      const m = normReply.match(re);
+      return m ? normReply.slice((m.index ?? 0) + m[0].length).trim() : null;
+    };
+    const bareJson = normReply.startsWith("{") ? normReply : null;
+    const jsonHasFacts = !!bareJson && /"(services|hours|voice_style|branches|service_locations|payment_instructions|quick_reference_info|currency_prefix|business_type|industry|name)"\s*:/i.test(normReply);
+    const companyCreated = findAfter("CREATE_COMPANY:");
+    const claimCode = findAfter("CLAIM_CODE:");
+    const saveFacts = company ? (findAfter("SAVE_FACTS:") ?? (jsonHasFacts ? bareJson : null)) : null;
+    const saveKb = company ? findAfter("SAVE_KB:") : null;
+    const connectMeta = !!company && normReply.toUpperCase().startsWith("CONNECT_META");
+    const videoBrief = company ? findAfter("VIDEO:") : null;
+    const postCaption = company ? findAfter("POST:") : null;
+    const campaignBrief = company ? findAfter("CAMPAIGN:") : null;
+    const brandDetail = company ? findAfter("BRAND:") : null;
+
     // ── Self-serve onboarding: company creation + claim codes ──────────
-    if (reply.toUpperCase().startsWith("CREATE_COMPANY:")) {
-      const parsed: any = extractJson(reply.slice(15));
+    if (companyCreated !== null) {
+      const parsed: any = extractJson(companyCreated);
       const name = String(parsed?.name || "").trim();
       if (isGuest) {
         // No account yet — we can't create an owned company. Prompt sign-up.
@@ -403,8 +431,8 @@ serve(async (req) => {
         action = { type: "company_created", company_id: newCompanyId, name };
         reply = "🎉 " + name + " is live on Omanut! Now tell me more — your services, prices, hours — I'll remember everything. And when you're ready, say \"connect\" to link Facebook & Instagram.";
       }
-    } else if (reply.toUpperCase().startsWith("CLAIM_CODE:")) {
-      const code = reply.slice(11).trim();
+    } else if (claimCode !== null) {
+      const code = claimCode;
       if (isGuest) {
         action = { type: "signup_required" };
         reply = "🔒 To claim that business you'll need an account first. Create a free one and I'll link you instantly.";
@@ -427,8 +455,8 @@ serve(async (req) => {
     }
 
     // ── Conversational onboarding: the agent WRITES the company profile ──
-    if (company && reply.toUpperCase().startsWith("SAVE_FACTS:")) {
-      const parsed: any = extractJson(reply.slice(11));
+    if (saveFacts !== null) {
+      const parsed: any = extractJson(saveFacts);
       try {
         const { saved } = await updateCompanyFacts(supabase, company.id, parsed);
         const stillMissing = profileMissingList(company).filter((m) => !saved.some((s) => m.startsWith(s)));
@@ -439,8 +467,8 @@ serve(async (req) => {
       } catch (e: any) {
         reply = "⚠️ Save failed: " + (e?.message || "unknown error");
       }
-    } else if (company && reply.toUpperCase().startsWith("SAVE_KB:")) {
-      const rest = reply.slice(8).trim();
+    } else if (saveKb !== null) {
+      const rest = saveKb;
       const nl = rest.indexOf("\n");
       const filename = (nl >= 0 ? rest.slice(0, nl) : rest).trim() || "knowledge-" + Date.now() + ".md";
       const content = nl >= 0 ? rest.slice(nl + 1).trim() : rest;
@@ -451,7 +479,7 @@ serve(async (req) => {
       } catch (e: any) {
         reply = "⚠️ KB save failed: " + (e?.message || "unknown error");
       }
-    } else if (company && reply.toUpperCase().trim() === "CONNECT_META") {
+    } else if (connectMeta) {
       const appId = Deno.env.get("META_APP_ID");
       const configId = Deno.env.get("META_CONFIG_ID");
       if (!appId) {
@@ -468,8 +496,8 @@ serve(async (req) => {
     }
 
     // Route tool escapes (video + post) — company-scoped.
-    if (company && reply.toUpperCase().startsWith("VIDEO:")) {
-      const brief = reply.slice(6).trim() || message;
+    if (videoBrief !== null) {
+      const brief = videoBrief || message;
       const looksLikeScript = imageUrls.length > 0 && message.length > 400;
       const motionBody: Record<string, unknown> = looksLikeScript
         ? { company_id: company.id, brief: message.slice(0, 200), script_override: message, image_urls: imageUrls }
@@ -485,8 +513,8 @@ serve(async (req) => {
         reply = "🎬 Video render started. It takes 1-3 minutes — the finished video lands in your Media Studio and I'll let you know here." + (creditsLeft != null ? " (Credits left: " + creditsLeft + ")" : "");
         action = { type: "video", job_id: motionRes.data?.job_id ?? null, brief, credits_remaining: creditsLeft ?? null };
       }
-    } else if (company && reply.toUpperCase().startsWith("POST:")) {
-      const caption = reply.slice(5).trim();
+    } else if (postCaption !== null) {
+      const caption = postCaption;
       const { data: cred } = await supabase
         .from("meta_credentials")
         .select("page_id")
@@ -520,9 +548,9 @@ serve(async (req) => {
           action = { type: "post", post_id: post?.id ?? null };
         }
       }
-    } else if (company && reply.toUpperCase().startsWith("CAMPAIGN:")) {
+    } else if (campaignBrief !== null) {
       // Launch a multi-variant Grow Engine campaign through campaign-engine.
-      const brief = reply.slice(9).trim() || message;
+      const brief = campaignBrief || message;
       const playbook = String(bodyData.playbook || "").trim() || "custom";
       try {
         const campRes: any = await supabase.functions.invoke("campaign-engine", {
@@ -539,9 +567,9 @@ serve(async (req) => {
         console.error("[AGENT-CONSOLE] campaign invoke threw:", e2);
         reply = "I couldn't launch the campaign just now — please try again in a moment.";
       }
-    } else if (company && reply.toUpperCase().startsWith("BRAND:")) {
+    } else if (brandDetail !== null) {
       // Save the brand kit guardrail (upsert one per company).
-      const detail = reply.slice(6).trim();
+      const detail = brandDetail;
       const { data: existing } = await supabase.from("brand_kits").select("id").eq("company_id", company.id).maybeSingle();
       if (existing?.id) {
         await supabase.from("brand_kits").update({ guidelines: detail.slice(0, 2000), updated_by: user.id, updated_at: new Date().toISOString() }).eq("id", existing.id);
