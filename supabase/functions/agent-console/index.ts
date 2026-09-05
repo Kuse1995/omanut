@@ -29,7 +29,7 @@ const corsHeaders = {
 };
 
 // Deploy marker — bump per release; lets us verify what's actually live with one probe.
-const AGENT_CONSOLE_BUILD = "2026-09-05-image-post-v2";
+const AGENT_CONSOLE_BUILD = "2026-09-05-harness-first-v3";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
