@@ -318,6 +318,18 @@ serve(async (req) => {
           }
         } catch { /* history lookup is best-effort */ }
       }
+
+      // SHOW intent: "can i see the image you just created" — the farm brain
+      // can't see chat history, so the console answers deterministically by
+      // re-attaching the last generated/uploaded image.
+      const showImageIntent = !!lastImage && /(show|see|open|find|display|view|where)\b/i.test(t) && /\b(image|picture|visual|photo|it|that|them)\b/i.test(t);
+      if (showImageIntent) {
+        reply = "🖼️ There it is — also saved in your media library. Want me to draft a post around it?";
+        action = { type: "image_shown", url: lastImage };
+        assistantAttachments = [{ url: lastImage, type: "image" }];
+        preHandled = true;
+      }
+
       const wantsApprove = /\bapprove\b/i.test(t);
       // IMAGE-post intent: an image exists (generated or attached) and the
       // owner says "post it/this" — post THAT image with a fresh caption
