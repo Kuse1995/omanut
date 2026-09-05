@@ -263,44 +263,54 @@ serve(async (req) => {
     // WhatsApp-specific (tone rules, price guard, 12-25s client timeout) and
     // was failing on long grounded prompts; the console needs longer
     // generations without that ceiling.
-    // ── Deterministic approve / publish-now intents (before the AI) ────
-    // "i approve" and "post it right now" must ACT on the pending post, not
-    // be left to the model's imagination. Runs only when a pending_approval
-    // post actually exists, so ordinary chat is never hijacked.
+    // ── Deterministic draft follow-through (before the AI) ─────────────
+    // When a draft is already pending approval, "post it", "i approve" or
+    // "post it right now" must ACT on THAT draft — never draft a different
+    // caption. The pending draft is also injected into the prompt so the
+    // model never duplicates it.
     let reply = "";
     let action: any = { type: null };
     let preHandled = false;
+    let pendingPost: any = null;
     if (company) {
-      const approveIntent = /\bapprove\b/i.test(message) && /\b(it|that|this|them|the post|post)\b/i.test(message);
-      const publishNowIntent = /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(message);
-      if (approveIntent || publishNowIntent) {
-        const { data: pendingPost } = await supabase
-          .from("scheduled_posts")
-          .select("id, content, scheduled_time")
-          .eq("company_id", company.id)
-          .eq("status", "pending_approval")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (pendingPost) {
-          if (publishNowIntent) {
-            await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
-            const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pendingPost.id } });
-            if (pub?.error || pub?.data?.error) {
-              reply = "⚠️ I tried to publish it now but the platform said: " + (pub?.data?.error || pub?.error?.message || "unknown error") + ". Your post is safe in the Content Scheduler — you can publish it from there.";
-              action = { type: "post_publish_failed", post_id: pendingPost.id };
-            } else {
-              reply = "🚀 It's live! Published to your page" + (pub?.data?.platforms?.instagram === "success" ? "s (Facebook + Instagram)" : "") + " just now.";
-              action = { type: "post_published", post_id: pendingPost.id, meta_post_id: pub?.data?.meta_post_id ?? null };
-            }
+      const { data: pp } = await supabase
+        .from("scheduled_posts")
+        .select("id, content, scheduled_time")
+        .eq("company_id", company.id)
+        .eq("status", "pending_approval")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      pendingPost = pp || null;
+
+      const t = message.trim();
+      const short = t.length <= 100;
+      const confirmish = short && /(post\s*(it|this|that|now)|publish|share\s*(it|this|that)?|go\s*live|send\s*it|push\s*it|approv(e|ed|al)|i\s+approve|go\s*ahead|confirm)/i.test(t);
+      const wantsNow = /\b(now|right now|immediately|asap)\b/i.test(t);
+      const approveIntent = /\bapprove\b/i.test(t) && /\b(it|that|this|them|the post|post)\b/i.test(t);
+      const publishNowIntent = /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(t);
+
+      if (pendingPost && (confirmish || approveIntent || publishNowIntent)) {
+        if (wantsNow || publishNowIntent) {
+          await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
+          const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pendingPost.id } });
+          if (pub?.error || pub?.data?.error) {
+            reply = "⚠️ I tried to publish it now but the platform said: " + (pub?.data?.error || pub?.error?.message || "unknown error") + ". Your post is safe in the Content Scheduler — you can publish it from there.";
+            action = { type: "post_publish_failed", post_id: pendingPost.id };
           } else {
-            await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
-            const when = new Date(pendingPost.scheduled_time).toLocaleString();
-            reply = "✅ Approved — it's scheduled to go live " + when + ". Say \"post it right now\" if you want it out immediately.";
-            action = { type: "post_approved", post_id: pendingPost.id };
+            reply = "🚀 It's live! Published to your page" + (pub?.data?.platforms?.instagram === "success" ? "s (Facebook + Instagram)" : "") + " just now.";
+            action = { type: "post_published", post_id: pendingPost.id, meta_post_id: pub?.data?.meta_post_id ?? null };
           }
-          preHandled = true;
+        } else {
+          await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
+          const when = new Date(pendingPost.scheduled_time).toLocaleString();
+          reply = "✅ Approved — it's scheduled to go live " + when + ". Say \"post it right now\" to push it out immediately.";
+          action = { type: "post_approved", post_id: pendingPost.id };
         }
+        preHandled = true;
+      } else if (pendingPost) {
+        // A draft is waiting: tell the model so it never drafts a duplicate.
+        system += "\n\nPENDING APPROVAL: one drafted post is awaiting the owner's approval. It starts with: \"" + String(pendingPost.content).slice(0, 120) + "\". If the owner confirms or asks to post it WITHOUT adding new content, reply with exactly APPROVE: on its own line — or APPROVE NOW: if they want it live immediately. Never draft a duplicate POST.";
       }
     }
 
@@ -422,6 +432,10 @@ serve(async (req) => {
     const postCaption = company ? findAfter("POST:") : null;
     const campaignBrief = company ? findAfter("CAMPAIGN:") : null;
     const brandDetail = company ? findAfter("BRAND:") : null;
+    // Draft confirmation escapes (the prompt tells the model to emit these
+    // when a draft is already pending and the owner confirms it).
+    const approveNowEsc = company ? findAfter("APPROVE NOW:") : null;
+    const approveEsc = company && approveNowEsc === null ? findAfter("APPROVE:") : null;
 
     // ── Self-serve onboarding: company creation + claim codes ──────────
     if (companyCreated !== null) {
@@ -519,6 +533,34 @@ serve(async (req) => {
         action = { type: "kb_saved", filename };
       } catch (e: any) {
         reply = "⚠️ KB save failed: " + (e?.message || "unknown error");
+      }
+    } else if (approveNowEsc !== null || approveEsc !== null) {
+      // The owner confirmed the pending draft (model relayed APPROVE:/APPROVE NOW:).
+      const { data: pp2 } = await supabase
+        .from("scheduled_posts")
+        .select("id, scheduled_time")
+        .eq("company_id", company.id)
+        .eq("status", "pending_approval")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!pp2) {
+        reply = "There's no draft waiting for approval right now — tell me what you'd like to post and I'll draft it.";
+      } else if (approveNowEsc !== null) {
+        await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pp2.id);
+        const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pp2.id } });
+        if (pub?.error || pub?.data?.error) {
+          reply = "⚠️ I tried to publish it now but the platform said: " + (pub?.data?.error || pub?.error?.message || "unknown error") + ". Your post is safe in the Content Scheduler.";
+          action = { type: "post_publish_failed", post_id: pp2.id };
+        } else {
+          reply = "🚀 It's live! Published to your page just now.";
+          action = { type: "post_published", post_id: pp2.id, meta_post_id: pub?.data?.meta_post_id ?? null };
+        }
+      } else {
+        await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pp2.id);
+        const when = new Date(pp2.scheduled_time).toLocaleString();
+        reply = "✅ Approved — it's scheduled to go live " + when + ". Say \"post it right now\" to push it out immediately.";
+        action = { type: "post_approved", post_id: pp2.id };
       }
     } else if (connectMeta) {
       const appId = Deno.env.get("META_APP_ID");
