@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { geminiChat, geminiChatWithFallback, geminiImageGenerate, veoStartGeneration, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { generateImageSmart } from "../_shared/fal-image.ts";
 import { minimaxStartVideoGeneration } from "../_shared/minimax-client.ts";
 import { embedQuery } from "../_shared/embedding-client.ts";
 import { resolveCompaniesForPhone } from "../_shared/boss-phones.ts";
@@ -2770,7 +2771,7 @@ Style: ${angle}, ${light}, ${bg}, ${comp}
 CRITICAL: Show the EXACT product described in the request. Do NOT substitute with a different product. Do NOT add text or watermarks. The composition MUST be vertical/portrait oriented.`;
 
                     try {
-                      const { imageBase64 } = await geminiImageGenerate({
+                      const { imageBase64 } = await generateImageSmart({
                         model: 'gemini-2.5-flash-image',
                         prompt: firstFramePrompt,
                       });
