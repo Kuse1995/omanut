@@ -3,17 +3,51 @@
 // provider for all generation. Gemini (geminiImageGenerate) remains the
 // automatic fallback via generateImageSmart() below — never remove it.
 //
-// Models (env-overridable):
-//   FAL_IMAGE_MODEL       text-to-image          default fal-ai/flux/dev
-//   FAL_IMAGE_EDIT_MODEL  reference-image edits  default fal-ai/flux-pro/kontext
-// FLUX Kontext is a reference-image editor — packshot in, on-brand ad out.
+// PRIMARY model: fal's NANO BANANA (Google's Gemini image model, hosted on
+// fal) — excellent edits, multi-image blending (logo + packshot + brand
+// background up to 10 refs), and strong prompt adherence.
+//
+// Models (env-overridable — correct an id without touching code):
+//   FAL_IMAGE_MODEL       text-to-image          default fal-ai/nano-banana
+//   FAL_IMAGE_EDIT_MODEL  reference-image edits  default fal-ai/nano-banana
+//   FAL_IMAGE_ASPECT      default aspect ratio   e.g. 9:16, 4:5, 1:1
+// Best upgrades when you want them:
+//   fal-ai/nano-banana-pro  (Gemini 3 Pro Image — 2K/4K, best poster text)
+//   fal-ai/flux-pro/kontext (fast product-anchored edits)
+//   fal-ai/bytedance/seedream/v4/text-to-image (4K, cheap)
 
 import { geminiImageGenerate } from "./gemini-client.ts";
 
 const FAL_QUEUE_BASE = Deno.env.get("FAL_QUEUE_BASE") || "https://queue.fal.run";
 const FAL_KEY = Deno.env.get("FAL_KEY") || "";
-const FAL_IMAGE_MODEL = Deno.env.get("FAL_IMAGE_MODEL") || "fal-ai/flux/dev";
-const FAL_IMAGE_EDIT_MODEL = Deno.env.get("FAL_IMAGE_EDIT_MODEL") || "fal-ai/flux-pro/kontext";
+const FAL_IMAGE_MODEL = Deno.env.get("FAL_IMAGE_MODEL") || "fal-ai/nano-banana";
+const FAL_IMAGE_EDIT_MODEL = Deno.env.get("FAL_IMAGE_EDIT_MODEL") || "fal-ai/nano-banana";
+const FAL_IMAGE_ASPECT = Deno.env.get("FAL_IMAGE_ASPECT") || "1:1";
+
+/** Model-aware input builder — fal request shapes differ per model family:
+ *  nano-banana takes image_urls as an ARRAY and aspect_ratio;
+ *  kontext takes a single image_url; flux takes image_size. */
+function buildInput(
+  model: string,
+  options: { prompt: string; inputImageUrls?: string[]; aspectRatio?: string; imageSize?: string },
+): Record<string, unknown> {
+  const refs = (options.inputImageUrls || []).filter(Boolean);
+  const isNano = model.includes("nano-banana");
+  const isKontext = model.includes("kontext");
+  const aspect = options.aspectRatio || FAL_IMAGE_ASPECT;
+
+  if (isNano) {
+    const input: Record<string, unknown> = { prompt: options.prompt, num_images: 1 };
+    if (refs.length) input.image_urls = refs.slice(0, 10);
+    if (aspect) input.aspect_ratio = aspect;
+    return input;
+  }
+  if (isKontext) {
+    return { prompt: options.prompt, image_url: refs[0] };
+  }
+  // FLUX-family default
+  return { prompt: options.prompt, image_size: options.imageSize || "square_hd" };
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -39,14 +73,13 @@ async function toDataUri(imageUrl: string): Promise<string> {
 export async function falImageGenerate(options: {
   prompt: string;
   inputImageUrls?: string[];
+  aspectRatio?: string;
   imageSize?: string;
 }): Promise<{ imageBase64: string; text: string | null; model: string }> {
   if (!FAL_KEY) throw new Error("FAL_KEY not configured");
   const isEdit = !!(options.inputImageUrls && options.inputImageUrls.length);
   const model = isEdit ? FAL_IMAGE_EDIT_MODEL : FAL_IMAGE_MODEL;
-  const input: Record<string, unknown> = isEdit
-    ? { prompt: options.prompt, image_url: options.inputImageUrls![0] }
-    : { prompt: options.prompt, image_size: options.imageSize || "square_hd" };
+  const input = buildInput(model, options);
 
   const submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
     method: "POST",
@@ -92,6 +125,7 @@ export async function falImageGenerate(options: {
 export async function generateImageSmart(options: {
   prompt: string;
   inputImageUrls?: string[];
+  aspectRatio?: string;
   imageSize?: string;
 }): Promise<{ imageBase64: string; text: string | null; source: string }> {
   const errors: string[] = [];
