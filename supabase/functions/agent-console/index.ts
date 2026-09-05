@@ -15,6 +15,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiChatWithFallback, geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { callHarness } from "../_shared/harness-client.ts";
+import { generateImageSmart } from "../_shared/fal-image.ts";
 import {
   buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
@@ -89,7 +90,7 @@ serve(async (req) => {
       }
       const { data: c } = await supabase
         .from("companies")
-        .select("id, name, metadata, voice_style, hours, services, quick_reference_info")
+        .select("id, name, metadata, voice_style, hours, services, quick_reference_info, credit_balance")
         .eq("id", companyId)
         .maybeSingle();
       if (!c) {
@@ -236,6 +237,7 @@ serve(async (req) => {
         "3. Draft social posts — if the user wants a post drafted, begin your reply with exactly \"POST:\" followed by the ready-to-publish caption (nothing else). If they attached media and ask to post/schedule it, still use \"POST:\" — the attached media is saved with the draft automatically.",
         "4. RUN A CAMPAIGN — if the user asks to run a promo/campaign (e.g. \"run a flash sale\", \"launch campaign\", \"promo\"), begin your reply with exactly \"CAMPAIGN:\" followed by a one-line brief (what's being offered/promoted). The console launches a multi-variant campaign for you.",
         "5. BRAND KIT — if the user shares brand details (colours, tone, fonts, phrases to avoid), reply with exactly \"BRAND:\" followed by those details so they're saved as the brand guardrail.",
+        "6. CREATE IMAGES — if the user asks for an image, graphic, poster, picture or visual, begin your reply with exactly \"IMAGE:\" followed by ONE vivid paragraph describing the visual to generate: subject, setting, mood, composition, colors, camera angle, style. Include the brand/product context from the facts. Only specify on-image text if the owner explicitly asked for words on the image.",
         "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), PLAIN TEXT only (no markdown, no asterisks, no bullets), no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
         "",
         "UPLOADS: When the owner uploads a knowledge document, acknowledge it by name and note that your answers can now draw from it. When they upload media and ask to post/schedule it, confirm you've attached it to the draft and that it will appear for approval in the Content Scheduler.",
@@ -271,6 +273,7 @@ serve(async (req) => {
     // model never duplicates it.
     let reply = "";
     let action: any = { type: null };
+    let assistantAttachments: any[] | null = null;
     let preHandled = false;
     let pendingPost: any = null;
     if (company) {
@@ -465,6 +468,7 @@ serve(async (req) => {
     const postCaption = company ? findAfter("POST:") : null;
     const campaignBrief = company ? findAfter("CAMPAIGN:") : null;
     const brandDetail = company ? findAfter("BRAND:") : null;
+    const imageBrief = company ? findAfter("IMAGE:") : null;
     // Draft confirmation escapes (the prompt tells the model to emit these
     // when a draft is already pending and the owner confirms it).
     const approveNowEsc = company ? findAfter("APPROVE NOW:") : null;
@@ -705,6 +709,37 @@ serve(async (req) => {
       }
       reply = "🎨 Brand guardrail saved — I'll keep every post and video on-brand from now on. Tell me your colours, tone, and any phrases to avoid and I'll remember those too.";
       action = { type: "brand_saved" };
+    } else if (imageBrief !== null) {
+      // CREATE IMAGES: generate on fal (Nano Banana 2), save to company media,
+      // and show it in the chat bubble.
+      try {
+        const balance = Number((company as any)?.credit_balance ?? 0);
+        if (balance < 1) {
+          reply = "⚠️ You're out of generation credits — top up your plan and I'll create images again.";
+          action = { type: "image_failed", reason: "insufficient_credits" };
+        } else {
+          const gen = await generateImageSmart({ prompt: imageBrief, aspectRatio: Deno.env.get("FAL_IMAGE_ASPECT") || "1:1" });
+          const match = gen.imageBase64.match(/^data:(image\/[\w+]+);base64,(.+)$/);
+          if (!match) throw new Error("unexpected image payload");
+          const mime = match[1];
+          const bytes = new Uint8Array(atob(match[2]).length);
+          const bin = atob(match[2]);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const path = company.id + "/generated/" + Date.now() + "-" + Math.random().toString(36).slice(2, 8) + (mime.includes("jpeg") ? ".jpg" : ".png");
+          const { error: upErr } = await supabase.storage.from("company-media").upload(path, bytes, { contentType: mime, upsert: false });
+          if (upErr) throw upErr;
+          const { data: pub } = supabase.storage.from("company-media").getPublicUrl(path);
+          const imageUrl = pub.publicUrl;
+          await supabase.from("companies").update({ credit_balance: balance - 1 }).eq("id", company.id).gte("credit_balance", 1);
+          reply = "🖼️ Here's your image — saved to your media library. Want me to draft a post around it, or turn the concept into a video?";
+          action = { type: "image_created", url: imageUrl };
+          assistantAttachments = [{ url: imageUrl, type: "image" }];
+        }
+      } catch (e3: any) {
+        console.error("[AGENT-CONSOLE] image generation failed:", e3?.message || e3);
+        reply = "⚠️ Image generation failed just now (" + String(e3?.message || e3).slice(0, 120) + "). Tell me the concept again and I'll retry.";
+        action = { type: "image_failed" };
+      }
     }
 
     // Persist the turn, then return the full thread (ChatGPT-style history).
@@ -714,7 +749,7 @@ serve(async (req) => {
       : null;
     if (threadConvoId) {
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000), attachments: turnAttachments });
-      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000) });
+      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000), attachments: assistantAttachments });
       // Auto-title a fresh thread from its first user message (ChatGPT-style).
       if (newThreadCreated || threadAlreadyUntitled) {
         await supabase.from("conversations").update({ customer_name: message.slice(0, 48) }).eq("id", threadConvoId);

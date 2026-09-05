@@ -816,7 +816,7 @@ const AgentConsole = () => {
             </Button>
           </form>
           <p className="max-w-3xl mx-auto text-[11px] text-muted-foreground mt-1.5 text-center">
-            Upload a document to teach your agent, or media to post &mdash; say &quot;post this&quot; or &quot;schedule this&quot;. Videos cost generation credits.
+            Ask me for images, videos and posts &mdash; upload docs to teach your agent. Images &amp; videos cost generation credits.
           </p>
         </div>
       </div>
