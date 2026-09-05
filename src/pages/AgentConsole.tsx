@@ -525,13 +525,24 @@ const AgentConsole = () => {
               <PanelLeft className="h-4 w-4" /> Chats &amp; media
             </button>
             {isGuest ? (
-              <Button
-                size="sm"
-                className="h-9 px-4 gap-2"
-                onClick={() => navigate("/signup")}
-              >
-                Get my agent
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9 px-3 gap-2"
+                  onClick={() => navigate("/login")}
+                  title="I already have an Omanut agent"
+                >
+                  Sign in
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-9 px-4 gap-2"
+                  onClick={() => navigate("/signup")}
+                >
+                  Get my agent
+                </Button>
+              </>
             ) : (
               <Button
                 size="sm"
