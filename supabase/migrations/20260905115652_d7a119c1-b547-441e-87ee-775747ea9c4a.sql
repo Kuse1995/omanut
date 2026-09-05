@@ -1,0 +1,12 @@
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.campaigns TO authenticated;
+GRANT ALL ON public.campaigns TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.campaign_variants TO authenticated;
+GRANT ALL ON public.campaign_variants TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.brand_kits TO authenticated;
+GRANT ALL ON public.brand_kits TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.nurture_sequences TO authenticated;
+GRANT ALL ON public.nurture_sequences TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.competitor_targets TO authenticated;
+GRANT ALL ON public.competitor_targets TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.growth_snapshots TO authenticated;
+GRANT ALL ON public.growth_snapshots TO service_role;
