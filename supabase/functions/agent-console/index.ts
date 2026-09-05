@@ -359,9 +359,23 @@ serve(async (req) => {
     const aiController = new AbortController();
     const aiTimer = setTimeout(() => aiController.abort(), 60000);
     if (sawImage) {
-      // Vision turns: try ONLY vision-capable models, directly (no fallback
-      // chain through blind text models — that cascade was exhausting and
-      // ending in a 500). GLM first per the owner's stack, then Gemini Flash.
+      // PRIMARY brain: the Omanut farm harness (GLM-5.3-Flash) — own
+      // infrastructure, proven in production, no third-party key/balance
+      // dependency. Image parts pass straight through to the GLM brain.
+      try {
+        const h = await callHarness({
+          session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
+          messages: agentMessages,
+          tools: [],
+        });
+        const hText = String(h.message?.content || "").trim();
+        if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] vision answered by farm harness (primary)"); }
+        else aiErrors.push("harness(vision): " + (h.reason || "no content"));
+      } catch (hErr: any) {
+        aiErrors.push("harness(vision): " + (hErr?.message || hErr));
+      }
+      // Fallbacks: direct vision models only (never blind text models — that
+      // cascade was exhausting and ending in a 500).
       const visionModels = [
         Deno.env.get("VISION_MODEL") || "glm-5.3-flash",
         "glm-4.5v",
@@ -386,28 +400,23 @@ serve(async (req) => {
           console.warn("[AGENT-CONSOLE] vision model failed:", vm, vErr?.message || vErr);
         }
       }
-      if (!reply) {
-        // Last resort for images: the Omanut farm harness (GLM-5.3-Flash).
-        // Image parts are passed straight through — the farm proxies to the
-        // GLM brain, so vision still works even with no direct provider keys.
-        try {
-          const h = await callHarness({
-            session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
-            messages: agentMessages,
-            tools: [],
-          });
-          const hText = String(h.message?.content || "").trim();
-          if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] vision answered by farm harness"); }
-          else aiErrors.push("harness(vision): " + (h.reason || "no content"));
-        } catch (hErr: any) {
-          aiErrors.push("harness(vision): " + (hErr?.message || hErr));
-        }
-      }
     }
     if (!reply) {
-      // Text path (also the guaranteed fallback when vision fails) — never 500s.
-      // Retry across two text models: when the primary burns its whole budget
-      // reasoning, content comes back empty and a second opinion fixes it.
+      // Text path. PRIMARY brain: the Omanut farm harness (GLM-5.3-Flash) —
+      // own infrastructure, no third-party key/balance dependency.
+      try {
+        const h = await callHarness({
+          session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
+          messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
+          tools: [],
+        });
+        const hText = String(h.message?.content || "").trim();
+        if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] text answered by farm harness (primary)"); }
+        else aiErrors.push("harness(text): " + (h.reason || "no content"));
+      } catch (hErr: any) {
+        aiErrors.push("harness(text): " + (hErr?.message || hErr));
+      }
+      // Fallbacks: direct providers (never 500s — guaranteed reply below).
       const textModels = [PRIMARY_TEXT_MODEL, "google/gemini-2.5-flash"];
       for (const tm of textModels) {
         try {
@@ -426,21 +435,6 @@ serve(async (req) => {
         } catch (aiErr: any) {
           aiErrors.push("text:" + tm + ": " + (aiErr?.message || aiErr));
           console.warn("[AGENT-CONSOLE] text model failed:", tm, aiErr?.message || aiErr);
-        }
-      }
-      if (!reply) {
-        // Emergency brain: the Omanut farm harness (GLM-5.3-Flash).
-        try {
-          const h = await callHarness({
-            session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
-            messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
-            tools: [],
-          });
-          const hText = String(h.message?.content || "").trim();
-          if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] text answered by farm harness"); }
-          else aiErrors.push("harness(text): " + (h.reason || "no content"));
-        } catch (hErr: any) {
-          aiErrors.push("harness(text): " + (hErr?.message || hErr));
         }
       }
     }
