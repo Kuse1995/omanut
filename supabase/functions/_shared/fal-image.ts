@@ -3,15 +3,15 @@
 // provider for all generation. Gemini (geminiImageGenerate) remains the
 // automatic fallback via generateImageSmart() below — never remove it.
 //
-// PRIMARY model: fal's NANO BANANA (Google's Gemini image model, hosted on
-// fal) — excellent edits, multi-image blending (logo + packshot + brand
-// background up to 10 refs), and strong prompt adherence.
+// PRIMARY model: fal's NANO BANANA 2 (Google's Gemini image model, hosted on
+// fal) — separate edit and text-to-image endpoints, multi-image blending,
+// strong prompt adherence. Cascades: nano-banana-2 -> nano-banana (v1).
 //
 // Models (env-overridable — correct an id without touching code):
-//   FAL_IMAGE_MODEL       text-to-image          default fal-ai/nano-banana
-//   FAL_IMAGE_EDIT_MODEL  reference-image edits  default fal-ai/nano-banana
+//   FAL_IMAGE_MODEL       text-to-image          default fal-ai/nano-banana-2, fal-ai/nano-banana
+//   FAL_IMAGE_EDIT_MODEL  reference-image edits  default fal-ai/nano-banana-2/edit, fal-ai/nano-banana
 //   FAL_IMAGE_ASPECT      default aspect ratio   e.g. 9:16, 4:5, 1:1
-// Best upgrades when you want them:
+// Other strong models, one env var away:
 //   fal-ai/nano-banana-pro  (Gemini 3 Pro Image — 2K/4K, best poster text)
 //   fal-ai/flux-pro/kontext (fast product-anchored edits)
 //   fal-ai/bytedance/seedream/v4/text-to-image (4K, cheap)
@@ -20,8 +20,8 @@ import { geminiImageGenerate } from "./gemini-client.ts";
 
 const FAL_QUEUE_BASE = Deno.env.get("FAL_QUEUE_BASE") || "https://queue.fal.run";
 const FAL_KEY = Deno.env.get("FAL_KEY") || "";
-const FAL_IMAGE_MODEL = Deno.env.get("FAL_IMAGE_MODEL") || "fal-ai/nano-banana";
-const FAL_IMAGE_EDIT_MODEL = Deno.env.get("FAL_IMAGE_EDIT_MODEL") || "fal-ai/nano-banana";
+const FAL_IMAGE_MODEL = Deno.env.get("FAL_IMAGE_MODEL") || "fal-ai/nano-banana-2, fal-ai/nano-banana";
+const FAL_IMAGE_EDIT_MODEL = Deno.env.get("FAL_IMAGE_EDIT_MODEL") || "fal-ai/nano-banana-2/edit, fal-ai/nano-banana";
 const FAL_IMAGE_ASPECT = Deno.env.get("FAL_IMAGE_ASPECT") || "1:1";
 
 /** Model-aware input builder — fal request shapes differ per model family:
@@ -37,7 +37,7 @@ function buildInput(
   const aspect = options.aspectRatio || FAL_IMAGE_ASPECT;
 
   if (isNano) {
-    const input: Record<string, unknown> = { prompt: options.prompt, num_images: 1 };
+    const input: Record<string, unknown> = { prompt: options.prompt };
     if (refs.length) input.image_urls = refs.slice(0, 10);
     if (aspect) input.aspect_ratio = aspect;
     return input;
