@@ -19,6 +19,7 @@ import {
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
   extractJson,
 } from "../_shared/company-context.ts";
+import { buildBrandBlock } from "../_shared/marketing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -185,6 +186,14 @@ serve(async (req) => {
     }
 
     const facts = company ? buildCompanyFacts(company) : "";
+    // Brand Kit — on-brand guardrail injected into every console reply.
+    let brandBlock = "";
+    if (company) {
+      try {
+        const { data: kit } = await supabase.from("brand_kits").select("tone, colors, no_go_phrases, guidelines").eq("company_id", company.id).maybeSingle();
+        brandBlock = buildBrandBlock(kit);
+      } catch { /* brand kit is optional */ }
+    }
     const kb = company ? formatKbMatches(await searchKnowledgeBase(supabase, company.id, message, 6)) : "";
     const missing = company ? profileMissingList(company) : [];
 
@@ -218,6 +227,7 @@ serve(async (req) => {
         "You are the AI agent for " + (company.name || "this business") + " — the owner is chatting with you in their console.",
         facts ? facts : "",
         kb ? kb : "",
+        brandBlock ? brandBlock : "",
         "",
         "CAPABILITIES:",
         "1. Answer questions about the business from the FACTS and KNOWLEDGE BASE MATCHES above (pricing, hours, services, policies).",

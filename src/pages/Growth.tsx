@@ -33,6 +33,7 @@ const Growth = () => {
   const [sequences, setSequences] = useState<any[]>([]);
   const [competitors, setCompetitors] = useState<any[]>([]);
   const [insight, setInsight] = useState("");
+  const [bestTime, setBestTime] = useState<any>(null);
 
   // Campaign composer
   const [brief, setBrief] = useState("");
@@ -75,7 +76,10 @@ const Growth = () => {
       const ins = await supabase.functions.invoke("competitor-watch", { body: { action: "insight", company_id: companyId } });
       setInsight(ins.data?.insight || "");
       const opt = await supabase.functions.invoke("optimize-posting", { body: { company_id: companyId } });
-      if (opt.data?.insights) setMetrics((prev: any) => ({ ...(prev || {}), optimize: opt.data.insights }));
+      if (opt.data?.insights) {
+        setMetrics((prev: any) => ({ ...(prev || {}), optimize: opt.data.insights }));
+        setBestTime(opt.data.insights.best_time || null);
+      }
     } catch (e) {
       console.error("Growth refresh failed:", e);
     } finally {
@@ -225,6 +229,17 @@ const Growth = () => {
                 <CardTitle className="flex items-center gap-2 text-base"><Sparkles className="w-4 h-4 text-primary" /> This week</CardTitle>
               </CardHeader>
               <CardContent><p className="text-sm text-foreground">{summary}</p></CardContent>
+            </Card>
+          )}
+          {bestTime && (
+            <Card className="card-glass">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="w-4 h-4 text-primary" /> Best time to post</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-foreground">{bestTime.date} around {bestTime.time}</p>
+                <p className="text-xs text-muted-foreground mt-1">{bestTime.reason}</p>
+              </CardContent>
             </Card>
           )}
         </TabsContent>
