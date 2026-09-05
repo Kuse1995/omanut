@@ -78,46 +78,68 @@ export async function falImageGenerate(options: {
 }): Promise<{ imageBase64: string; text: string | null; model: string }> {
   if (!FAL_KEY) throw new Error("FAL_KEY not configured");
   const isEdit = !!(options.inputImageUrls && options.inputImageUrls.length);
-  const model = isEdit ? FAL_IMAGE_EDIT_MODEL : FAL_IMAGE_MODEL;
-  const input = buildInput(model, options);
 
-  const submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify(input),
-  });
-  if (!submitRes.ok) {
-    const t = await submitRes.text();
-    throw new Error("fal submit failed (" + submitRes.status + "): " + t.slice(0, 200));
-  }
-  const submitJson: any = await submitRes.json();
-  const statusUrl: string = submitJson.status_url || (FAL_QUEUE_BASE + "/" + model + "/requests/" + submitJson.request_id + "/status");
-  const responseUrl: string = submitJson.response_url || (FAL_QUEUE_BASE + "/" + model + "/requests/" + submitJson.request_id);
+  // Model CASCADE: comma-separated env lists, tried in order. Adopting a new
+  // model is zero-risk — put it first; if the id 404s we fall to the next
+  // (nano banana), then Gemini.
+  const parseModels = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
+  const modelList = parseModels(isEdit ? FAL_IMAGE_EDIT_MODEL : FAL_IMAGE_MODEL);
 
-  // Poll ~30s (images are fast); video has its own longer poller.
-  let payload: any = null;
-  for (let i = 0; i < 15; i++) {
-    await sleep(2000);
-    const stRes = await fetch(statusUrl, { headers: authHeaders() });
-    const stJson: any = await stRes.json().catch(() => ({}));
-    if (stJson.status === "COMPLETED") {
-      const r = await fetch(responseUrl, { headers: authHeaders() });
-      payload = await r.json();
-      break;
+  const failures: string[] = [];
+  for (const model of modelList) {
+    const input = buildInput(model, options);
+    let submitRes: Response;
+    try {
+      submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(input),
+      });
+    } catch (e: any) {
+      failures.push(model + ": " + (e?.message || e));
+      continue;
     }
-    if (stJson.status === "FAILED" || stJson.status === "ERROR") {
-      throw new Error("fal image generation failed on the provider");
+    if (!submitRes.ok) {
+      const t = await submitRes.text();
+      failures.push(model + ": submit " + submitRes.status + " " + t.slice(0, 120));
+      continue; // unknown model id / bad input — try the next model in the cascade
     }
+    const submitJson: any = await submitRes.json();
+    const statusUrl: string = submitJson.status_url || (FAL_QUEUE_BASE + "/" + model + "/requests/" + submitJson.request_id + "/status");
+    const responseUrl: string = submitJson.response_url || (FAL_QUEUE_BASE + "/" + model + "/requests/" + submitJson.request_id);
+
+    // Poll ~30s (images are fast); video has its own longer poller.
+    let payload: any = null;
+    for (let i = 0; i < 15; i++) {
+      await sleep(2000);
+      const stRes = await fetch(statusUrl, { headers: authHeaders() });
+      const stJson: any = await stRes.json().catch(() => ({}));
+      if (stJson.status === "COMPLETED") {
+        const r = await fetch(responseUrl, { headers: authHeaders() });
+        payload = await r.json();
+        break;
+      }
+      if (stJson.status === "FAILED" || stJson.status === "ERROR") {
+        break;
+      }
+    }
+    if (!payload) {
+      failures.push(model + ": timed out");
+      continue; // try the next model in the cascade
+    }
+
+    // Flexible output parse — fal response shapes vary slightly per model.
+    const imageUrl: string | null =
+      payload?.images?.[0]?.url || payload?.image?.url || payload?.url || payload?.output?.[0]?.url || null;
+    if (!imageUrl) {
+      failures.push(model + ": no image url in response");
+      continue;
+    }
+
+    const imageBase64 = await toDataUri(imageUrl);
+    return { imageBase64, text: null, model };
   }
-  if (!payload) throw new Error("fal image generation timed out");
-
-  // Flexible output parse — fal response shapes vary slightly per model.
-  const imageUrl: string | null =
-    payload?.images?.[0]?.url || payload?.image?.url || payload?.url || payload?.output?.[0]?.url || null;
-  if (!imageUrl) throw new Error("fal returned no image url");
-
-  const imageBase64 = await toDataUri(imageUrl);
-  return { imageBase64, text: null, model };
+  throw new Error("fal image cascade exhausted — " + failures.join(" | "));
 }
 
 /** fal-first with Gemini fallback. Drop-in for geminiImageGenerate —
