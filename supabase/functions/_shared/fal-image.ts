@@ -75,6 +75,8 @@ export async function falImageGenerate(options: {
   inputImageUrls?: string[];
   aspectRatio?: string;
   imageSize?: string;
+  /** Accepted for call-site compatibility; model routing is env-driven. */
+  model?: string;
 }): Promise<{ imageBase64: string; text: string | null; model: string }> {
   if (!FAL_KEY) throw new Error("FAL_KEY not configured");
   const isEdit = !!(options.inputImageUrls && options.inputImageUrls.length);
@@ -149,6 +151,8 @@ export async function generateImageSmart(options: {
   inputImageUrls?: string[];
   aspectRatio?: string;
   imageSize?: string;
+  /** Accepted for call-site compatibility; model routing is env-driven. */
+  model?: string;
 }): Promise<{ imageBase64: string; text: string | null; source: string }> {
   const errors: string[] = [];
   if (FAL_KEY) {
