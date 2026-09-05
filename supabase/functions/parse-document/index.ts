@@ -27,6 +27,12 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const { documentId } = await req.json();
+    if (!documentId) {
+      return new Response(
+        JSON.stringify({ error: 'documentId is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     console.log('Parsing document:', documentId);
 
     const { data: document, error: docError } = await supabase
