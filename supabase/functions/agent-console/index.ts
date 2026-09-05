@@ -267,6 +267,8 @@ serve(async (req) => {
     // "i approve" and "post it right now" must ACT on the pending post, not
     // be left to the model's imagination. Runs only when a pending_approval
     // post actually exists, so ordinary chat is never hijacked.
+    let reply = "";
+    let action: any = { type: null };
     let preHandled = false;
     if (company) {
       const approveIntent = /\bapprove\b/i.test(message) && /\b(it|that|this|them|the post|post)\b/i.test(message);
@@ -343,7 +345,6 @@ serve(async (req) => {
     const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userContent }];
     const aiController = new AbortController();
     const aiTimer = setTimeout(() => aiController.abort(), 60000);
-    let reply = "";
     if (sawImage) {
       // Vision turns: try ONLY vision-capable models, directly (no fallback
       // chain through blind text models — that cascade was exhausting and
@@ -400,7 +401,6 @@ serve(async (req) => {
     // its whole token budget thinking, content comes back empty and the leaked
     // chain-of-thought was being dumped into the chat verbatim.
     if (!reply) reply = "I couldn't process that just now — please try again in a moment.";
-    let action: any = { type: null };
 
     // ── Tool escapes: model-proof parsing ──────────────────────────────
     // Models wrap escapes in code fences, indent them, or drop the prefix
