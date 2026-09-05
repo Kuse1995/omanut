@@ -2088,6 +2088,7 @@ export type Database = {
           takeover_by: string | null
           transcript: string | null
           unread_count: number | null
+          updated_at: string | null
         }
         Insert: {
           active_agent?: string | null
@@ -2122,6 +2123,7 @@ export type Database = {
           takeover_by?: string | null
           transcript?: string | null
           unread_count?: number | null
+          updated_at?: string | null
         }
         Update: {
           active_agent?: string | null
@@ -2156,6 +2158,7 @@ export type Database = {
           takeover_by?: string | null
           transcript?: string | null
           unread_count?: number | null
+          updated_at?: string | null
         }
         Relationships: [
           {
