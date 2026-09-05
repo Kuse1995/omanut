@@ -28,6 +28,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Deploy marker — bump per release; lets us verify what's actually live with one probe.
+const AGENT_CONSOLE_BUILD = "2026-09-05-creation-intents";
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -219,6 +222,7 @@ serve(async (req) => {
         action: { type: null },
         company_id: companyId,
         thread_id: threadConvoId,
+        build: AGENT_CONSOLE_BUILD,
         thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content, attachments: m.attachments || null })),
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -808,6 +812,7 @@ serve(async (req) => {
       action,
       company_id: companyId,
       thread_id: threadConvoId,
+      build: AGENT_CONSOLE_BUILD,
       thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content, attachments: m.attachments || null })),
       // Diagnostics for the operator: pass debug:true to see why AI models failed.
       ai_errors: bodyData.debug === true ? aiErrors : undefined,
