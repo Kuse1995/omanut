@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Send, Sparkles, Video, PenLine, Loader2, Paperclip, X, Images, PanelLeft, Settings, FileText, ImagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCompany } from "@/context/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
 import omanutLogo from "@/assets/omanut-logo-new.png";
@@ -31,6 +32,7 @@ const AgentConsole = () => {
   const [postMedia, setPostMedia] = useState<{ url: string; type: "image" | "video"; name?: string } | null>(null);
   const [docUploading, setDocUploading] = useState(false);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
@@ -587,31 +589,61 @@ const AgentConsole = () => {
 
         {/* Composer */}
         <div className="border-t px-4 py-3">
-          {attachedUrl && (
-            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-muted rounded-lg px-3 py-2">
-              <span className="text-foreground">ðŸ“Ž Reference image attached</span>
-              <button
-                type="button"
-                onClick={() => setAttachedUrl(null)}
-                className="ml-auto text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-          {postMedia && (
-            <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2 text-xs bg-primary/10 border border-primary/20 rounded-lg px-3 py-2">
-              <span className="text-foreground flex items-center gap-1.5">
-                {postMedia.type === "video" ? <Video className="h-3.5 w-3.5" /> : <Images className="h-3.5 w-3.5" />}
-                {postMedia.name || (postMedia.type === "video" ? "Video" : "Image")} — ready to post/schedule
-              </span>
-              <button
-                type="button"
-                onClick={() => setPostMedia(null)}
-                className="ml-auto text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+          {(attachedUrl || postMedia || docUploading) && (
+            <div className="max-w-3xl mx-auto mb-2 flex items-end gap-2 flex-wrap">
+              {attachedUrl && (
+                <div className="relative">
+                  <img
+                    src={attachedUrl}
+                    alt="Reference"
+                    className="h-16 w-16 rounded-xl object-cover border border-border bg-card"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAttachedUrl(null)}
+                    title="Remove reference image"
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-destructive shadow-sm"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                  <span className="absolute bottom-0 inset-x-0 bg-background/85 text-[9px] leading-4 text-center text-muted-foreground rounded-b-xl">Reference</span>
+                </div>
+              )}
+              {postMedia && (
+                <div className="relative">
+                  {postMedia.type === "video" ? (
+                    <video
+                      src={postMedia.url}
+                      className="h-16 w-16 rounded-xl object-cover border border-border bg-card"
+                      preload="metadata"
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={postMedia.url}
+                      alt={postMedia.name || "Post media"}
+                      className="h-16 w-16 rounded-xl object-cover border border-border bg-card"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPostMedia(null)}
+                    title="Remove media"
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-destructive shadow-sm"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                  <span className="absolute bottom-0 inset-x-0 bg-background/85 text-[9px] leading-4 text-center text-muted-foreground rounded-b-xl">
+                    {postMedia.type === "video" ? "Post video" : "Post image"}
+                  </span>
+                </div>
+              )}
+              {docUploading && (
+                <div className="h-16 w-16 rounded-xl border border-dashed border-border flex flex-col items-center justify-center text-muted-foreground bg-card">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-[9px] mt-1">Reading</span>
+                </div>
+              )}
             </div>
           )}
           <form
@@ -654,33 +686,58 @@ const AgentConsole = () => {
                 e.target.value = "";
               }}
             />
-            <button
-              type="button"
-              onClick={() => docInputRef.current?.click()}
-              disabled={docUploading || busy}
-              title="Upload a knowledge document (PDF, Word, Excel, CSV, text) so the agent can answer from it"
-              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              {docUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => postMediaInputRef.current?.click()}
-              disabled={postMediaUploading || busy}
-              title="Upload media to post or schedule (image or video)"
-              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              {postMediaUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || busy}
-              title="Attach a reference image (product shot, brand asset)"
-              className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-            >
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-            </button>
+            <Popover open={attachOpen} onOpenChange={setAttachOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  disabled={uploading || docUploading || postMediaUploading || busy}
+                  title="Attach images, documents or media"
+                  className="h-11 w-11 rounded-xl border bg-card flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  {uploading || docUploading || postMediaUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-4 w-4" />
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-80 p-1.5">
+                <p className="px-2 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Attach to your message</p>
+                <button
+                  type="button"
+                  onClick={() => { setAttachOpen(false); fileInputRef.current?.click(); }}
+                  className="w-full text-left flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-accent transition-colors"
+                >
+                  <span className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><Paperclip className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">Reference image</span>
+                    <span className="block text-xs text-muted-foreground">Product shot or brand asset — grounds video ads</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAttachOpen(false); docInputRef.current?.click(); }}
+                  className="w-full text-left flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-accent transition-colors"
+                >
+                  <span className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><FileText className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">Knowledge document</span>
+                    <span className="block text-xs text-muted-foreground">PDF, Word, Excel, CSV, text — the agent learns from it</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAttachOpen(false); postMediaInputRef.current?.click(); }}
+                  className="w-full text-left flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-accent transition-colors"
+                >
+                  <span className="h-8 w-8 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center"><ImagePlus className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">Media to post or schedule</span>
+                    <span className="block text-xs text-muted-foreground">Image or video attached to your drafted post</span>
+                  </span>
+                </button>
+              </PopoverContent>
+            </Popover>
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
