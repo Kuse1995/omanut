@@ -406,8 +406,75 @@ const AgentConsole = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <div className="flex-1 flex flex-col h-screen">
+    <div className="relative flex h-screen overflow-hidden bg-background">
+      {/* ChatGPT-style left rail: a true pane that pushes the chat (overlays on mobile) */}
+      {showSidebar && (
+        <aside className="w-80 shrink-0 h-screen border-r border-border flex flex-col bg-muted/30 overflow-hidden animate-sidebar-in max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40">
+          <div className="p-3 border-b border-border flex items-center gap-2">
+            <img src={omanutLogo} alt="Omanut" className="h-6 w-6 object-contain" />
+            <span className="text-sm font-semibold text-foreground">Omanut Agent</span>
+            <button type="button" onClick={() => setShowSidebar(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="p-3">
+            <button
+              type="button"
+              onClick={startNewThread}
+              className="w-full text-left text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+            >
+              + New chat
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversations</h4>
+              </div>
+              <div className="space-y-1">
+                {threads.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No conversations yet.</p>
+                ) : threads.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => openThread(t.id)}
+                    className={"w-full text-left text-sm px-3 py-2.5 rounded-lg border transition-colors " + (currentThreadId === t.id ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent border-border")}
+                  >
+                    {t.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Media</h4>
+                <Images className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+              {mediaLoading ? (
+                <p className="text-xs text-muted-foreground">Loading…</p>
+              ) : mediaItems.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {activeCompanyId ? "Upload a product photo with 📎, or ask for a video/image — it appears here." : "Connect a business first, then your media lives here."}
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {mediaItems.map((item) => (
+                    <a key={item.name + item.url} href={item.url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-card border">
+                      {item.type === "image" ? (
+                        <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
+                      ) : item.type === "video" ? (
+                        <video src={item.url} className="w-full h-full object-cover" preload="metadata" muted />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground p-1 text-center">file</div>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+      )}
+      <main className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
         {/* Header */}
         <div className="border-b px-6 py-4 flex items-center gap-3">
           <div className="relative">
@@ -457,76 +524,6 @@ const AgentConsole = () => {
             )}
           </div>
         </div>
-
-        {/* ChatGPT-style left sidebar: conversations + media in one rail */}
-        {showSidebar && (
-          <div className="w-80 border-r border-border flex flex-col bg-muted/20 max-h-[calc(100vh-4rem)] overflow-hidden animate-sidebar-in">
-            <div className="p-3 border-b border-border flex items-center gap-2">
-              <img src={omanutLogo} alt="Omanut" className="h-6 w-6 object-contain" />
-              <span className="text-sm font-semibold text-foreground">Omanut Agent</span>
-              <button type="button" onClick={() => setShowSidebar(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="p-3">
-            <button
-                type="button"
-                onClick={startNewThread}
-                className="w-full text-left text-sm px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
-              >
-                + New chat
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
-              {/* Conversations */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Conversations</h4>
-                </div>
-                <div className="space-y-1">
-                  {threads.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No conversations yet.</p>
-                  ) : threads.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => openThread(t.id)}
-                      className={"w-full text-left text-sm px-3 py-2.5 rounded-lg border transition-colors " + (currentThreadId === t.id ? "bg-primary/10 border-primary/30" : "bg-card hover:bg-accent border-border")}
-                    >
-                      {t.title}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Media */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Media</h4>
-                  <Images className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                {mediaLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading…</p>
-                ) : mediaItems.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {activeCompanyId ? "Upload a product photo with 📎, or ask for a video/image — it appears here." : "Connect a business first, then your media lives here."}
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {mediaItems.map((item) => (
-                      <a key={item.name + item.url} href={item.url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden bg-card border">
-                        {item.type === "image" ? (
-                          <img src={item.url} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
-                        ) : item.type === "video" ? (
-                          <video src={item.url} className="w-full h-full object-cover" preload="metadata" muted />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[10px] text-muted-foreground p-1 text-center">file</div>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Thread */}
         <div className="flex-1 overflow-y-auto">
@@ -824,7 +821,7 @@ const AgentConsole = () => {
             Ask me for images, videos and posts &mdash; upload docs to teach your agent. Images &amp; videos cost generation credits.
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
