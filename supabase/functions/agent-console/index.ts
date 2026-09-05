@@ -334,19 +334,31 @@ serve(async (req) => {
       if (imagePostIntent) {
         // Caption the freshly generated image, then post it.
         let caption = "";
+        // The caption must describe THIS image — include the stored brief and
+        // prefer instruction-following models over the harness persona.
+        const lastBrief = ((company as any)?.metadata?.last_generated_image_brief) || imageBrief || null;
+        const capSystem = "You write Facebook post captions for " + (company?.name || "a business") + "."
+          + (lastBrief ? " The image this caption accompanies shows: " + lastBrief : "")
+          + " The caption must describe or tie directly to that visual. 1-3 short lines, warm and social, max 2 emojis, no hashtags. Output ONLY the caption.";
         const capMessages = [
-          { role: "system", content: "You write Facebook post captions for " + (company?.name || "a business") + ". 1-3 short lines, warm and social, max 2 emojis, no hashtags. Output ONLY the caption." },
-          { role: "user", content: "Write the caption to accompany the image this request is about. The owner's request: \"" + message + "\"" },
+          { role: "system", content: capSystem },
+          { role: "user", content: "Write the caption for this image. The owner's request: \"" + message + "\"" },
         ];
-        try {
-          const h = await callHarness({ session_id: "console:" + company.id + ":caption:" + Date.now(), messages: capMessages, tools: [] });
-          if (h.ok && h.message?.content) caption = String(h.message.content).trim();
-        } catch { /* fall through */ }
-        if (!caption) {
+        const capModels = [PRIMARY_TEXT_MODEL, "google/gemini-2.5-flash"];
+        for (const cm of capModels) {
+          if (caption) break;
           try {
-            const r = await geminiChat({ model: PRIMARY_TEXT_MODEL, messages: capMessages, temperature: 0.8, max_tokens: 300 });
+            const r = await geminiChat({ model: cm, messages: capMessages, temperature: 0.8, max_tokens: 300 });
             const d: any = await r.json();
             caption = String(d?.choices?.[0]?.message?.content || "").trim();
+          } catch (cErr: any) {
+            console.warn("[AGENT-CONSOLE] caption model failed:", cm, cErr?.message || cErr);
+          }
+        }
+        if (!caption) {
+          try {
+            const h = await callHarness({ session_id: "console:" + company.id + ":caption:" + Date.now(), messages: capMessages, tools: [] });
+            if (h.ok && h.message?.content) caption = String(h.message.content).trim();
           } catch { /* fall through */ }
         }
         if (!caption) caption = t;
@@ -857,8 +869,9 @@ serve(async (req) => {
           if (upErr) throw upErr;
           const { data: pub } = supabase.storage.from("company-media").getPublicUrl(path);
           const imageUrl = pub.publicUrl;
-          // Remember it so a follow-up "post it with a caption" uses THIS image.
-          const nextMeta = { ...(((company as any)?.metadata) || {}), last_generated_image: imageUrl };
+          // Remember the image AND its brief so the follow-up caption is
+          // written about THIS visual, not the harness's default persona.
+          const nextMeta = { ...(((company as any)?.metadata) || {}), last_generated_image: imageUrl, last_generated_image_brief: imageBrief };
           await supabase.from("companies").update({ metadata: nextMeta, credit_balance: balance - 1 }).eq("id", company.id).gte("credit_balance", 1);
           reply = "🖼️ Here's your image — saved to your media library. Want me to draft a post around it, or turn the concept into a video?";
           action = { type: "image_created", url: imageUrl };
