@@ -46,7 +46,12 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      // Guard against auth-service outages: a hanging sign-in used to spin forever.
+      const signIn = supabase.auth.signInWithPassword({ email, password });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("The sign-in service is busy right now — please try again in a few minutes.")), 30000)
+      );
+      const { error } = await Promise.race([signIn, timeout]);
       if (error) throw error;
       // Routing handled by onAuthStateChange
     } catch (error: any) {
