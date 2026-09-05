@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar, Clock, Send, Loader2, AlertCircle, CheckCircle2, FileText, Trash2, ImagePlus, X, Upload, Facebook, Instagram, Sparkles, Eye, Pencil, Check, XCircle } from 'lucide-react';
+import { Calendar, Clock, Send, Loader2, AlertCircle, CheckCircle2, FileText, Trash2, ImagePlus, X, Upload, Facebook, Instagram, Sparkles, Eye, Pencil, Check, XCircle, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
