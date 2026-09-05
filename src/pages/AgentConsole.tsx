@@ -85,7 +85,7 @@ const AgentConsole = () => {
           body: { message: "", history_only: true, company_id: activeCompanyId },
         });
         if (data?.thread?.length) {
-          setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+          setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content, attachments: Array.isArray(m.attachments) && m.attachments.length ? m.attachments : undefined })));
         }
       } catch { /* thread load is best-effort */ }
     })();
@@ -298,7 +298,7 @@ const AgentConsole = () => {
         const { data } = await supabase.functions.invoke("agent-console", {
           body: { message: "", history_only: true, company_id: activeCompanyId, thread_id: id },
         });
-        if (data?.thread) setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content })));
+        if (data?.thread) setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content, attachments: Array.isArray(m.attachments) && m.attachments.length ? m.attachments : undefined })));
       } catch { /* best-effort */ }
     })();
   };
@@ -358,6 +358,8 @@ const AgentConsole = () => {
           image_urls: attachedUrl ? [attachedUrl] : [],
           post_media_url: mediaForPost?.url ?? null,
           post_media_type: mediaForPost?.type ?? null,
+          // Persisted with the user message so attachments stay in history.
+          attachments: pendingAttachments,
           thread_id: currentThreadId,
           new_thread: !currentThreadId,
           // Guests have no server thread — carry the in-state conversation so
@@ -374,12 +376,12 @@ const AgentConsole = () => {
       }
       if (data?.thread?.length) {
         // Server-authoritative thread (ChatGPT-style) — replaces local messages.
-        const thread: ChatMessage[] = data.thread.map((m: any) => ({ role: m.role, content: m.content }));
-        // The server stores text only; re-attach this turn's media so the
-        // sent bubble keeps showing the image/video.
+        const thread: ChatMessage[] = data.thread.map((m: any) => ({ role: m.role, content: m.content, attachments: Array.isArray(m.attachments) && m.attachments.length ? m.attachments : undefined }));
+        // Fallback while the attachments column is new: graft this turn's
+        // media onto the sent bubble if the server row didn't carry it yet.
         if (pendingAttachments.length) {
           for (let i = thread.length - 1; i >= 0; i--) {
-            if (thread[i].role === "user") { thread[i] = { ...thread[i], attachments: pendingAttachments }; break; }
+            if (thread[i].role === "user" && !thread[i].attachments) { thread[i] = { ...thread[i], attachments: pendingAttachments }; break; }
           }
         }
         setMessages(thread);

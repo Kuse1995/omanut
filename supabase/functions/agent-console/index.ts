@@ -210,14 +210,14 @@ serve(async (req) => {
     // History-only call (message empty) — return the full thread, no generation.
     if (!message) {
       const { data: threadRows } = threadConvoId
-        ? await supabase.from("messages").select("role, content, created_at").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
+        ? await supabase.from("messages").select("role, content, created_at, attachments").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
         : { data: [] };
       return new Response(JSON.stringify({
         reply: "",
         action: { type: null },
         company_id: companyId,
         thread_id: threadConvoId,
-        thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+        thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content, attachments: m.attachments || null })),
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -263,6 +263,46 @@ serve(async (req) => {
     // WhatsApp-specific (tone rules, price guard, 12-25s client timeout) and
     // was failing on long grounded prompts; the console needs longer
     // generations without that ceiling.
+    // ── Deterministic approve / publish-now intents (before the AI) ────
+    // "i approve" and "post it right now" must ACT on the pending post, not
+    // be left to the model's imagination. Runs only when a pending_approval
+    // post actually exists, so ordinary chat is never hijacked.
+    let preHandled = false;
+    if (company) {
+      const approveIntent = /\bapprove\b/i.test(message) && /\b(it|that|this|them|the post|post)\b/i.test(message);
+      const publishNowIntent = /(post|publish|share)\b[^.!?]{0,40}\b(right now|now|immediately|asap)\b/i.test(message);
+      if (approveIntent || publishNowIntent) {
+        const { data: pendingPost } = await supabase
+          .from("scheduled_posts")
+          .select("id, content, scheduled_time")
+          .eq("company_id", company.id)
+          .eq("status", "pending_approval")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (pendingPost) {
+          if (publishNowIntent) {
+            await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
+            const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: pendingPost.id } });
+            if (pub?.error || pub?.data?.error) {
+              reply = "⚠️ I tried to publish it now but the platform said: " + (pub?.data?.error || pub?.error?.message || "unknown error") + ". Your post is safe in the Content Scheduler — you can publish it from there.";
+              action = { type: "post_publish_failed", post_id: pendingPost.id };
+            } else {
+              reply = "🚀 It's live! Published to your page" + (pub?.data?.platforms?.instagram === "success" ? "s (Facebook + Instagram)" : "") + " just now.";
+              action = { type: "post_published", post_id: pendingPost.id, meta_post_id: pub?.data?.meta_post_id ?? null };
+            }
+          } else {
+            await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", pendingPost.id);
+            const when = new Date(pendingPost.scheduled_time).toLocaleString();
+            reply = "✅ Approved — it's scheduled to go live " + when + ". Say \"post it right now\" if you want it out immediately.";
+            action = { type: "post_approved", post_id: pendingPost.id };
+          }
+          preHandled = true;
+        }
+      }
+    }
+
+    if (!preHandled) {
     // Vision: when the owner attached media, the model must actually SEE it.
     // Route image turns to a vision-capable model (DeepSeek text models can't
     // read images) and pass the URLs as OpenAI-style image parts.
@@ -355,6 +395,7 @@ serve(async (req) => {
       }
     }
     clearTimeout(aiTimer);
+    } // end !preHandled (AI generation skipped for deterministic intents)
     // NEVER surface raw reasoning_content as the reply — when the model spends
     // its whole token budget thinking, content comes back empty and the leaked
     // chain-of-thought was being dumped into the chat verbatim.
@@ -543,6 +584,17 @@ serve(async (req) => {
         if (postErr) {
           console.error("[AGENT-CONSOLE] post insert failed:", postErr);
           reply = "The draft failed to save — please try again.";
+        } else if (/\b(right now|immediately|asap)\b/i.test(message)) {
+          // "post it right now" with no existing draft: publish immediately.
+          await supabase.from("scheduled_posts").update({ status: "approved", updated_at: new Date().toISOString() }).eq("id", post.id);
+          const pub: any = await supabase.functions.invoke("publish-meta-post", { body: { post_id: post.id } });
+          if (pub?.error || pub?.data?.error) {
+            reply = "📝 Your post is saved in the Content Scheduler, but publishing just now failed: " + (pub?.data?.error || pub?.error?.message || "unknown error");
+            action = { type: "post", post_id: post?.id ?? null };
+          } else {
+            reply = "🚀 It's live! Published to your page just now:\n\n" + caption;
+            action = { type: "post_published", post_id: post?.id ?? null, meta_post_id: pub?.data?.meta_post_id ?? null };
+          }
         } else {
           reply = "📝 Post drafted and saved for your approval in the Content Scheduler:\n\n" + caption;
           action = { type: "post", post_id: post?.id ?? null };
@@ -581,8 +633,12 @@ serve(async (req) => {
     }
 
     // Persist the turn, then return the full thread (ChatGPT-style history).
+    // Attachments ride on the user message so they stay visible in history.
+    const turnAttachments = Array.isArray(bodyData.attachments) && bodyData.attachments.length
+      ? bodyData.attachments.slice(0, 4).map((a: any) => ({ url: String(a.url || ""), type: String(a.type || "image") })).filter((a: any) => a.url)
+      : null;
     if (threadConvoId) {
-      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000) });
+      await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "user", content: message.slice(0, 2000), attachments: turnAttachments });
       await supabase.from("messages").insert({ conversation_id: threadConvoId, role: "assistant", content: reply.slice(0, 4000) });
       // Auto-title a fresh thread from its first user message (ChatGPT-style).
       if (newThreadCreated || threadAlreadyUntitled) {
@@ -590,7 +646,7 @@ serve(async (req) => {
       }
     }
     const { data: threadRows } = threadConvoId
-      ? await supabase.from("messages").select("role, content, created_at").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
+      ? await supabase.from("messages").select("role, content, created_at, attachments").eq("conversation_id", threadConvoId).order("created_at", { ascending: true }).limit(80)
       : { data: [] };
 
     return new Response(JSON.stringify({
@@ -598,7 +654,7 @@ serve(async (req) => {
       action,
       company_id: companyId,
       thread_id: threadConvoId,
-      thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content })),
+      thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content, attachments: m.attachments || null })),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[AGENT-CONSOLE] fatal:", err);
