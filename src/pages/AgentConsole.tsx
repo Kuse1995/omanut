@@ -335,6 +335,11 @@ const AgentConsole = () => {
       ...(attachedUrl ? [{ url: attachedUrl, type: "image" as const }] : []),
       ...(postMedia ? [{ url: postMedia.url, type: postMedia.type }] : []),
     ];
+    // The composer chip disappears the instant the message is sent — the
+    // attachment now lives in the sent bubble. (The invoke below still uses
+    // the values captured in this closure, so clearing state here is safe.)
+    setPostMedia(null);
+    setAttachedUrl(null);
     const userMsg: ChatMessage = { role: "user", content: message, attachments: pendingAttachments };
     setMessages((prev) => [...prev, userMsg]);
     try {
