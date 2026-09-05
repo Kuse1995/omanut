@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { geminiChat, geminiChatJSON, geminiImageGenerate } from "../_shared/gemini-client.ts";
+import { generateImageSmart } from "../_shared/fal-image.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -835,7 +836,7 @@ async function runImagePipeline(
     }
 
     // Use Gemini gemini-3-pro-image-preview for generation (natively supports input images)
-    const { imageBase64, text: imageText } = await geminiImageGenerate({
+    const { imageBase64, text: imageText } = await generateImageSmart({
       prompt: genPrompt,
       inputImageUrls: inputImages.length > 0 ? inputImages.slice(0, 4) : undefined,
     });
@@ -1241,7 +1242,7 @@ async function editImage(
 ): Promise<{ imageUrl: string; editDescription: string }> {
   const editInstruction = `${context}\n\nEdit this image for ${companyName}: ${editPrompt}. Maintain professional quality suitable for social media marketing.`;
   
-  const { imageBase64, text: textResponse } = await geminiImageGenerate({
+  const { imageBase64, text: textResponse } = await generateImageSmart({
     prompt: editInstruction,
     inputImageUrls: [sourceImageUrl],
   });

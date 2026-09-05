@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { geminiChat, geminiImageGenerate, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { generateImageSmart } from "../_shared/fal-image.ts";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
 
 const corsHeaders = {
@@ -239,7 +240,7 @@ The image should match this caption: "${caption}"
 
 Make it vibrant, high-quality, and optimized for social media engagement. Square aspect ratio (1:1).`;
 
-    const { imageBase64, text: imageText } = await geminiImageGenerate({
+    const { imageBase64, text: imageText } = await generateImageSmart({
       prompt: imagePrompt,
     });
 

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 import { geminiImageGenerate } from "../_shared/gemini-client.ts";
+import { generateImageSmart } from "../_shared/fal-image.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -204,7 +205,7 @@ serve(async (req) => {
     // ────────────────────────────────────────────────────────────
     // CALL GEMINI
     // ────────────────────────────────────────────────────────────
-    const { imageBase64 } = await geminiImageGenerate({
+    const { imageBase64 } = await generateImageSmart({
       prompt: genPrompt,
       inputImageUrls: inputImageUrls.length > 0 ? inputImageUrls : undefined,
     });
