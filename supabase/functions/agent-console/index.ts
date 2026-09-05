@@ -274,6 +274,7 @@ serve(async (req) => {
     let reply = "";
     let action: any = { type: null };
     let assistantAttachments: any[] | null = null;
+    let imageBrief: string | null = null;
     let preHandled = false;
     let pendingPost: any = null;
     if (company) {
@@ -315,6 +316,48 @@ serve(async (req) => {
       } else if (pendingPost) {
         // A draft is waiting: tell the model so it never drafts a duplicate.
         system += "\n\nPENDING APPROVAL: one drafted post is awaiting the owner's approval. It starts with: \"" + String(pendingPost.content).slice(0, 120) + "\". If the owner confirms or asks to post it WITHOUT adding new content, reply with exactly APPROVE: on its own line — or APPROVE NOW: if they want it live immediately. Never draft a duplicate POST.";
+      }
+
+      // ── Deterministic creation intents: image / video ──────────────────
+      // The farm brain doesn't reliably emit tool escapes, so creation is
+      // detected HERE; the model is used only as a brief writer.
+      const imageIntent = /\b(image|picture|graphic|poster|visual|photo|banner|flyer)\b/i.test(message) && /\b(create|make|generate|design|draw|produce)\b/i.test(message);
+      const videoIntent = /\b(video|reel|animated)\b/i.test(message) && /\b(create|make|generate|produce|turn|draft)\b/i.test(message);
+      const writeBrief = async (kind: "image" | "video"): Promise<string> => {
+        const sys = kind === "image"
+          ? "You are an art director for " + (company?.name || "the business") + ". The owner wants a marketing image. Write ONE paragraph (3-5 sentences) visual brief for an image generator: subject, setting, mood, composition, colors, camera angle and style, grounded in this request and business. Output ONLY the brief paragraph — no preamble, no quotes."
+          : "You are a creative director for " + (company?.name || "the business") + ". The owner wants a short marketing video. Write ONE cinematic brief (3-4 sentences): the 2-second hook, visual beats, mood, style and CTA. Output ONLY the brief.";
+        let out = "";
+        try {
+          const h = await callHarness({ session_id: "console:" + company.id + ":brief:" + Date.now(), messages: [{ role: "system", content: sys }, { role: "user", content: message }], tools: [] });
+          if (h.ok && h.message?.content) out = String(h.message.content).trim();
+        } catch { /* harness optional */ }
+        if (!out) {
+          try {
+            const r = await geminiChat({ model: PRIMARY_TEXT_MODEL, messages: [{ role: "system", content: sys }, { role: "user", content: message }], temperature: 0.8, max_tokens: 400 });
+            const d: any = await r.json();
+            out = String(d?.choices?.[0]?.message?.content || "").trim();
+          } catch { /* fall through */ }
+        }
+        return out || message;
+      };
+      if (videoIntent) {
+        const brief = await writeBrief("video");
+        try {
+          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: brief.slice(0, 500), user_id: user.id } });
+          if (motionRes?.error || motionRes?.data?.error) {
+            reply = "I couldn't start the video render just now — please try again in a moment.";
+          } else {
+            reply = "🎬 Video render started — it lands in your Media Studio in 1-3 minutes.";
+            action = { type: "video", job_id: motionRes.data?.job_id ?? null, brief };
+          }
+        } catch (e5: any) {
+          reply = "I couldn't start the video render just now — please try again in a moment.";
+        }
+        preHandled = true;
+      } else if (imageIntent) {
+        imageBrief = await writeBrief("image");
+        preHandled = true; // the generation block below runs instead of a chat turn
       }
     }
 
@@ -468,7 +511,8 @@ serve(async (req) => {
     const postCaption = company ? findAfter("POST:") : null;
     const campaignBrief = company ? findAfter("CAMPAIGN:") : null;
     const brandDetail = company ? findAfter("BRAND:") : null;
-    const imageBrief = company ? findAfter("IMAGE:") : null;
+    const escImageBrief = company ? findAfter("IMAGE:") : null;
+    if (escImageBrief !== null) imageBrief = escImageBrief;
     // Draft confirmation escapes (the prompt tells the model to emit these
     // when a draft is already pending and the owner confirms it).
     const approveNowEsc = company ? findAfter("APPROVE NOW:") : null;
