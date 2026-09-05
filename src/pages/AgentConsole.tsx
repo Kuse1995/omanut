@@ -37,7 +37,9 @@ const AgentConsole = () => {
   const [docUploading, setDocUploading] = useState(false);
   const [postMediaUploading, setPostMediaUploading] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSidebar, setShowSidebar] = useState<boolean>(() => {
+    try { return localStorage.getItem("agent_sidebar_open") === "1"; } catch { return false; }
+  });
   const [mediaItems, setMediaItems] = useState<{ name: string; url: string; type: "image" | "video" | "file" }[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
@@ -76,21 +78,38 @@ const AgentConsole = () => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
-  // Load the persistent ChatGPT-style thread on mount (server owns history).
+  // PERSISTENT CHAT HISTORY: the server owns every thread. On mount (and on
+  // company switch) restore the LAST ACTIVE thread — full history, attachments
+  // included — so the console always reopens exactly where the owner left off.
   useEffect(() => {
     if (!session) return;
+    const saved = activeCompanyId ? localStorage.getItem("agent_last_thread_" + activeCompanyId) : null;
     (async () => {
       try {
         const { data } = await supabase.functions.invoke("agent-console", {
-          body: { message: "", history_only: true, company_id: activeCompanyId },
+          body: { message: "", history_only: true, company_id: activeCompanyId, thread_id: saved },
         });
+        if (data?.thread_id) setCurrentThreadId(data.thread_id);
         if (data?.thread?.length) {
           setMessages(data.thread.map((m: any) => ({ role: m.role, content: m.content, attachments: Array.isArray(m.attachments) && m.attachments.length ? m.attachments : undefined })));
+        } else {
+          setMessages([]);
         }
       } catch { /* thread load is best-effort */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, activeCompanyId]);
+
+  // Remember the last active thread per company (restored on reload).
+  useEffect(() => {
+    if (!activeCompanyId || !currentThreadId) return;
+    try { localStorage.setItem("agent_last_thread_" + activeCompanyId, currentThreadId); } catch {}
+  }, [activeCompanyId, currentThreadId]);
+
+  // Remember whether the rail was open.
+  useEffect(() => {
+    try { localStorage.setItem("agent_sidebar_open", showSidebar ? "1" : "0"); } catch {}
+  }, [showSidebar]);
 
   if (authLoading || companyLoading) {
     // Wait for BOTH the session and the company context before rendering, so a
@@ -288,11 +307,13 @@ const AgentConsole = () => {
   const startNewThread = () => {
     setCurrentThreadId(null);
     setMessages([]);
+    if (activeCompanyId) { try { localStorage.removeItem("agent_last_thread_" + activeCompanyId); } catch {} }
   };
 
   const openThread = (id: string) => {
     setCurrentThreadId(id);
     setMessages([]);
+    if (activeCompanyId) { try { localStorage.setItem("agent_last_thread_" + activeCompanyId, id); } catch {} }
     (async () => {
       try {
         const { data } = await supabase.functions.invoke("agent-console", {
@@ -368,7 +389,7 @@ const AgentConsole = () => {
         },
       });
       if (error) throw new Error(error.message || "Agent request failed");
-      if (data?.thread_id) setCurrentThreadId(data.thread_id);
+      if (data?.thread_id) { setCurrentThreadId(data.thread_id); loadThreads(); }
       const action = data?.action || null;
       if (action?.type === "company_created" || action?.type === "company_claimed") {
         if (action.company_id) setActiveCompanyId(action.company_id);
