@@ -266,19 +266,52 @@ serve(async (req) => {
     // Vision: when the owner attached media, the model must actually SEE it.
     // Route image turns to a vision-capable model (DeepSeek text models can't
     // read images) and pass the URLs as OpenAI-style image parts.
-    const visionImages = [...imageUrls, ...(postMediaUrl && postMediaType === "image" ? [postMediaUrl] : [])]
+    const toDataUri = async (u: string): Promise<string | null> => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const res = await fetch(u, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) return null;
+        const mime = (res.headers.get("content-type") || "image/jpeg").split(";")[0];
+        if (!mime.startsWith("image/")) return null;
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.length > 4_500_000) return null;
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return "data:" + mime + ";base64," + btoa(bin);
+      } catch {
+        return null;
+      }
+    };
+    const visionRaw = [...imageUrls, ...(postMediaUrl && postMediaType === "image" ? [postMediaUrl] : [])]
       .filter(Boolean).slice(0, 3);
-    const userContent: any = visionImages.length
-      ? [{ type: "text", text: message }, ...visionImages.map((u) => ({ type: "image_url", image_url: { url: u } }))]
-      : message;
+    const visionParts: any[] = [];
+    for (const u of visionRaw) {
+      const uri = await toDataUri(u);
+      if (uri) visionParts.push({ type: "image_url", image_url: { url: uri } });
+    }
+    const sawImage = visionParts.length > 0;
+    const userText = sawImage
+      ? message
+      : (visionRaw.length ? message + "\n\n(An image was attached but it could not be read — ask the owner to re-upload it.)" : message);
+    const userContent: any = sawImage
+      ? [{ type: "text", text: userText }, ...visionParts]
+      : userText;
     const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userContent }];
+    const aiController = new AbortController();
+    const aiTimer = setTimeout(() => aiController.abort(), 45000);
     const aiResponse = await geminiChatWithFallback({
       // deepseek-chat has no vision — image turns go straight to Gemini Flash.
-      model: visionImages.length ? "google/gemini-2.5-flash" : PRIMARY_TEXT_MODEL,
+      model: sawImage ? "google/gemini-2.5-flash" : PRIMARY_TEXT_MODEL,
       messages: agentMessages,
       temperature: 0.7,
       max_tokens: 2000,
+      signal: aiController.signal,
     });
+    clearTimeout(aiTimer);
     const aiData: any = await aiResponse.json();
     let reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
     // NEVER surface raw reasoning_content as the reply — when the model spends
