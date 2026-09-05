@@ -14,6 +14,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiChatWithFallback, geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
+import { callHarness } from "../_shared/harness-client.ts";
 import {
   buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
@@ -314,6 +315,8 @@ serve(async (req) => {
       }
     }
 
+    const aiErrors: string[] = [];
+
     if (!preHandled) {
     // Vision: when the owner attached media, the model must actually SEE it.
     // Route image turns to a vision-capable model (DeepSeek text models can't
@@ -376,9 +379,28 @@ serve(async (req) => {
           const vData: any = await vRes.json();
           const vText = String(vData?.choices?.[0]?.message?.content || "").trim();
           if (vText) { reply = vText; console.log("[AGENT-CONSOLE] vision answered by", vm); break; }
+          aiErrors.push("vision:" + vm + ": empty content");
           console.warn("[AGENT-CONSOLE] vision model returned empty content:", vm);
         } catch (vErr: any) {
+          aiErrors.push("vision:" + vm + ": " + (vErr?.message || vErr));
           console.warn("[AGENT-CONSOLE] vision model failed:", vm, vErr?.message || vErr);
+        }
+      }
+      if (!reply) {
+        // Last resort for images: the Omanut farm harness (GLM-5.3-Flash).
+        // Image parts are passed straight through — the farm proxies to the
+        // GLM brain, so vision still works even with no direct provider keys.
+        try {
+          const h = await callHarness({
+            session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
+            messages: agentMessages,
+            tools: [],
+          });
+          const hText = String(h.message?.content || "").trim();
+          if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] vision answered by farm harness"); }
+          else aiErrors.push("harness(vision): " + (h.reason || "no content"));
+        } catch (hErr: any) {
+          aiErrors.push("harness(vision): " + (hErr?.message || hErr));
         }
       }
     }
@@ -399,9 +421,26 @@ serve(async (req) => {
           const aiData: any = await aiResponse.json();
           const t = String(aiData?.choices?.[0]?.message?.content || "").trim();
           if (t) { reply = t; break; }
+          aiErrors.push("text:" + tm + ": empty content");
           console.warn("[AGENT-CONSOLE] text model returned empty content:", tm);
         } catch (aiErr: any) {
+          aiErrors.push("text:" + tm + ": " + (aiErr?.message || aiErr));
           console.warn("[AGENT-CONSOLE] text model failed:", tm, aiErr?.message || aiErr);
+        }
+      }
+      if (!reply) {
+        // Emergency brain: the Omanut farm harness (GLM-5.3-Flash).
+        try {
+          const h = await callHarness({
+            session_id: "console:" + (company?.id || "guest") + ":" + Date.now(),
+            messages: [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userText }],
+            tools: [],
+          });
+          const hText = String(h.message?.content || "").trim();
+          if (h.ok && hText) { reply = hText; console.log("[AGENT-CONSOLE] text answered by farm harness"); }
+          else aiErrors.push("harness(text): " + (h.reason || "no content"));
+        } catch (hErr: any) {
+          aiErrors.push("harness(text): " + (hErr?.message || hErr));
         }
       }
     }
@@ -697,6 +736,8 @@ serve(async (req) => {
       company_id: companyId,
       thread_id: threadConvoId,
       thread: (threadRows || []).map((m: any) => ({ role: m.role === "user" ? "user" : "assistant", content: m.content, attachments: m.attachments || null })),
+      // Diagnostics for the operator: pass debug:true to see why AI models failed.
+      ai_errors: bodyData.debug === true ? aiErrors : undefined,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("[AGENT-CONSOLE] fatal:", err);
