@@ -91,10 +91,11 @@ serve(async (req) => {
           const facts = buildCompanyFacts(company);
           const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 4));
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
+            + (ctx ? ctx + "\n\n" : "")
             + (facts ? facts + "\n\n" : "")
             + (kb ? kb + "\n\n" : "")
-            + (ctx ? ctx + "\n\n" : "")
-            + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Ground the reply in the POST and the facts above; only quote prices/claims that appear in them, never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
+            + "ANSWER PRIORITY: THE POST THEY ARE COMMENTING ON is the immediate subject of the conversation. If their question refers to anything shown in that post — a package, tier, plan name, price, or offer — answer from THE POST CONTENT first, even if the FACTS or KB/BMS catalog list a different product with a similar name. Use the FACTS/KB for anything the post doesn't cover, or to add extra detail after answering from the post.\n"
+            + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Only quote prices/claims that appear in the post or the facts above — never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
           userPrompt = "Their comment: \"" + text + "\"";
         } else if (row.channel === "direct_message") {
           const history = await buildDmContext(supabase, payload, text);
