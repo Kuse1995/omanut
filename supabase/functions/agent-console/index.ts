@@ -238,6 +238,7 @@ serve(async (req) => {
         "Otherwise answer normally from the FACTS and KB MATCHES: warm, concise (1-5 short lines), PLAIN TEXT only (no markdown, no asterisks, no bullets), no invented prices or claims. If the answer is not in the provided knowledge, say so and offer to connect the owner.",
         "",
         "UPLOADS: When the owner uploads a knowledge document, acknowledge it by name and note that your answers can now draw from it. When they upload media and ask to post/schedule it, confirm you've attached it to the draft and that it will appear for approval in the Content Scheduler.",
+        "ATTACHED IMAGES: you can SEE any image the owner attaches in the current message. When they say \"post about this\", \"make this an ad\", or \"this\" with an image attached, \"this\" IS the image — look at it, describe what matters in one short line, and draft the post/ad around it, grounded in the FACTS (never invent prices). Never say you can't see attachments.",
         "",
         "ONBOARDING (your most important job): this company's profile is still missing: " + (missing.length ? missing.join(", ") : "nothing — profile complete!") + ".",
         "Ask about ONE or TWO missing pieces at a time, conversationally, woven into your replies (never a form, never a list of questions).",
@@ -262,19 +263,28 @@ serve(async (req) => {
     // WhatsApp-specific (tone rules, price guard, 12-25s client timeout) and
     // was failing on long grounded prompts; the console needs longer
     // generations without that ceiling.
-    const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: message }];
+    // Vision: when the owner attached media, the model must actually SEE it.
+    // Route image turns to a vision-capable model (DeepSeek text models can't
+    // read images) and pass the URLs as OpenAI-style image parts.
+    const visionImages = [...imageUrls, ...(postMediaUrl && postMediaType === "image" ? [postMediaUrl] : [])]
+      .filter(Boolean).slice(0, 3);
+    const userContent: any = visionImages.length
+      ? [{ type: "text", text: message }, ...visionImages.map((u) => ({ type: "image_url", image_url: { url: u } }))]
+      : message;
+    const agentMessages = [{ role: "system", content: system }, ...historyMsgs, { role: "user", content: userContent }];
     const aiResponse = await geminiChatWithFallback({
-      model: PRIMARY_TEXT_MODEL,
+      // deepseek-chat has no vision — image turns go straight to Gemini Flash.
+      model: visionImages.length ? "google/gemini-2.5-flash" : PRIMARY_TEXT_MODEL,
       messages: agentMessages,
       temperature: 0.7,
-      max_tokens: 1200,
+      max_tokens: 2000,
     });
     const aiData: any = await aiResponse.json();
     let reply = String(aiData?.choices?.[0]?.message?.content || "").trim();
-    if (!reply && aiData?.choices?.[0]?.message?.reasoning_content) {
-      reply = String(aiData.choices[0].message.reasoning_content).trim();
-    }
-    if (!reply) reply = "I couldn't process that just now — please try again.";
+    // NEVER surface raw reasoning_content as the reply — when the model spends
+    // its whole token budget thinking, content comes back empty and the leaked
+    // chain-of-thought was being dumped into the chat verbatim.
+    if (!reply) reply = "I couldn't process that just now — please try again in a moment.";
     let action: any = { type: null };
 
     // ── Self-serve onboarding: company creation + claim codes ──────────
