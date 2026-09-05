@@ -106,8 +106,78 @@ serve(async (req) => {
     }
 
     const targetPlatform = post.target_platform || 'facebook';
-    const results: { facebook?: any; instagram?: any } = {};
+    const results: { facebook?: any; instagram?: any; tiktok?: any } = {};
     const errors: string[] = [];
+
+    // ── TikTok: Content Posting API (video). Requires TIKTOK_ACCESS_TOKEN. ──
+    if (targetPlatform === 'tiktok') {
+      const tiktokToken = Deno.env.get('TIKTOK_ACCESS_TOKEN');
+      if (!tiktokToken) {
+        await supabaseService.from('scheduled_posts').update({
+          status: 'failed',
+          error_message: 'TikTok publishing is not configured on this project yet (missing TIKTOK_ACCESS_TOKEN). Publish to Facebook/Instagram for now.',
+          updated_at: new Date().toISOString(),
+        }).eq('id', post_id);
+        return new Response(JSON.stringify({ error: 'TikTok publishing is not configured on this project yet.' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      try {
+        const ttRes = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + tiktokToken,
+            'Content-Type': 'application/json; charset=UTF-8',
+          },
+          body: JSON.stringify({
+            post_info: {
+              title: String(post.content || '').slice(0, 150),
+              privacy_level: 'SELF_ONLY', // safe default until operator approves public posting
+              disable_duet: false,
+              disable_comment: false,
+              disable_stitch: false,
+            },
+            source_info: {
+              source: 'PULL_FROM_URL',
+              video_url: post.video_url || '',
+            },
+          }),
+        });
+        const ttJson: any = await ttRes.json();
+        if (!ttRes.ok || ttJson?.error?.code !== 'ok') {
+          const detail = ttJson?.error?.message || 'TikTok API error';
+          errors.push('TikTok: ' + detail);
+          console.error('TikTok publish error:', JSON.stringify(ttJson, null, 2));
+        } else {
+          results.tiktok = ttJson?.data?.publish_id || ttJson.data || null;
+          console.log('Post ' + post_id + ' submitted to TikTok. publish_id:', results.tiktok);
+        }
+      } catch (ttErr: any) {
+        errors.push('TikTok: ' + ttErr.message);
+      }
+
+      if (!results.tiktok) {
+        await supabaseService.from('scheduled_posts').update({
+          status: 'failed',
+          error_message: errors.join('; '),
+          updated_at: new Date().toISOString(),
+        }).eq('id', post_id);
+        return new Response(JSON.stringify({ error: errors.join('; ') }), {
+          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      await supabaseService.from('scheduled_posts').update({
+        status: 'published',
+        meta_post_id: results.tiktok || null,
+        error_message: null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', post_id);
+      return new Response(JSON.stringify({
+        success: true,
+        meta_post_id: results.tiktok || null,
+        platforms: { tiktok: 'success' },
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     // ── Facebook: Publish immediately ──
     if (targetPlatform === 'facebook' || targetPlatform === 'both') {

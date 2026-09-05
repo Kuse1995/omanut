@@ -30,7 +30,7 @@ export const ContentSchedulerPanel = () => {
   const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
-  const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both'>('facebook');
+  const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both' | 'tiktok'>('facebook');
   const [publishMode, setPublishMode] = useState<'schedule' | 'now'>('schedule');
 
   // Editing state (shared for approval queue and all posts)
@@ -120,6 +120,7 @@ export const ContentSchedulerPanel = () => {
       if (!selectedPageId) throw new Error('Select a page');
       if (publishMode === 'schedule' && (!scheduledDate || !scheduledTime)) throw new Error('Date and time are required');
       if ((targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl) throw new Error('Instagram posts require an image.');
+      if (targetPlatform === 'tiktok' && !hasVideo) throw new Error('TikTok posts require a video — attach one first.');
 
       const scheduledTimeISO = publishMode === 'now'
         ? new Date().toISOString()
@@ -280,6 +281,8 @@ export const ContentSchedulerPanel = () => {
             <Badge className="bg-pink-500/20 text-pink-500 border-pink-500/30 gap-1"><Instagram className="w-3 h-3" />IG</Badge>
           </div>
         );
+      case 'tiktok':
+        return <Badge className="bg-cyan-500/20 text-cyan-600 border-cyan-500/30 gap-1"><Video className="w-3 h-3" />TT</Badge>;
       default:
         return <Badge className="bg-blue-500/20 text-blue-500 border-blue-500/30 gap-1"><Facebook className="w-3 h-3" />FB</Badge>;
     }
@@ -297,6 +300,7 @@ export const ContentSchedulerPanel = () => {
   const minDateStr = minDate.toISOString().split('T')[0];
   const selectedPage = pages?.find(p => p.page_id === selectedPageId);
   const hasIgConfigured = !!selectedPage?.ig_user_id;
+  const hasVideo = !!imageUrl && /\.(mp4|mov|webm|m4v)$/i.test(imageUrl.split('?')[0] || '');
 
   const startEditing = (post: any) => {
     setEditingPostId(post.id);
@@ -388,6 +392,7 @@ export const ContentSchedulerPanel = () => {
                   <ToggleGroupItem value="facebook" className="gap-1.5 data-[state=on]:bg-blue-500/20 data-[state=on]:text-blue-600"><Facebook className="h-4 w-4" />Facebook</ToggleGroupItem>
                   <ToggleGroupItem value="instagram" disabled={!hasIgConfigured} className="gap-1.5 data-[state=on]:bg-pink-500/20 data-[state=on]:text-pink-600"><Instagram className="h-4 w-4" />Instagram</ToggleGroupItem>
                   <ToggleGroupItem value="both" disabled={!hasIgConfigured} className="gap-1.5 data-[state=on]:bg-purple-500/20 data-[state=on]:text-purple-600">Both</ToggleGroupItem>
+                  <ToggleGroupItem value="tiktok" disabled={!hasVideo} className="gap-1.5 data-[state=on]:bg-cyan-500/20 data-[state=on]:text-cyan-600">TikTok</ToggleGroupItem>
                 </ToggleGroup>
                 {!hasIgConfigured && selectedPageId && <p className="text-xs text-muted-foreground">Instagram not configured for this page.</p>}
                 {(targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl && <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ Instagram requires an image.</p>}

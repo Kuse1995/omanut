@@ -84,12 +84,41 @@ serve(async (req) => {
 
     const { data: company } = await supabase
       .from("companies")
-      .select("id, name, metadata, voice_style, services, quick_reference_info, whatsapp_number")
+      .select("id, name, metadata, voice_style, services, quick_reference_info, whatsapp_number, credit_balance")
       .eq("id", company_id)
       .maybeSingle();
     if (!company) {
       return new Response(JSON.stringify({ error: "Company not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    // ── SPEND GUARDRAIL ────────────────────────────────────────────────
+    // Every render costs tenant credits. Reject when the balance can't cover
+    // it, and deduct atomically (a conditional update — if another render
+    // raced us and drained the balance, the update matches no rows).
+    const seconds = Math.max(1, Number(duration) || 5);
+    const perSecond = resolution === "1080p" ? 0.124 : resolution === "480p" ? 0.024 : 0.056; // ≈ fal Seedance pricing
+    const cost = Math.max(1, Math.ceil(seconds * perSecond * 10)); // 1 credit ≈ $0.10
+    const balance = Number(company.credit_balance ?? 0);
+    if (balance < cost) {
+      return new Response(JSON.stringify({
+        error: "Insufficient credits for this render",
+        required_credits: cost,
+        credit_balance: balance,
+        hint: "Top up your plan or lower the resolution/duration.",
+      }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const { data: deducted, error: deductErr } = await supabase
+      .from("companies")
+      .update({ credit_balance: balance - cost })
+      .eq("id", company_id)
+      .gte("credit_balance", cost)
+      .select("credit_balance")
+      .maybeSingle();
+    if (deductErr || !deducted) {
+      return new Response(JSON.stringify({ error: "Insufficient credits for this render", required_credits: cost, credit_balance: balance }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const remainingCredits = Number(deducted.credit_balance ?? 0);
+    console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
 
     let bossPhone = "";
     const { data: bossRow } = await supabase
@@ -137,8 +166,9 @@ serve(async (req) => {
       "You are the Marketing Strategist for " + (company.name || "a business") + ".",
       facts ? facts : "",
       "Convert the brief into a video script plan. The FIRST 2 SECONDS must hook (a bold visual statement, a surprising motion, or the product as hero).",
-      'Output STRICT JSON only — no markdown, no code fences: {"style": "<one of: motion_design | ecommerce | cinematic | social_hook | product_360>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>"}.',
+      'Output STRICT JSON only — no markdown, no code fences: {"style": "<one of: motion_design | ecommerce | cinematic | social_hook | product_360>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
       "2-4 beats. Each beat is one visual moment that fits a 5-second shot.",
+      "The voiceover is the consistent AI spokesperson voice of the brand — warm, human, ready to be recorded or fed to a speech model. It must match the beats in order and end on the CTA.",
     ].filter(Boolean).join("\n");
     const scriptRes = await harnessChatWithFallback(
       [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }],
@@ -242,7 +272,10 @@ serve(async (req) => {
         shot_plan: shots,
         hook: script.hook ?? null,
         cta: script.cta ?? null,
+        voiceover: script.voiceover ?? null,
         status: "pending",
+        credits_charged: cost,
+        credits_remaining: remainingCredits,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

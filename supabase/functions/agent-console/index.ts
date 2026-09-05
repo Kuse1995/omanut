@@ -394,8 +394,9 @@ serve(async (req) => {
         console.error("[AGENT-CONSOLE] omanut-motion failed:", motionRes.error);
         reply = "I couldn't start the video render just now — please try again in a moment.";
       } else {
-        reply = "🎬 Video render started. It takes 1-3 minutes — the finished video lands in your Media Studio and I'll let you know here.";
-        action = { type: "video", job_id: motionRes.data?.job_id ?? null, brief };
+        const creditsLeft = motionRes.data?.credits_remaining;
+        reply = "🎬 Video render started. It takes 1-3 minutes — the finished video lands in your Media Studio and I'll let you know here." + (creditsLeft != null ? " (Credits left: " + creditsLeft + ")" : "");
+        action = { type: "video", job_id: motionRes.data?.job_id ?? null, brief, credits_remaining: creditsLeft ?? null };
       }
     } else if (company && reply.toUpperCase().startsWith("POST:")) {
       const caption = reply.slice(5).trim();
