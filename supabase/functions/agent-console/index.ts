@@ -16,6 +16,17 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiChatWithFallback, geminiChat, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { callHarness } from "../_shared/harness-client.ts";
 import { generateImageSmart } from "../_shared/fal-image.ts";
+
+// Style labels mirroring omanut-motion's MOTION_STYLES (storyboard captions).
+const MOTION_STYLE_LABELS: Record<string, string> = {
+  saas_launch: "SaaS launch video",
+  real_footage_motion: "motion on real footage",
+  hypermotion_product: "hypermotion product ad",
+  flythrough_3d: "3D flythrough",
+  explainer_2d: "2D explainer",
+  editorial_explainer: "editorial explainer",
+  cinematic: "cinematic",
+};
 import {
   buildCompanyFacts, searchKnowledgeBase, formatKbMatches,
   profileMissingList, sanitizeFacts, updateCompanyFacts, upsertKbDocument, buildMetaConnectUrl,
@@ -29,7 +40,7 @@ const corsHeaders = {
 };
 
 // Deploy marker — bump per release; lets us verify what's actually live with one probe.
-const AGENT_CONSOLE_BUILD = "2026-09-06-director-v5";
+const AGENT_CONSOLE_BUILD = "2026-09-06-storyboard-v6";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -480,14 +491,44 @@ serve(async (req) => {
             reply = "I couldn't start the video render just now — please try again in a moment.";
           } else {
             const planData = motionRes.data;
-            const plan = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), created_at: new Date().toISOString() };
+            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), created_at: new Date().toISOString() };
+            // STORYBOARD PREVIEWS: a generated still per planned scene so the
+            // owner SEES the direction before spending video credits.
+            const previewShots = planData.shots.slice(0, 3);
+            const frameCount = previewShots.length;
+            const balance = Number((company as any)?.credit_balance ?? 0);
+            const previews: { n: number; url: string }[] = [];
+            if (frameCount > 0 && balance >= frameCount) {
+              const styleKey = String(planData.style || "cinematic");
+              const genResults = await Promise.all(previewShots.map((s: any) =>
+                generateImageSmart({
+                  prompt: "Storyboard still frame for a " + (MOTION_STYLE_LABELS[styleKey] || styleKey) + " marketing video. Shot " + s.n + " of " + planData.shots.length + ": " + String(s.action || "") + ". Camera: " + (s.camera || "directors choice") + (s.lighting ? ". Lighting: " + s.lighting : "") + ". Overall concept: " + brief.slice(0, 300) + ". Cinematic single still frame, no text, no captions, no words on screen.",
+                  aspectRatio: "16:9",
+                }).then((g: any) => {
+                  const match = String(g.imageBase64).match(/^data:(image\/[\w+]+);base64,(.+)$/);
+                  if (!match) throw new Error("unexpected image payload");
+                  const mime = match[1];
+                  const bin = atob(match[2]);
+                  const bytes = new Uint8Array(bin.length);
+                  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                  const path = company.id + "/storyboards/" + Date.now() + "-shot" + s.n + "-" + Math.random().toString(36).slice(2, 8) + (mime.includes("jpeg") ? ".jpg" : ".png");
+                  return supabase.storage.from("company-media").upload(path, bytes, { contentType: mime, upsert: false }).then(() => supabase.storage.from("company-media").getPublicUrl(path));
+                }).then((pub: any) => ({ n: s.n, url: pub.data?.publicUrl }))
+              ));
+              for (const pr of genResults) { if (pr && pr.url) previews.push(pr); }
+              if (previews.length) {
+                plan.previews = previews;
+                await supabase.from("companies").update({ credit_balance: balance - previews.length }).eq("id", company.id).gte("credit_balance", previews.length);
+              }
+            }
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
             const styleLabel = String(planData.style || "cinematic").replace(/_/g, " ");
             const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
             const renderHint = 'Say "render it" and I will bring the hero shot to life - or tell me what to change.';
-            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
-            action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style };
+            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + (previews.length ? "\n\nStoryboard previews attached (" + previews.length + " frame" + (previews.length > 1 ? "s" : "") + ", " + previews.length + " credit" + (previews.length > 1 ? "s" : "") + ")." : "") + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
+            action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style, previews };
+            assistantAttachments = previews.map((pr: any) => ({ url: pr.url, type: "image" }));
           }
         } catch (e5: any) {
           reply = "I couldn't start the video render just now — please try again in a moment.";
