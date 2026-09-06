@@ -393,6 +393,7 @@ serve(async (req) => {
     // rendering. The console shows it to the owner for approval.
     if (plan_only) {
       return new Response(JSON.stringify({
+        build: "motion-v2-styles",
         ok: true,
         plan_only: true,
         style: script.style ?? null,
