@@ -565,7 +565,7 @@ serve(async (req) => {
           await supabase.from("companies").update({ credit_balance: balance - previews.length }).eq("id", company.id).gte("credit_balance", previews.length);
         }
         return previews;
-      };
+      }
       if (videoIntent) {
         const brief = await writeBrief("video");
         try {
