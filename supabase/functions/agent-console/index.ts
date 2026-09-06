@@ -444,7 +444,7 @@ serve(async (req) => {
       const wantsRender = !!pendingPlan && /\b(render|go ahead|approve|do it|shoot)\b/i.test(t) && !imagePostIntent && !captionIntent;
       if (wantsRender) {
         try {
-          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: String(pendingPlan.brief || ""), approved_plan: { script: pendingPlan.script, shots: pendingPlan.shots, hero_shot: pendingPlan.hero_shot } } });
+          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: String(pendingPlan.brief || ""), approved_plan: { script: pendingPlan.script, shots: pendingPlan.shots, hero_shot: pendingPlan.hero_shot }, image_urls: pendingPlan.reference_image ? [pendingPlan.reference_image] : null } });
           if (motionRes?.error || motionRes?.data?.error) {
             reply = "The render engine hiccuped — say \"render it\" again in a moment.";
           } else {
@@ -456,6 +456,51 @@ serve(async (req) => {
           }
         } catch (e6: any) {
           reply = "The render engine hiccuped — say \"render it\" again in a moment.";
+        }
+        preHandled = true;
+      }
+
+      // ── PLAN REVISION: change the pending video plan (references, casting, shots) ──
+      const pendingPlanRev = ((company as any)?.metadata?.last_video_plan) || null;
+      const revisePlanIntent = !!pendingPlanRev && !wantsRender && !captionIntent && !imagePostIntent && t.length <= 260
+        && /\b(use|change|swap|replace|add|cast|instead|revise|update|redo|make them|make it)\b/i.test(t)
+        && !/^(hi|hello|hey|thanks|thank you|ok|okay)\b/i.test(t);
+      if (revisePlanIntent) {
+        // Reference image: this turn's media, else the newest user-attached image
+        // in this company's console threads (e.g. the BMS UI screenshot).
+        let refImage: string | null = postMediaUrl;
+        if (!refImage) {
+          try {
+            const { data: convs3 } = await supabase.from("conversations").select("id").eq("company_id", company.id).like("phone", "agent:" + company.id + "%").limit(20);
+            const cids = (convs3 || []).map((c: any) => c.id);
+            if (cids.length) {
+              const { data: um } = await supabase.from("messages").select("attachments, created_at").in("conversation_id", cids).eq("role", "user").not("attachments", "is", null).order("created_at", { ascending: false }).limit(8);
+              for (const row of (um || [])) {
+                const atts = Array.isArray(row.attachments) ? row.attachments : [];
+                const img = atts.find((a: any) => a.type === "image" && a.url);
+                if (img) { refImage = String(img.url); break; }
+              }
+            }
+          } catch { /* best-effort */ }
+        }
+        const revisionBrief = String(pendingPlanRev.brief || "") + "\n\nOWNER REVISION REQUEST: " + message + (refImage ? "\n\nA REFERENCE IMAGE is available: " + refImage + " - shots that show the product must feature exactly this interface, and any people shown should be Zambian urban business people unless the owner says otherwise." : "");
+        try {
+          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: revisionBrief.slice(0, 900), plan_only: true } });
+          const planData = motionRes?.data;
+          if (motionRes?.error || motionRes?.data?.error || !planData?.shots?.length) {
+            reply = "The revision pass hiccuped - tell me the change again in a moment.";
+          } else {
+            const previews = await generateStoryboards(planData, revisionBrief, 3);
+            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), reference_image: refImage, previews, created_at: new Date().toISOString() };
+            const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
+            await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
+            const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
+            reply = "🎬 Revised" + (refImage ? " - your reference image is locked for the product shots" : "") + ":\n\n" + shotLines + (previews.length ? "\n\nFresh storyboards attached (" + previews.length + " credits)." : "") + "\n\nSay \"render it\" when it's right.";
+            action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style, previews };
+            assistantAttachments = previews.map((pr: any) => ({ url: pr.url, type: "image" }));
+          }
+        } catch (e7: any) {
+          reply = "The revision pass hiccuped - tell me the change again in a moment.";
         }
         preHandled = true;
       }
@@ -483,6 +528,40 @@ serve(async (req) => {
         }
         return out || message;
       };
+      // STORYBOARD PREVIEWS: a generated still per planned scene (credit-guarded:
+      // only when the balance covers the frames PLUS one hero video render).
+      const generateStoryboards = async (planData: any, briefText: string, cap: number): Promise<{ n: number; url: string }[]> => {
+        const previewShots = (planData.shots || []).slice(0, cap);
+        const frameCount = previewShots.length;
+        const balance = Number((company as any)?.credit_balance ?? 0);
+        const previews: { n: number; url: string }[] = [];
+        const RENDER_RESERVE = 3;
+        if (frameCount <= 0 || balance < frameCount + RENDER_RESERVE) {
+          console.log("[AGENT-CONSOLE] storyboards skipped to preserve video credits (balance: " + balance + ")");
+          return previews;
+        }
+        const styleKey = String(planData.style || "cinematic");
+        const genResults = await Promise.all(previewShots.map((s: any) =>
+          generateImageSmart({
+            prompt: "Storyboard still frame for a " + (MOTION_STYLE_LABELS[styleKey] || styleKey) + " marketing video. Shot " + s.n + " of " + planData.shots.length + ": " + String(s.action || "") + ". Camera: " + (s.camera || "directors choice") + (s.lighting ? ". Lighting: " + s.lighting : "") + ". Overall concept: " + briefText.slice(0, 300) + ". Cinematic single still frame, no text, no captions, no words on screen.",
+            aspectRatio: "16:9",
+          }).then((g: any) => {
+            const match = String(g.imageBase64).match(/^data:(image\/[\w+]+);base64,(.+)$/);
+            if (!match) throw new Error("unexpected image payload");
+            const mime = match[1];
+            const bin = atob(match[2]);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const path = company.id + "/storyboards/" + Date.now() + "-shot" + s.n + "-" + Math.random().toString(36).slice(2, 8) + (mime.includes("jpeg") ? ".jpg" : ".png");
+            return supabase.storage.from("company-media").upload(path, bytes, { contentType: mime, upsert: false }).then(() => supabase.storage.from("company-media").getPublicUrl(path));
+          }).then((pub: any) => ({ n: s.n, url: pub.data?.publicUrl }))
+        ));
+        for (const pr of genResults) { if (pr && pr.url) previews.push(pr); }
+        if (previews.length) {
+          await supabase.from("companies").update({ credit_balance: balance - previews.length }).eq("id", company.id).gte("credit_balance", previews.length);
+        }
+        return previews;
+      };
       if (videoIntent) {
         const brief = await writeBrief("video");
         try {
@@ -492,48 +571,14 @@ serve(async (req) => {
           } else {
             const planData = motionRes.data;
             const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), created_at: new Date().toISOString() };
-            // STORYBOARD PREVIEWS: a generated still per planned scene so the
-            // owner SEES the direction before spending video credits.
-            const previewShots = planData.shots.slice(0, 3);
-            const frameCount = previewShots.length;
-            const balance = Number((company as any)?.credit_balance ?? 0);
-            const previews: { n: number; url: string }[] = [];
-            // Preserve at least one video render: storyboards only when the
-            // balance covers the frames PLUS a hero render afterwards.
-            const RENDER_RESERVE = 3;
-            const storyboardsAffordable = frameCount > 0 && balance >= frameCount + RENDER_RESERVE;
-            if (frameCount > 0 && balance >= frameCount && !storyboardsAffordable) {
-              console.log("[AGENT-CONSOLE] storyboards skipped to preserve video credits (balance: " + balance + ")");
-            }
-            if (storyboardsAffordable) {
-              const styleKey = String(planData.style || "cinematic");
-              const genResults = await Promise.all(previewShots.map((s: any) =>
-                generateImageSmart({
-                  prompt: "Storyboard still frame for a " + (MOTION_STYLE_LABELS[styleKey] || styleKey) + " marketing video. Shot " + s.n + " of " + planData.shots.length + ": " + String(s.action || "") + ". Camera: " + (s.camera || "directors choice") + (s.lighting ? ". Lighting: " + s.lighting : "") + ". Overall concept: " + brief.slice(0, 300) + ". Cinematic single still frame, no text, no captions, no words on screen.",
-                  aspectRatio: "16:9",
-                }).then((g: any) => {
-                  const match = String(g.imageBase64).match(/^data:(image\/[\w+]+);base64,(.+)$/);
-                  if (!match) throw new Error("unexpected image payload");
-                  const mime = match[1];
-                  const bin = atob(match[2]);
-                  const bytes = new Uint8Array(bin.length);
-                  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                  const path = company.id + "/storyboards/" + Date.now() + "-shot" + s.n + "-" + Math.random().toString(36).slice(2, 8) + (mime.includes("jpeg") ? ".jpg" : ".png");
-                  return supabase.storage.from("company-media").upload(path, bytes, { contentType: mime, upsert: false }).then(() => supabase.storage.from("company-media").getPublicUrl(path));
-                }).then((pub: any) => ({ n: s.n, url: pub.data?.publicUrl }))
-              ));
-              for (const pr of genResults) { if (pr && pr.url) previews.push(pr); }
-              if (previews.length) {
-                plan.previews = previews;
-                await supabase.from("companies").update({ credit_balance: balance - previews.length }).eq("id", company.id).gte("credit_balance", previews.length);
-              }
-            }
+            const previews = await generateStoryboards(planData, brief, 3);
+            if (previews.length) plan.previews = previews;
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
             const styleLabel = String(planData.style || "cinematic").replace(/_/g, " ");
             const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
             const renderHint = 'Say "render it" and I will bring the hero shot to life - or tell me what to change.';
-            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + (previews.length ? "\n\nStoryboard previews attached (" + previews.length + " frame" + (previews.length > 1 ? "s" : "") + ", " + previews.length + " credit" + (previews.length > 1 ? "s" : "") + ")." : (frameCount > 0 ? "\n\n(Skipped storyboard previews to preserve your video credits.)" : "")) + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
+            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + (previews.length ? "\n\nStoryboard previews attached (" + previews.length + " frame" + (previews.length > 1 ? "s" : "") + ", " + previews.length + " credit" + (previews.length > 1 ? "s" : "") + ")." : "") + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
             action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style, previews };
             assistantAttachments = previews.map((pr: any) => ({ url: pr.url, type: "image" }));
           }
