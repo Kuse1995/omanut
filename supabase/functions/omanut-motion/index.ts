@@ -236,12 +236,18 @@ serve(async (req) => {
       "STYLE LIBRARY - pick the ONE style that best serves this brief and obey its direction:",
       'Output STRICT JSON only - no markdown, no code fences: {"style": "<one of: ' + STYLE_KEYS.join(" | ") + '>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
     ].filter(Boolean).join("\n");
-    const scriptRes = await harnessChatWithFallback(
-      [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }],
-      [],
-      { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
-    );
+    const scriptMsgs = [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }];
+    const scriptRes = await harnessChatWithFallback(scriptMsgs, [], { companyId: company_id, metadata: company?.metadata || null, mode: "content" });
     script = extractJson(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "") || script;
+    // GLM sometimes answers in prose - one strict-JSON retry before falling back.
+    if (!script.voiceover) {
+      const retryRes = await harnessChatWithFallback(
+        [...scriptMsgs, { role: "assistant", content: String(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "").slice(0, 800) }, { role: "user", content: "That was not valid JSON. Reply AGAIN with ONLY the JSON object - start with { and end with }. No prose, no markdown." }],
+        [],
+        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
+      );
+      script = extractJson(retryRes.ok && retryRes.message?.content ? retryRes.message.content : "") || script;
+    }
 
     // ── STAGE 2: CREATIVE DIRECTOR ─────────────────────────────────────
     const directorSystem = [
@@ -259,7 +265,16 @@ serve(async (req) => {
       [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
-    const plan = extractJson(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    let plan = extractJson(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    if (!plan || !Array.isArray(plan.shots) || plan.shots.length < 2) {
+      // One strict-JSON retry - single-shot plans are usually a parse failure.
+      const retryPlan = await harnessChatWithFallback(
+        [[{ role: "system", content: directorSystem }, { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) }][0], { role: "assistant", content: String(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "").slice(0, 800) }, { role: "user", content: "That was not valid JSON or had too few shots. Reply AGAIN with ONLY the JSON object with 2-4 shots - start with { and end with }. No prose." }],
+        [],
+        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
+      );
+      plan = extractJson(retryPlan.ok && retryPlan.message?.content ? retryPlan.message.content : "") || plan;
+    }
     shots = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : shots;
     heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
     } // end sub-agent bypass (script_override)
