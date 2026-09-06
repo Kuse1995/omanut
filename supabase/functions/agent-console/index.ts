@@ -494,7 +494,7 @@ serve(async (req) => {
             console.error("[AGENT-CONSOLE] plan revision failed:", motionRes?.error?.message || motionRes?.data?.error || "no shots returned");
             reply = "The revision pass hiccuped - tell me the change again in a moment.";
           } else {
-            const previews = await generateStoryboards(planData, revisionBrief, 2);
+            const previews = await generateStoryboards(planData, revisionBrief, 2, refImage);
             const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), previews, reference_image: refImage, created_at: new Date().toISOString() };
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
@@ -535,7 +535,7 @@ serve(async (req) => {
       };
       // STORYBOARD PREVIEWS: a generated still per planned scene (credit-guarded:
       // only when the balance covers the frames PLUS one hero video render).
-      async function generateStoryboards(planData: any, briefText: string, cap: number): Promise<{ n: number; url: string }[]> {
+      async function generateStoryboards(planData: any, briefText: string, cap: number, refUrl?: string | null): Promise<{ n: number; url: string }[]> {
         const previewShots = (planData.shots || []).slice(0, cap);
         const frameCount = previewShots.length;
         const balance = Number((company as any)?.credit_balance ?? 0);
@@ -548,8 +548,9 @@ serve(async (req) => {
         const styleKey = String(planData.style || "cinematic");
         const genResults = await Promise.all(previewShots.map((s: any) =>
           generateImageSmart({
-            prompt: "Storyboard still frame for a " + (MOTION_STYLE_LABELS[styleKey] || styleKey) + " marketing video. Shot " + s.n + " of " + planData.shots.length + ": " + String(s.action || "") + ". Camera: " + (s.camera || "directors choice") + (s.lighting ? ". Lighting: " + s.lighting : "") + ". Overall concept: " + briefText.slice(0, 300) + ". Cinematic single still frame, no text, no captions, no words on screen.",
+            prompt: "Storyboard still frame for a " + (MOTION_STYLE_LABELS[styleKey] || styleKey) + " marketing video. Shot " + s.n + " of " + planData.shots.length + ": " + String(s.action || "") + ". Camera: " + (s.camera || "directors choice") + (s.lighting ? ". Lighting: " + s.lighting : "") + ". Overall concept: " + briefText.slice(0, 300) + ". Cinematic single still frame, no text, no captions, no words on screen." + (refUrl ? " HARD REFERENCE LOCK: the attached reference image is the exact product/interface — reproduce its layout, colours and branding pixel-faithfully in any shot that shows the product; only environment, framing and lighting may change." : ""),
             aspectRatio: "16:9",
+            ...(refUrl ? { inputImageUrls: [refUrl] } : {}),
           }).then((g: any) => {
             const match = String(g.imageBase64).match(/^data:(image\/[\w+]+);base64,(.+)$/);
             if (!match) throw new Error("unexpected image payload");
