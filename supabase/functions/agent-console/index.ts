@@ -491,11 +491,11 @@ serve(async (req) => {
           const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: revisionBrief.slice(0, 900), plan_only: true } });
           const planData = motionRes?.data;
           if (motionRes?.error || motionRes?.data?.error || !planData?.shots?.length) {
+            console.error("[AGENT-CONSOLE] plan revision failed:", motionRes?.error?.message || motionRes?.data?.error || "no shots returned");
             reply = "The revision pass hiccuped - tell me the change again in a moment.";
           } else {
-            const previews = await generateStoryboards(planData, revisionBrief, 3);
-            const planRef = await findReferenceImage();
-            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), reference_image: refImage, previews, reference_image: planRef, created_at: new Date().toISOString() };
+            const previews = await generateStoryboards(planData, revisionBrief, 2);
+            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), previews, reference_image: refImage, created_at: new Date().toISOString() };
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
             const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
@@ -504,6 +504,7 @@ serve(async (req) => {
             assistantAttachments = previews.map((pr: any) => ({ url: pr.url, type: "image" }));
           }
         } catch (e7: any) {
+          console.error("[AGENT-CONSOLE] plan revision threw:", e7?.message || e7);
           reply = "The revision pass hiccuped - tell me the change again in a moment.";
         }
         preHandled = true;
