@@ -498,7 +498,14 @@ serve(async (req) => {
             const frameCount = previewShots.length;
             const balance = Number((company as any)?.credit_balance ?? 0);
             const previews: { n: number; url: string }[] = [];
-            if (frameCount > 0 && balance >= frameCount) {
+            // Preserve at least one video render: storyboards only when the
+            // balance covers the frames PLUS a hero render afterwards.
+            const RENDER_RESERVE = 3;
+            const storyboardsAffordable = frameCount > 0 && balance >= frameCount + RENDER_RESERVE;
+            if (frameCount > 0 && balance >= frameCount && !storyboardsAffordable) {
+              console.log("[AGENT-CONSOLE] storyboards skipped to preserve video credits (balance: " + balance + ")");
+            }
+            if (storyboardsAffordable) {
               const styleKey = String(planData.style || "cinematic");
               const genResults = await Promise.all(previewShots.map((s: any) =>
                 generateImageSmart({
@@ -526,7 +533,7 @@ serve(async (req) => {
             const styleLabel = String(planData.style || "cinematic").replace(/_/g, " ");
             const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
             const renderHint = 'Say "render it" and I will bring the hero shot to life - or tell me what to change.';
-            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + (previews.length ? "\n\nStoryboard previews attached (" + previews.length + " frame" + (previews.length > 1 ? "s" : "") + ", " + previews.length + " credit" + (previews.length > 1 ? "s" : "") + ")." : "") + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
+            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + (previews.length ? "\n\nStoryboard previews attached (" + previews.length + " frame" + (previews.length > 1 ? "s" : "") + ", " + previews.length + " credit" + (previews.length > 1 ? "s" : "") + ")." : (frameCount > 0 ? "\n\n(Skipped storyboard previews to preserve your video credits.)" : "")) + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
             action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style, previews };
             assistantAttachments = previews.map((pr: any) => ({ url: pr.url, type: "image" }));
           }
