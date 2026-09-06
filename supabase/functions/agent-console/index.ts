@@ -534,7 +534,7 @@ serve(async (req) => {
       };
       // STORYBOARD PREVIEWS: a generated still per planned scene (credit-guarded:
       // only when the balance covers the frames PLUS one hero video render).
-      const generateStoryboards = async (planData: any, briefText: string, cap: number): Promise<{ n: number; url: string }[]> => {
+      async function generateStoryboards(planData: any, briefText: string, cap: number): Promise<{ n: number; url: string }[]> {
         const previewShots = (planData.shots || []).slice(0, cap);
         const frameCount = previewShots.length;
         const balance = Number((company as any)?.credit_balance ?? 0);
