@@ -108,6 +108,10 @@ serve(async (req) => {
       script_override = null,
       image_urls = null,
       model_choice = null,
+      // Director-conversation modes: plan_only returns the shot plan WITHOUT
+      // rendering; approved_plan renders a plan the owner already approved.
+      plan_only = false,
+      approved_plan = null,
     } = body ?? {};
 
     const refs: string[] = Array.isArray(image_urls) ? image_urls.filter((u: any) => !!u) : [];
@@ -191,7 +195,9 @@ serve(async (req) => {
     // ── STAGE 1+2: MARKETING (Script Writer) + CREATIVE DIRECTOR ───────
     // When the caller supplies a full script (script_override), the user has
     // already done the creative work — it passes through verbatim and the
-    // sub-agents are skipped.
+    // sub-agents are skipped. approved_plan is the Director-conversation
+    // path: the owner already saw and approved this exact plan, so it is
+    // applied verbatim — no new creative decisions are made here.
     let script: any = {
       style: "cinematic",
       hook: String(brief),
@@ -207,7 +213,21 @@ serve(async (req) => {
     }];
     let heroIdx = 0;
 
-    if (!useScript) {
+    // approved_plan (Director-conversation render): the owner already saw and
+    // approved this exact plan — apply it verbatim, no new creative decisions.
+    if (approved_plan && typeof approved_plan === "object" && !useScript) {
+      try {
+        const ap: any = approved_plan;
+        if (ap.script) script = ap.script;
+        if (Array.isArray(ap.shots) && ap.shots.length) shots = ap.shots;
+        heroIdx = Math.min(Math.max(Number(ap.hero_shot) || 1, 1), shots.length) - 1;
+        console.log("[OMANUT-MOTION] approved plan applied:", shots.length, "shots");
+      } catch (apErr) {
+        console.error("[OMANUT-MOTION] approved_plan invalid:", apErr);
+      }
+    }
+
+    if (!useScript && !(approved_plan && typeof approved_plan === "object")) {
     const scriptSystem = [
       "You are the Marketing Strategist for " + (company.name || "a business") + ".",
       facts ? facts : "",
@@ -243,6 +263,22 @@ serve(async (req) => {
     shots = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : shots;
     heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
     } // end sub-agent bypass (script_override)
+
+    // plan_only (Director-conversation preview): return the plan WITHOUT
+    // rendering. The console shows it to the owner for approval.
+    if (plan_only) {
+      return new Response(JSON.stringify({
+        ok: true,
+        plan_only: true,
+        style: script.style ?? null,
+        hook: script.hook ?? null,
+        beats: script.beats ?? [],
+        cta: script.cta ?? null,
+        voiceover: script.voiceover ?? null,
+        shots,
+        hero_shot: heroIdx + 1,
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const heroShot = shots[heroIdx];
 
