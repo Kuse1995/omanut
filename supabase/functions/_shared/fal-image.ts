@@ -155,6 +155,29 @@ export async function generateImageSmart(options: {
   model?: string;
 }): Promise<{ imageBase64: string; text: string | null; source: string }> {
   const errors: string[] = [];
+  // THE ASTRA PATH: when IMAGE_PROVIDER=openai, the creative brain's engine
+  // paints the frames (OpenAI images API) — fal stays as the fallback.
+  if (Deno.env.get("IMAGE_PROVIDER") === "openai") {
+    try {
+      const apiKey = Deno.env.get("OPENAI_API_KEY");
+      if (!apiKey) throw new Error("OPENAI_API_KEY missing");
+      const model = Deno.env.get("OPENAI_IMAGE_MODEL") || "gpt-image-1";
+      const ar = options.aspectRatio || "1:1";
+      const size = ar === "16:9" || ar === "4:3" ? "1536x1024" : ar === "9:16" || ar === "3:4" ? "1024x1536" : "1024x1024";
+      const r = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, prompt: options.prompt.slice(0, 32000), size, n: 1 }),
+      });
+      const d: any = await r.json().catch(() => ({}));
+      const b64 = d?.data?.[0]?.b64_json;
+      if (!r.ok || !b64) throw new Error("openai images " + r.status + ": " + String(d?.error?.message || "no image").slice(0, 160));
+      console.log("[FAL-IMAGE] generated via openai:", model);
+      return { imageBase64: "data:image/png;base64," + b64, text: null, source: "openai/" + model };
+    } catch (e: any) {
+      errors.push("openai: " + (e?.message || e));
+    }
+  }
   if (FAL_KEY) {
     try {
       const r = await falImageGenerate(options);
