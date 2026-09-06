@@ -33,30 +33,44 @@ const corsHeaders = {
 // (Stage 1) locks the style; the Director (Stage 2) obeys its cinematography.
 const MOTION_STYLES: Record<string, { label: string; direction: string }> = {
   saas_launch: {
+    cameras: ["slow push-in on the UI","precise lateral slide across cards","crash-zoom to a metric","top-down over the dashboard"],
+    lighting: ["clean studio glow","soft screen light on dark UI","bright minimal daylight"],
     label: "SaaS launch video",
     direction: "Product-as-hero. Motion built around UI: dashboard glows, cursor moves, card slides, metric count-ups, clean dark or light surfaces with generous negative space. Camera: subtle push-ins and precise lateral slides, never handheld. Pacing: confident, 2-second beats, one feature per beat. Seedance: clean geometric motion, crisp light sweeps across screens, no clutter.",
   },
   real_footage_motion: {
+    cameras: ["handheld follow matching the plate","locked-off with overlay pops","slow tracking with the subject"],
+    lighting: ["natural daylight","practical shop lighting","warm evening ambient"],
     label: "Motion on top of real footage",
     direction: "Live-action base with graphics layered on: tracking overlays, kinetic captions, arrows and callouts pinned to moving subjects, price tags popping on products. Camera: match the documentary feel of the base plate, natural sway allowed. Pacing: punchy, beat-synced pops. Seedance: when an input frame from real footage is attached, extend ITS motion and perspective; keep the plate stable and let the drama come from what appears over it.",
   },
   hypermotion_product: {
+    cameras: ["360 orbit","crash-zoom to macro detail","speed-ramped spin","dramatic pull-back"],
+    lighting: ["single dramatic key with hard shadows","glossy studio sweep","colored rim lights"],
     label: "Hypermotion product ad",
     direction: "Extreme macro product worship. Dramatic lighting sweeps, speed-ramped spins, droplet and particle bursts, slow-mo luxury into snap stops. Camera: orbit, whip to macro, crash-zoom on the hero detail. Pacing: high contrast, slow moments then explosive transitions. Seedance: glossy surfaces, specular highlights, shallow depth of field, premium commercial finish.",
   },
   flythrough_3d: {
+    cameras: ["continuous gimbal glide","doorway reveal push","rising crane to a wide","corner-wrap orbit"],
+    lighting: ["dawn golden-hour through windows","dusk warm interiors","cool morning haze"],
     label: "3D flythrough",
     direction: "Architectural and spatial flythroughs: continuous gimbal glides through rooms and structures, reveals through doorways and around corners, dawn or dusk light through windows, scale plays between intimate and grand. Camera: one continuous motivated move per shot, glide, orbit a volume, rise to a wide view. Pacing: smooth, unhurried, prestige. Seedance: consistent spatial logic between shots, volumetric light, no cuts mid-glide.",
   },
   explainer_2d: {
+    cameras: ["panel slide left","element pop with easing","wipe transition","zoom into an icon"],
+    lighting: ["flat even color fields","soft pastel gradient","high-contrast minimal"],
     label: "2D explainer",
     direction: "Flat-vector illustration language: clean shapes, limited palette, icon transitions, characters with simple gestures, background color shifts per beat. Camera: dynamic 2D framing, panels slide, elements pop with easing, wipe transitions. Pacing: friendly and clear, one idea per beat. Seedance: cohesive 2D world, crisp edges, playful but disciplined motion, no photoreal elements.",
   },
   editorial_explainer: {
+    cameras: ["deliberate drift across the layout","headline-first tilt-up","measured dolly along the grid"],
+    lighting: ["paper-white even light","ink-dark contrast","warm print-shop tone"],
     label: "Editorial explainer",
     direction: "Magazine-grade motion: kinetic serif headlines, paper and ink texture grain, refined grids, restrained color, elegant negative space, footage treated like editorial photography. Camera: deliberate drifts and print-inspired set moves. Pacing: measured, sophisticated, headline-first. Seedance: tactile textures, refined layout motion, understated but premium.",
   },
   cinematic: {
+    cameras: ["slow push-in","wide establishing","close-up insert"],
+    lighting: ["naturalistic","motivated practical","dramatic key"],
     label: "Cinematic (directors choice)",
     direction: "Full creative freedom with film discipline: motivated camera, naturalistic light, emotional pacing. Seedance: filmic grain, believable physics, one strong idea per shot.",
   },
@@ -67,6 +81,49 @@ const STYLE_KEYS = Object.keys(MOTION_STYLES);
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const FAL_TEXT_MODEL = "fal-ai/bytedance/seedance/v1/pro/text-to-video";
 const FAL_IMAGE_MODEL = "fal-ai/bytedance/seedance/v1/pro/image-to-video";
+
+// Labeled-line parsing (model-proof): GLM answers prose far more reliably
+// than strict JSON, so the plan stages use plain "KEY: value" lines and code
+// assembles the structure. Format: STYLE:/HOOK:/BEAT n:/CTA:/VO:
+function parseLabeled(text: string): { fields: Record<string, string>; beats: string[] } {
+  const fields: Record<string, string> = {};
+  const beats: string[] = [];
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z][A-Za-z 0-9]*?)\s*:\s*(.+)$/);
+    if (!m) continue;
+    const key = m[1].trim().toUpperCase();
+    const val = m[2].trim();
+    if (/^BEAT\b/.test(key)) beats.push(val);
+    else fields[key] = val;
+  }
+  return { fields, beats };
+}
+
+// Shot-line parsing for Stage 2: "SHOT n CAMERA:", "SHOT n LIGHT:", "SHOT n ACTION:", "HERO: n"
+function parseShotLines(text: string): { list: any[]; hero: number } {
+  const list: any[] = [];
+  let hero = 1;
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const m = line.match(/^\s*SHOT\s*(\d+)\s+(CAMERA|LIGHT|ACTION)\s*:\s*(.+)$/i);
+    if (!m) {
+      const h = line.match(/^\s*HERO\s*:\s*(\d+)/i);
+      if (h) hero = Number(h[1]);
+      continue;
+    }
+    const n = Number(m[1]);
+    let shot = list.find((s: any) => s.n === n);
+    if (!shot) { shot = { n, camera: "", lighting: "", action: "" }; list.push(shot); }
+    const k = m[2].toUpperCase();
+    if (k === "CAMERA") shot.camera = m[3].trim();
+    else if (k === "LIGHT") shot.lighting = m[3].trim();
+    else shot.action = m[3].trim();
+  }
+  const complete = list.filter((s: any) => s.action);
+  for (const s of complete) {
+    s.seedance_prompt = s.action + (s.camera ? " Camera: " + s.camera + "." : "") + " No on-screen text.";
+  }
+  return { list: complete, hero };
+}
 
 function extractJson(text: string): any | null {
   if (!text) return null;
@@ -121,9 +178,6 @@ serve(async (req) => {
     }
 
     const FAL_KEY = Deno.env.get("FAL_KEY");
-    if (!FAL_KEY) {
-      return new Response(JSON.stringify({ error: "FAL_KEY not configured on the project" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
 
     const { data: company } = await supabase
       .from("companies")
@@ -228,34 +282,60 @@ serve(async (req) => {
     }
 
     if (!useScript && !(approved_plan && typeof approved_plan === "object")) {
+    // STAGE 1: MARKETING STRATEGIST - plain labeled lines (model-proof:
+    // GLM answers prose far more reliably than strict JSON; code structures it).
     const scriptSystem = [
-      "You are the Marketing Strategist for " + (company.name || "a business") + ".",
+      "You are the Marketing Strategist for " + ((company as any)?.name || "a business") + ".",
       facts ? facts : "",
       brandBlock ? brandBlock : "",
       "Convert the brief into a video script plan. The FIRST 2 SECONDS must hook (a bold visual statement, a surprising motion, or the product as hero).",
-      "STYLE LIBRARY - pick the ONE style that best serves this brief and obey its direction:",
-      'Output STRICT JSON only - no markdown, no code fences: {"style": "<one of: ' + STYLE_KEYS.join(" | ") + '>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
+      "Reply in EXACTLY this plain-text format, one line each, in this order, nothing else:",
+      "STYLE: <exactly one of: " + STYLE_KEYS.join(" | ") + ">",
+      "HOOK: <the 2-second opening idea>",
+      "BEAT 1: <visual moment that fits a 5-second shot>",
+      "BEAT 2: <visual moment>",
+      "BEAT 3: <visual moment>",
+      "CTA: <closing call to action>",
+      "VO: <spoken line for beat 1> | <spoken line for beat 2> | <spoken line for beat 3>",
+      "2-4 BEAT lines. No markdown, no bullets, no extra lines.",
     ].filter(Boolean).join("\n");
     const scriptMsgs = [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }];
     const scriptRes = await harnessChatWithFallback(scriptMsgs, [], { companyId: company_id, metadata: company?.metadata || null, mode: "content" });
-    script = extractJson(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "") || script;
-    // GLM sometimes answers in prose - one strict-JSON retry before falling back.
-    if (!script.voiceover) {
-      const retryRes = await harnessChatWithFallback(
-        [...scriptMsgs, { role: "assistant", content: String(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "").slice(0, 800) }, { role: "user", content: "That was not valid JSON. Reply AGAIN with ONLY the JSON object - start with { and end with }. No prose, no markdown." }],
-        [],
-        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
-      );
-      script = extractJson(retryRes.ok && retryRes.message?.content ? retryRes.message.content : "") || script;
+    const parsed1 = parseLabeled(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "");
+    let styleLock = String(parsed1.fields.STYLE || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!MOTION_STYLES[styleLock]) {
+      const hay = String(brief).toLowerCase();
+      styleLock = /saas|software|dashboard|bms|platform|app/.test(hay) ? "saas_launch"
+        : /flythrough|real estate|property|house|apartment/.test(hay) ? "flythrough_3d"
+        : /2d|explainer|cartoon/.test(hay) ? "explainer_2d"
+        : /footage|film shoot|video shoot/.test(hay) ? "real_footage_motion"
+        : "cinematic";
     }
+    const beats = parsed1.beats.length >= 2 ? parsed1.beats.slice(0, 4)
+      : (String(brief).split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 3).length >= 2
+        ? String(brief).split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 3)
+        : [String(brief)]);
+    script = {
+      style: styleLock,
+      hook: parsed1.fields.HOOK || beats[0] || String(brief),
+      beats,
+      cta: parsed1.fields.CTA || "",
+      voiceover: parsed1.fields.VO || beats.join(" "),
+    };
 
-    // ── STAGE 2: CREATIVE DIRECTOR ─────────────────────────────────────
+    // STAGE 2: CREATIVE DIRECTOR - shot lines from the model, deterministic
+    // assembly from beats as the guarantee (2-4 shots, always).
+    const st = MOTION_STYLES[script.style] || MOTION_STYLES.cinematic;
     const directorSystem = [
-      "You are the Creative Director and cinematographer. Convert the marketing plan into a shot-by-shot plan for Seedance (5-second shots).",
-      "LOCKED STYLE: " + (MOTION_STYLES[script.style]?.label || script.style || "cinematic") + ".",
-      "STYLE DIRECTION (obey this cinematography in every shot): " + (MOTION_STYLES[script.style]?.direction || "Film discipline: motivated camera, naturalistic light, one strong idea per shot."),
-      'Output STRICT JSON only — no markdown, no code fences: {"shots": [{"n": 1, "camera": "<camera movement, e.g. slow push-in / orbit / whip pan>", "lighting": "<lighting setup>", "action": "<what happens>", "seedance_prompt": "<ONE paragraph: subject + action + camera movement + lighting + style. No text overlays, no captions, no on-screen words.>"}], "hero_shot": 1}.',
-      "2-4 shots. Each seedance_prompt must be self-contained (the model sees only that prompt). Shot n=hero_shot is the strongest single frame of the whole ad.",
+      "You are the Creative Director and cinematographer for " + ((company as any)?.name || "a business") + ".",
+      "LOCKED STYLE: " + st.label + ". STYLE DIRECTION (obey in every shot): " + st.direction,
+      "Convert the marketing plan into shots. Reply in EXACTLY this plain-text format per shot, nothing else:",
+      "SHOT 1 CAMERA: <camera movement>",
+      "SHOT 1 LIGHT: <lighting setup>",
+      "SHOT 1 ACTION: <what happens, one vivid sentence>",
+      "(repeat for SHOT 2, SHOT 3...)",
+      "HERO: <the shot number that is the strongest>",
+      "2-4 shots. No markdown, no extra lines.",
     ].join("\n");
     const directorRes = await harnessChatWithFallback(
       [
@@ -265,19 +345,25 @@ serve(async (req) => {
       [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
-    let plan = extractJson(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
-    if (!plan || !Array.isArray(plan.shots) || plan.shots.length < 2) {
-      // One strict-JSON retry - single-shot plans are usually a parse failure.
-      const retryPlan = await harnessChatWithFallback(
-        [[{ role: "system", content: directorSystem }, { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) }][0], { role: "assistant", content: String(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "").slice(0, 800) }, { role: "user", content: "That was not valid JSON or had too few shots. Reply AGAIN with ONLY the JSON object with 2-4 shots - start with { and end with }. No prose." }],
-        [],
-        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
-      );
-      plan = extractJson(retryPlan.ok && retryPlan.message?.content ? retryPlan.message.content : "") || plan;
+    const parsed2 = parseShotLines(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    if (parsed2.list.length >= 2) {
+      shots = parsed2.list;
+    } else {
+      // Deterministic assembly: each beat becomes a shot with the style's own
+      // camera/lighting vocabulary - the plan can never be a lonely single shot.
+      const cams = st.cameras || ["slow push-in"];
+      const lights = st.lighting || ["natural"];
+      shots = script.beats.slice(0, 4).map((b: string, i: number) => ({
+        n: i + 1,
+        camera: cams[i % cams.length],
+        lighting: lights[i % lights.length],
+        action: b,
+        seedance_prompt: b + ". Camera: " + cams[i % cams.length] + ". " + st.direction + " Commercial quality, no on-screen text.",
+      }));
     }
-    shots = Array.isArray(plan?.shots) && plan.shots.length ? plan.shots : shots;
-    heroIdx = Math.min(Math.max(Number(plan?.hero_shot) || 1, 1), shots.length) - 1;
+    heroIdx = Math.min(Math.max(parsed2.hero || 1, 1), shots.length) - 1;
     } // end sub-agent bypass (script_override)
+
 
     // plan_only (Director-conversation preview): return the plan WITHOUT
     // rendering. The console shows it to the owner for approval.
@@ -293,6 +379,9 @@ serve(async (req) => {
         shots,
         hero_shot: heroIdx + 1,
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (!FAL_KEY) {
+      return new Response(JSON.stringify({ error: "FAL_KEY not configured on the project" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const heroShot = shots[heroIdx];
