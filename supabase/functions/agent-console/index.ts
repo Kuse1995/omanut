@@ -460,6 +460,23 @@ serve(async (req) => {
         preHandled = true;
       }
 
+      // REFERENCE IMAGE: this turn's media, else the newest user-attached image in
+      // this company's console threads (e.g. the BMS UI screenshot).
+      const findReferenceImage = async (): Promise<string | null> => {
+        if (postMediaUrl) return postMediaUrl;
+        try {
+          const { data: convsR } = await supabase.from("conversations").select("id").eq("company_id", company.id).like("phone", "agent:" + company.id + "%").limit(20);
+          const cidsR = (convsR || []).map((c: any) => c.id);
+          if (!cidsR.length) return null;
+          const { data: umR } = await supabase.from("messages").select("attachments, created_at").in("conversation_id", cidsR).eq("role", "user").not("attachments", "is", null).order("created_at", { ascending: false }).limit(8);
+          for (const row of (umR || [])) {
+            const atts = Array.isArray(row.attachments) ? row.attachments : [];
+            const img = atts.find((a: any) => a.type === "image" && a.url);
+            if (img) return String(img.url);
+          }
+        } catch { /* best-effort */ }
+        return null;
+      };
       // ── PLAN REVISION: change the pending video plan (references, casting, shots) ──
       const pendingPlanRev = ((company as any)?.metadata?.last_video_plan) || null;
       const revisePlanIntent = !!pendingPlanRev && !wantsRender && !captionIntent && !imagePostIntent && t.length <= 260
@@ -468,21 +485,7 @@ serve(async (req) => {
       if (revisePlanIntent) {
         // Reference image: this turn's media, else the newest user-attached image
         // in this company's console threads (e.g. the BMS UI screenshot).
-        let refImage: string | null = postMediaUrl;
-        if (!refImage) {
-          try {
-            const { data: convs3 } = await supabase.from("conversations").select("id").eq("company_id", company.id).like("phone", "agent:" + company.id + "%").limit(20);
-            const cids = (convs3 || []).map((c: any) => c.id);
-            if (cids.length) {
-              const { data: um } = await supabase.from("messages").select("attachments, created_at").in("conversation_id", cids).eq("role", "user").not("attachments", "is", null).order("created_at", { ascending: false }).limit(8);
-              for (const row of (um || [])) {
-                const atts = Array.isArray(row.attachments) ? row.attachments : [];
-                const img = atts.find((a: any) => a.type === "image" && a.url);
-                if (img) { refImage = String(img.url); break; }
-              }
-            }
-          } catch { /* best-effort */ }
-        }
+        const refImage = await findReferenceImage();
         const revisionBrief = String(pendingPlanRev.brief || "") + "\n\nOWNER REVISION REQUEST: " + message + (refImage ? "\n\nA REFERENCE IMAGE is available: " + refImage + " - shots that show the product must feature exactly this interface, and any people shown should be Zambian urban business people unless the owner says otherwise." : "");
         try {
           const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: revisionBrief.slice(0, 900), plan_only: true } });
@@ -491,7 +494,8 @@ serve(async (req) => {
             reply = "The revision pass hiccuped - tell me the change again in a moment.";
           } else {
             const previews = await generateStoryboards(planData, revisionBrief, 3);
-            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), reference_image: refImage, previews, created_at: new Date().toISOString() };
+            const planRef = await findReferenceImage();
+            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: revisionBrief.slice(0, 900), reference_image: refImage, previews, reference_image: planRef, created_at: new Date().toISOString() };
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
             const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
