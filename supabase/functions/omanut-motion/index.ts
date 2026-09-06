@@ -485,6 +485,7 @@ serve(async (req) => {
           brief,
           model,
           input_image_url,
+          image_urls: refs.length ? refs : null,
           fal_status_url: submitJson.status_url ?? null,
           fal_response_url: submitJson.response_url ?? null,
           resolution,

@@ -226,9 +226,51 @@ async function handleSeedancePoll(supabase: any, job: any) {
 
   const resultRes = await fetch(responseUrl, { headers: { Authorization: `Key ${FAL_KEY}` } });
   if (!resultRes.ok) {
+    // BRAND-PRESERVING LADDER: capture fal's actual complaint, then degrade
+    // one rung instead of dying - r2v -> i2v (reference as first frame) -> t2v.
+    const errBody = await resultRes.text().catch(() => "");
+    const stored: any = job.scheduled_post_data || {};
+    const refs: string[] = Array.isArray(stored.image_urls) ? stored.image_urls.filter(Boolean) : [];
+    const alreadyDegraded = !!stored.degraded;
+    if (!alreadyDegraded && FAL_KEY) {
+      const attempt = async (endpoint: string, body: Record<string, unknown>) => {
+        const r = await fetch(`${FAL_QUEUE_BASE}/${endpoint}`, {
+          method: "POST",
+          headers: { Authorization: `Key ${FAL_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return { r, j: await r.json().catch(() => ({})) };
+      };
+      let resub: { r: Response; j: any } | null = null;
+      try {
+        if (refs.length) {
+          resub = await attempt("fal-ai/bytedance/seedance/v1/pro/image-to-video", {
+            prompt: job.prompt, image_url: refs[0], aspect_ratio: job.aspect_ratio || "9:16", resolution: "720p", duration: "5",
+          });
+        }
+        if ((!resub || !resub.r.ok || !resub.j.request_id)) {
+          resub = await attempt("fal-ai/bytedance/seedance/v1/pro/text-to-video", {
+            prompt: job.prompt, aspect_ratio: job.aspect_ratio || "9:16", resolution: "720p", duration: "5",
+          });
+        }
+      } catch { resub = null; }
+      if (resub && resub.r.ok && resub.j.request_id) {
+        await supabase.from("video_generation_jobs").update({
+          operation_name: resub.j.request_id,
+          fal_status_url: resub.j.status_url ?? null,
+          fal_response_url: resub.j.response_url ?? null,
+          status: "pending",
+          poll_count: 0,
+          updated_at: new Date().toISOString(),
+          scheduled_post_data: { ...stored, degraded: true, degraded_note: "original result fetch failed: " + resultRes.status },
+        }).eq("id", job.id);
+        console.log("[POLL-VIDEO] degraded resubmitted for job " + job.id);
+        return;
+      }
+    }
     await supabase
       .from('video_generation_jobs')
-      .update({ status: 'failed', error_message: `fal result fetch failed: ${resultRes.status}`, updated_at: new Date().toISOString() })
+      .update({ status: 'failed', error_message: `fal result fetch failed: ${resultRes.status} - ${errBody.slice(0, 280)}`, updated_at: new Date().toISOString() })
       .eq('id', job.id);
     await sendWhatsAppMessage(job, `❌ Video completed but the result could not be fetched (${resultRes.status}).`);
     return;
