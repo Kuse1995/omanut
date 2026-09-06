@@ -29,7 +29,7 @@ const corsHeaders = {
 };
 
 // Deploy marker — bump per release; lets us verify what's actually live with one probe.
-const AGENT_CONSOLE_BUILD = "2026-09-06-thread-rail-v4";
+const AGENT_CONSOLE_BUILD = "2026-09-06-director-v5";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -428,6 +428,27 @@ serve(async (req) => {
         system += "\n\nPENDING APPROVAL: one drafted post is awaiting the owner's approval. It starts with: \"" + String(pendingPost.content).slice(0, 120) + "\". If the owner confirms or asks to post it WITHOUT adding new content, reply with exactly APPROVE: on its own line — or APPROVE NOW: if they want it live immediately. Never draft a duplicate POST.";
       }
 
+      // ── Pending video plan: "render it" after the Director showed the plan ──
+      const pendingPlan = ((company as any)?.metadata?.last_video_plan) || null;
+      const wantsRender = !!pendingPlan && /\b(render|go ahead|approve|do it|shoot)\b/i.test(t) && !imagePostIntent && !captionIntent;
+      if (wantsRender) {
+        try {
+          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: String(pendingPlan.brief || ""), approved_plan: { script: pendingPlan.script, shots: pendingPlan.shots, hero_shot: pendingPlan.hero_shot } } });
+          if (motionRes?.error || motionRes?.data?.error) {
+            reply = "The render engine hiccuped — say \"render it\" again in a moment.";
+          } else {
+            reply = "🎬 Rendering your approved hero shot now — it lands in your Media Studio in 1-3 minutes. I will queue the remaining shots next.";
+            action = { type: "video", job_id: motionRes.data?.job_id ?? null, plan: pendingPlan };
+            const nextMeta = { ...(((company as any)?.metadata) || {}) };
+            delete nextMeta.last_video_plan;
+            await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
+          }
+        } catch (e6: any) {
+          reply = "The render engine hiccuped — say \"render it\" again in a moment.";
+        }
+        preHandled = true;
+      }
+
       // ── Deterministic creation intents: image / video ──────────────────
       // The farm brain doesn't reliably emit tool escapes, so creation is
       // detected HERE; the model is used only as a brief writer.
@@ -454,12 +475,19 @@ serve(async (req) => {
       if (videoIntent) {
         const brief = await writeBrief("video");
         try {
-          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: brief.slice(0, 500), user_id: user.id } });
+          const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: brief.slice(0, 500), plan_only: true } });
           if (motionRes?.error || motionRes?.data?.error) {
             reply = "I couldn't start the video render just now — please try again in a moment.";
           } else {
-            reply = "🎬 Video render started — it lands in your Media Studio in 1-3 minutes.";
-            action = { type: "video", job_id: motionRes.data?.job_id ?? null, brief };
+            const planData = motionRes.data;
+            const plan = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), created_at: new Date().toISOString() };
+            const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
+            await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
+            const styleLabel = String(planData.style || "cinematic").replace(/_/g, " ");
+            const shotLines = planData.shots.map((s: any) => "• Shot " + s.n + " (" + (s.camera || "directors choice") + "): " + String(s.action || "").slice(0, 90)).join("\n");
+            const renderHint = 'Say "render it" and I will bring the hero shot to life - or tell me what to change.';
+            reply = "🎬 My direction for a " + styleLabel + " - hook: " + String(planData.hook || brief).slice(0, 80) + "\n\n" + shotLines + "\n\nVoiceover: " + String(planData.voiceover || "(none)").slice(0, 140) + "\n\n" + renderHint;
+            action = { type: "video_plan", shots: planData.shots, hero_shot: planData.hero_shot, style: planData.style };
           }
         } catch (e5: any) {
           reply = "I couldn't start the video render just now — please try again in a moment.";
