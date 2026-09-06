@@ -325,7 +325,16 @@ serve(async (req) => {
     ].filter(Boolean).join("\n");
     const scriptMsgs = [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }];
     const scriptRes = await creativeBrain(scriptMsgs, { companyId: company_id, metadata: company?.metadata || null, mode: "content" });
-    const parsed1 = parseLabeled(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "");
+    let parsed1 = parseLabeled(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "");
+    if (!parsed1.fields.STYLE && parsed1.beats.length === 0) {
+      // GLM answered in prose - one labeled-format retry with its reply quoted.
+      const retry1 = await creativeBrain(
+        [...scriptMsgs, { role: "assistant", content: String(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "").slice(0, 600) }, { role: "user", content: "Reply AGAIN in EXACTLY the labeled-line format: STYLE: <one style key> on its own line, then HOOK:, BEAT 1:, BEAT 2:, BEAT 3:, CTA:, VO:. No other text." }],
+        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
+      );
+      const p1b = parseLabeled(retry1.ok && retry1.message?.content ? retry1.message.content : "");
+      if (p1b.fields.STYLE || p1b.beats.length) parsed1 = p1b;
+    }
     let styleLock = String(parsed1.fields.STYLE || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
     if (!MOTION_STYLES[styleLock]) {
       const hay = String(brief).toLowerCase();
@@ -369,7 +378,15 @@ serve(async (req) => {
       [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
-    const parsed2 = parseShotLines(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    let parsed2 = parseShotLines(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
+    if (parsed2.list.length < 2) {
+      const retry2 = await creativeBrain(
+        [{ role: "system", content: directorSystem }, { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) }, { role: "assistant", content: String(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "").slice(0, 600) }, { role: "user", content: "Reply AGAIN in EXACTLY the shot-line format: for each shot - SHOT n CAMERA:, SHOT n LIGHT:, SHOT n ACTION: - then HERO: <number>. 2-4 shots. No other text." }],
+        { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
+      );
+      const p2b = parseShotLines(retry2.ok && retry2.message?.content ? retry2.message.content : "");
+      if (p2b.list.length >= 2) parsed2 = p2b;
+    }
     if (parsed2.list.length >= 2) {
       shots = parsed2.list;
     } else {
