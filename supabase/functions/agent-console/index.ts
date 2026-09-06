@@ -570,14 +570,15 @@ serve(async (req) => {
       }
       if (videoIntent) {
         const brief = await writeBrief("video");
+        const vidRefImage = await findReferenceImage();
         try {
           const motionRes: any = await supabase.functions.invoke("omanut-motion", { body: { company_id: company.id, brief: brief.slice(0, 500), plan_only: true } });
           if (motionRes?.error || motionRes?.data?.error) {
             reply = "I couldn't start the video render just now — please try again in a moment.";
           } else {
             const planData = motionRes.data;
-            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), created_at: new Date().toISOString() };
-            const previews = await generateStoryboards(planData, brief, 3);
+            const plan: any = { script: { style: planData.style, hook: planData.hook, beats: planData.beats, cta: planData.cta, voiceover: planData.voiceover }, shots: planData.shots, hero_shot: planData.hero_shot, brief: brief.slice(0, 500), reference_image: vidRefImage, created_at: new Date().toISOString() };
+            const previews = await generateStoryboards(planData, brief, 3, vidRefImage);
             if (previews.length) plan.previews = previews;
             const nextMeta = { ...(((company as any)?.metadata) || {}), last_video_plan: plan };
             await supabase.from("companies").update({ metadata: nextMeta }).eq("id", company.id);
