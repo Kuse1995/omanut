@@ -26,6 +26,44 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ── THE STYLE ENGINE ────────────────────────────────────────────────────
+// The 6 motion-design styles companies pay $300-$3,000 for (the own-
+// Higgsfield menu). Each entry is production direction: visual language,
+// camera/motion vocabulary, pacing, and Seedance-specific guidance. GLM-5.3
+// (Stage 1) locks the style; the Director (Stage 2) obeys its cinematography.
+const MOTION_STYLES: Record<string, { label: string; direction: string }> = {
+  saas_launch: {
+    label: "SaaS launch video",
+    direction: "Product-as-hero. Motion built around UI: dashboard glows, cursor moves, card slides, metric count-ups, clean dark or light surfaces with generous negative space. Camera: subtle push-ins and precise lateral slides, never handheld. Pacing: confident, 2-second beats, one feature per beat. Seedance: clean geometric motion, crisp light sweeps across screens, no clutter.",
+  },
+  real_footage_motion: {
+    label: "Motion on top of real footage",
+    direction: "Live-action base with graphics layered on: tracking overlays, kinetic captions, arrows and callouts pinned to moving subjects, price tags popping on products. Camera: match the documentary feel of the base plate, natural sway allowed. Pacing: punchy, beat-synced pops. Seedance: when an input frame from real footage is attached, extend ITS motion and perspective; keep the plate stable and let the drama come from what appears over it.",
+  },
+  hypermotion_product: {
+    label: "Hypermotion product ad",
+    direction: "Extreme macro product worship. Dramatic lighting sweeps, speed-ramped spins, droplet and particle bursts, slow-mo luxury into snap stops. Camera: orbit, whip to macro, crash-zoom on the hero detail. Pacing: high contrast, slow moments then explosive transitions. Seedance: glossy surfaces, specular highlights, shallow depth of field, premium commercial finish.",
+  },
+  flythrough_3d: {
+    label: "3D flythrough",
+    direction: "Architectural and spatial flythroughs: continuous gimbal glides through rooms and structures, reveals through doorways and around corners, dawn or dusk light through windows, scale plays between intimate and grand. Camera: one continuous motivated move per shot, glide, orbit a volume, rise to a wide view. Pacing: smooth, unhurried, prestige. Seedance: consistent spatial logic between shots, volumetric light, no cuts mid-glide.",
+  },
+  explainer_2d: {
+    label: "2D explainer",
+    direction: "Flat-vector illustration language: clean shapes, limited palette, icon transitions, characters with simple gestures, background color shifts per beat. Camera: dynamic 2D framing, panels slide, elements pop with easing, wipe transitions. Pacing: friendly and clear, one idea per beat. Seedance: cohesive 2D world, crisp edges, playful but disciplined motion, no photoreal elements.",
+  },
+  editorial_explainer: {
+    label: "Editorial explainer",
+    direction: "Magazine-grade motion: kinetic serif headlines, paper and ink texture grain, refined grids, restrained color, elegant negative space, footage treated like editorial photography. Camera: deliberate drifts and print-inspired set moves. Pacing: measured, sophisticated, headline-first. Seedance: tactile textures, refined layout motion, understated but premium.",
+  },
+  cinematic: {
+    label: "Cinematic (directors choice)",
+    direction: "Full creative freedom with film discipline: motivated camera, naturalistic light, emotional pacing. Seedance: filmic grain, believable physics, one strong idea per shot.",
+  },
+};
+
+const STYLE_KEYS = Object.keys(MOTION_STYLES);
+
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 const FAL_TEXT_MODEL = "fal-ai/bytedance/seedance/v1/pro/text-to-video";
 const FAL_IMAGE_MODEL = "fal-ai/bytedance/seedance/v1/pro/image-to-video";
@@ -175,9 +213,8 @@ serve(async (req) => {
       facts ? facts : "",
       brandBlock ? brandBlock : "",
       "Convert the brief into a video script plan. The FIRST 2 SECONDS must hook (a bold visual statement, a surprising motion, or the product as hero).",
-      'Output STRICT JSON only — no markdown, no code fences: {"style": "<one of: motion_design | ecommerce | cinematic | social_hook | product_360>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
-      "2-4 beats. Each beat is one visual moment that fits a 5-second shot.",
-      "The voiceover is the consistent AI spokesperson voice of the brand — warm, human, ready to be recorded or fed to a speech model. It must match the beats in order and end on the CTA.",
+      "STYLE LIBRARY - pick the ONE style that best serves this brief and obey its direction:",
+      'Output STRICT JSON only - no markdown, no code fences: {"style": "<one of: ' + STYLE_KEYS.join(" | ") + '>", "hook": "<the 2-second opening idea>", "beats": ["<beat 1>", "<beat 2>", "<beat 3>"], "cta": "<closing call to action>", "voiceover": "<the spoken script for the whole ad, one short line per beat, in the brand voice>"}.',
     ].filter(Boolean).join("\n");
     const scriptRes = await harnessChatWithFallback(
       [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }],
@@ -189,6 +226,8 @@ serve(async (req) => {
     // ── STAGE 2: CREATIVE DIRECTOR ─────────────────────────────────────
     const directorSystem = [
       "You are the Creative Director and cinematographer. Convert the marketing plan into a shot-by-shot plan for Seedance (5-second shots).",
+      "LOCKED STYLE: " + (MOTION_STYLES[script.style]?.label || script.style || "cinematic") + ".",
+      "STYLE DIRECTION (obey this cinematography in every shot): " + (MOTION_STYLES[script.style]?.direction || "Film discipline: motivated camera, naturalistic light, one strong idea per shot."),
       'Output STRICT JSON only — no markdown, no code fences: {"shots": [{"n": 1, "camera": "<camera movement, e.g. slow push-in / orbit / whip pan>", "lighting": "<lighting setup>", "action": "<what happens>", "seedance_prompt": "<ONE paragraph: subject + action + camera movement + lighting + style. No text overlays, no captions, no on-screen words.>"}], "hero_shot": 1}.',
       "2-4 shots. Each seedance_prompt must be self-contained (the model sees only that prompt). Shot n=hero_shot is the strongest single frame of the whole ad.",
     ].join("\n");
