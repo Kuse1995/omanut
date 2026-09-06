@@ -447,12 +447,24 @@ serve(async (req) => {
     if (input_image_url) submitBody.image_url = input_image_url;
     if (use25 && refs.length) submitBody.image_urls = refs;
 
-    const submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
+    let submitRes = await fetch(FAL_QUEUE_BASE + "/" + model, {
       method: "POST",
       headers: { Authorization: "Key " + FAL_KEY, "Content-Type": "application/json" },
       body: JSON.stringify(submitBody),
     });
-    const submitJson: any = await submitRes.json().catch(() => ({}));
+    let submitJson: any = await submitRes.json().catch(() => ({}));
+    // Reference-to-video endpoints occasionally reject payloads (422): degrade
+    // gracefully to the proven text-to-video path rather than failing the job.
+    if (!submitRes.ok && (refs.length > 0 || input_image_url)) {
+      console.warn("[OMANUT-MOTION] reference submit failed (" + submitRes.status + "), degrading to text-to-video");
+      const fallbackBody: Record<string, unknown> = { prompt: String(submitBody.prompt || "").slice(0, 4000), aspect_ratio, resolution, duration: "5" };
+      submitRes = await fetch(FAL_QUEUE_BASE + "/" + FAL_TEXT_MODEL, {
+        method: "POST",
+        headers: { Authorization: "Key " + FAL_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify(fallbackBody),
+      });
+      submitJson = await submitRes.json().catch(() => ({}));
+    }
     if (!submitRes.ok || !submitJson.request_id) {
       console.error("[OMANUT-MOTION] fal submit failed:", submitRes.status, submitJson);
       return new Response(JSON.stringify({ error: "fal submit failed", details: submitJson }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
