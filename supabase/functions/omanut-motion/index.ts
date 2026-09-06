@@ -19,6 +19,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { geminiChat } from "../_shared/gemini-client.ts";
 import { buildBrandBlock } from "../_shared/marketing.ts";
 
 const corsHeaders = {
@@ -135,6 +136,29 @@ function extractJson(text: string): any | null {
     try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
   }
   return null;
+}
+
+// THE CREATIVE BRAIN: which model sits in the director's chair.
+// Set MOTION_DIRECTOR_MODEL (e.g. "openai/gpt-6-astra") + OPENAI_API_KEY to put
+// a frontier model in the role; unset = the Omanut farm harness (GLM-5.3),
+// which stays the default and the fallback either way.
+async function creativeBrain(messages: any[], opts: { companyId: string; metadata: any; mode: string }): Promise<{ ok: boolean; message?: { content?: string } }> {
+  const model = Deno.env.get("MOTION_DIRECTOR_MODEL");
+  if (model) {
+    try {
+      const r = await geminiChat({ model, messages, temperature: 0.8, max_tokens: 1400 });
+      const d: any = await r.json();
+      const content = String(d?.choices?.[0]?.message?.content || "").trim();
+      if (content) {
+        console.log("[OMANUT-MOTION] creative brain:", model);
+        return { ok: true, message: { content } };
+      }
+      console.warn("[OMANUT-MOTION] creative brain returned empty, falling back to harness");
+    } catch (e) {
+      console.warn("[OMANUT-MOTION] creative brain failed, falling back to harness:", (e as any)?.message || e);
+    }
+  }
+  return harnessChatWithFallback(messages, [], opts);
 }
 
 serve(async (req) => {
@@ -300,7 +324,7 @@ serve(async (req) => {
       "2-4 BEAT lines. No markdown, no bullets, no extra lines.",
     ].filter(Boolean).join("\n");
     const scriptMsgs = [{ role: "system", content: scriptSystem }, { role: "user", content: "BRIEF: " + String(brief) }];
-    const scriptRes = await harnessChatWithFallback(scriptMsgs, [], { companyId: company_id, metadata: company?.metadata || null, mode: "content" });
+    const scriptRes = await creativeBrain(scriptMsgs, { companyId: company_id, metadata: company?.metadata || null, mode: "content" });
     const parsed1 = parseLabeled(scriptRes.ok && scriptRes.message?.content ? scriptRes.message.content : "");
     let styleLock = String(parsed1.fields.STYLE || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
     if (!MOTION_STYLES[styleLock]) {
@@ -337,7 +361,7 @@ serve(async (req) => {
       "HERO: <the shot number that is the strongest>",
       "2-4 shots. No markdown, no extra lines.",
     ].join("\n");
-    const directorRes = await harnessChatWithFallback(
+    const directorRes = await creativeBrain(
       [
         { role: "system", content: directorSystem },
         { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) + (input_image_url ? "\n\nA reference product image will be attached as the first frame input." : "") },
