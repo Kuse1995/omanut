@@ -13,6 +13,7 @@ const ZHIPU_OPENAI_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
 const DEEPSEEK_OPENAI_URL = 'https://api.deepseek.com/v1/chat/completions';
 const KIMI_OPENAI_URL = 'https://api.moonshot.cn/v1/chat/completions';
 const MINIMAX_OPENAI_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
+const OPENAI_OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 /** Primary text/tool-calling model used across the system. Override via PRIMARY_TEXT_MODEL env for instant rollback.
  *  Default: 'deepseek-chat' (DeepSeek Chat, direct DeepSeek API - fast reasoning + tool calling).
@@ -27,19 +28,22 @@ function normalizeModel(model: string): string {
 }
 
 /** Determine provider from model name. No 'lovable' option — gateway is removed. */
-function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' | 'minimax' {
+function getProvider(model: string): 'zhipu' | 'deepseek' | 'gemini' | 'kimi' | 'minimax' | 'openai' {
   const lowered = model.toLowerCase();
   // Explicit provider prefixes win over name heuristics
   if (lowered.startsWith('zai/') || lowered.startsWith('zhipu/')) return 'zhipu';
   if (lowered.startsWith('deepseek/')) return 'deepseek';
   if (lowered.startsWith('kimi/') || lowered.startsWith('moonshot/')) return 'kimi';
   if (lowered.startsWith('minimax/') || lowered.startsWith('minimax-')) return 'minimax';
+  if (lowered.startsWith('openai/')) return 'openai';
   const normalized = normalizeModel(model);
   if (normalized.startsWith('glm-')) return 'zhipu';
   if (normalized.startsWith('deepseek')) return 'deepseek';
   if (normalized.startsWith('kimi-') || normalized.startsWith('moonshot-')) return 'kimi';
   if (/^minimax/i.test(normalized)) return 'minimax';
-  // gemini-* and gpt-* both route to Gemini direct (gpt models are deprecated for chat in this codebase)
+  // gpt-*/astra route to OpenAI (the creative-director option, e.g. GPT-6 Astra)
+  if (normalized.startsWith('gpt-') || normalized.startsWith('astra')) return 'openai';
+  // gemini-* route to Gemini direct
   return 'gemini';
 }
 
@@ -123,6 +127,17 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
         apiKey = Deno.env.get('GEMINI_API_KEY');
         modelToSend = 'gemini-2.5-flash';
         if (!apiKey) throw new Error('No direct provider API keys configured (MINIMAX/GEMINI both missing)');
+      }
+      break;
+    case 'openai':
+      apiUrl = OPENAI_OPENAI_URL;
+      apiKey = Deno.env.get('OPENAI_API_KEY');
+      if (!apiKey) {
+        console.error('[CONFIG-ERROR] Missing OPENAI_API_KEY for model "' + options.model + '", falling back to Zhipu glm-4.7');
+        apiUrl = ZHIPU_OPENAI_URL;
+        apiKey = Deno.env.get('ZHIPU_API_KEY');
+        modelToSend = 'glm-4.7';
+        if (!apiKey) throw new Error('No direct provider API keys configured (OPENAI/ZHIPU both missing)');
       }
       break;
     case 'gemini':
