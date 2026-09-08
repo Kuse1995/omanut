@@ -1721,12 +1721,18 @@ async function _processAIResponseInner(
             console.log('[MEDIA-ANALYSIS] Result:', analysis);
             
             // Audio/voice note — inject transcription as message context
-            if (analysis.transcription) {
+            const transcriptOk = analysis.transcription &&
+              analysis.transcription.trim() !== '[inaudible]';
+            if (transcriptOk) {
               imageAnalysisContext += `\n🎤 VOICE NOTE TRANSCRIPTION:\n"${analysis.transcription}"\n`;
               if (analysis.audioSummary) {
                 imageAnalysisContext += `Summary: ${analysis.audioSummary}\n`;
               }
-              imageAnalysisContext += `⚡ IMPORTANT: Treat this transcription as if the customer typed it. Respond to their request accordingly.\n`;
+              imageAnalysisContext += `⚡ IMPORTANT: Treat this transcription as if the customer typed it. Respond to their request accordingly. Money figures in the transcription are the customer's spoken words — verify them against tools/records before confirming any sale, payment, or stock change.\n`;
+            } else if (mediaType.startsWith('audio/')) {
+              // Honest fallback — never guess from failed or garbled audio
+              imageAnalysisContext += `\n🎤 VOICE NOTE received but transcription FAILED or was unintelligible.\n`;
+              imageAnalysisContext += `⚡ Do NOT guess what the customer said. Do NOT take any action (no sales, payments, or stock changes). Politely ask the customer to type their message as text instead.\n`;
             }
             // PDF/document — inject extracted content
             else if (analysis.documentContent) {

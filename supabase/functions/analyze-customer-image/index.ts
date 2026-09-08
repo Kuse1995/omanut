@@ -169,15 +169,16 @@ async function analyzeAudio(audioUrl: string, mediaType: string, businessContext
 
   const systemPrompt = `You are an expert assistant for a business WhatsApp AI. 
 A customer sent a voice note or audio message. Your job:
-1. Transcribe the audio content accurately
-2. Summarize the key intent/request in 1-2 sentences
-3. Detect if the customer mentions any product names, quantities, prices, dates, or phone numbers
+1. Transcribe the audio VERBATIM, in the language(s) actually spoken (English, Nyanja/Chewa, Bemba, or mixed). Do NOT translate. Do NOT paraphrase, correct, or complete anything the speaker said.
+2. Convert spoken numbers to numerals, but NEVER invent or alter amounts, product names, phone numbers, or reference codes that were not actually said.
+3. Summarize the key intent/request in 1-2 sentences
+4. If the audio is unintelligible, mostly silence, or too short to understand, set "transcription" to exactly [inaudible] and explain in audioSummary
 
 ${businessContext ? `Business context: ${businessContext}` : ''}
 
 Respond with ONLY valid JSON (no markdown):
 {
-  "transcription": "Full transcription of the audio",
+  "transcription": "Verbatim transcription in the language spoken, or exactly [inaudible] if unintelligible",
   "audioSummary": "1-2 sentence summary of what the customer wants",
   "description": "Voice note from customer: [brief topic]",
   "category": "voice_note",
