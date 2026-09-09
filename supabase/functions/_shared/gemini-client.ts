@@ -279,7 +279,7 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     }
     const attemptBudget = Math.max(5000, Math.min(PER_ATTEMPT_MS, CHAIN_BUDGET_MS - elapsed));
     const attemptController = new AbortController();
-    const attemptTimer = setTimeout(() => attemptController.abort(), PER_ATTEMPT_MS);
+    const attemptTimer = setTimeout(() => attemptController.abort(), attemptBudget);
     try {
       console.log(`[AI-FALLBACK] Trying model ${i + 1}/${chain.length}: ${model}`);
       const response = await geminiChat({ ...options, model, signal: attemptController.signal });
