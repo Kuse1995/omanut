@@ -3856,6 +3856,16 @@ Trust ONLY the information provided in this system prompt.
           // their own site. If the reply forgot the company's website link, the
           // pipeline appends it - the model can forget, the code cannot.
           try {
+            // BREVITY BACKSTOP: tradesmen don't read essays - cap the reply.
+            const wc = harnessContent.split(/\s+/).filter(Boolean).length;
+            if (wc > 40) {
+              const sentences = harnessContent.match(/[^.!?\n]+[.!?]*/g) || [harnessContent];
+              let kept = sentences.slice(0, 2).join(" ").trim();
+              const q = sentences.reverse().find((s: string) => s.includes("?"));
+              if (q && !kept.includes(q.trim())) kept += " " + q.trim();
+              harnessContent = kept;
+              console.log("[BREVITY] trimmed reply to", harnessContent.split(/\s+/).length, "words");
+            }
             const siteUrl = String(company?.quick_reference_info || "").match(/https?:\/\/[^\s]+/)?.[0];
             if (siteUrl && !harnessContent.includes(siteUrl)) {
               const siteLink = siteUrl.includes("onthebuildzambia") ? siteUrl.replace(/\/$/, "") + "/trades" : siteUrl;
@@ -5722,6 +5732,14 @@ Trust ONLY the information provided in this system prompt.
         assistantReply = roundData.choices[0].message.content || assistantReply || '';
         // SITE-LINK ENFORCEMENT (tool-loop path): same rule as the main flow.
         try {
+          const wc2 = assistantReply.split(/\s+/).filter(Boolean).length;
+          if (wc2 > 40) {
+            const sentences2 = assistantReply.match(/[^.!?\n]+[.!?]*/g) || [assistantReply];
+            let kept2 = sentences2.slice(0, 2).join(" ").trim();
+            const q2 = sentences2.reverse().find((s: string) => s.includes("?"));
+            if (q2 && !kept2.includes(q2.trim())) kept2 += " " + q2.trim();
+            assistantReply = kept2;
+          }
           const siteUrl2 = String(company?.quick_reference_info || "").match(/https?:\/\/[^\s]+/)?.[0];
           if (siteUrl2 && !assistantReply.includes(siteUrl2)) {
             const siteLink2 = siteUrl2.includes("onthebuildzambia") ? siteUrl2.replace(/\/$/, "") + "/trades" : siteUrl2;
