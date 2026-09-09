@@ -1515,7 +1515,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const limit = Math.min(Math.max(params?.limit || 20, 1), 100);
       let q = supabase
         .from("ai_error_logs")
-        .select("id, conversation_id, error_type, severity, original_message, ai_response, expected_response, status, quality_score, confidence_score, detected_flags, auto_flagged, created_at")
+        .select("id, conversation_id, error_type, severity, original_message, ai_response, expected_response, status, quality_score, confidence_score, detected_flags, auto_flagged, created_at, analysis_details")
         .eq("company_id", companyId)
         .order("created_at", { ascending: false })
         .limit(limit);
