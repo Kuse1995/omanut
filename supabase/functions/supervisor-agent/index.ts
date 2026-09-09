@@ -311,7 +311,7 @@ Be strategic, data-driven, and focus on ${focusAreasText}.`;
     console.log('[Supervisor] Calling AI for strategic analysis (gemini-2.5-flash via Lovable Gateway)...');
 
     const aiResponse = await geminiChat({
-      model: 'google/gemini-2.5-flash',
+      model: 'kimi-k2.6',
       messages: [
         {
           role: 'system',

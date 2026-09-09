@@ -79,16 +79,16 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiKey = Deno.env.get('ZHIPU_API_KEY');
       if (!apiKey) {
         console.error(`[CONFIG-ERROR] Missing ZHIPU_API_KEY for model "${options.model}", falling back to direct Gemini`);
-        apiUrl = GEMINI_OPENAI_URL;
-        apiKey = Deno.env.get('GEMINI_API_KEY');
+        apiUrl = KIMI_OPENAI_URL;
+        apiKey = Deno.env.get('KIMI_API_KEY');
         if (!apiKey) {
-          console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY too, falling back to DeepSeek`);
+          console.error(`[CONFIG-ERROR] Missing KIMI_API_KEY too, falling back to DeepSeek`);
           apiUrl = DEEPSEEK_OPENAI_URL;
           apiKey = Deno.env.get('DEEPSEEK_API_KEY');
           modelToSend = 'deepseek-chat';
           if (!apiKey) throw new Error('No direct provider API keys configured (ZHIPU/GEMINI/DEEPSEEK all missing)');
         } else {
-          modelToSend = 'gemini-2.5-flash';
+          modelToSend = 'kimi-k2.6';
         }
       }
       break;
@@ -97,9 +97,9 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiKey = Deno.env.get('DEEPSEEK_API_KEY');
       if (!apiKey) {
         console.error(`[CONFIG-ERROR] Missing DEEPSEEK_API_KEY for model "${options.model}", falling back to direct Gemini`);
-        apiUrl = GEMINI_OPENAI_URL;
-        apiKey = Deno.env.get('GEMINI_API_KEY');
-        modelToSend = 'gemini-2.5-flash';
+        apiUrl = KIMI_OPENAI_URL;
+        apiKey = Deno.env.get('KIMI_API_KEY');
+        modelToSend = 'kimi-k2.6';
         if (!apiKey) throw new Error('No direct provider API keys configured (DEEPSEEK/GEMINI both missing)');
       }
       break;
@@ -107,11 +107,11 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiUrl = KIMI_OPENAI_URL;
       apiKey = Deno.env.get('KIMI_API_KEY');
       if (!apiKey) {
-        console.error(`[CONFIG-ERROR] Missing KIMI_API_KEY for model "${options.model}", falling back to direct Gemini`);
-        apiUrl = GEMINI_OPENAI_URL;
-        apiKey = Deno.env.get('GEMINI_API_KEY');
-        modelToSend = 'gemini-2.5-flash';
-        if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/GEMINI both missing)');
+        console.error(`[CONFIG-ERROR] Missing KIMI_API_KEY for model "${options.model}", falling back to DeepSeek`);
+        apiUrl = DEEPSEEK_OPENAI_URL;
+        apiKey = Deno.env.get('DEEPSEEK_API_KEY');
+        modelToSend = 'deepseek-chat';
+        if (!apiKey) throw new Error('No direct provider API keys configured (KIMI/DEEPSEEK both missing)');
       }
       break;
     case 'minimax':
@@ -123,9 +123,9 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       }
       if (!apiKey) {
         console.error(`[CONFIG-ERROR] Missing MINIMAX_API_KEY for model "${options.model}", falling back to direct Gemini`);
-        apiUrl = GEMINI_OPENAI_URL;
-        apiKey = Deno.env.get('GEMINI_API_KEY');
-        modelToSend = 'gemini-2.5-flash';
+        apiUrl = KIMI_OPENAI_URL;
+        apiKey = Deno.env.get('KIMI_API_KEY');
+        modelToSend = 'kimi-k2.6';
         if (!apiKey) throw new Error('No direct provider API keys configured (MINIMAX/GEMINI both missing)');
       }
       break;
@@ -145,11 +145,11 @@ export async function geminiChat(options: GeminiChatOptions): Promise<Response> 
       apiUrl = GEMINI_OPENAI_URL;
       apiKey = Deno.env.get('GEMINI_API_KEY');
       if (!apiKey) {
-        console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY for model "${options.model}", falling back to Zhipu glm-4.7`);
-        apiUrl = ZHIPU_OPENAI_URL;
-        apiKey = Deno.env.get('ZHIPU_API_KEY');
-        modelToSend = 'glm-4.7';
-        if (!apiKey) throw new Error('No direct provider API keys configured (GEMINI/ZHIPU both missing)');
+        console.error(`[CONFIG-ERROR] Missing GEMINI_API_KEY for model "${options.model}", falling back to Kimi`);
+        apiUrl = KIMI_OPENAI_URL;
+        apiKey = Deno.env.get('KIMI_API_KEY');
+        modelToSend = 'kimi-k2.6';
+        if (!apiKey) throw new Error('No direct provider API keys configured (GEMINI/KIMI both missing)');
       }
       break;
   }
@@ -228,7 +228,6 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     'kimi-k2.5',
     'MiniMax-M2',
     'glm-4.6',
-    'gemini-2.5-flash',
     'deepseek-chat',
   ];
 

@@ -727,7 +727,7 @@ async function routeToAgent(
   // (glm-4.5-air, glm-4.6, deepseek-reasoner, MiniMax-M2, *-thinking) burn the
   // token budget inside `reasoning_content` and return empty `content`, which
   // forces the catch-block fallback and pins everything to the is_default mode.
-  const routingModel = config?.routingModel || 'google/gemini-2.5-flash-lite';
+  const routingModel = config?.routingModel || 'kimi-k2.5';
   const routingTemperature = config?.routingTemperature ?? 0.3;
   const confidenceThreshold = config?.confidenceThreshold ?? 0.6;
   
@@ -2111,7 +2111,7 @@ async function _processAIResponseInner(
         console.log(`[ROUTER] Message to classify: "${userMessage.substring(0, 100)}${userMessage.length > 100 ? '...' : ''}"`);
         
         const routingConfig = {
-          routingModel: aiOverrides?.routing_model || 'google/gemini-2.5-flash-lite',
+          routingModel: aiOverrides?.routing_model || 'kimi-k2.5',
           routingTemperature: aiOverrides?.routing_temperature ?? 0.3,
           confidenceThreshold: aiOverrides?.routing_confidence_threshold ?? 0.6,
           modes: agentModes,
