@@ -258,11 +258,31 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
   };
 
   const chainFailures: string[] = [];
+  // PER-ATTEMPT TIMEOUT: the caller's single AbortSignal used to be shared by every
+  // model in the chain — once it fired, every remaining attempt aborted instantly and
+  // the chain "failed" with zero recorded failures. Each attempt now gets its own
+  // budget, and the caller's signal only stops the chain (it no longer poisons it).
+  const PER_ATTEMPT_MS = Number(Deno.env.get('AI_ATTEMPT_TIMEOUT_MS') || 25000);
+  const CHAIN_BUDGET_MS = Number(Deno.env.get('AI_CHAIN_BUDGET_MS') || 45000);
+  const chainStart = Date.now();
+  const callerSignal = options.signal;
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
+    if (callerSignal?.aborted) {
+      chainFailures.push('caller aborted before ' + model);
+      break;
+    }
+    const elapsed = Date.now() - chainStart;
+    if (elapsed >= CHAIN_BUDGET_MS) {
+      chainFailures.push(`chain budget ${CHAIN_BUDGET_MS}ms exhausted before ${model}`);
+      break;
+    }
+    const attemptBudget = Math.max(5000, Math.min(PER_ATTEMPT_MS, CHAIN_BUDGET_MS - elapsed));
+    const attemptController = new AbortController();
+    const attemptTimer = setTimeout(() => attemptController.abort(), attemptBudget);
     try {
       console.log(`[AI-FALLBACK] Trying model ${i + 1}/${chain.length}: ${model}`);
-      const response = await geminiChat({ ...options, model });
+      const response = await geminiChat({ ...options, model, signal: attemptController.signal });
       if (response.ok) {
         // Peek body to catch HTTP-200 billing errors before returning to caller
         const cloned = response.clone();
@@ -285,7 +305,11 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
       console.warn(`[AI-FALLBACK] Model ${model} failed (${response.status}): ${errText.substring(0, 200)}`);
       chainFailures.push(`${model}: HTTP ${response.status}`);
     } catch (err) {
-      console.warn(`[AI-FALLBACK] Model ${model} threw:`, err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[AI-FALLBACK] Model ${model} threw:`, msg);
+      chainFailures.push(`${model}: threw ${msg.substring(0, 160)}`);
+    } finally {
+      clearTimeout(attemptTimer);
     }
   }
 
