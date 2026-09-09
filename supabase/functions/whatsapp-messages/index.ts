@@ -3047,7 +3047,9 @@ ${supervisorRecommendation.recommendedResponse}
     const configuredMaxTokens = aiOverrides?.max_tokens || 1024;
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
-    const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
+    // Floor of 45s: this signal now bounds the WHOLE model fallback chain, so a tight
+    // 30s value used to cut the chain off after the first slow model and force a fallback.
+    const responseTimeout = Math.max(45000, (aiOverrides?.response_timeout_seconds || 60) * 1000);
     const fallbackMessage = aiOverrides?.fallback_message || "I'm on it — give me a moment and I'll come right back with an answer.";
 
     console.log(`[AI] Using model=${selectedModel} agent=${selectedMode?.slug || selectedAgent || 'default'} (source=${selectedMode?.model ? 'agent_override' : 'company_default'})`);
