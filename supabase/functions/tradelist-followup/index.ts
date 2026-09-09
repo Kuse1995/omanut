@@ -27,8 +27,10 @@ serve(async (req) => {
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   const now = Date.now();
-  const minTs = new Date(now - (WINDOW_MIN + TOLERANCE) * 60000).toISOString();
-  const maxTs = new Date(now - (WINDOW_MIN - TOLERANCE) * 60000).toISOString();
+  // Catch EVERY stuck lead: quiet for 2 hours or more (within the last 7 days).
+  // This includes leads that received the fallback message after an AI failure.
+  const maxTs = new Date(now - WINDOW_MIN * 60000).toISOString();
+  const minTs = new Date(now - 7 * 24 * 60 * 60000).toISOString();
 
   const { data: convs, error } = await supabase
     .from("conversations")

@@ -5547,6 +5547,16 @@ Trust ONLY the information provided in this system prompt.
       if (!assistantReply) {
         console.warn('[RETRY-EXHAUSTED] All retries failed, using company fallback message');
         assistantReply = fallbackMessage;
+        // LEAD RESCUE: a failed AI turn must never dead-end a hot lead —
+        // the fallback carries the company's site link so they self-serve.
+        try {
+          const rescueUrl = String(company?.quick_reference_info || "").match(/https?:\/\/[^\s]+/)?.[0];
+          if (rescueUrl && !assistantReply.includes(rescueUrl)) {
+            const rescueLink = rescueUrl.includes("onthebuildzambia") ? rescueUrl.replace(/\/$/, "") + "/trades" : rescueUrl;
+            assistantReply += "\n\nIn the meantime — get your business listed FREE on our TradeList: " + rescueLink + " (takes 2 minutes).";
+            console.log("[LEAD-RESCUE] site link appended to fallback for", company.id);
+          }
+        } catch (rescueErr) { console.error('[LEAD-RESCUE] append failed (non-fatal):', rescueErr); }
 
         // Classify error for a cleaner boss message
         const errLower = (originalError || '').toLowerCase();
