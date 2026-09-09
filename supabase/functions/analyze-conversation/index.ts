@@ -121,7 +121,7 @@ Return your analysis in the following JSON format:
 Only include items that are genuinely important. If there's nothing significant, return empty arrays.`;
 
     const response = await geminiChat({
-      model: 'glm-4.7',
+      model: 'kimi-k2.6',
       messages: [
         { role: 'system', content: 'You are a helpful assistant that analyzes customer service conversations and extracts actionable insights.' },
         { role: 'user', content: analysisPrompt }
