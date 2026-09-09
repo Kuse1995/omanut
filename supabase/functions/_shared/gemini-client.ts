@@ -273,7 +273,7 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
           chainFailures.push(`${model}: billing/quota error`);
           } else {
             console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no usable assistant message: ${peek.substring(0, 200)}`);
-          chainFailures.push(`${model}: empty/no usable message`);
+          chainFailures.push(`${model}: empty/no usable message | body: ${peek.substring(0, 220)}`);
           }
           continue;
         }
