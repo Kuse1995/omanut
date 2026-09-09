@@ -3851,7 +3851,19 @@ Trust ONLY the information provided in this system prompt.
           temperature,
         });
         if (harnessResult.ok && harnessResult.message) {
-          const harnessBody = { choices: [{ message: harnessResult.message }] };
+          let harnessContent = String(harnessResult.message.content || "");
+          // SITE-LINK ENFORCEMENT: harness-on companies are traffic funnels to
+          // their own site. If the reply forgot the company's website link, the
+          // pipeline appends it - the model can forget, the code cannot.
+          try {
+            const siteUrl = String(company?.quick_reference_info || "").match(/https?:\/\/[^\s]+/)?.[0];
+            if (siteUrl && !harnessContent.includes(siteUrl)) {
+              const siteLink = siteUrl.includes("onthebuildzambia") ? siteUrl.replace(/\/$/, "") + "/trades" : siteUrl;
+              harnessContent += "\n\n👉 " + siteLink + (siteLink.includes("onthebuildzambia") ? " — Get listed free, takes 2 minutes." : "");
+              console.log("[SITE-LINK] appended company link:", siteLink);
+            }
+          } catch (linkErr) { console.error("[SITE-LINK] append failed (non-fatal):", linkErr); }
+          const harnessBody = { choices: [{ message: { role: "assistant", content: harnessContent } }] };
           response = new Response(JSON.stringify(harnessBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
           console.log('[HARNESS] main turn answered by harness');
         } else {
@@ -5708,6 +5720,14 @@ Trust ONLY the information provided in this system prompt.
         
         const roundData = await roundResponse.json();
         assistantReply = roundData.choices[0].message.content || assistantReply || '';
+        // SITE-LINK ENFORCEMENT (tool-loop path): same rule as the main flow.
+        try {
+          const siteUrl2 = String(company?.quick_reference_info || "").match(/https?:\/\/[^\s]+/)?.[0];
+          if (siteUrl2 && !assistantReply.includes(siteUrl2)) {
+            const siteLink2 = siteUrl2.includes("onthebuildzambia") ? siteUrl2.replace(/\/$/, "") + "/trades" : siteUrl2;
+            assistantReply += "\n\n👉 " + siteLink2 + (siteLink2.includes("onthebuildzambia") ? " — Get listed free, takes 2 minutes." : "");
+          }
+        } catch (_) { /* best-effort */ }
         const newToolCalls = roundData.choices[0].message.tool_calls;
         
         console.log(`[TOOL-LOOP] Round ${currentRound} result:`, {
