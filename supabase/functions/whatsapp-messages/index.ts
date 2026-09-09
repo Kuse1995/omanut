@@ -3048,7 +3048,7 @@ ${supervisorRecommendation.recommendedResponse}
     const maxTokens = messageComplexity === 'simple' ? Math.min(512, configuredMaxTokens) : configuredMaxTokens;
     const temperature = aiOverrides?.primary_temperature || 1.0;
     const responseTimeout = (aiOverrides?.response_timeout_seconds || 60) * 1000;
-    const fallbackMessage = aiOverrides?.fallback_message || "Let me get our owner involved — they'll respond shortly.";
+    const fallbackMessage = aiOverrides?.fallback_message || "I'm on it — give me a moment and I'll come right back with an answer.";
 
     console.log(`[AI] Using model=${selectedModel} agent=${selectedMode?.slug || selectedAgent || 'default'} (source=${selectedMode?.model ? 'agent_override' : 'company_default'})`);
     console.log(`[AI-CONFIG] Using database configuration:`, {
@@ -6363,7 +6363,7 @@ Trust ONLY the information provided in this system prompt.
           console.log('[SYNTHESIS-FALLBACK] Built deterministic reply from tool results:', synthesized.slice(0, 120));
         } else {
           // Safe customer-facing fallback — NEVER expose internal tool names or round numbers
-          assistantReply = `I'm still checking that for you — let me confirm with the owner and get right back. 🙏`;
+          assistantReply = `I'm still checking that for you — one moment and I'll come right back. 🙏`;
           console.log('[SYNTHESIS-FALLBACK] No structured data; using safe customer-facing fallback. Internal context (not sent):', toolExecutionContext);
         }
       } else {
