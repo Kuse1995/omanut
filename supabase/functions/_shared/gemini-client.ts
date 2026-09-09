@@ -257,6 +257,7 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
     }
   };
 
+  const chainFailures: string[] = [];
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
     try {
@@ -269,8 +270,10 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
         if (isBillingErrorBody(peek) || !hasUsableChoices(peek)) {
           if (isBillingErrorBody(peek)) {
             console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body is a billing/quota error: ${peek.substring(0, 200)}`);
+          chainFailures.push(`${model}: billing/quota error`);
           } else {
             console.warn(`[AI-FALLBACK] Model ${model} returned 200 but body has no usable assistant message: ${peek.substring(0, 200)}`);
+          chainFailures.push(`${model}: empty/no usable message`);
           }
           continue;
         }
@@ -280,14 +283,16 @@ export async function geminiChatWithFallback(options: GeminiChatOptions): Promis
       }
       const errText = await response.text();
       console.warn(`[AI-FALLBACK] Model ${model} failed (${response.status}): ${errText.substring(0, 200)}`);
+      chainFailures.push(`${model}: HTTP ${response.status}`);
     } catch (err) {
       console.warn(`[AI-FALLBACK] Model ${model} threw:`, err instanceof Error ? err.message : err);
     }
   }
 
   // All failed — return last attempt so caller gets an error response
-  console.error('[AI-FALLBACK] All models in fallback chain failed');
-  throw new Error('All AI models in fallback chain failed');
+  const chainError = 'All AI models in fallback chain failed [' + chainFailures.join('; ') + ']';
+  console.error('[AI-FALLBACK]', chainError);
+  throw new Error(chainError);
 }
 
 /**
