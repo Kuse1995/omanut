@@ -76,44 +76,63 @@ export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
     console.warn('[HARNESS] OMANUT_HARNESS_API_KEY not configured — falling back to in-house');
     return { ok: false, reason: 'not_configured' };
   }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), OMANUT_HARNESS_TIMEOUT_MS);
-  try {
-    const res = await fetch(OMANUT_HARNESS_URL + '/whatsapp/turn', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + OMANUT_HARNESS_API_KEY,
-      },
-      body: JSON.stringify({
-        session_id: call.session_id,
-        messages: call.messages,
-        tools: call.tools,
-        max_tokens: call.max_tokens,
-        temperature: call.temperature,
-      }),
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    let body: any = {};
-    try { body = text ? JSON.parse(text) : {}; } catch { /* keep {} */ }
-    if (res.ok && body.ok !== false && Array.isArray(body.choices) && body.choices[0]?.message) {
-      return {
-        ok: true,
-        message: body.choices[0].message,
-        http_status: res.status,
-      };
-    }
-    console.warn('[HARNESS] non-ok response', res.status, body.reason || body.error || '');
-    return { ok: false, reason: body.reason || body.error || 'http_' + res.status, http_status: res.status };
-  } catch (e) {
-    console.warn('[HARNESS] call failed, falling back to in-house:', e instanceof Error ? e.message : e);
-    return { ok: false, reason: 'network_error' };
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
+  const attempt = async (): Promise<HarnessResult> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), OMANUT_HARNESS_TIMEOUT_MS);
+    try {
+      const res = await fetch(OMANUT_HARNESS_URL + '/whatsapp/turn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + OMANUT_HARNESS_API_KEY,
+        },
+        body: JSON.stringify({
+          session_id: call.session_id,
+          messages: call.messages,
+          tools: call.tools,
+          max_tokens: call.max_tokens,
+          temperature: call.temperature,
+        }),
+        signal: ctrl.signal,
+      });
+      const text = await res.text();
+      let body: any = {};
+      try { body = text ? JSON.parse(text) : {}; } catch { /* keep {} */ }
+      if (res.ok && body.ok !== false && Array.isArray(body.choices) && body.choices[0]?.message) {
+        return {
+          ok: true,
+          message: body.choices[0].message,
+          http_status: res.status,
+        };
+      }
+      console.warn('[HARNESS] non-ok response', res.status, body.reason || body.error || '');
+      return { ok: false, reason: body.reason || body.error || 'http_' + res.status, http_status: res.status };
+    } catch (e) {
+      console.warn('[HARNESS] call failed, falling back to in-house:', e instanceof Error ? e.message : e);
+      return { ok: false, reason: 'network_error' };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const first = await attempt();
+
+  // Burst resilience: transient failures (timeouts, 5xx, 429) get ONE quick
+  // retry after a short backoff — concurrent ad bursts clear in seconds, and
+  // GLM-5.3-Flash has 50 concurrent slots so the retry usually lands.
+  const transient = first.reason === 'network_error'
+    || [429, 500, 502, 503, 504].includes(Number(first.http_status));
+  if (!first.ok && transient) {
+    console.warn('[HARNESS] transient failure (' + first.reason + ') — retrying once in 1.5s');
+    await new Promise((r) => setTimeout(r, 1500));
+    const second = await attempt();
+    if (second.ok) return second;
+    return { ok: false, reason: first.reason + ' | retry: ' + (second.reason || ''), http_status: second.http_status };
+  }
+
+  return first;
+}
 export { OMANUT_HARNESS_URL };
 
 
