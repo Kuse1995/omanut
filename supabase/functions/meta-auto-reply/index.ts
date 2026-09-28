@@ -64,7 +64,7 @@ serve(async (req) => {
         // Company + harness gate
         const { data: company } = await supabase
           .from("companies")
-          .select("id, name, metadata, voice_style, hours, services, quick_reference_info")
+          .select("id, name, metadata, voice_style, hours, services, quick_reference_info, branches, service_locations, whatsapp_number, twilio_number")
           .eq("id", row.company_id)
           .maybeSingle();
         const mode = String(company?.metadata?.harness_mode || "off").toLowerCase();
@@ -135,21 +135,24 @@ serve(async (req) => {
           [],
           { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
         );
-        // FACTS-GROUNDED FALLBACK: when every brain fails we still answer with
-        // something useful — the company's own facts (location, hours, contact)
-        // — instead of a content-free placeholder.
+        // PUBLIC-ONLY FALLBACK. NEVER voice_style, quick_reference_info or any
+        // instruction text: those carry internal strategy and previously leaked
+        // into a public comment. Whitelist = location + hours only.
         let reply = harnessResult.ok && harnessResult.message?.content
           ? String(harnessResult.message.content)
           : "";
         if (!reply) {
-          const facts = buildCompanyFacts(company);
-          const factLine = facts
-            ? String(facts).replace(/^[^:]*:\s*/gm, "").split("\n").filter(Boolean).slice(0, 3).join(" · ")
-            : "";
-          reply = (factLine
-            ? "Thanks for reaching out! " + factLine
-            : "Thanks for reaching out!") + " — reply here and our team will assist you right away.";
-          console.warn("[META-AUTO-REPLY] all brains failed — facts-grounded fallback used");
+          const scrub = (v: any) => String(v || "")
+            .split(/[\n;]+/)
+            .filter((line) => !/\b(ai should|maintain a tone|tone suitable|push for urgency|persona|instruction|prompt|system|strategy|guardians and prospective)\b/i.test(line))
+            .join(" ").trim().slice(0, 120);
+          const loc = scrub((company as any)?.service_locations || (company as any)?.branches);
+          const hrs = scrub((company as any)?.hours);
+          reply = "Thanks for reaching out!"
+            + (loc ? " We are at " + loc + "." : "")
+            + (hrs ? " Open " + hrs + "." : "")
+            + " Reply here and our team will assist you right away.";
+          console.warn("[META-AUTO-REPLY] all brains failed — public-facts fallback used (location/hours only)");
         }
 
         // Comment anti-spam delay
