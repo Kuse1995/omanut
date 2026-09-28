@@ -95,7 +95,25 @@ function isCannedReply(content: string): boolean {
   return CANNED_REPLY_PATTERNS.some((re) => re.test(text));
 }
 
+// CIRCUIT BREAKER
+// When the harness fails repeatedly it must stop dominating every turn: each
+// attempt costs up to 12s before the real brain runs. After 3 consecutive
+// failures the circuit opens and calls go straight to the direct chain
+// (DeepSeek/Kimi) for 5 minutes, then the harness is probed again.
+const BREAKER_THRESHOLD = 3;
+const BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
+let harnessFailureStreak = 0;
+let harnessSkipUntil = 0;
+
+export function harnessCircuitState(): { open: boolean; streak: number; skipUntil: number } {
+  return { open: Date.now() < harnessSkipUntil, streak: harnessFailureStreak, skipUntil: harnessSkipUntil };
+}
+
 export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
+  if (Date.now() < harnessSkipUntil) {
+    console.warn('[HARNESS] circuit OPEN — skipping harness, going straight to the direct chain');
+    return { ok: false, reason: 'circuit_open' };
+  }
   if (!OMANUT_HARNESS_API_KEY) {
     console.warn('[HARNESS] OMANUT_HARNESS_API_KEY not configured — falling back to in-house');
     return { ok: false, reason: 'not_configured' };
@@ -127,8 +145,15 @@ export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
         const content = String(body.choices[0].message.content || '');
         if (isCannedReply(content)) {
           console.warn('[HARNESS] canned/placeholder reply detected — treating as failure so the real chain runs');
+          harnessFailureStreak++;
+          if (harnessFailureStreak >= BREAKER_THRESHOLD) {
+            harnessSkipUntil = Date.now() + BREAKER_COOLDOWN_MS;
+            console.warn('[HARNESS] circuit OPENED for 5 min (canned replies) — direct chain takes over');
+          }
           return { ok: false, reason: 'canned_reply', http_status: res.status };
         }
+        harnessFailureStreak = 0;
+        harnessSkipUntil = 0;
         return {
           ok: true,
           message: body.choices[0].message,
@@ -156,8 +181,25 @@ export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
     console.warn('[HARNESS] transient failure (' + first.reason + ') — retrying once in 1.5s');
     await new Promise((r) => setTimeout(r, 1500));
     const second = await attempt();
-    if (second.ok) return second;
+    if (second.ok) {
+      harnessFailureStreak = 0;
+      harnessSkipUntil = 0;
+      return second;
+    }
+    harnessFailureStreak++;
+    if (harnessFailureStreak >= BREAKER_THRESHOLD) {
+      harnessSkipUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      console.warn('[HARNESS] circuit OPENED for 5 min after ' + harnessFailureStreak + ' failures — direct chain takes over');
+    }
     return { ok: false, reason: first.reason + ' | retry: ' + (second.reason || ''), http_status: second.http_status };
+  }
+
+  if (!first.ok) {
+    harnessFailureStreak++;
+    if (harnessFailureStreak >= BREAKER_THRESHOLD) {
+      harnessSkipUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      console.warn('[HARNESS] circuit OPENED for 5 min after ' + harnessFailureStreak + ' failures — direct chain takes over');
+    }
   }
 
   return first;
