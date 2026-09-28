@@ -71,6 +71,30 @@ export interface HarnessResult {
  * network error — the caller must then fall through to the in-house pipeline.
  * NEVER throws.
  */
+// CANNED-REPLY DETECTOR
+// The farm harness sometimes masks an upstream LLM failure with a generic
+// acknowledgment ("Thanks for your message! We'll get back to you shortly.").
+// Left undetected, that placeholder reaches the customer while the real
+// fallback chain (DeepSeek/Kimi) never runs. Any canned acknowledgment is
+// treated as a FAILURE so the caller falls through to a working brain.
+const CANNED_REPLY_PATTERNS: RegExp[] = [
+  /thanks for your message[!.]?\s*(we'?ll|we will)?\s*(get back|respond|reply)/i,
+  /we'?ll get back to you shortly/i,
+  /let me get our owner involved/i,
+  /we will respond shortly/i,
+  /your message (has been|was) received/i,
+  /thank you for your message\.?\s*how can i help you today\??/i,
+  /our (team|owner) will (be in touch|respond|get back)/i,
+];
+
+function isCannedReply(content: string): boolean {
+  const text = String(content || '').trim();
+  if (!text) return true;
+  // Short + matches a canned pattern = placeholder, not an answer.
+  if (text.length > 240) return false;
+  return CANNED_REPLY_PATTERNS.some((re) => re.test(text));
+}
+
 export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
   if (!OMANUT_HARNESS_API_KEY) {
     console.warn('[HARNESS] OMANUT_HARNESS_API_KEY not configured — falling back to in-house');
@@ -100,6 +124,11 @@ export async function callHarness(call: HarnessCall): Promise<HarnessResult> {
       let body: any = {};
       try { body = text ? JSON.parse(text) : {}; } catch { /* keep {} */ }
       if (res.ok && body.ok !== false && Array.isArray(body.choices) && body.choices[0]?.message) {
+        const content = String(body.choices[0].message.content || '');
+        if (isCannedReply(content)) {
+          console.warn('[HARNESS] canned/placeholder reply detected — treating as failure so the real chain runs');
+          return { ok: false, reason: 'canned_reply', http_status: res.status };
+        }
         return {
           ok: true,
           message: body.choices[0].message,
