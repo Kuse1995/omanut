@@ -144,7 +144,7 @@ serve(async (req) => {
           const directRes = await geminiChatWithFallback({
             model: PRIMARY_TEXT_MODEL,
             messages: chatMessages,
-            maxTokens: 300,
+            max_tokens: 300,
           });
           if (directRes.ok) {
             try {
