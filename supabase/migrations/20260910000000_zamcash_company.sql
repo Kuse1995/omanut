@@ -145,5 +145,20 @@ If a customer has questions about eligibility, approval, fees, repayment or an a
 
 
 
+  -- Image generation settings: enables fal image generation for this company and
+  -- keeps the visual style on-brand (green/white fintech) with NO other branding.
+  IF NOT EXISTS (SELECT 1 FROM public.image_generation_settings WHERE company_id = v_company_id) THEN
+    INSERT INTO public.image_generation_settings (
+      company_id, enabled, style_description, brand_tone, visual_guidelines, brand_colors
+    ) VALUES (
+      v_company_id,
+      true,
+      'ZamCash digital short-term loans in Zambia. Warm, friendly, hopeful fintech imagery: Zambian customers smiling while using their phones, mobile money notifications, small business owners and market traders in real Zambian settings. Clean, simple, uncluttered compositions. Brand colours: green and white. NEVER show other companies'' logos, software dashboards, or unrelated branding.',
+      'Friendly, simple, encouraging, trustworthy.',
+      'Real Zambian/African people and places. Natural daylight. Show phones, mobile money, cash and small businesses. Keep it simple and human - no clutter, no foreign branding, no text-heavy layouts.',
+      'green and white with warm neutral accents'
+    );
+  END IF;
+
   RAISE NOTICE 'ZamCash Loans ready: % (next: connect the Facebook page, then run the posts migration)', v_company_id;
 END $$;
