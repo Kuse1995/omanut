@@ -69,12 +69,9 @@ serve(async (req) => {
           .eq("id", row.company_id)
           .maybeSingle();
         const mode = String(company?.metadata?.harness_mode || "off").toLowerCase();
-        if (mode !== "on") {
-          // Not harness-managed: release back to pending for other handlers.
-          await supabase.from("inbound_events").update({ status: "pending", claimed_by: null }).eq("id", row.id);
-          results.push({ event_id: row.id, skipped: "harness_off" });
-          continue;
-        }
+        // Harness off no longer skips the event: the direct model chain
+        // (DeepSeek → Kimi via geminiChatWithFallback) answers instead, so
+        // comments/DMs still get real replies while the farm harness is demoted.
 
         const payload = row.payload || {};
         const text = String(payload.text || payload.body || "");
