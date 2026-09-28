@@ -158,9 +158,6 @@ serve(async (req) => {
         // PUBLIC-ONLY FALLBACK. NEVER voice_style, quick_reference_info or any
         // instruction text: those carry internal strategy and previously leaked
         // into a public comment. Whitelist = location + hours only.
-        let reply = harnessResult.ok && harnessResult.message?.content
-          ? String(harnessResult.message.content)
-          : "";
         if (!reply) {
           const scrub = (v: any) => String(v || "")
             .split(/[\n;]+/)
