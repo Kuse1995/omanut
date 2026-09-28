@@ -16,6 +16,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { harnessChatWithFallback } from "../_shared/harness-client.ts";
+import { geminiChatWithFallback, PRIMARY_TEXT_MODEL } from "../_shared/gemini-client.ts";
 import { buildCompanyFacts, buildCommentContext, buildDmContext, searchKnowledgeBase, formatKbMatches } from "../_shared/company-context.ts";
 
 
@@ -68,12 +69,9 @@ serve(async (req) => {
           .eq("id", row.company_id)
           .maybeSingle();
         const mode = String(company?.metadata?.harness_mode || "off").toLowerCase();
-        if (mode !== "on") {
-          // Not harness-managed: release back to pending for other handlers.
-          await supabase.from("inbound_events").update({ status: "pending", claimed_by: null }).eq("id", row.id);
-          results.push({ event_id: row.id, skipped: "harness_off" });
-          continue;
-        }
+        // Harness off no longer skips the event: the direct model chain
+        // (DeepSeek → Kimi via geminiChatWithFallback) answers instead, so
+        // comments/DMs still get real replies while the farm harness is demoted.
 
         const payload = row.payload || {};
         const text = String(payload.text || payload.body || "");
@@ -127,20 +125,39 @@ serve(async (req) => {
             + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing.";
           userPrompt = text;
         }
-        const harnessResult = await harnessChatWithFallback(
-          [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          [],
-          { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
-        );
+        const chatMessages = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ];
+        let reply = "";
+        if (mode === "on") {
+          const harnessResult = await harnessChatWithFallback(
+            chatMessages,
+            [],
+            { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
+          );
+          if (harnessResult.ok && harnessResult.message?.content) {
+            reply = String(harnessResult.message.content);
+          }
+        } else {
+          // Direct chain (DeepSeek → Kimi …) — funded and producing real answers.
+          const directRes = await geminiChatWithFallback({
+            model: PRIMARY_TEXT_MODEL,
+            messages: chatMessages,
+            max_tokens: 300,
+          });
+          if (directRes.ok) {
+            try {
+              const data = await directRes.json();
+              reply = String(data?.choices?.[0]?.message?.content || "");
+            } catch (_e) { /* fall through to safe fallback */ }
+          } else {
+            console.warn("[META-AUTO-REPLY] direct chain failed:", directRes.status);
+          }
+        }
         // PUBLIC-ONLY FALLBACK. NEVER voice_style, quick_reference_info or any
         // instruction text: those carry internal strategy and previously leaked
         // into a public comment. Whitelist = location + hours only.
-        let reply = harnessResult.ok && harnessResult.message?.content
-          ? String(harnessResult.message.content)
-          : "";
         if (!reply) {
           const scrub = (v: any) => String(v || "")
             .split(/[\n;]+/)
