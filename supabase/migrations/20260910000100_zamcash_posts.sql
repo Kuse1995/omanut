@@ -1,8 +1,11 @@
--- ZamCash Loans — 10 scheduled posts across 5 days (2 per day, 09:00 and 17:00 CAT).
--- Step 2 of 2: RUN THIS ONLY AFTER the ZamCash Facebook page is connected to the
--- 'ZamCash Loans' company (the posts need that page's id to publish).
--- If the page is not connected yet, this migration fails loudly instead of
--- creating unpublishable rows - connect the page and re-run it.
+-- ZamCash Loans - 10 scheduled posts across 5 days with images.
+-- 2 posts per day at 09:00 and 17:00 CAT (Africa/Lusaka = UTC+2, stored in UTC).
+-- Every post carries the owner's referral link (812531) and its own generated image.
+--
+-- RUN THIS ONLY AFTER the ZamCash Facebook page is connected to the
+-- 'ZamCash Loans' company - the posts need that page id to publish. If the page
+-- is not connected the migration stops with a clear message; connect the page
+-- and run it again.
 
 DO $$
 DECLARE
@@ -25,49 +28,48 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Creator: reuse an existing post author (the owner account) when available.
   SELECT created_by INTO v_created_by FROM public.scheduled_posts ORDER BY created_at ASC LIMIT 1;
   IF v_created_by IS NULL THEN
     SELECT id INTO v_created_by FROM auth.users ORDER BY created_at ASC LIMIT 1;
   END IF;
 
-  INSERT INTO public.scheduled_posts (company_id, page_id, content, scheduled_time, status, created_by)
+  INSERT INTO public.scheduled_posts (company_id, page_id, content, scheduled_time, status, created_by, image_url)
   VALUES
       (v_company_id, v_page_id, $p$Need quick cash? Apply for a ZamCash loan on your phone - no paperwork, no bank queue. It takes about 2 minutes.
 
-Apply here 👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '1 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by),
+Apply here 👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '1 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/8f19a38c-c24e-46da-9bba-51cbef2072b4.png$img$::text),
       (v_company_id, v_page_id, $p$Your phone is all you need. Apply for ZamCash online and the money is sent to your mobile money once approved.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '1 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '1 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/6aaed420-bc59-49da-996d-c906ee2c0244.png$img$::text),
       (v_company_id, v_page_id, $p$K500 cash, repay K600 after 14 days. Simple and straight.
 
 Always read the repayment terms in the app before you accept the loan. 👍
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '2 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '2 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/d44b45a0-c7b9-448e-8c79-f22b3c2359f6.png$img$::text),
       (v_company_id, v_page_id, $p$Airtel, MTN or Zamtel - use the number you already have. Apply in minutes.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '2 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '2 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/29a04429-ace1-4095-a1f4-f37ae88f2d1c.png$img$::text),
       (v_company_id, v_page_id, $p$How to apply in 3 steps:
 1. Open the link
 2. Enter your mobile number
 3. Follow the verification
 
-That's it. 👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '3 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by),
+That's it. 👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '3 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/af81736b-7eb7-4d04-b535-5b0e44e94b8e.png$img$::text),
       (v_company_id, v_page_id, $p$Emergency, stock for the shop, or school fees? ZamCash is open 24/7, online.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '3 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '3 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/1d1cc0ef-95cd-4f66-acfb-cc0ae43624cb.png$img$::text),
       (v_company_id, v_page_id, $p$⚠️ Never pay a deposit or "registration fee" to anyone for a ZamCash loan. Apply only through the official link.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '4 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '4 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/7635e3f7-d06f-4c80-8aac-33af59d20bd3.png$img$::text),
       (v_company_id, v_page_id, $p$No paperwork. No queues. 100% mobile application - money straight to your mobile money if approved.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '4 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '4 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/576989db-1505-449c-9972-65cbaae6678f.png$img$::text),
       (v_company_id, v_page_id, $p$Loan approval is decided by ZamCash - but applying takes about 2 minutes. See what you qualify for.
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '5 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by),
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '5 day' + interval '7 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/786bc9bf-4bcf-458d-9bd0-6ba3fcdd25bc.png$img$::text),
       (v_company_id, v_page_id, $p$Don't get caught short this month. Apply today and get an answer fast. Read your repayment terms first. 🙏
 
-👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '5 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by);
+👉 https://zamcash.com/invite/812531$p$::text, (date_trunc('day', now()) + interval '5 day' + interval '15 hour' + interval '0 minute'), 'approved', v_created_by, $img$https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/generated/10873fee-3fea-4238-b3b5-6d74e360f4b0/6b4fb905-71d7-446b-a7d0-288783d5172b.png$img$::text);
 
-  RAISE NOTICE 'ZamCash Loans: 10 posts scheduled across 5 days';
+  RAISE NOTICE 'ZamCash Loans: 10 posts with images scheduled across 5 days';
 END $$;
