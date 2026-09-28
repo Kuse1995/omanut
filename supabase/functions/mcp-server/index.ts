@@ -1066,6 +1066,48 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── list_page_posts ──
+  // Reads the company's Facebook page posts (newest first) with engagement
+  // counts. Lets the agent study the page's real voice and top-performing
+  // content before writing new posts.
+  server.tool("list_page_posts", {
+    description: "Read the connected Facebook page's published posts newest-first, with reaction/comment/share counts and permalinks. Use to learn the page's voice, humour and best-performing content style before drafting new posts.",
+    inputSchema: z.object({
+      limit: z.number().optional().describe("How many posts to return (default 25, max 50)"),
+      since: z.string().optional().describe("ISO date (YYYY-MM-DD) - only posts published after this date"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("page_id, access_token")
+        .eq("company_id", companyId)
+        .limit(1)
+        .maybeSingle();
+      if (!cred?.page_id || !cred?.access_token) {
+        throw new Error("No Facebook page connected for this company - connect a page first.");
+      }
+      const limit = Math.min(Math.max(Number(params?.limit) || 25, 1), 50);
+      const fields = "id,message,created_time,permalink_url,reactions.summary(true),comments.summary(true),shares,attachments{media_type}";
+      let url = "https://graph.facebook.com/v21.0/" + cred.page_id + "/posts?fields=" + encodeURIComponent(fields) + "&limit=" + limit + "&access_token=" + encodeURIComponent(cred.access_token);
+      if (params?.since) url += "&since=" + encodeURIComponent(String(params.since));
+      const res = await fetch(url);
+      const j: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error("Graph API error: " + JSON.stringify(j).slice(0, 300));
+      const posts = (j.data || []).map((p: any) => ({
+        id: p.id,
+        created_time: p.created_time,
+        message: p.message || "(image or video only - no caption)",
+        reactions: p.reactions?.summary?.total_count ?? 0,
+        comments: p.comments?.summary?.total_count ?? 0,
+        shares: p.shares?.count ?? 0,
+        media_type: p.attachments?.data?.[0]?.media_type || null,
+        permalink: p.permalink_url || null,
+      }));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ page_id: cred.page_id, count: posts.length, posts }, null, 2) }] };
+    },
+  });
+
   // â”€â”€ list_generated_images â”€â”€
   server.tool("list_generated_images", {
     description: "List AI-generated images with prompts, approval status, brand assets used, and URLs.",
