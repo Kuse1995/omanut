@@ -65,7 +65,7 @@ serve(async (req) => {
         // Company + harness gate
         const { data: company } = await supabase
           .from("companies")
-          .select("id, name, metadata, voice_style, hours, services, quick_reference_info, branches, service_locations, whatsapp_number, twilio_number")
+          .select("id, name, metadata, voice_style, hours, services, quick_reference_info, payment_instructions, branches, service_locations, whatsapp_number, twilio_number")
           .eq("id", row.company_id)
           .maybeSingle();
         const mode = String(company?.metadata?.harness_mode || "off").toLowerCase();
@@ -106,23 +106,25 @@ serve(async (req) => {
         if (row.channel === "public_comment") {
           const ctx = await buildCommentContext(supabase, payload);
           const facts = buildCompanyFacts(company);
-          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 4));
+          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 8));
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", replying publicly to a comment on the company's Facebook page.\n"
             + (ctx ? ctx + "\n\n" : "")
             + (facts ? facts + "\n\n" : "")
             + (kb ? kb + "\n\n" : "")
             + "ANSWER PRIORITY: THE POST THEY ARE COMMENTING ON is the immediate subject of the conversation. If their question refers to anything shown in that post — a package, tier, plan name, price, or offer — answer from THE POST CONTENT first, even if the FACTS or KB/BMS catalog list a different product with a similar name. Use the FACTS/KB for anything the post doesn't cover, or to add extra detail after answering from the post.\n"
-            + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Only quote prices/claims that appear in the post or the facts above — never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward.";
+            + "RULES: Reply in 1-3 short lines. Warm, human, social style — no markdown, no hashtags, max 1-2 emojis. Only quote prices/claims that appear in the post or the facts above — never invent. If it needs a private or sensitive answer, invite them to send a DM. Ask a question only if it moves them forward."
+            + " ANSWER DIRECTLY: if the answer (location, fees, hours, requirements, payment details, how to apply) is anywhere in the KNOWLEDGE BASE, FACTS or KB MATCHES above, state it plainly in the reply — e.g. give the actual location or the exact fee. NEVER tell them to DM, call or visit to get information you already have. Only invite a DM when the info truly is not in the knowledge above or is personal to them.";
           userPrompt = "Their comment: \"" + text + "\"";
         } else if (row.channel === "direct_message") {
           const history = await buildDmContext(supabase, payload, text);
           const facts = buildCompanyFacts(company);
-          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 4));
+          const kb = formatKbMatches(await searchKnowledgeBase(supabase, row.company_id, text, 8));
           systemPrompt = "You are the social media assistant for " + (company?.name || "this business") + ", chatting one-on-one with a customer in the company's Facebook/Instagram DMs.\n"
             + (facts ? facts + "\n\n" : "")
             + (kb ? kb + "\n\n" : "")
             + (history ? history + "\n\n" : "")
-            + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing.";
+            + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing."
+            + " ANSWER DIRECTLY: if the answer (location, fees, hours, requirements, payment details, how to apply) is anywhere in the KNOWLEDGE BASE, FACTS or KB MATCHES above, state it plainly in the reply — e.g. give the actual location or the exact fee. NEVER tell them to DM, call or visit to get information you already have. Only invite a DM when the info truly is not in the knowledge above or is personal to them.";
           userPrompt = text;
         }
         const chatMessages = [
@@ -144,7 +146,7 @@ serve(async (req) => {
           const directRes = await geminiChatWithFallback({
             model: PRIMARY_TEXT_MODEL,
             messages: chatMessages,
-            max_tokens: 300,
+            max_tokens: 400,
           });
           if (directRes.ok) {
             try {
