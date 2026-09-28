@@ -125,14 +125,36 @@ serve(async (req) => {
             + "RULES: Reply in 1-4 short lines. Warm, human, helpful — no markdown, no hashtags. Ground answers in the facts above; only quote prices that appear in them, never invent. Ask a question only if it moves them toward a purchase or booking. If something is beyond the facts, say you'll double-check with the team rather than guessing.";
           userPrompt = text;
         }
-        const harnessResult = await harnessChatWithFallback(
-          [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          [],
-          { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
-        );
+        const chatMessages = [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ];
+        let reply = "";
+        if (mode === "on") {
+          const harnessResult = await harnessChatWithFallback(
+            chatMessages,
+            [],
+            { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
+          );
+          if (harnessResult.ok && harnessResult.message?.content) {
+            reply = String(harnessResult.message.content);
+          }
+        } else {
+          // Direct chain (DeepSeek → Kimi …) — funded and producing real answers.
+          const directRes = await geminiChatWithFallback({
+            model: PRIMARY_TEXT_MODEL,
+            messages: chatMessages,
+            maxTokens: 300,
+          });
+          if (directRes.ok) {
+            try {
+              const data = await directRes.json();
+              reply = String(data?.choices?.[0]?.message?.content || "");
+            } catch (_e) { /* fall through to safe fallback */ }
+          } else {
+            console.warn("[META-AUTO-REPLY] direct chain failed:", directRes.status);
+          }
+        }
         // PUBLIC-ONLY FALLBACK. NEVER voice_style, quick_reference_info or any
         // instruction text: those carry internal strategy and previously leaked
         // into a public comment. Whitelist = location + hours only.
