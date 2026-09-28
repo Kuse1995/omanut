@@ -83,6 +83,25 @@ serve(async (req) => {
           continue;
         }
 
+        // DUPLICATE GUARD: a comment must be answered ONCE. Meta redelivers
+        // webhooks and failed sends get re-queued — both produced double replies.
+        if (row.channel === "public_comment" && payload.comment_id) {
+          const { data: already } = await supabase
+            .from("inbound_events")
+            .select("id")
+            .eq("channel", "public_comment")
+            .eq("status", "sent")
+            .neq("id", row.id)
+            .filter("payload->>comment_id", "eq", String(payload.comment_id))
+            .limit(1)
+            .maybeSingle();
+          if (already) {
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null }).eq("id", row.id);
+            results.push({ event_id: row.id, skipped: "duplicate_comment" });
+            continue;
+          }
+        }
+
         // Harness reply — with real context: company facts + post + thread history
         let systemPrompt = "You are the friendly social media assistant for " + (company?.name || "this business") + ". Reply to the customer on Facebook/Instagram in the brand voice. 1-3 short lines. Never invent prices or claims.";
         let userPrompt = text;
@@ -116,9 +135,22 @@ serve(async (req) => {
           [],
           { companyId: row.company_id, metadata: company?.metadata || null, mode: "content" }
         );
-        const reply = harnessResult.ok && harnessResult.message?.content
+        // FACTS-GROUNDED FALLBACK: when every brain fails we still answer with
+        // something useful — the company's own facts (location, hours, contact)
+        // — instead of a content-free placeholder.
+        let reply = harnessResult.ok && harnessResult.message?.content
           ? String(harnessResult.message.content)
-          : SAFE_FALLBACK;
+          : "";
+        if (!reply) {
+          const facts = buildCompanyFacts(company);
+          const factLine = facts
+            ? String(facts).replace(/^[^:]*:\s*/gm, "").split("\n").filter(Boolean).slice(0, 3).join(" · ")
+            : "";
+          reply = (factLine
+            ? "Thanks for reaching out! " + factLine
+            : "Thanks for reaching out!") + " — reply here and our team will assist you right away.";
+          console.warn("[META-AUTO-REPLY] all brains failed — facts-grounded fallback used");
+        }
 
         // Comment anti-spam delay
         if (row.channel === "public_comment") {
