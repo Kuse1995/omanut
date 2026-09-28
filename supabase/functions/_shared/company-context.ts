@@ -14,18 +14,60 @@ export interface CompanyFacts {
   hours?: string | null;
   services?: string | null;
   quick_reference_info?: string | null;
+  branches?: string | null;
+  service_locations?: string | null;
+  payment_instructions?: string | null;
 }
 
-// Authoritative company facts block (KB grounding). Long fields are capped
-// so the harness call stays fast (client timeout is 12s by default).
+// Authoritative company facts block (KB grounding). The full knowledge base
+// is included (generous cap) — truncating it previously cut off facts like
+// the exact location that sat at the end of quick_reference_info.
 export function buildCompanyFacts(company: CompanyFacts | null | undefined): string {
   return [
-    company?.voice_style ? "BRAND VOICE: " + company.voice_style : "",
+    company?.voice_style ? "BRAND VOICE: " + String(company.voice_style).slice(0, 600) : "",
     company?.hours ? "BUSINESS HOURS: " + company.hours : "",
-    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + String(company.services).slice(0, 1500) : "",
-    company?.quick_reference_info ? "QUICK FACTS: " + String(company.quick_reference_info).slice(0, 1200) : "",
+    company?.branches ? "BRANCHES / CAMPUSES: " + company.branches : "",
+    company?.services ? "PRODUCTS/SERVICES (only quote prices that appear here): " + String(company.services).slice(0, 3000) : "",
+    company?.quick_reference_info ? "KNOWLEDGE BASE (full, authoritative):\n" + String(company.quick_reference_info).slice(0, 8000) : "",
+    company?.payment_instructions ? "PAYMENT INSTRUCTIONS: " + String(company.payment_instructions).slice(0, 1500) : "",
   ].filter(Boolean).join("\n");
 }
+
+// Expand question words to the vocabulary KBs actually use, so
+// "where is it located?" matches "Location: ..." and "how much" matches fees.
+const SYNONYMS: Record<string, string[]> = {
+  where: ["location", "located", "address", "along", "directions", "campus"],
+  located: ["location", "address", "along"],
+  location: ["located", "address", "along"],
+  address: ["location", "along"],
+  directions: ["location", "along"],
+  much: ["fee", "fees", "price", "cost", "k"],
+  cost: ["fee", "fees", "price"],
+  price: ["fee", "fees", "cost"],
+  fees: ["fee", "tuition", "term", "registration"],
+  fee: ["fees", "tuition", "registration"],
+  pay: ["payment", "bank", "account"],
+  payment: ["bank", "account", "pay"],
+  open: ["hours", "monday", "friday"],
+  time: ["hours", "monday"],
+  contact: ["phone", "call", "office", "whatsapp"],
+  apply: ["application", "admission", "form", "registration"],
+  enroll: ["application", "admission", "registration"],
+  admission: ["application", "form", "registration"],
+  transport: ["bus", "pick-up", "drop-off"],
+  uniform: ["attire"],
+};
+function expandTerms(q: string): string[] {
+  const base = q.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  const out = new Set<string>();
+  for (const t of base) {
+    out.add(t);
+    if (t.endsWith("s") && t.length > 4) out.add(t.slice(0, -1));
+    for (const s of SYNONYMS[t] || []) out.add(s);
+  }
+  return [...out];
+}
+
 
 // Public comment context: the post being commented on (Graph, via the page
 // token), the parent comment when the comment is a reply-to-reply, and the
@@ -127,16 +169,19 @@ export async function searchKnowledgeBase(
       supabase.from("bms_connections").select("last_kb_text").eq("company_id", companyId).eq("is_active", true).maybeSingle(),
     ]);
 
-    const terms = q.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+    const terms = expandTerms(q);
     const matches: KbSnippet[] = [];
     const scan = (source: string, text: string | null | undefined) => {
       if (!text) return;
-      const paragraphs = String(text).split(/\n{2,}|\r\n\r\n/);
-      for (const p of paragraphs) {
+      // Split on blank lines AND single lines so short "Location: ..." lines
+      // are their own snippets; attach the previous heading for context.
+      const lines = String(text).split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
+      for (let i = 0; i < lines.length; i++) {
+        const p = (lines[i].length < 40 && lines[i + 1] ? lines[i] + " — " + lines[i + 1] : lines[i]);
         const lower = p.toLowerCase();
         let score = 0;
         for (const t of terms) if (lower.includes(t)) score++;
-        if (score > 0) matches.push({ source, snippet: p.trim().slice(0, 800), score });
+        if (score > 0) matches.push({ source, snippet: p.slice(0, 800), score });
       }
     };
 
