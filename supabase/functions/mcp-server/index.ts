@@ -129,7 +129,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.3.0",
+    version: "1.4.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
@@ -1144,6 +1144,135 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       }
       const after = await (await fetch(listUrl)).json().catch(() => ({}));
       return { content: [{ type: "text" as const, text: JSON.stringify({ credential_id: cred.id, page_id: cred.page_id, subscribe_result: subJson, instagram_result: igResult, subscribed_apps_after: after }, null, 2) }] };
+    },
+  });
+
+  // ── list_post_comments ──
+  // Shows what the public actually wrote on a post AND whether the page already
+  // replied, so "we are not replying to comments" can be verified rather than
+  // guessed. A post's comment count alone cannot tell the two apart.
+  server.tool("list_post_comments", {
+    description: "List the comments on a Facebook page post (newest post by default) together with the page's own replies, marking which comments are still unanswered. Use to verify the auto-reply pipeline end to end.",
+    inputSchema: z.object({
+      post_id: z.string().optional().describe("Facebook post id; defaults to the page's newest post"),
+      limit: z.number().optional().describe("How many comments to return (default 25, max 50)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("page_id, access_token")
+        .eq("company_id", companyId)
+        .limit(1)
+        .maybeSingle();
+      if (!cred?.page_id || !cred?.access_token) {
+        throw new Error("No Facebook page connected for this company - connect a page first.");
+      }
+      let postId: string | null = params?.post_id ? String(params.post_id) : null;
+      if (!postId) {
+        const lr = await fetch("https://graph.facebook.com/v21.0/" + cred.page_id + "/posts?fields=id,created_time&limit=1&access_token=" + encodeURIComponent(cred.access_token));
+        const lj: any = await lr.json().catch(() => ({}));
+        if (!lr.ok) throw new Error("Graph API error: " + JSON.stringify(lj).slice(0, 300));
+        postId = lj?.data?.[0]?.id ?? null;
+        if (!postId) throw new Error("This page has no posts yet.");
+      }
+      const limit = Math.min(Math.max(Number(params?.limit) || 25, 1), 50);
+      const fields = "id,message,from,created_time,comments.limit(10){id,message,from,created_time}";
+      const url = "https://graph.facebook.com/v21.0/" + postId + "/comments?fields=" + encodeURIComponent(fields) + "&limit=" + limit + "&access_token=" + encodeURIComponent(cred.access_token);
+      const res = await fetch(url);
+      const j: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error("Graph API error: " + JSON.stringify(j).slice(0, 300));
+      const comments = (j.data || []).map((c: any) => {
+        const replies = (c.comments?.data || []).map((r: any) => ({
+          id: r.id,
+          from: r.from?.name || null,
+          from_id: r.from?.id || null,
+          by_page: r.from?.id === cred.page_id,
+          message: r.message || "",
+          created_time: r.created_time || null,
+        }));
+        return {
+          id: c.id,
+          from: c.from?.name || null,
+          from_id: c.from?.id || null,
+          by_page: c.from?.id === cred.page_id,
+          message: c.message || "",
+          created_time: c.created_time || null,
+          replies,
+          replied_by_page: replies.some((r: any) => r.by_page),
+        };
+      });
+      const unanswered = comments.filter((c: any) => !c.by_page && !c.replied_by_page);
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        page_id: cred.page_id,
+        post_id: postId,
+        comment_count: comments.length,
+        unanswered_count: unanswered.length,
+        unanswered_comment_ids: unanswered.map((c: any) => c.id),
+        comments,
+      }, null, 2) }] };
+    },
+  });
+
+  // ── company_health ──
+  // Answers "is my agent actually connected and delivering?" in one call. The
+  // is_live switch matters most: when it is false every outbound provider call
+  // is skipped (logged to test_outbound_log) while the pipeline still reports
+  // success, which is exactly how replies go missing without an error anywhere.
+  server.tool("company_health", {
+    description: "Health check for a company: whether outbound is live (is_live) or sandboxed, inbound event counts by status for a look-back window, the latest failure reasons per event, and how many outbound messages the sandbox suppressed. Call this first whenever replies or DMs appear to be missing.",
+    inputSchema: z.object({
+      days: z.number().optional().describe("Look-back window in days (default 7, max 90)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const days = Math.min(Math.max(Number(params?.days) || 7, 1), 90);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const { data: company } = await supabase
+        .from("companies")
+        .select("id, name, is_live, whatsapp_number")
+        .eq("id", companyId)
+        .maybeSingle();
+      const { data: events } = await supabase
+        .from("inbound_events")
+        .select("id, channel, status, last_error, attempts, created_at, completed_at")
+        .eq("company_id", companyId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      const rows: any[] = events || [];
+      const byStatus: Record<string, number> = {};
+      const byChannel: Record<string, number> = {};
+      for (const e of rows) {
+        byStatus[e.status] = (byStatus[e.status] || 0) + 1;
+        byChannel[e.channel] = (byChannel[e.channel] || 0) + 1;
+      }
+      const problems = rows
+        .filter((e: any) => ["pending", "processing", "failed", "dead"].includes(e.status))
+        .slice(0, 10)
+        .map((e: any) => ({ id: e.id, channel: e.channel, status: e.status, attempts: e.attempts, last_error: e.last_error, created_at: e.created_at }));
+      const { data: suppressed } = await supabase
+        .from("test_outbound_log")
+        .select("channel, reason, created_at")
+        .eq("company_id", companyId)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      const suppressedRows: any[] = suppressed || [];
+      const sandboxByChannel: Record<string, number> = {};
+      for (const s of suppressedRows) sandboxByChannel[s.channel] = (sandboxByChannel[s.channel] || 0) + 1;
+      const live = company?.is_live === true;
+      return { content: [{ type: "text" as const, text: JSON.stringify({
+        window_days: days,
+        company: company ?? { id: companyId },
+        outbound_live: live,
+        verdict: live
+          ? "live - outbound providers are actually called"
+          : "SANDBOXED - outbound is written to test_outbound_log and never sent",
+        inbound_events: { total: rows.length, by_status: byStatus, by_channel: byChannel },
+        problems,
+        sandboxed_outbound: { total: suppressedRows.length, by_channel: sandboxByChannel, latest: suppressedRows.slice(0, 5) },
+      }, null, 2) }] };
     },
   });
 
