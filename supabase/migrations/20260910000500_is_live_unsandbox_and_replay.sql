@@ -17,9 +17,9 @@
 --   nothing ever reached Facebook.
 --
 -- This migration (1) takes real, traffic-receiving companies out of the
--- sandbox and (2) re-queues the events that were answered into the void, but
--- only for companies that genuinely produced sandboxed outbound attempts, so a
--- reply that did go out is never posted twice.
+-- sandbox and (2) re-queues the comments that were answered into the void, but
+-- only for companies that genuinely produced sandboxed comment-reply attempts,
+-- so a reply that did go out is never posted twice.
 
 -- 1. Un-sandbox companies the platform is actively receiving traffic for.
 --    Companies with no inbound traffic (demo/test shells) stay sandboxed.
@@ -34,20 +34,53 @@ UPDATE public.companies c
 UPDATE public.companies SET is_live = true
  WHERE id = '10873fee-3fea-4238-b3b5-6d74e360f4b0';
 
--- 2. Replay events that were "sent" into the sandbox. Evidence-gated: the
---    company must have sandboxed outbound rows on record.
+-- 2a. Replay the comment events that were "sent" into the sandbox.
+--     Evidence-gated: the company must have sandboxed fb_comment_reply rows on
+--     record. One event per comment is replayed (Meta redelivers webhooks, so a
+--     single comment can carry several events); the losers are parked in 2b.
+--     Sandboxed DMs are deliberately left alone rather than messaging people
+--     again weeks later.
+WITH replayable AS (
+  SELECT DISTINCT ON (e.payload->>'comment_id') e.id
+    FROM public.inbound_events e
+   WHERE e.channel = 'public_comment'
+     AND e.status = 'sent'
+     AND e.payload->>'comment_id' IS NOT NULL
+     AND e.created_at > now() - interval '60 days'
+     AND EXISTS (
+       SELECT 1 FROM public.test_outbound_log t
+        WHERE t.company_id = e.company_id
+          AND t.channel = 'fb_comment_reply'
+          AND t.created_at > now() - interval '60 days'
+     )
+   ORDER BY e.payload->>'comment_id', e.created_at ASC
+)
 UPDATE public.inbound_events e
    SET status = 'pending',
        claimed_by = NULL,
        claimed_at = NULL,
-       last_error = 'replayed: was sandboxed while company_not_live',
        attempts = 0,
+       last_error = 'replayed: was sandboxed while company_not_live',
        next_attempt_at = now()
- WHERE e.status = 'sent'
+ WHERE e.id IN (SELECT id FROM replayable);
+
+-- 2b. Any further "sent" event for the same comment is parked so the duplicate
+--     guard in meta-auto-reply cannot post a second reply.
+UPDATE public.inbound_events e
+   SET status = 'skipped',
+       claimed_by = NULL,
+       claimed_at = NULL,
+       attempts = 0,
+       last_error = 'skipped: duplicate comment event during sandbox replay',
+       next_attempt_at = now()
+ WHERE e.channel = 'public_comment'
+   AND e.status = 'sent'
+   AND e.payload->>'comment_id' IS NOT NULL
    AND e.created_at > now() - interval '60 days'
    AND EXISTS (
      SELECT 1 FROM public.test_outbound_log t
       WHERE t.company_id = e.company_id
+        AND t.channel = 'fb_comment_reply'
         AND t.created_at > now() - interval '60 days'
    );
 
