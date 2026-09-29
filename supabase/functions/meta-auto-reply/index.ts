@@ -76,7 +76,7 @@ serve(async (req) => {
         const payload = row.payload || {};
         const text = String(payload.text || payload.body || "");
         if (!text.trim()) {
-          await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null }).eq("id", row.id);
+          await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
           results.push({ event_id: row.id, skipped: "empty" });
           continue;
         }
@@ -94,7 +94,7 @@ serve(async (req) => {
             .limit(1)
             .maybeSingle();
           if (already) {
-            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null }).eq("id", row.id);
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
             results.push({ event_id: row.id, skipped: "duplicate_comment" });
             continue;
           }
@@ -188,7 +188,7 @@ serve(async (req) => {
           // sends via Graph /me/messages and persists the outbound turn.
           const conversationId = payload.conversation_id;
           if (!conversationId) {
-            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null }).eq("id", row.id);
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
             results.push({ event_id: row.id, skipped: "no_conversation" });
             continue;
           }
@@ -198,8 +198,16 @@ serve(async (req) => {
           if (dmRes?.error) {
             throw new Error("send-meta-dm failed: " + JSON.stringify(dmRes.error).slice(0, 300));
           }
+          // send-meta-dm answers { success: true, sandboxed: true } when the
+          // company is not live (is_live gate). That is not a delivered DM.
+          if ((dmRes?.data as any)?.sandboxed) {
+            console.warn("[META-AUTO-REPLY] DM sandboxed, company not live:", row.company_id, (dmRes?.data as any)?.reason);
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
+            results.push({ event_id: row.id, channel: row.channel, sandboxed: true, reason: (dmRes?.data as any)?.reason ?? "company_not_live" });
+            continue;
+          }
         } else {
-          await supabase.functions.invoke("send-facebook-comment-reply", {
+          const commentRes: any = await supabase.functions.invoke("send-facebook-comment-reply", {
             body: {
               company_id: row.company_id,
               comment_id: payload.comment_id,
@@ -211,15 +219,43 @@ serve(async (req) => {
               source_type: "auto",
             },
           });
+          // A reply only exists if the dispatcher confirms it. This result used
+          // to be discarded and the event marked "sent" regardless, so a
+          // sandboxed company (is_live=false) or a Facebook API error looked
+          // exactly like a successful public reply.
+          if (commentRes?.error) {
+            throw new Error("send-facebook-comment-reply failed: " + JSON.stringify(commentRes.error).slice(0, 300));
+          }
+          const commentBody: any = commentRes?.data ?? {};
+          if (commentBody?.sandboxed) {
+            console.warn("[META-AUTO-REPLY] comment reply sandboxed, company not live:", row.company_id, commentBody?.reason);
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
+            results.push({ event_id: row.id, channel: row.channel, sandboxed: true, reason: commentBody?.reason ?? "company_not_live" });
+            continue;
+          }
+          if (commentBody?.success !== true) {
+            throw new Error("send-facebook-comment-reply returned no success: " + JSON.stringify(commentBody).slice(0, 300));
+          }
         }
 
         await supabase.from("inbound_events").update({ status: "sent", claimed_by: null }).eq("id", row.id);
         results.push({ event_id: row.id, channel: row.channel, replied: true, reply_len: reply.length });
       } catch (err) {
-        console.error("[META-AUTO-REPLY] event failed:", row.id, err instanceof Error ? err.message : err);
-        // Release back so it can be retried / surfaced
-        await supabase.from("inbound_events").update({ status: "pending", claimed_by: null }).eq("id", row.id);
-        results.push({ event_id: row.id, error: String(err instanceof Error ? err.message : err) });
+        const msg = err instanceof Error ? err.message : String(err);
+        const attempts = Number((row as any).attempts ?? 0) + 1;
+        console.error("[META-AUTO-REPLY] event failed:", row.id, msg);
+        // Persist the real reason instead of silently releasing the event. After
+        // 3 tries it is parked as dead so a permanently broken send (missing
+        // page token, deleted comment) cannot loop forever.
+        await supabase.from("inbound_events").update({
+          status: attempts >= 3 ? "dead" : "pending",
+          claimed_by: null,
+          attempts,
+          last_error: msg.slice(0, 500),
+          error_class: "send_failed",
+          next_attempt_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+        }).eq("id", row.id);
+        results.push({ event_id: row.id, error: msg, attempts });
       }
     }
 
