@@ -34,7 +34,24 @@ function buildInput(
   const refs = (options.inputImageUrls || []).filter(Boolean);
   const isNano = model.includes("nano-banana");
   const isKontext = model.includes("kontext");
+  const isGptImage = model.includes("gpt-image");
   const aspect = options.aspectRatio || FAL_IMAGE_ASPECT;
+
+  // OpenAI GPT-Image family (ChatGPT image models hosted on fal):
+  // { prompt, image_size preset, quality, image_urls for references }.
+  if (isGptImage) {
+    const sizeMap: Record<string, string> = {
+      "9:16": "portrait_16_9", "2:3": "portrait_16_9", "3:4": "portrait_4_3", "4:5": "portrait_4_3",
+      "4:3": "landscape_4_3", "3:2": "landscape_4_3", "16:9": "landscape_16_9", "1:1": "square_hd",
+    };
+    const input: Record<string, unknown> = {
+      prompt: options.prompt,
+      image_size: options.imageSize || sizeMap[aspect] || "square_hd",
+      quality: "high",
+    };
+    if (refs.length) input.image_urls = refs.slice(0, 16);
+    return input;
+  }
 
   if (isNano) {
     const input: Record<string, unknown> = { prompt: options.prompt };
@@ -85,7 +102,13 @@ export async function falImageGenerate(options: {
   // model is zero-risk — put it first; if the id 404s we fall to the next
   // (nano banana), then Gemini.
   const parseModels = (v: string) => v.split(",").map((s) => s.trim()).filter(Boolean);
-  const modelList = parseModels(isEdit ? FAL_IMAGE_EDIT_MODEL : FAL_IMAGE_MODEL);
+  const envList = parseModels(isEdit ? FAL_IMAGE_EDIT_MODEL : FAL_IMAGE_MODEL);
+  // A per-company model (image_generation_settings.image_model) is tried FIRST,
+  // then the env cascade — so picking ChatGPT-image for one company is zero-risk.
+  const requested = String(options.model || "").trim();
+  const modelList = requested && !requested.startsWith("gpt-") && !requested.startsWith("dall")
+    ? [requested, ...envList.filter((m) => m !== requested)]
+    : envList;
 
   const failures: string[] = [];
   for (const model of modelList) {
