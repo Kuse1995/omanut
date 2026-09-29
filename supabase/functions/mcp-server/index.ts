@@ -1108,6 +1108,45 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── page_webhook ──
+  // Reads or repairs a page's webhook subscription. Without a 'feed'
+  // subscription Facebook never sends comment events, so the page's comments
+  // are silently invisible to the auto-reply pipeline.
+  server.tool("page_webhook", {
+    description: "Check or repair the connected Facebook page's webhook subscription. action 'status' lists the apps/fields Facebook currently sends events for; action 'subscribe' (re)subscribes the page to feed + messages so comments and DMs reach the auto-reply pipeline.",
+    inputSchema: z.object({
+      action: z.enum(["status", "subscribe"]).optional().describe("status (default) or subscribe"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const action = String(params?.action || "status");
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("id, page_id, access_token, ig_user_id")
+        .eq("company_id", companyId)
+        .limit(1)
+        .maybeSingle();
+      if (!cred?.page_id || !cred?.access_token) {
+        throw new Error("No Facebook page connected for this company - connect a page first.");
+      }
+      const listUrl = "https://graph.facebook.com/v21.0/" + cred.page_id + "/subscribed_apps?access_token=" + encodeURIComponent(cred.access_token);
+      const before = await (await fetch(listUrl)).json().catch(() => ({}));
+      if (action === "status") {
+        return { content: [{ type: "text" as const, text: JSON.stringify({ credential_id: cred.id, page_id: cred.page_id, ig_user_id: cred.ig_user_id || null, subscribed_apps: before }, null, 2) }] };
+      }
+      const subUrl = "https://graph.facebook.com/v21.0/" + cred.page_id + "/subscribed_apps";
+      const subRes = await fetch(subUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscribed_fields: "feed,messages", access_token: cred.access_token }) });
+      const subJson = await subRes.json().catch(() => ({}));
+      let igResult: any = null;
+      if (cred.ig_user_id) {
+        const igRes = await fetch("https://graph.facebook.com/v21.0/" + cred.ig_user_id + "/subscribed_apps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscribed_fields: "messages", access_token: cred.access_token }) });
+        igResult = await igRes.json().catch(() => ({}));
+      }
+      const after = await (await fetch(listUrl)).json().catch(() => ({}));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ credential_id: cred.id, page_id: cred.page_id, subscribe_result: subJson, instagram_result: igResult, subscribed_apps_after: after }, null, 2) }] };
+    },
+  });
+
   // â”€â”€ list_generated_images â”€â”€
   server.tool("list_generated_images", {
     description: "List AI-generated images with prompts, approval status, brand assets used, and URLs.",
