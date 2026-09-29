@@ -2710,6 +2710,8 @@ export type Database = {
           created_at: string
           enabled: boolean
           id: string
+          image_model: string | null
+          image_provider: string | null
           learned_style_preferences: Json | null
           reference_asset_ids: string[] | null
           sample_prompts: string[] | null
@@ -2728,6 +2730,8 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          image_model?: string | null
+          image_provider?: string | null
           learned_style_preferences?: Json | null
           reference_asset_ids?: string[] | null
           sample_prompts?: string[] | null
@@ -2746,6 +2750,8 @@ export type Database = {
           created_at?: string
           enabled?: boolean
           id?: string
+          image_model?: string | null
+          image_provider?: string | null
           learned_style_preferences?: Json | null
           reference_asset_ids?: string[] | null
           sample_prompts?: string[] | null
