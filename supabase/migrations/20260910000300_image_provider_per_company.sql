@@ -14,9 +14,12 @@ ALTER TABLE public.image_generation_settings
 COMMENT ON COLUMN public.image_generation_settings.image_provider IS 'Image engine for this company: fal | openai | NULL (= IMAGE_PROVIDER env default)';
 COMMENT ON COLUMN public.image_generation_settings.image_model IS 'Exact image model id for the chosen provider (NULL = provider default/env)';
 
--- ZamCash Loans: switch its images to OpenAI (its settings row already exists
--- with the ZamCash visual style). The model id itself comes from the
--- OPENAI_IMAGE_MODEL env var so it can be corrected without a migration.
+-- ZamCash Loans: use OpenAI's ChatGPT image model (GPT-Image 2.5) HOSTED ON FAL,
+-- so it bills the fal key we already use - no separate OpenAI account needed.
+--   openai/gpt-image-2.5/flare/text-to-image     (default: fast, high quality)
+--   openai/gpt-image-2.5/sunburst/text-to-image  (alternate flavour - swap to compare)
+-- Other companies keep fal's Nano Banana cascade untouched.
 UPDATE public.image_generation_settings
-SET image_provider = 'openai'
+SET image_provider = 'fal',
+    image_model = 'openai/gpt-image-2.5/flare/text-to-image'
 WHERE company_id = (SELECT id FROM public.companies WHERE name = 'ZamCash Loans' LIMIT 1);
