@@ -151,17 +151,20 @@ export async function generateImageSmart(options: {
   inputImageUrls?: string[];
   aspectRatio?: string;
   imageSize?: string;
-  /** Accepted for call-site compatibility; model routing is env-driven. */
+  /** Optional model id — used as the OpenAI image model when the provider is openai. */
   model?: string;
+  /** Per-company engine override: 'openai' | 'fal' (falls back to IMAGE_PROVIDER env). */
+  provider?: string;
 }): Promise<{ imageBase64: string; text: string | null; source: string }> {
   const errors: string[] = [];
-  // THE ASTRA PATH: when IMAGE_PROVIDER=openai, the creative brain's engine
-  // paints the frames (OpenAI images API) — fal stays as the fallback.
-  if (Deno.env.get("IMAGE_PROVIDER") === "openai") {
+  const engine = String(options.provider || Deno.env.get("IMAGE_PROVIDER") || "").toLowerCase();
+  // OPENAI PATH: when the company (or env) selects openai, images are painted by
+  // OpenAI's image model — fal stays as the automatic fallback.
+  if (engine === "openai") {
     try {
       const apiKey = Deno.env.get("OPENAI_API_KEY");
       if (!apiKey) throw new Error("OPENAI_API_KEY missing");
-      const model = Deno.env.get("OPENAI_IMAGE_MODEL") || "gpt-image-1";
+      const model = String(options.model || "").trim() || Deno.env.get("OPENAI_IMAGE_MODEL") || "gpt-image-1";
       const ar = options.aspectRatio || "1:1";
       const size = ar === "16:9" || ar === "4:3" ? "1536x1024" : ar === "9:16" || ar === "3:4" ? "1024x1536" : "1024x1024";
       const r = await fetch("https://api.openai.com/v1/images/generations", {
