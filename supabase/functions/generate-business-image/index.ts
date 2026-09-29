@@ -205,9 +205,26 @@ serve(async (req) => {
     // ────────────────────────────────────────────────────────────
     // CALL GEMINI
     // ────────────────────────────────────────────────────────────
+    // Per-company image engine: image_generation_settings.image_provider wins,
+    // otherwise the IMAGE_PROVIDER env default applies.
+    let imageProvider: string | undefined;
+    let imageModel: string | undefined;
+    try {
+      const { data: imgSettings } = await supabase
+        .from('image_generation_settings')
+        .select('image_provider, image_model')
+        .eq('company_id', companyId)
+        .maybeSingle();
+      imageProvider = (imgSettings as any)?.image_provider || undefined;
+      imageModel = (imgSettings as any)?.image_model || undefined;
+    } catch (_) { /* settings are optional */ }
+    console.log('[GENERATE-BUSINESS-IMAGE] engine=' + (imageProvider || 'env default') + ' model=' + (imageModel || 'default'));
+
     const { imageBase64 } = await generateImageSmart({
       prompt: genPrompt,
       inputImageUrls: inputImageUrls.length > 0 ? inputImageUrls : undefined,
+      provider: imageProvider,
+      model: imageModel,
     });
 
     if (!imageBase64) {
