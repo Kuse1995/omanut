@@ -94,7 +94,7 @@ serve(async (req) => {
             .limit(1)
             .maybeSingle();
           if (already) {
-            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "sandboxed: company_not_live" }).eq("id", row.id);
+            await supabase.from("inbound_events").update({ status: "skipped", claimed_by: null, last_error: "skipped: duplicate_comment" }).eq("id", row.id);
             results.push({ event_id: row.id, skipped: "duplicate_comment" });
             continue;
           }
