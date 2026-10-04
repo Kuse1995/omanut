@@ -211,14 +211,36 @@ serve(async (req) => {
         .eq("comment_id", comment_id)
         .single();
 
+      // The comment row is a convenience, not a requirement. meta-webhook can
+      // fail to persist it, and then this 404 meant the reply silently never
+      // went out even though the caller knew the company and the comment.
+      let commentPageId: string | null = originalComment?.page_id ?? null;
+      let commentCompanyId: string | null = originalComment?.company_id ?? null;
       if (commentError || !originalComment) {
-        return new Response(JSON.stringify({ error: "Original comment not found in database to map Page Token" }), {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        if (!company_id) {
+          return new Response(JSON.stringify({ error: "Original comment not found in database to map Page Token" }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        console.warn("[send-facebook-comment-reply] comment row missing - resolving page by company", { comment_id, company_id });
+        const { data: byCompany } = await supabase
+          .from("meta_credentials")
+          .select("page_id, company_id")
+          .eq("company_id", company_id)
+          .limit(1)
+          .maybeSingle();
+        if (!byCompany?.page_id) {
+          return new Response(JSON.stringify({ error: "Facebook page token not configured", details: "no meta_credentials row for this company and the comment is not in facebook_comments" }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        commentPageId = byCompany.page_id;
+        commentCompanyId = byCompany.company_id ?? company_id;
       }
 
-      const activeCompanyId = company_id || originalComment.company_id;
+      const activeCompanyId = company_id || commentCompanyId;
       assertTenantContext(activeCompanyId, "send-facebook-comment-reply-direct");
 
       // For human callers in autonomous mode, still require manager role on the resolved company
@@ -235,14 +257,29 @@ serve(async (req) => {
         }
       }
 
-      const { data: fbPage, error: pageError } = await supabase
+      let { data: fbPage, error: pageError } = await supabase
         .from("meta_credentials")
         .select("access_token")
-        .eq("page_id", originalComment.page_id)
+        .eq("page_id", commentPageId)
         .maybeSingle();
 
+      // Second chance: the page may be linked to the company under a different
+      // page_id than the one recorded on the comment.
+      if (!fbPage?.access_token && activeCompanyId) {
+        const byCompanyToken = await supabase
+          .from("meta_credentials")
+          .select("access_token")
+          .eq("company_id", activeCompanyId)
+          .limit(1)
+          .maybeSingle();
+        if (byCompanyToken.data?.access_token) {
+          fbPage = byCompanyToken.data;
+          pageError = null;
+        }
+      }
+
       if (pageError || !fbPage?.access_token) {
-        console.error("[send-facebook-comment-reply] page token lookup failed", { page_id: originalComment.page_id, pageError });
+        console.error("[send-facebook-comment-reply] page token lookup failed", { page_id: commentPageId, pageError });
         return new Response(JSON.stringify({ error: "Facebook page token not configured", details: pageError }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -250,7 +287,7 @@ serve(async (req) => {
       }
 
       const liveCheck2 = await checkIsLive({
-        company_id: originalComment.company_id,
+        company_id: activeCompanyId,
         channel: "fb_comment_reply",
         recipient: comment_id,
         payload: { message, autonomous: true },
