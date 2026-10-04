@@ -135,8 +135,10 @@ async function persistCommentAndEnqueue(supabase: any, pageCred: any, c: {
     { onConflict: "comment_id" },
   );
   if (upsertErr) {
-    console.error("[meta-webhook] facebook_comments upsert FAILED", { comment_id: c.commentId, error: upsertErr });
-    return;
+    // Do not drop the comment: the reply path can resolve the page token from
+    // the company alone. Returning here meant a comment whose row failed to
+    // persist never entered the pipeline at all.
+    console.error("[meta-webhook] facebook_comments upsert FAILED - enqueueing anyway", { comment_id: c.commentId, error: upsertErr });
   }
 
   await enqueueOrLegacy(supabase, {
