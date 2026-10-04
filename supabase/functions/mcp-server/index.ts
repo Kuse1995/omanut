@@ -965,7 +965,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         updated_at: new Date().toISOString(),
       };
       if (params.updated_caption) updates.content = params.updated_caption;
-      if (params.rejection_reason) updates.rejection_reason = params.rejection_reason;
+      // scheduled_posts has no rejection_reason column - writing one made every
+      // reject call fail with a schema-cache error. error_message is the
+      // free-text field explaining why a post will not go out.
+      if (params.rejection_reason) updates.error_message = params.rejection_reason;
+      if (params.action === "approve") updates.error_message = null;
       const { data, error } = await supabase
         .from("scheduled_posts")
         .update(updates)
