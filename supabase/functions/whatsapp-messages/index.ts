@@ -5090,9 +5090,22 @@ Trust ONLY the information provided in this system prompt.
                   .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
-                const { data: textResults } = await textQuery
+                const { data: rawTextResults } = await textQuery
                   .or(ilikeClauses)
-                  .limit(args.count || 5);
+                  .limit(50);
+
+                // Rank by how many query words each file matches; keep only the best
+                // matches so "LifeStraw Family" doesn't return every LifeStraw product.
+                const scored = (rawTextResults || []).map((m: any) => {
+                  const hay = `${m.file_name || ''} ${m.description || ''} ${(m.tags || []).join?.(' ') || ''}`.toLowerCase();
+                  const score = searchTerms.filter((t: string) => hay.includes(t)).length;
+                  return { m, score };
+                });
+                const best = scored.reduce((a: number, s: any) => Math.max(a, s.score), 0);
+                const textResults = scored
+                  .filter((s: any) => s.score === best && best > 0)
+                  .slice(0, args.count || 5)
+                  .map((s: any) => s.m);
 
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
