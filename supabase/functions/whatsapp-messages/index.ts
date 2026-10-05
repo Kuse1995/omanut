@@ -3576,7 +3576,7 @@ DO NOT USE for: fee inquiries, pricing questions, general info requests.`,
     }
 
     // Auto-merge core search & notification tools — these are always safe and required
-    const alwaysEnabledTools = ['search_media', 'search_knowledge', 'search_past_conversations', 'notify_boss', 'forward_media_to_boss'];
+    const alwaysEnabledTools = ['search_media', 'send_media', 'search_knowledge', 'search_past_conversations', 'notify_boss', 'forward_media_to_boss'];
     for (const tool of alwaysEnabledTools) {
       if (!enabledToolNames.includes(tool)) {
         enabledToolNames.push(tool);
@@ -6127,11 +6127,14 @@ Trust ONLY the information provided in this system prompt.
     // never called send_media, dispatch the top results deterministically. Caps at 3 to avoid spam.
     try {
       const lowerUserMsgForMedia = (userMessage || '').toLowerCase();
-      const askedForMedia = /\b(pic|pics|picture|pictures|photo|photos|image|images|video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia);
+      const IMG_WORDS = /\b(pic|pics|pix|pik|piks|poc|pocs|picha|picture|pictures|photo|photos|foto|fotos|image|images|imgs?)\b/;
+      const assistantClaimedSend = /\b(sent|sending|here (are|is)) (you )?(the )?(pics?|photos?|images?|pictures?)\b|sent the pics/i.test(String(assistantReply || ''));
+      const askedForMedia = IMG_WORDS.test(lowerUserMsgForMedia)
+        || /\b(video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia)
+        || assistantClaimedSend;
       const askedForVideoOnly = /\b(video|videos|clip|clips|reel|reels|footage)\b/.test(lowerUserMsgForMedia)
-        && !/\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
-      const askedForImageOnly = !askedForVideoOnly
-        && /\b(pic|pics|picture|pictures|photo|photos|image|images)\b/.test(lowerUserMsgForMedia);
+        && !IMG_WORDS.test(lowerUserMsgForMedia);
+      const askedForImageOnly = !askedForVideoOnly && IMG_WORDS.test(lowerUserMsgForMedia);
 
       const sendMediaWasCalled = allToolResults.some(tr => tr.fn === 'send_media')
         || toolExecutionContext.some(c => /send_media/i.test(c));
