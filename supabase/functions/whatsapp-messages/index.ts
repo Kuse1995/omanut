@@ -5101,11 +5101,14 @@ Trust ONLY the information provided in this system prompt.
                   m,
                   hay: `${m.file_name || ''} ${m.description || ''} ${(m.tags || []).join?.(' ') || ''}`.toLowerCase(),
                 }));
+                const GENERIC = new Set(['water','filter','filters','product','products','image','images','photo','photos','pic','pics','picture','pictures','the','and','for','with']);
+                const keyTerms = searchTerms.filter((t: string) => !GENERIC.has(t));
+                const rankTerms = keyTerms.length ? keyTerms : searchTerms;
                 const termFreq: Record<string, number> = {};
-                for (const t of searchTerms) termFreq[t] = rows.filter((r: any) => r.hay.includes(t)).length;
+                for (const t of rankTerms) termFreq[t] = rows.filter((r: any) => r.hay.includes(t)).length || 1;
                 const scored = rows.map((r: any) => ({
                   m: r.m,
-                  score: searchTerms.reduce((s: number, t: string) => s + (r.hay.includes(t) ? 1 / termFreq[t] : 0), 0),
+                  score: rankTerms.reduce((s: number, t: string) => s + (r.hay.includes(t) ? 1 / termFreq[t] : 0), 0),
                 }));
                 const best = scored.reduce((a: number, s: any) => Math.max(a, s.score), 0);
                 const textResults = scored
