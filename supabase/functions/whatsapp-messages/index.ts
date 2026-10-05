@@ -5096,11 +5096,17 @@ Trust ONLY the information provided in this system prompt.
 
                 // Rank by how many query words each file matches; keep only the best
                 // matches so "LifeStraw Family" doesn't return every LifeStraw product.
-                const scored = (rawTextResults || []).map((m: any) => {
-                  const hay = `${m.file_name || ''} ${m.description || ''} ${(m.tags || []).join?.(' ') || ''}`.toLowerCase();
-                  const score = searchTerms.filter((t: string) => hay.includes(t)).length;
-                  return { m, score };
-                });
+                // Rarer words (e.g. "family") weigh more than words every file shares ("lifestraw", "filter").
+                const rows = (rawTextResults || []).map((m: any) => ({
+                  m,
+                  hay: `${m.file_name || ''} ${m.description || ''} ${(m.tags || []).join?.(' ') || ''}`.toLowerCase(),
+                }));
+                const termFreq: Record<string, number> = {};
+                for (const t of searchTerms) termFreq[t] = rows.filter((r: any) => r.hay.includes(t)).length;
+                const scored = rows.map((r: any) => ({
+                  m: r.m,
+                  score: searchTerms.reduce((s: number, t: string) => s + (r.hay.includes(t) ? 1 / termFreq[t] : 0), 0),
+                }));
                 const best = scored.reduce((a: number, s: any) => Math.max(a, s.score), 0);
                 const textResults = scored
                   .filter((s: any) => s.score === best && best > 0)
