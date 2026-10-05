@@ -5090,9 +5090,31 @@ Trust ONLY the information provided in this system prompt.
                   .select('id, description, category, file_path, media_type, file_type, tags, file_name')
                   .eq('company_id', company.id);
                 if (requestedMediaType) textQuery = textQuery.eq('media_type', requestedMediaType);
-                const { data: textResults } = await textQuery
+                const { data: rawTextResults } = await textQuery
                   .or(ilikeClauses)
-                  .limit(args.count || 5);
+                  .limit(50);
+
+                // Rank by how many query words each file matches; keep only the best
+                // matches so "LifeStraw Family" doesn't return every LifeStraw product.
+                // Rarer words (e.g. "family") weigh more than words every file shares ("lifestraw", "filter").
+                const rows = (rawTextResults || []).map((m: any) => ({
+                  m,
+                  hay: `${m.file_name || ''} ${m.description || ''} ${(m.tags || []).join?.(' ') || ''}`.toLowerCase(),
+                }));
+                const GENERIC = new Set(['water','filter','filters','product','products','image','images','photo','photos','pic','pics','picture','pictures','the','and','for','with']);
+                const keyTerms = searchTerms.filter((t: string) => !GENERIC.has(t));
+                const rankTerms = keyTerms.length ? keyTerms : searchTerms;
+                const termFreq: Record<string, number> = {};
+                for (const t of rankTerms) termFreq[t] = rows.filter((r: any) => r.hay.includes(t)).length || 1;
+                const scored = rows.map((r: any) => ({
+                  m: r.m,
+                  score: rankTerms.reduce((s: number, t: string) => s + (r.hay.includes(t) ? 1 / termFreq[t] : 0), 0),
+                }));
+                const best = scored.reduce((a: number, s: any) => Math.max(a, s.score), 0);
+                const textResults = scored
+                  .filter((s: any) => s.score === best && best > 0)
+                  .slice(0, args.count || 5)
+                  .map((s: any) => s.m);
 
                 if (textResults && textResults.length > 0) {
                   results = textResults.map((m: any) => ({
