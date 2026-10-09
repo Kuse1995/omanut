@@ -984,10 +984,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // â”€â”€ create_scheduled_post â”€â”€
   server.tool("create_scheduled_post", {
-    description: "Create a new scheduled social media post with caption, image, platform, and timing.",
+    description: "Create a new scheduled social media post with caption, image(s), platform, and timing.",
     inputSchema: z.object({
       caption: z.string().describe("Post caption text"),
       image_url: z.string().optional().describe("Image URL for the post"),
+      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs for a multi-photo post (Facebook album / Instagram carousel). Takes precedence over image_url. Max 10."),
       video_url: z.string().optional().describe("Video URL for the post (reels)"),
       platform: z.enum(["facebook", "instagram", "both"]).describe("Target platform"),
       scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
@@ -1007,13 +1008,19 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         }) }] };
       }
 
+      const imageUrls: string[] = Array.isArray(params.image_urls)
+        ? params.image_urls.filter((u: unknown) => typeof u === "string" && u.trim().length > 0).slice(0, 10)
+        : [];
+      const primaryImage: string | null = imageUrls[0] || params.image_url || null;
+
       const { data, error } = await supabase
         .from("scheduled_posts")
         .insert({
           company_id: companyId,
           page_id: cred.page_id,
           content: params.caption,
-          image_url: params.image_url || null,
+          image_url: primaryImage,
+          image_urls: imageUrls.length > 0 ? imageUrls : null,
           video_url: params.video_url || null,
           target_platform: params.platform,
           scheduled_time: params.scheduled_time,
@@ -1037,7 +1044,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
               caption: params.caption,
               pendingPostId: data?.id,
             },
-            mediaUrl: params.image_url || undefined,
+            mediaUrl: primaryImage || undefined,
           },
         });
         bossNotified = !notifyRes?.error;
@@ -2105,6 +2112,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     targetPlatform: "facebook" | "instagram" | "both";
     caption: string;
     image_url?: string | null;
+    image_urls?: string[] | null;
     video_url?: string | null;
   }) {
     // Look up the company's Meta page_id
@@ -2125,7 +2133,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         company_id: params.companyId,
         page_id: cred.page_id,
         content: params.caption,
-        image_url: params.image_url || null,
+        image_url: params.image_urls && params.image_urls.length > 0 ? params.image_urls[0] : (params.image_url || null),
+        image_urls: params.image_urls && params.image_urls.length > 0 ? params.image_urls : null,
         video_url: params.video_url || null,
         target_platform: params.targetPlatform,
         scheduled_time: new Date().toISOString(),
@@ -2148,6 +2157,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     inputSchema: z.object({
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().optional().describe("Image URL to attach"),
+      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs — 2 or more creates a native multi-photo post"),
       video_url: z.string().optional().describe("Video URL to attach"),
     }).merge(companyOverride),
     handler: async (params: any) => {
@@ -2157,6 +2167,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         targetPlatform: "facebook",
         caption: params.caption,
         image_url: params.image_url,
+        image_urls: params.image_urls,
         video_url: params.video_url,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
@@ -2168,6 +2179,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     inputSchema: z.object({
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().describe("Image URL (required for IG)"),
+      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs — 2 or more creates an Instagram carousel"),
       video_url: z.string().optional().describe("Video URL for Reels"),
     }).merge(companyOverride),
     handler: async (params: any) => {
@@ -2177,6 +2189,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         targetPlatform: "instagram",
         caption: params.caption,
         image_url: params.image_url,
+        image_urls: params.image_urls,
         video_url: params.video_url,
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };

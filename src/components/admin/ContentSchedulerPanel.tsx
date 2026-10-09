@@ -17,6 +17,8 @@ import { format } from 'date-fns';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
 
+const MAX_IMAGES = 10; // Facebook multi-photo posts and IG carousels both cap a single post at 10
+
 export const ContentSchedulerPanel = () => {
   const { selectedCompany } = useCompany();
   const queryClient = useQueryClient();
@@ -27,7 +29,7 @@ export const ContentSchedulerPanel = () => {
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [selectedPageId, setSelectedPageId] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [targetPlatform, setTargetPlatform] = useState<'facebook' | 'instagram' | 'both' | 'tiktok'>('facebook');
@@ -92,19 +94,64 @@ export const ContentSchedulerPanel = () => {
   const pendingPosts = posts?.filter((p: any) => p.status === 'pending_approval') || [];
   const allPosts = posts?.filter((p: any) => p.status !== 'pending_approval') || [];
 
-  // Upload image
-  const handleImageUpload = async (file: File) => {
+  // Attached images: image_urls is the new source of truth, image_url the legacy single image.
+  const postImages = (post: any): string[] => {
+    const arr = Array.isArray(post?.image_urls) ? post.image_urls.filter(Boolean) : [];
+    return arr.length > 0 ? arr : (post?.image_url ? [post.image_url] : []);
+  };
+
+  const renderThumbStrip = (post: any, size: 'lg' | 'sm') => {
+    const imgs = postImages(post);
+    if (!imgs.length) return null;
+    const box = size === 'lg' ? 'w-24 h-24 rounded-lg' : 'w-14 h-14 rounded-md';
+    const shown = imgs.slice(0, 3);
+    return (
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {shown.map((u, i) => (
+          <img key={u + i} src={u} alt="" className={cn(box, 'object-cover border border-border')} />
+        ))}
+        {imgs.length > shown.length && (
+          <span className={cn(box, 'border border-border bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground')}>
+            +{imgs.length - shown.length}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+
+  // Upload one or more images (multi-photo posts)
+  const handleImageUpload = async (files: FileList | File[]) => {
     if (!selectedCompany) return;
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
     setUploading(true);
     try {
-      const ext = file.name.split('.').pop();
-      const path = `scheduled-posts/${selectedCompany.id}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from('company-media').upload(path, file, { upsert: false });
-      if (error) throw error;
-      const { data: publicData } = supabase.storage.from('company-media').getPublicUrl(path);
-      setImageUrl(publicData.publicUrl);
+      const room = MAX_IMAGES - imageUrls.length;
+      if (room <= 0) {
+        toast.error('Maximum ' + MAX_IMAGES + ' images per post');
+        return;
+      }
+      if (incoming.length > room) {
+        toast.warning('Only ' + room + ' more image' + (room === 1 ? '' : 's') + ' could be added (max ' + MAX_IMAGES + ' per post).');
+      }
+      const uploaded: string[] = [];
+      for (const file of incoming.slice(0, room)) {
+        const ext = file.name.split('.').pop();
+        const path = 'scheduled-posts/' + selectedCompany.id + '/' + crypto.randomUUID() + '.' + ext;
+        const { error } = await supabase.storage.from('company-media').upload(path, file, { upsert: false });
+        if (error) {
+          toast.error(file.name + ': ' + error.message);
+          continue;
+        }
+        const { data: publicData } = supabase.storage.from('company-media').getPublicUrl(path);
+        uploaded.push(publicData.publicUrl);
+      }
+      if (uploaded.length > 0) {
+        setImageUrls((prev) => [...prev, ...uploaded]);
+        toast.success(uploaded.length === 1 ? 'Image uploaded' : uploaded.length + ' images uploaded');
+      }
       setImagePickerOpen(false);
-      toast.success('Image uploaded');
     } catch (err: any) {
       toast.error(err.message || 'Upload failed');
     } finally {
@@ -112,14 +159,14 @@ export const ContentSchedulerPanel = () => {
     }
   };
 
-  // Schedule/publish mutation
+
   const scheduleMutation = useMutation({
     mutationFn: async () => {
       if (!selectedCompany) throw new Error('No company selected');
       if (!content.trim()) throw new Error('Post content is required');
       if (!selectedPageId) throw new Error('Select a page');
       if (publishMode === 'schedule' && (!scheduledDate || !scheduledTime)) throw new Error('Date and time are required');
-      if ((targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl) throw new Error('Instagram posts require an image.');
+      if ((targetPlatform === 'instagram' || targetPlatform === 'both') && imageUrls.length === 0) throw new Error('Instagram posts require an image.');
       if (targetPlatform === 'tiktok' && !hasVideo) throw new Error('TikTok posts require a video — attach one first.');
 
       const scheduledTimeISO = publishMode === 'now'
@@ -134,7 +181,8 @@ export const ContentSchedulerPanel = () => {
         .insert({
           company_id: selectedCompany.id, page_id: selectedPageId, content: content.trim(),
           scheduled_time: scheduledTimeISO, status: 'draft', created_by: user.id,
-          image_url: imageUrl || null, target_platform: targetPlatform,
+          image_url: imageUrls[0] || null, image_urls: imageUrls.length > 0 ? imageUrls : null,
+          target_platform: targetPlatform,
         })
         .select('id').single();
       if (insertError) throw insertError;
@@ -157,7 +205,7 @@ export const ContentSchedulerPanel = () => {
     onSuccess: () => {
       const label = targetPlatform === 'both' ? 'Facebook + Instagram' : targetPlatform === 'instagram' ? 'Instagram' : 'Facebook';
       toast.success(`Post ${publishMode === 'now' ? 'published' : 'scheduled'} on ${label}!`);
-      setContent(''); setScheduledDate(''); setScheduledTime(''); setImageUrl('');
+      setContent(''); setScheduledDate(''); setScheduledTime(''); setImageUrls([]);
       queryClient.invalidateQueries({ queryKey: ['scheduled-posts'] });
     },
     onError: (error: Error) => toast.error(error.message),
@@ -300,7 +348,7 @@ export const ContentSchedulerPanel = () => {
   const minDateStr = minDate.toISOString().split('T')[0];
   const selectedPage = pages?.find(p => p.page_id === selectedPageId);
   const hasIgConfigured = !!selectedPage?.ig_user_id;
-  const hasVideo = !!imageUrl && /\.(mp4|mov|webm|m4v)$/i.test(imageUrl.split('?')[0] || '');
+  const hasVideo = !!imageUrls[0] && /\.(mp4|mov|webm|m4v)$/i.test(imageUrls[0].split('?')[0] || '');
 
   const startEditing = (post: any) => {
     setEditingPostId(post.id);
@@ -395,7 +443,7 @@ export const ContentSchedulerPanel = () => {
                   <ToggleGroupItem value="tiktok" disabled={!hasVideo} className="gap-1.5 data-[state=on]:bg-cyan-500/20 data-[state=on]:text-cyan-600">TikTok</ToggleGroupItem>
                 </ToggleGroup>
                 {!hasIgConfigured && selectedPageId && <p className="text-xs text-muted-foreground">Instagram not configured for this page.</p>}
-                {(targetPlatform === 'instagram' || targetPlatform === 'both') && !imageUrl && <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ Instagram requires an image.</p>}
+                {(targetPlatform === 'instagram' || targetPlatform === 'both') && imageUrls.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ Instagram requires an image.</p>}
               </div>
 
               {/* Content */}
@@ -405,51 +453,107 @@ export const ContentSchedulerPanel = () => {
                 <p className="text-xs text-muted-foreground">{content.length} characters</p>
               </div>
 
-              {/* Image attachment */}
-              {imageUrl ? (
-                <div className="space-y-2">
-                  <Label>Attached Image</Label>
-                  <div className="relative inline-block">
-                    <img src={imageUrl} alt="Attached" className="w-32 h-32 object-cover rounded-lg border border-border" />
-                    <Button variant="destructive" size="icon" className="absolute -top-2 -right-2 h-6 w-6 rounded-full" onClick={() => setImageUrl('')}><X className="w-3 h-3" /></Button>
-                  </div>
-                </div>
-              ) : (
-                <Popover open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2"><ImagePlus className="w-4 h-4" />Attach Image</Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-96 p-0" align="start">
-                    <Tabs defaultValue="generated" className="w-full">
-                      <TabsList className="w-full rounded-none border-b">
-                        <TabsTrigger value="generated" className="flex-1">Generated Images</TabsTrigger>
-                        <TabsTrigger value="upload" className="flex-1">Upload</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="generated" className="p-3 m-0">
-                        {!generatedImages?.length ? (
-                          <p className="text-sm text-muted-foreground text-center py-4">No approved generated images yet.</p>
-                        ) : (
-                          <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                            {generatedImages.map((img) => (
-                              <button key={img.id} className="relative group rounded-md overflow-hidden border border-border hover:border-primary transition-colors" onClick={() => { setImageUrl(img.image_url); setImagePickerOpen(false); }}>
-                                <img src={img.image_url} alt={img.prompt} className="w-full h-20 object-cover" />
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </TabsContent>
-                      <TabsContent value="upload" className="p-3 m-0">
-                        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); }} />
-                        <Button variant="outline" className="w-full gap-2" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-                          {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading...</> : <><Upload className="w-4 h-4" /> Choose Image</>}
-                        </Button>
-                      </TabsContent>
-                    </Tabs>
-                  </PopoverContent>
-                </Popover>
-              )}
+              {/* Image attachments — 2 or more publishes as a native album / carousel */}
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <ImagePlus className="w-4 h-4" />
+                  Attached Images
+                  {imageUrls.length > 0 && <span className="font-normal text-muted-foreground">({imageUrls.length}/{MAX_IMAGES})</span>}
+                </Label>
 
-              {/* Date & Time */}
+                {imageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {imageUrls.map((url, idx) => (
+                      <div key={url} className="relative">
+                        <img
+                          src={url}
+                          alt={'Attachment ' + (idx + 1)}
+                          className={cn('w-24 h-24 object-cover rounded-lg border border-border', idx === 0 && 'ring-2 ring-primary')}
+                        />
+                        {idx === 0 && imageUrls.length > 1 && (
+                          <span className="absolute bottom-1 left-1 rounded bg-background/85 px-1 text-[10px] font-medium">cover</span>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                          onClick={() => setImageUrls((prev) => prev.filter((u) => u !== url))}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {imageUrls.length < MAX_IMAGES && (
+                  <Popover open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="gap-2">
+                        <ImagePlus className="w-4 h-4" />
+                        {imageUrls.length > 0 ? 'Add more images' : 'Attach Images'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-96 p-0" align="start">
+                      <Tabs defaultValue="generated" className="w-full">
+                        <TabsList className="w-full rounded-none border-b">
+                          <TabsTrigger value="generated" className="flex-1">Generated Images</TabsTrigger>
+                          <TabsTrigger value="upload" className="flex-1">Upload</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="generated" className="p-3 m-0">
+                          {!generatedImages?.length ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">No approved generated images yet.</p>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                              {generatedImages.map((img) => (
+                                <button
+                                  key={img.id}
+                                  className="relative group rounded-md overflow-hidden border border-border hover:border-primary transition-colors"
+                                  onClick={() => {
+                                    setImageUrls((prev) => (prev.includes(img.image_url) || prev.length >= MAX_IMAGES ? prev : [...prev, img.image_url]));
+                                  }}
+                                >
+                                  <img src={img.image_url} alt={img.prompt} className="w-full h-20 object-cover" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </TabsContent>
+                        <TabsContent value="upload" className="p-3 m-0 space-y-2">
+                          <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => {
+                              const files = e.target.files;
+                              if (files && files.length) handleImageUpload(files);
+                              e.target.value = '';
+                            }}
+                          />
+                          <Button variant="outline" className="w-full gap-2" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                            {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading...</> : <><Upload className="w-4 h-4" /> Choose Image(s)</>}
+                          </Button>
+                          <p className="text-xs text-muted-foreground">Select several at once. Two or more images publish as a native album on Facebook and a carousel on Instagram (max {MAX_IMAGES}).</p>
+                        </TabsContent>
+                      </Tabs>
+                    </PopoverContent>
+                  </Popover>
+                )}
+
+                {imageUrls.length > 1 && (
+                  <p className="text-xs text-muted-foreground">
+                    {imageUrls.length} images — {targetPlatform === 'instagram'
+                      ? 'will publish as an Instagram carousel'
+                      : targetPlatform === 'both'
+                        ? 'will publish as a Facebook album + Instagram carousel'
+                        : 'will publish as a Facebook multi-photo post'}.
+                  </p>
+                )}
+              </div>
+
+
               {publishMode === 'schedule' && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
@@ -500,9 +604,7 @@ export const ContentSchedulerPanel = () => {
                     return (
                       <div key={post.id} className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-3">
                         <div className="flex items-start gap-4">
-                          {post.image_url && (
-                            <img src={post.image_url} alt="" className="w-24 h-24 rounded-lg object-cover flex-shrink-0 border border-border" />
-                          )}
+                          {renderThumbStrip(post, 'lg')}
                           <div className="flex-1 min-w-0 space-y-2">
                             {isEditing ? (
                               <Textarea value={editCaption} onChange={(e) => setEditCaption(e.target.value)} rows={4} className="resize-none" />
@@ -577,7 +679,7 @@ export const ContentSchedulerPanel = () => {
                     
                     return (
                       <div key={post.id} className="relative flex items-start justify-between gap-4 p-4 rounded-lg border border-border bg-muted/30 group">
-                        {post.image_url && <img src={post.image_url} alt="" className="w-14 h-14 rounded-md object-cover flex-shrink-0 border border-border" />}
+                        {renderThumbStrip(post, 'sm')}
                         <div className="flex-1 min-w-0 space-y-1">
                           <p className="text-sm line-clamp-2">{post.content}</p>
                           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">

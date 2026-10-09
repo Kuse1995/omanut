@@ -6,6 +6,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+// ── Multi-image posts ──
+// 'image_urls' (ordered array) is the new source of truth; the legacy single
+// 'image_url' column is still honoured so older rows publish unchanged.
+// Facebook multi-photo posts and Instagram carousels are both capped at 10.
+const MAX_MEDIA_PER_POST = 10;
+
+function resolveImageUrls(post: any): string[] {
+  const fromArray: string[] = Array.isArray(post && post.image_urls)
+    ? post.image_urls.filter((u: unknown) => typeof u === 'string' && u.trim().length > 0)
+    : [];
+  const single: string[] =
+    post && typeof post.image_url === 'string' && post.image_url.trim().length > 0 ? [post.image_url] : [];
+  const ordered = fromArray.length > 0 ? fromArray : single;
+  return [...new Set(ordered)].slice(0, MAX_MEDIA_PER_POST);
+}
+
+function graphErr(payload: any): string {
+  const e = (payload && payload.error) || {};
+  return String(e.message || 'API error') +
+    (e.error_subcode ? ' [subcode ' + e.error_subcode + ']' : '') +
+    (e.error_user_msg ? ' — ' + e.error_user_msg : '') +
+    (e.fbtrace_id ? ' (fbtrace ' + e.fbtrace_id + ')' : '');
+}
+
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -106,6 +131,7 @@ serve(async (req) => {
     }
 
     const targetPlatform = post.target_platform || 'facebook';
+    const imageUrls = resolveImageUrls(post);
     const results: { facebook?: any; instagram?: any; tiktok?: any } = {};
     const errors: string[] = [];
 
@@ -201,17 +227,61 @@ serve(async (req) => {
               }),
             }
           );
-        } else if (post.image_url) {
+        } else if (imageUrls.length > 1) {
+          // ── Multi-photo post: upload each photo unpublished, then attach ──
+          const mediaIds: string[] = [];
+          for (const imageUrl of imageUrls) {
+            const uploadRes = await fetch(
+              'https://graph.facebook.com/v25.0/' + post.page_id + '/photos',
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Bearer ' + cred.access_token,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ url: imageUrl, published: false }),
+              }
+            );
+            const uploadJson: any = await uploadRes.json();
+            if (!uploadRes.ok) {
+              errors.push('Facebook photo upload: ' + graphErr(uploadJson));
+              console.error('Facebook photo upload error:', JSON.stringify(uploadJson, null, 2));
+              continue;
+            }
+            mediaIds.push(uploadJson.id);
+          }
+
+          if (mediaIds.length === 0) {
+            errors.push('Facebook: no image could be uploaded');
+            fbResponse = new Response(JSON.stringify({ error: { message: 'No image could be uploaded' } }), { status: 502 });
+          } else {
+            fbResponse = await fetch(
+              'https://graph.facebook.com/v25.0/' + post.page_id + '/feed',
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Bearer ' + cred.access_token,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  message: post.content,
+                  attached_media: mediaIds.map((id) => ({ media_fbid: id })),
+                }),
+              }
+            );
+            console.log('Facebook multi-photo post: attaching ' + mediaIds.length + ' images');
+          }
+        } else if (imageUrls.length === 1) {
           fbResponse = await fetch(
-            `https://graph.facebook.com/v25.0/${post.page_id}/photos`,
+            'https://graph.facebook.com/v25.0/' + post.page_id + '/photos',
             {
               method: 'POST',
               headers: {
-                Authorization: `Bearer ${cred.access_token}`,
+                Authorization: 'Bearer ' + cred.access_token,
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                url: post.image_url,
+                url: imageUrls[0],
                 caption: post.content,
                 published: true,
               }),
@@ -253,12 +323,13 @@ serve(async (req) => {
     if (targetPlatform === 'instagram' || targetPlatform === 'both') {
       if (!cred.ig_user_id) {
         errors.push('Instagram: No Instagram Business Account ID configured');
-      } else if (!post.image_url && !post.video_url) {
+      } else if (imageUrls.length === 0 && !post.video_url) {
         errors.push('Instagram: An image or video is required for Instagram posts');
       } else {
         try {
-          // Step 1: Create media container (video or image)
+          // Step 1: Create media container (video, carousel or single image)
           const isVideo = !!post.video_url;
+          const isCarousel = !isVideo && imageUrls.length > 1;
           const containerBody: any = {
             caption: post.content,
           };
@@ -267,9 +338,40 @@ serve(async (req) => {
             containerBody.media_type = 'REELS';
             containerBody.video_url = post.video_url;
             containerBody.share_to_feed = true;
+          } else if (isCarousel) {
+            // ── Carousel: one child container per image, then the parent ──
+            const childIds: string[] = [];
+            for (const imageUrl of imageUrls) {
+              const childRes = await fetch(
+                'https://graph.facebook.com/v25.0/' + cred.ig_user_id + '/media',
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization: 'Bearer ' + cred.access_token,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ image_url: imageUrl, is_carousel_item: true }),
+                }
+              );
+              const childJson: any = await childRes.json();
+              if (!childRes.ok) {
+                errors.push('Instagram carousel item: ' + graphErr(childJson));
+                console.error('IG carousel item error:', JSON.stringify(childJson, null, 2));
+                continue;
+              }
+              childIds.push(childJson.id);
+            }
+
+            if (childIds.length < 2) {
+              throw new Error('Instagram carousel needs at least 2 usable images');
+            }
+            containerBody.media_type = 'CAROUSEL';
+            containerBody.children = childIds;
+            console.log('Instagram carousel: ' + childIds.length + ' images');
           } else {
-            containerBody.image_url = post.image_url;
+            containerBody.image_url = imageUrls[0];
           }
+
 
           const containerRes = await fetch(
             `https://graph.facebook.com/v25.0/${cred.ig_user_id}/media`,
@@ -294,7 +396,7 @@ serve(async (req) => {
             console.log(`IG media container created: ${creationId} (type: ${isVideo ? 'REELS' : 'IMAGE'})`);
 
             // Poll for container readiness (videos take longer)
-            const maxPolls = isVideo ? 20 : 10;
+            const maxPolls = isVideo ? 20 : (isCarousel ? 15 : 10);
             const pollInterval = isVideo ? 5000 : 3000;
             let containerStatus = 'IN_PROGRESS';
             for (let i = 0; i < maxPolls; i++) {
