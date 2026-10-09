@@ -821,6 +821,65 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
+  // ── create_reservation (general bookings: demos, site visits, appointments) ──
+  server.tool("create_reservation", {
+    description: "Create a booking (demo, site visit, consultation, appointment, table). Required: name, phone, date, time. Starts as pending_boss_approval.",
+    inputSchema: z.object({
+      name: z.string().describe("Contact person full name"),
+      phone: z.string().describe("Contact phone number"),
+      date: z.string().describe("Date (YYYY-MM-DD)"),
+      time: z.string().describe("Time (HH:MM, 24-hour)"),
+      email: z.string().optional(),
+      guests: z.number().optional().describe("Number of people attending (defaults to 1)"),
+      company_name: z.string().optional().describe("The business the booking is for"),
+      booking_type: z.enum(["demo", "site_visit", "consultation", "appointment", "table", "other"]).optional(),
+      channel: z.enum(["in_person", "online", "phone"]).optional(),
+      location: z.string().optional().describe("Where the booking happens - address we travel to, or the online platform"),
+      location_notes: z.string().optional().describe("Landmark, directions or Yango pin"),
+      purpose: z.string().optional().describe("What the customer wants from the booking"),
+      notes: z.string().optional(),
+      notify_boss: z.boolean().optional().describe("Also WhatsApp the boss for approval (default false)"),
+    }).merge(companyOverride),
+    handler: async (params: any) => {
+      const companyId = await resolveCompanyId(params?.company_id);
+      const { data, error } = await supabase
+        .from("reservations")
+        .insert({
+          company_id: companyId,
+          name: params.name,
+          phone: params.phone,
+          email: params.email || null,
+          date: params.date,
+          time: params.time,
+          guests: params.guests ?? 1,
+          company_name: params.company_name || null,
+          booking_type: params.booking_type || null,
+          channel: params.channel || null,
+          location: params.location || null,
+          location_notes: params.location_notes || null,
+          purpose: params.purpose || null,
+          notes: params.notes || null,
+          occasion: params.booking_type
+            ? params.booking_type + (params.purpose ? " - " + params.purpose : "")
+            : (params.purpose || null),
+          status: "pending_boss_approval",
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      let bossNotified = false;
+      if (params.notify_boss) {
+        try {
+          const r = await callEdgeFunction("send-boss-reservation-request", { reservationId: data.id });
+          bossNotified = !r?.error;
+        } catch (e) {
+          console.error("[create_reservation] boss notify failed:", e);
+        }
+      }
+      return { content: [{ type: "text" as const, text: JSON.stringify({ reservation: data, boss_notified: bossNotified }, null, 2) }] };
+    },
+  });
+
   // â”€â”€ list_products â”€â”€
   server.tool("list_products", {
     description: "List active payment products.",

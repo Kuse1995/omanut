@@ -124,9 +124,9 @@ serve(async (req) => {
     });
 
     // Build notification message
-    const message = `📅 Reservation Request for ${formattedDate}
+    const message = `📅 Booking Request for ${formattedDate}
 
-🔔 NEW REQUEST:
+🔔 NEW BOOKING REQUEST:
 Name: ${reservation.name}
 Phone: ${reservation.phone}
 ${reservation.email ? `Email: ${reservation.email}\n` : ''}Time: ${reservation.time}
@@ -138,7 +138,21 @@ Reply with:
 ❌ "REJECT ${reservation_id.slice(0, 8)} [reason]" to decline
 💬 "SUGGEST ${reservation_id.slice(0, 8)} [alternative]" to propose different time`;
 
-    console.log('[BOSS-REQUEST] Sending notification to boss phones:', bossPhones.map(p => p.phone));
+    console.log('[BOSS-REQUEST] Sending notification to boss phones:', bossPhones.map(p => p.phone));    // General booking details (demo, site visit, consultation) - rendered only when present.
+    const bookingLines = [
+      reservation.company_name ? 'Company: ' + reservation.company_name : null,
+      reservation.booking_type ? 'Type: ' + reservation.booking_type : null,
+      reservation.channel ? 'Mode: ' + reservation.channel : null,
+      reservation.location ? 'Where: ' + reservation.location : null,
+      reservation.location_notes ? 'Directions: ' + reservation.location_notes : null,
+      reservation.purpose ? 'Purpose: ' + reservation.purpose : null,
+      reservation.notes ? 'Notes: ' + reservation.notes : null,
+    ].filter(Boolean).join('\n');
+    const fullMessage = bookingLines
+      ? message.replace(/\r?\n\r?\nReply with:/, '\n' + bookingLines + '\n\nReply with:')
+      : message;
+
+
     console.log('[BOSS-REQUEST] Message:', message);
 
     // Send via Twilio to all boss phones
@@ -163,7 +177,7 @@ Reply with:
           body: new URLSearchParams({
             To: `whatsapp:${cleanPhone}`,
             From: `whatsapp:${cleanPhone.includes('+260') ? '+13344685065' : Deno.env.get('TWILIO_WHATSAPP_NUMBER') || '+13344685065'}`,
-            Body: message,
+            Body: fullMessage,
           }),
         }
       );
