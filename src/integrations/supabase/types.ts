@@ -3856,64 +3856,91 @@ export type Database = {
       reservations: {
         Row: {
           area_preference: string | null
+          assigned_to: string | null
+          booking_type: string | null
           boss_approved_at: string | null
           boss_rejection_reason: string | null
           branch: string | null
           calendar_event_link: string | null
           calendar_sync_status: string | null
+          channel: string | null
           company_id: string | null
+          company_name: string | null
           conversation_id: string | null
           created_at: string
           date: string
+          duration_minutes: number | null
           email: string | null
           google_calendar_event_id: string | null
-          guests: number
+          guests: number | null
           id: string
+          location: string | null
+          location_notes: string | null
           name: string
+          notes: string | null
           occasion: string | null
           phone: string
+          purpose: string | null
           status: string
           time: string
         }
         Insert: {
           area_preference?: string | null
+          assigned_to?: string | null
+          booking_type?: string | null
           boss_approved_at?: string | null
           boss_rejection_reason?: string | null
           branch?: string | null
           calendar_event_link?: string | null
           calendar_sync_status?: string | null
+          channel?: string | null
           company_id?: string | null
+          company_name?: string | null
           conversation_id?: string | null
           created_at?: string
           date: string
+          duration_minutes?: number | null
           email?: string | null
           google_calendar_event_id?: string | null
-          guests: number
+          guests?: number | null
           id?: string
+          location?: string | null
+          location_notes?: string | null
           name: string
+          notes?: string | null
           occasion?: string | null
           phone: string
+          purpose?: string | null
           status?: string
           time: string
         }
         Update: {
           area_preference?: string | null
+          assigned_to?: string | null
+          booking_type?: string | null
           boss_approved_at?: string | null
           boss_rejection_reason?: string | null
           branch?: string | null
           calendar_event_link?: string | null
           calendar_sync_status?: string | null
+          channel?: string | null
           company_id?: string | null
+          company_name?: string | null
           conversation_id?: string | null
           created_at?: string
           date?: string
+          duration_minutes?: number | null
           email?: string | null
           google_calendar_event_id?: string | null
-          guests?: number
+          guests?: number | null
           id?: string
+          location?: string | null
+          location_notes?: string | null
           name?: string
+          notes?: string | null
           occasion?: string | null
           phone?: string
+          purpose?: string | null
           status?: string
           time?: string
         }
