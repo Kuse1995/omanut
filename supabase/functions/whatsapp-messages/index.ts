@@ -2819,28 +2819,35 @@ Key Guidelines:
       instructions += `
 3. RESERVATION WORKFLOW - MANDATORY STEPS (DO NOT SKIP):
    ${dateStep}${calendarStep}
-   STEP 3 - COLLECT ALL REQUIRED INFORMATION:
-   YOU MUST HAVE ALL 6 ITEMS BEFORE CREATING RESERVATION:
-   1. ✅ Customer name - Look in conversation for "I'm John", "Abraham here", "My name is X"
-   2. ✅ Phone number - ALWAYS available from WhatsApp conversation (use customerPhone variable)
-   3. ✅ Email address - Look for @ symbol in messages, ask ONCE if not provided: "What's your email address?"
-   4. ✅ Date - Already validated${hasTool('get_date_info') ? ' in Step 1' : ''}
-   5. ✅ Time - Ask: "What time would you prefer?" (use 24-hour format HH:MM)
-   6. ✅ Number of guests - Look for "3 guests", "party of 4", ask: "How many guests?"
-   
+   STEP 3 - COLLECT THE BOOKING DETAILS:
+   ALWAYS REQUIRED (4 items - do not create the booking without them):
+   1. ✅ Customer name - from the conversation ("I'm John", "Chanda here")
+   2. ✅ Phone number - from the channel, or ask for the best number
+   3. ✅ Date - already validated above
+   4. ✅ Time - ask: "What time would you prefer?" (24-hour HH:MM)
+   COLLECT WHEN THEY APPLY (ask once, never block a booking over these):
+   - email - "so we can send the confirmation". If they have none, carry on.
+   - people attending - defaults to 1
+   - company_name - the business the booking is for (B2B)
+   - booking_type - demo | site_visit | consultation | appointment | table | other
+   - channel - in_person | online | phone
+   - location + location_notes - for an in-person booking this is the address the team
+     travels to, plus a landmark, directions or a Yango pin. For online, "online".
+   - purpose - what they actually want from the booking, in their words
+
    🚨 CRITICAL RULES:
    - DO NOT say "Done!" or "All set!" until you call create_reservation tool
-   - DO NOT skip information collection - you need all 6 required items
-   - DO NOT create reservation without email - it's REQUIRED
-   - Review conversation history FIRST - customer may have already provided info
-   
+   - Review conversation history FIRST - the customer may have already provided details
+   - NEVER block or delay a booking because an optional detail is missing
+
    STEP 4 - CREATE RESERVATION:
-   Once you have all 6 required items, IMMEDIATELY call create_reservation tool. DO NOT ask "Should I book this?" - just create it.
-   
+   Once you have the 4 required items, IMMEDIATELY call create_reservation tool.
+   DO NOT ask "Should I book this?" - just create it.
+
    STEP 5 - CONFIRM TO CUSTOMER:
-   "Perfect! Your reservation request for [DATE] at [TIME] for [GUESTS] guests has been received. Our team will review and send confirmation within a few hours. Thank you! 🙏"
-   
-   ALL RESERVATIONS REQUIRE BOSS CONFIRMATION (status starts as pending_boss_approval).`;
+   "Perfect! Your booking request for [DATE] at [TIME] has been received. Our team will confirm it shortly. Thank you! 🙏"
+
+   ALL BOOKINGS REQUIRE BOSS CONFIRMATION (status starts as pending_boss_approval).`;
     }
 
     // === AUTONOMOUS CHECKOUT (only if checkout tools are enabled) ===
@@ -3069,7 +3076,7 @@ ${supervisorRecommendation.recommendedResponse}
         type: "function",
         function: {
           name: "create_reservation",
-          description: "Create a new reservation in the database with pending_boss_approval status. Use this IMMEDIATELY after you have collected: name, phone, email, date, time, guests. Extract information from conversation history before calling this.",
+          description: "Create a booking (demo, site visit, consultation, appointment, table). Required: customer_name, phone, date, time. Optional: email, guests, company_name, booking_type, channel, location, location_notes, purpose, notes. Status starts as pending_boss_approval.",
           parameters: {
             type: "object",
             properties: {
@@ -3080,9 +3087,16 @@ ${supervisorRecommendation.recommendedResponse}
               time: { type: "string", description: "Reservation time (HH:MM format, 24-hour)" },
               guests: { type: "number", description: "Number of guests" },
               occasion: { type: "string", description: "Special occasion (optional)" },
-              area_preference: { type: "string", description: "Seating area preference (optional)" }
+              area_preference: { type: "string", description: "Seating area preference (optional)" },
+              company_name: { type: "string", description: "The business the booking is for (B2B)" },
+              booking_type: { type: "string", description: "demo | site_visit | consultation | appointment | table | other" },
+              channel: { type: "string", description: "in_person | online | phone" },
+              location: { type: "string", description: "Where the booking happens - the address the team travels to for an in-person booking, or 'online'" },
+              location_notes: { type: "string", description: "Landmark, directions or Yango pin" },
+              purpose: { type: "string", description: "What the customer wants from the booking (their reason / pain point)" },
+              notes: { type: "string", description: "Anything else the team should know" }
             },
-            required: ["customer_name", "phone", "email", "date", "time", "guests"]
+            required: ["customer_name", "phone", "date", "time"]
           }
         }
       },
@@ -4264,10 +4278,8 @@ Trust ONLY the information provided in this system prompt.
             const missingFields = [];
             if (!args.customer_name) missingFields.push('customer_name');
             if (!args.phone && !customerPhone) missingFields.push('phone');
-            if (!args.email) missingFields.push('email');
             if (!args.date) missingFields.push('date');
             if (!args.time) missingFields.push('time');
-            if (!args.guests) missingFields.push('guests');
             
             if (missingFields.length > 0) {
               console.error('[RESERVATION-BLOCKED] Missing required fields:', missingFields);
@@ -4300,10 +4312,17 @@ Trust ONLY the information provided in this system prompt.
                   conversation_id: conversationId,
                   name: args.customer_name,
                   phone: reservationPhone,
-                  email: args.email,
+                  email: args.email || null,
                   date: args.date,
                   time: args.time,
-                  guests: args.guests,
+                  guests: args.guests ?? 1,
+                  company_name: args.company_name || null,
+                  booking_type: args.booking_type || null,
+                  channel: args.channel || null,
+                  location: args.location || null,
+                  location_notes: args.location_notes || null,
+                  purpose: args.purpose || null,
+                  notes: args.notes || null,
                   occasion: args.occasion || null,
                   area_preference: args.area_preference || null,
                   branch: null,
@@ -4341,7 +4360,12 @@ Trust ONLY the information provided in this system prompt.
                     customer_name: args.customer_name,
                     date: args.date,
                     time: args.time,
-                    guests: args.guests,
+                    guests: args.guests ?? 1,
+                    company_name: args.company_name || null,
+                    booking_type: args.booking_type || null,
+                    channel: args.channel || null,
+                    location: args.location || null,
+                    purpose: args.purpose || null,
                     status: 'pending_boss_approval',
                     message: 'Reservation created successfully and boss has been notified for approval'
                   })
