@@ -181,11 +181,14 @@ Deno.serve(async (req) => {
     }
 
     if (action === "create_reservation") {
-      const { name, phone, date, time, guests, branch, area_preference, occasion, email } =
-        params || {};
-      if (!name || !phone || !date || !time || !guests) {
+      const {
+        name, phone, date, time, guests, branch, area_preference, occasion, email,
+        company_name, booking_type, channel, location, location_notes, purpose, notes,
+        duration_minutes, assigned_to,
+      } = params || {};
+      if (!name || !phone || !date || !time) {
         return respond(
-          { error: "name, phone, date, time, guests are required" },
+          { error: "name, phone, date and time are required" },
           400
         );
       }
@@ -197,11 +200,20 @@ Deno.serve(async (req) => {
           phone,
           date,
           time,
-          guests,
-          branch: branch || "Main",
-          area_preference,
-          occasion,
-          email,
+          guests: guests ?? 1,
+          branch: branch || null,
+          area_preference: area_preference || null,
+          occasion: occasion || null,
+          email: email || null,
+          company_name: company_name || null,
+          booking_type: booking_type || null,
+          channel: channel || null,
+          location: location || null,
+          location_notes: location_notes || null,
+          purpose: purpose || null,
+          notes: notes || null,
+          duration_minutes: duration_minutes ?? null,
+          assigned_to: assigned_to || null,
           status: "pending_boss_approval",
         })
         .select()
