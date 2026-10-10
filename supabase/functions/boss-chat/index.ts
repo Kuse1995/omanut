@@ -258,6 +258,7 @@ YOUR CAPABILITIES AS HEAD OF SALES & MARKETING:
 - You also have REAL-TIME inventory and sales data via the Business Management System (BMS)
 
 IMPORTANT: Only call get_business_summary when the boss asks about business performance, wants a briefing, or needs operational data. Do NOT call it for simple commands like image generation, stock checks, or scheduling.
+For "what new messages do we have / who wrote / any new chats / unread" questions the inbox snapshot is built automatically from the database. Report exactly what it contains - the count, the window and each conversation. NEVER say there is no activity unless the snapshot says the window was empty, and never invent names, previews or numbers.
 
 10. **Inventory & Sales (BMS)**: You have REAL-TIME access to the business inventory system.
    - Use check_stock to look up current stock levels and pricing for any product
@@ -655,7 +656,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
         type: "function",
         function: {
           name: "get_hot_leads",
-          description: "Get the hottest cross-platform leads from WhatsApp, Facebook, Instagram, and Messenger. Use when the boss asks about leads, hot leads, facebook leads, instagram leads, ads leads, or new inquiries.",
+          description: "List the conversations with recent customer activity, newest first, across WhatsApp, Facebook, Instagram and Messenger. Use this whenever the boss asks about new messages, who wrote in, the inbox, unread chats, or leads. Returns every conversation in the window - it does NOT filter by keyword.",
           parameters: {
             type: "object",
             properties: {
@@ -1387,6 +1388,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     const isPublishIntentMessage = /\b(post it|publish it|go live|put it live|share it|post this|publish this)\b/.test(normalizedBody);
     const isHotLeadIntent = /\b(hot\s*leads?|leads?|new\s*inquiries|interested\s*clients?|handoffs?|escalations?|opportunities)\b/.test(normalizedBody);
     const isAlertSnapshotIntent = /\b(alerts?|handoffs?|escalations?|action\s*required|what\s*happened|summary|brief|catch\s*me\s*up)\b/.test(normalizedBody);
+    // Deliberately broad: the boss asking for "messages" must always get the real inbox,
+    // never a keyword-filtered subset that can silently look empty.
+    const isNewMessagesIntent = /\b(new\s+messages?|any\s+messages?|messages?|inbox|unread|new\s+chats?|who\s+(messaged|wrote|texted)|anyone\s+(messaged|written|texted)|what\s+did\s+i\s+miss|any\s+new\s+(messages?|chats?|conversations?))\b/i.test(normalizedBody);
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const buildHotLeadsSnapshot = async (hoursBack = 24): Promise<string> => {
@@ -1435,7 +1439,10 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       lines.push(`Here’s the live lead snapshot for ${company.name} from the last ${hoursBack}h:`);
 
       if (hotLeads.length === 0) {
-        lines.push('\nNo hot leads detected in recent conversations.');
+        const scannedCount = (conversations || []).length;
+        lines.push(scannedCount === 0
+          ? '\nNo conversations had any activity in the last ' + hoursBack + 'h, so there is nothing to qualify yet. Ask me for "new messages" or a longer window if you expected traffic.'
+          : '\nNone of the ' + scannedCount + ' conversation(s) with activity in the last ' + hoursBack + 'h show a clear buying or booking signal yet. Ask "new messages" to see all ' + scannedCount + ' with what each one said.');
       } else {
         lines.push(`\n🔥 Hot leads (${hotLeads.length}):`);
         hotLeads.forEach((lead: any, index: number) => {
@@ -1459,6 +1466,70 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
           lines.push(`${index + 1}. ${compact}`);
         });
       }
+
+      return lines.join('\n');
+    };
+
+    const buildNewMessagesSnapshot = async (hoursBack = 24, limit = 25): Promise<string> => {
+      const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
+      const { data: rows, error, count } = await supabase
+        .from('conversations')
+        .select('id, customer_name, phone, platform, status, started_at, last_message_at, last_message_preview, transcript, human_takeover, is_paused_for_human, paused_reason, unread_count', { count: 'exact' })
+        .eq('company_id', company.id)
+        .or(`last_message_at.gte.${cutoff},started_at.gte.${cutoff}`)
+        .order('started_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('[BOSS-DIRECT] New messages lookup failed:', error);
+        return 'I could not read the inbox for ' + company.name + ' just now (' + error.message + '). That is a read failure, NOT "no messages" - please ask again.';
+      }
+
+      const when = (r: any) => r.last_message_at || r.started_at || null;
+      const ago = (iso: string | null) => {
+        if (!iso) return 'unknown time';
+        const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+        if (mins < 1) return 'just now';
+        if (mins < 60) return mins + 'm ago';
+        if (mins < 1440) return Math.round(mins / 60) + 'h ago';
+        return Math.round(mins / 1440) + 'd ago';
+      };
+      const previewOf = (r: any) => {
+        if (r.last_message_preview) return String(r.last_message_preview);
+        const t = String(r.transcript || '').trim();
+        if (!t) return 'No preview available';
+        return t.split('\n').filter(Boolean).slice(-2).join(' ');
+      };
+
+      const all = (rows || []).slice().sort((a: any, b: any) => new Date(when(b) || 0).getTime() - new Date(when(a) || 0).getTime());
+      const total = typeof count === 'number' ? count : all.length;
+
+      const lines: string[] = [];
+      lines.push('📥 New messages — ' + company.name);
+      lines.push(total + ' conversation' + (total === 1 ? '' : 's') + ' with activity in the last ' + hoursBack + 'h' + (all.length < total ? ' (showing the newest ' + all.length + ')' : '') + '.');
+
+      if (all.length === 0) {
+        lines.push('');
+        lines.push('Nothing has come in during the last ' + hoursBack + 'h — that is the database answering, not a guess. Ask me for a longer window (48h) if you expected traffic.');
+        return lines.join('\n');
+      }
+
+      const needsYou = all.filter((r: any) => r.human_takeover || r.is_paused_for_human || r.status === 'pending');
+      if (needsYou.length > 0) {
+        lines.push('');
+        lines.push('⚠️ Waiting on you (' + needsYou.length + '):');
+        needsYou.slice(0, 10).forEach((r: any, i: number) => {
+          lines.push((i + 1) + '. ' + (r.customer_name || 'Unknown') + ' (' + (r.phone || 'no number') + ') — ' + (r.human_takeover ? 'handoff' : r.is_paused_for_human ? 'paused for a human' : r.status) + (r.paused_reason ? ': ' + r.paused_reason : ''));
+        });
+      }
+
+      lines.push('');
+      lines.push('All of them:');
+      all.forEach((r: any, i: number) => {
+        const flags = [r.human_takeover ? 'handoff' : '', r.is_paused_for_human ? 'paused' : '', (r.unread_count || 0) > 0 ? r.unread_count + ' unread' : ''].filter(Boolean).join(', ');
+        lines.push((i + 1) + '. ' + (r.customer_name || 'Unknown') + ' (' + (r.phone || 'no number') + ') via ' + (r.platform || 'unknown') + ' — ' + ago(when(r)) + (flags ? ' — ' + flags : ''));
+        lines.push('   "' + String(previewOf(r)).replace(/\s+/g, ' ').slice(0, 180) + '"');
+      });
 
       return lines.join('\n');
     };
@@ -1490,6 +1561,7 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
     };
 
     const buildProviderFailureFallback = async (error: unknown): Promise<string> => {
+      if (isNewMessagesIntent) return buildNewMessagesSnapshot(24);
       if (isHotLeadIntent) return buildHotLeadsSnapshot(24);
       if (isAlertSnapshotIntent) return buildAlertSnapshot();
 
@@ -1497,6 +1569,23 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
       console.error('[BOSS-DIRECT] Provider fallback activated:', errorText);
       return `I received you as management for ${company.name}, but the AI provider chain is unavailable right now.\n\nI can still pull direct operational snapshots — try “any hot leads?” or “recent handoffs” while the model key/credits are being fixed.`;
     };
+
+    if (isNewMessagesIntent) {
+      const directResponse = await buildNewMessagesSnapshot(24);
+      await supabase
+        .from('boss_conversations')
+        .insert({
+          company_id: company.id,
+          message_from: 'management',
+          message_content: Body,
+          response: directResponse,
+          tool_context: { direct_route: 'new_messages' },
+        });
+
+      return new Response(JSON.stringify({ response: directResponse }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     if (isHotLeadIntent) {
       const directResponse = await buildHotLeadsSnapshot(24);
@@ -2252,22 +2341,28 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
               const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
               let query = supabase
                 .from('conversations')
-                .select('customer_name, phone, platform, started_at, status, last_message_preview')
+                .select('id, customer_name, phone, platform, started_at, last_message_at, status, last_message_preview, transcript, unread_count, human_takeover, is_paused_for_human')
                 .eq('company_id', company.id)
-                .gte('started_at', cutoff)
+                .or(`last_message_at.gte.${cutoff},started_at.gte.${cutoff}`)
                 .order('started_at', { ascending: false })
-                .limit(20);
+                .limit(25);
               if (args.platform_filter && args.platform_filter !== 'all') {
                 query = query.eq('platform', args.platform_filter);
               }
               const { data: leads } = await query;
               if (!leads?.length) {
-                result = { success: true, message: `No new leads in the last ${hoursBack} hours.` };
+                result = { success: true, message: `No conversations with activity in the last ${hoursBack}h. That is a genuinely empty window, not a filter.` };
               } else {
-                const leadsList = leads.map((l: any, i: number) =>
-                  `${i + 1}. ${l.customer_name || 'Unknown'} (${l.phone || 'N/A'}) via ${l.platform}\n   "${l.last_message_preview?.substring(0, 60) || 'No preview'}..."`
-                ).join('\n\n');
-                result = { success: true, message: `🔥 ${leads.length} leads (last ${hoursBack}h):\n\n${leadsList}` };
+                const convList = leads.map((l: any) => {
+                  const when = l.last_message_at || l.started_at;
+                  const mins = when ? Math.max(0, Math.round((Date.now() - new Date(when).getTime()) / 60000)) : null;
+                  const ago = mins === null ? 'unknown time' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : Math.round(mins / 1440) + 'd ago';
+                  const fallback = String(l.transcript || '').trim().split('\n').filter(Boolean).slice(-2).join(' ');
+                  const text = String(l.last_message_preview || fallback || 'No preview').replace(/\s+/g, ' ').slice(0, 160);
+                  const flags = [l.human_takeover ? 'handoff' : '', l.is_paused_for_human ? 'paused' : '', (l.unread_count || 0) > 0 ? l.unread_count + ' unread' : ''].filter(Boolean).join(', ');
+                  return (l.customer_name || 'Unknown') + ' (' + (l.phone || 'N/A') + ') via ' + (l.platform || 'unknown') + ' \u2014 ' + ago + (flags ? ' \u2014 ' + flags : '') + '\n   "' + text + '"';
+                }).join('\n\n');
+                result = { success: true, message: `\u{1F4E5} ${leads.length} conversation(s) with activity in the last ${hoursBack}h:\n\n${convList}` };
               }
               break;
             }
