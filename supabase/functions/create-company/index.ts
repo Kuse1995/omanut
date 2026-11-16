@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
+import { DASHBOARD_COMPANY_DEFAULTS } from '../_shared/company-defaults.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,7 +74,7 @@ serve(async (req) => {
         twilio_number: normalizedTwilio,
         whatsapp_number: normalizedWhatsapp,
         whatsapp_voice_enabled,
-        test_mode: test_mode ?? true,
+        test_mode: test_mode ?? DASHBOARD_COMPANY_DEFAULTS.test_mode,
         credit_balance,
         quick_reference_info,
       })

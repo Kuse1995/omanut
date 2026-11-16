@@ -3583,6 +3583,7 @@ export type Database = {
       }
       payment_products: {
         Row: {
+          bms_product_id: string | null
           category: string | null
           company_id: string | null
           created_at: string | null
@@ -3597,13 +3598,16 @@ export type Database = {
           embedding: string | null
           id: string
           is_active: boolean | null
+          media_id: string | null
           name: string
           price: number
           product_type: string | null
           selar_link: string | null
+          sku: string | null
           updated_at: string | null
         }
         Insert: {
+          bms_product_id?: string | null
           category?: string | null
           company_id?: string | null
           created_at?: string | null
@@ -3618,13 +3622,16 @@ export type Database = {
           embedding?: string | null
           id?: string
           is_active?: boolean | null
+          media_id?: string | null
           name: string
           price: number
           product_type?: string | null
           selar_link?: string | null
+          sku?: string | null
           updated_at?: string | null
         }
         Update: {
+          bms_product_id?: string | null
           category?: string | null
           company_id?: string | null
           created_at?: string | null
@@ -3639,10 +3646,12 @@ export type Database = {
           embedding?: string | null
           id?: string
           is_active?: boolean | null
+          media_id?: string | null
           name?: string
           price?: number
           product_type?: string | null
           selar_link?: string | null
+          sku?: string | null
           updated_at?: string | null
         }
         Relationships: [
@@ -3651,6 +3660,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_products_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "company_media"
             referencedColumns: ["id"]
           },
         ]

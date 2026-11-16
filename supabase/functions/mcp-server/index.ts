@@ -5,6 +5,12 @@ import { z } from "zod";
 import zodToJsonSchema from "zod-to-json-schema";
 import { buildEnvelope } from "../_shared/agent-envelope.ts";
 import { searchKnowledgeBase } from "../_shared/company-context.ts";
+import { DASHBOARD_COMPANY_DEFAULTS } from "../_shared/company-defaults.ts";
+import {
+  normalizeZambianPhone, normalizeOwnerPhone, UPDATE_COMPANY_FIELDS, ZAMBIAN_PHONE_FIELDS, OWNER_PHONE_FIELDS,
+  forbiddenCompanyKeyReason, sanitizeFilename, MEDIA_MIME, MAX_MEDIA_BYTES, sniffMatches, svgIsUnsafe,
+  imageDimensions, toMediaCategory, productCurrencyFromPrefix,
+} from "../_shared/mcp-company-validators.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -129,7 +135,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.4.0",
+    version: "1.5.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
@@ -258,7 +264,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         active_company_name: activeName,
         visible_company_count: companyCount,
         session_id: sessionId,
-        server_version: "1.2.0",
+        server_version: "1.5.0",
         next_step,
       }, null, 2) }] };
     },
@@ -2624,6 +2630,361 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         action: params.action,
         company_id: companyId,
       }, null, 2) }] };
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // TIER 1 — COMPANY SETUP TOOLS (create_company, update_company,
+  // upload_media, create_product, update_product). Nothing destructive.
+  // ═══════════════════════════════════════════════════════════════════
+
+  function requireAdminScope(toolName: string): void {
+    if (auth.scope !== "admin") {
+      throw new Error(`Admin key required: ${toolName} can only be called with an admin-scoped API key.`);
+    }
+  }
+
+  // Company keys may only ever target their pinned company. Explicitly passing a
+  // different company_id is rejected instead of silently ignored. Resolution
+  // itself is delegated to the shared resolveCompanyId.
+  async function resolveTargetCompanyId(perCallCompanyId?: string): Promise<string> {
+    const explicit = perCallCompanyId?.trim();
+    if (auth.scope === "company" && explicit && explicit !== auth.defaultCompanyId) {
+      throw new Error(`Company-scoped key cannot access company ${explicit}. This key is pinned to ${auth.defaultCompanyId}.`);
+    }
+    const companyId = await resolveCompanyId(explicit);
+    await requireCompanyAccess(companyId);
+    return companyId;
+  }
+
+  function rejectUnknownKeys(toolName: string, params: Record<string, unknown>, allowed: readonly string[]): void {
+    const bad = Object.keys(params || {}).filter((k) => !allowed.includes(k));
+    if (!bad.length) return;
+    const details = bad.map((k) => {
+      const why = forbiddenCompanyKeyReason(k);
+      return why ? `${k} (${why})` : `${k} (not an allowed field)`;
+    });
+    throw new Error(`${toolName} rejected: ${details.join(", ")}. Allowed fields: ${allowed.join(", ")}.`);
+  }
+
+  const redactCompany = (c: any) => {
+    if (!c) return c;
+    const { openclaw_webhook_token: _t, external_catalog_key: _k, embedding: _e, ...rest } = c;
+    return rest;
+  };
+
+  const okResult = (data: Record<string, unknown>) => ({
+    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+  });
+
+  // ── create_company ──
+  server.tool("create_company", {
+    description: "Create a new company (admin keys only) with the same defaults the dashboard uses (test mode on). Returns its id. Warns, without failing, if a company with the same name exists. Follow with update_company to set hours, services and payment numbers.",
+    inputSchema: z.object({
+      name: z.string().trim().min(2).max(120).describe("Company name (2–120 chars)"),
+      business_type: z.string().trim().max(200).optional().describe("Free text, e.g. 'school', 'wellness brand', 'retail'"),
+      currency_prefix: z.string().trim().min(1).max(4).optional().describe("Price prefix shown to customers (default 'K')"),
+      voice_style: z.string().trim().max(2000).optional().describe("How the assistant should sound (default: warm, polite Zambian receptionist)"),
+      company_id: z.string().optional().describe("Ignored for this tool (admin-only, not meaningful)."),
+    }).strict(),
+    handler: async (params: any) => {
+      requireAdminScope("create_company");
+      const name = String(params.name).trim();
+      const { data: dupes } = await supabase
+        .from("companies")
+        .select("id, name")
+        .ilike("name", name.replace(/[%_\\]/g, (m: string) => `\\${m}`));
+      const row: Record<string, unknown> = { ...DASHBOARD_COMPANY_DEFAULTS, name };
+      if (params.business_type !== undefined) row.business_type = params.business_type;
+      if (params.currency_prefix !== undefined) row.currency_prefix = params.currency_prefix;
+      if (params.voice_style !== undefined) row.voice_style = params.voice_style;
+      const { data: company, error } = await supabase
+        .from("companies")
+        .insert(row)
+        .select("id, name, business_type, currency_prefix, test_mode, created_at")
+        .single();
+      if (error) throw error;
+      const { data: claim } = await supabase
+        .from("company_claim_codes").select("code").eq("company_id", company.id).maybeSingle();
+      const duplicate = (dupes || []).length > 0;
+      return okResult({
+        company,
+        claim_code: claim?.code ?? null,
+        ...(duplicate ? { duplicate_warning: true, existing_company_ids: dupes!.map((d: any) => d.id) } : {}),
+        next_step: duplicate
+          ? `Company created, but ${dupes!.length} company(ies) already use this name — if you meant one of those, use update_company on it instead. Otherwise call update_company { company_id: '${company.id}', ... } to set hours, services and payment numbers.`
+          : `Company created. Call update_company { company_id: '${company.id}', ... } to set hours, services and payment numbers.`,
+      });
+    },
+  });
+
+  // ── update_company ──
+  const text = (max: number) => z.string().max(max);
+  server.tool("update_company", {
+    description: "Configure an existing company (admin keys only): rename, hours, services, payment numbers, test mode and more. Partial update — only fields you pass change. Empty string clears a text field. Billing, go-live, subscription and webhook fields cannot be changed here. Phone numbers are normalised to +260….",
+    inputSchema: z.object({
+      company_id: z.string().optional().describe("Target company (defaults to the active company)."),
+      name: z.string().trim().min(2).max(120).optional(),
+      business_type: text(200).optional(),
+      voice_style: text(2000).optional(),
+      hours: text(2000).optional(),
+      services: text(20000).optional(),
+      branches: text(2000).optional(),
+      service_locations: text(2000).optional(),
+      quick_reference_info: text(50000).optional(),
+      currency_prefix: z.string().trim().min(1).max(4).optional(),
+      boss_phone: text(32).optional().describe("Owner WhatsApp, e.g. 0977123456 or +260977123456 (international E.164 also accepted)"),
+      takeover_number: text(32).optional(),
+      payment_number_mtn: text(32).optional().describe("Zambian number, e.g. 0967123456 → +260967123456"),
+      payment_number_airtel: text(32).optional(),
+      payment_number_zamtel: text(32).optional(),
+      payment_instructions: text(4000).optional(),
+      test_mode: z.boolean().optional(),
+      payments_disabled: z.boolean().optional(),
+      agent_routing_enabled: z.boolean().optional(),
+      booking_buffer_minutes: z.number().int().min(0).max(1440).optional(),
+      image_gen_unlocked: z.boolean().optional(),
+    }).strict(),
+    handler: async (params: any) => {
+      requireAdminScope("update_company");
+      rejectUnknownKeys("update_company", params, ["company_id", ...UPDATE_COMPANY_FIELDS]);
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const patch: Record<string, unknown> = {};
+      for (const f of UPDATE_COMPANY_FIELDS) {
+        const v = params[f];
+        if (v === undefined) continue;
+        if (v === null) throw new Error(`${f} cannot be null. Use an empty string to clear a text field.`);
+        patch[f] = v;
+      }
+      for (const f of ZAMBIAN_PHONE_FIELDS) {
+        if (typeof patch[f] !== "string" || patch[f] === "") { if (patch[f] === "") patch[f] = null; continue; }
+        const n = normalizeZambianPhone(patch[f] as string);
+        if (!n) throw new Error(`${f} "${patch[f]}" is not a valid Zambian mobile number. Use +260XXXXXXXXX, 09XXXXXXXX or 07XXXXXXXX.`);
+        patch[f] = n;
+      }
+      for (const f of OWNER_PHONE_FIELDS) {
+        if (typeof patch[f] !== "string" || patch[f] === "") { if (patch[f] === "") patch[f] = null; continue; }
+        const n = normalizeOwnerPhone(patch[f] as string);
+        if (!n) throw new Error(`${f} "${patch[f]}" is not a valid phone number. Use +260XXXXXXXXX (or 09…/07…), or an international +<country><number>.`);
+        patch[f] = n;
+      }
+      if (patch.name !== undefined && String(patch.name).trim().length < 2) throw new Error("name must be at least 2 characters.");
+      if (patch.currency_prefix === "") throw new Error("currency_prefix cannot be empty.");
+      const updatedFields = Object.keys(patch);
+      if (!updatedFields.length) throw new Error("No fields to update. Pass at least one allowed field.");
+      const { data: company, error } = await supabase
+        .from("companies")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", companyId)
+        .select("*")
+        .single();
+      if (error) throw error;
+      const warnings: string[] = [];
+      if (company.payments_disabled === false && !company.payment_number_mtn && !company.payment_number_airtel && !company.payment_number_zamtel) {
+        warnings.push("Payments are enabled but no mobile-money number is set — the assistant may offer payment without a number to pay to.");
+      }
+      return okResult({
+        company: redactCompany(company),
+        updated_fields: updatedFields,
+        ...(warnings.length ? { warnings } : {}),
+        next_step: "Company updated. Call get_company_info to review, or upload_media / create_product to continue setup.",
+      });
+    },
+  });
+
+  // ── upload_media ──
+  server.tool("upload_media", {
+    description: "Add a file (logo, product photo, price list, video) to the company media library and get a public URL usable by send_media, publish_facebook_post, create_scheduled_post and generate_business_image. Pass exactly one of content_base64 or source_url (https). Max 15 MB; PNG, JPEG, WebP, SVG, PDF or MP4.",
+    inputSchema: z.object({
+      filename: z.string().min(1).max(200).describe("File name, e.g. logo.png"),
+      content_base64: z.string().optional().describe("File bytes as base64 (a data: URI prefix is allowed)"),
+      source_url: z.string().url().optional().describe("Public https URL to fetch the file from"),
+      mime_type: z.enum(["image/png", "image/jpeg", "image/webp", "image/svg+xml", "application/pdf", "video/mp4"]),
+      category: z.enum(["products", "logos", "promotional", "other"]).describe("Library category (logos is stored as 'logo')"),
+      description: z.string().max(500).optional(),
+      bms_product_id: z.string().max(200).optional().describe("Link the asset to a BMS catalogue item"),
+      company_id: z.string().optional().describe("Target company (admin keys only)."),
+    }).strict(),
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const mime = String(params.mime_type);
+      const spec = MEDIA_MIME[mime];
+      if (!spec) throw new Error(`mime_type ${mime} is not allowed. Allowed: ${Object.keys(MEDIA_MIME).join(", ")}.`);
+      const hasB64 = typeof params.content_base64 === "string" && params.content_base64.length > 0;
+      const hasUrl = typeof params.source_url === "string" && params.source_url.length > 0;
+      if (hasB64 === hasUrl) throw new Error("Pass exactly one of content_base64 or source_url.");
+
+      let bytes: Uint8Array;
+      if (hasB64) {
+        const b64 = String(params.content_base64).replace(/^data:[^;,]*;base64,/, "").replace(/\s+/g, "");
+        if (b64.length > Math.ceil(MAX_MEDIA_BYTES / 3) * 4 + 4) throw new Error("File is larger than 15 MB.");
+        try {
+          const bin = atob(b64);
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        } catch {
+          throw new Error("content_base64 is not valid base64.");
+        }
+      } else {
+        const url = String(params.source_url);
+        if (!/^https:\/\//i.test(url)) throw new Error("source_url must be https://");
+        const resp = await fetch(url, { redirect: "follow" });
+        if (!resp.ok) throw new Error(`source_url fetch failed: upstream returned HTTP ${resp.status}.`);
+        const len = Number(resp.headers.get("content-length") || 0);
+        if (len > MAX_MEDIA_BYTES) throw new Error("File is larger than 15 MB.");
+        bytes = new Uint8Array(await resp.arrayBuffer());
+      }
+      if (bytes.length === 0) throw new Error("File is empty.");
+      if (bytes.length > MAX_MEDIA_BYTES) throw new Error("File is larger than 15 MB.");
+      if (!sniffMatches(mime, bytes)) throw new Error(`File contents do not match mime_type ${mime}.`);
+      if (mime === "image/svg+xml" && svgIsUnsafe(bytes)) throw new Error("SVG contains scripts or embedded content and was rejected.");
+
+      const category = toMediaCategory(params.category);
+      const fileName = sanitizeFilename(params.filename);
+      // Same path convention as the dashboard upload: <company>/<category>/<timestamp>.<ext>
+      const filePath = `${companyId}/${category}/${Date.now()}.${spec.ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("company-media")
+        .upload(filePath, bytes, { contentType: mime, upsert: false });
+      if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
+
+      const { data: media, error: dbErr } = await supabase
+        .from("company_media")
+        .insert({
+          company_id: companyId,
+          file_name: fileName,
+          file_path: filePath,
+          file_type: mime,
+          file_size: bytes.length,
+          media_type: spec.media_type,
+          description: params.description || null,
+          tags: [],
+          uploaded_by: auth.createdBy || null,
+          category,
+          bms_product_id: params.bms_product_id || null,
+        })
+        .select("id, file_name, file_path, category, file_type, file_size, created_at")
+        .single();
+      if (dbErr) {
+        await supabase.storage.from("company-media").remove([filePath]);
+        throw dbErr;
+      }
+
+      const publicUrl = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/company-media/${filePath}`;
+      let smoke: { status: number; content_type: string | null } | null = null;
+      try {
+        const check = await fetch(publicUrl, { method: "GET" });
+        smoke = { status: check.status, content_type: check.headers.get("content-type") };
+        await check.body?.cancel();
+      } catch (e) {
+        smoke = { status: 0, content_type: null };
+        console.error("[upload_media] smoke fetch failed:", e);
+      }
+      const dims = spec.media_type === "image" ? imageDimensions(mime, bytes) : null;
+      return okResult({
+        media: {
+          id: media.id,
+          public_url: publicUrl,
+          file_name: media.file_name,
+          category: media.category,
+          mime_type: mime,
+          bytes: bytes.length,
+          ...(dims ? { width: dims.width, height: dims.height } : {}),
+        },
+        public_url_check: smoke,
+        ...(smoke && smoke.status !== 200 ? { warnings: [`Public URL returned HTTP ${smoke.status} on fetch-back.`] } : {}),
+        next_step: "Media ready for generate_business_image references or send_media.",
+      });
+    },
+  });
+
+  // ── create_product / update_product ──
+  const productFields = {
+    description: z.string().max(4000).optional(),
+    currency: z.string().trim().regex(/^[A-Za-z]{3}$/, "currency must be a 3-letter code, e.g. ZMW").optional()
+      .describe("ISO code (default from company currency: K → ZMW)"),
+    active: z.boolean().optional(),
+    media_id: z.string().uuid().optional().describe("Photo id from upload_media / list_media"),
+    bms_product_id: z.string().max(200).optional(),
+    sku: z.string().max(100).optional(),
+    company_id: z.string().optional().describe("Target company (admin keys only)."),
+  };
+
+  async function checkMediaBelongs(mediaId: string, companyId: string) {
+    const { data } = await supabase.from("company_media").select("id").eq("id", mediaId).eq("company_id", companyId).maybeSingle();
+    if (!data) throw new Error(`media_id ${mediaId} is not in this company's media library.`);
+  }
+
+  server.tool("create_product", {
+    description: "Add a product or service to the company's payment catalogue (the list list_products reads). Price must be a number ≥ 0. Use active:false later instead of deleting.",
+    inputSchema: z.object({
+      name: z.string().trim().min(1).max(200),
+      price: z.number().finite().min(0).describe("Price as a number, e.g. 350"),
+      ...productFields,
+    }).strict(),
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      if (params.media_id) await checkMediaBelongs(params.media_id, companyId);
+      let currency = params.currency?.toUpperCase();
+      if (!currency) {
+        const { data: c } = await supabase.from("companies").select("currency_prefix").eq("id", companyId).single();
+        currency = productCurrencyFromPrefix(c?.currency_prefix);
+      }
+      const { data: product, error } = await supabase
+        .from("payment_products")
+        .insert({
+          company_id: companyId,
+          name: params.name,
+          price: params.price,
+          currency,
+          description: params.description ?? null,
+          is_active: params.active ?? true,
+          media_id: params.media_id ?? null,
+          bms_product_id: params.bms_product_id ?? null,
+          sku: params.sku ?? null,
+        })
+        .select("id, name, description, price, currency, is_active, media_id, bms_product_id, sku, created_at")
+        .single();
+      if (error) throw error;
+      return okResult({
+        product,
+        next_step: "Product created. It now appears in list_products; use bms_generate_payment_link with its price to take payment.",
+      });
+    },
+  });
+
+  server.tool("update_product", {
+    description: "Change a product in the company's payment catalogue. Partial update — only fields you pass change. Set active:false to hide it (no deletes).",
+    inputSchema: z.object({
+      product_id: z.string().uuid(),
+      name: z.string().trim().min(1).max(200).optional(),
+      price: z.number().finite().min(0).optional(),
+      ...productFields,
+    }).strict(),
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const { data: existing } = await supabase
+        .from("payment_products").select("id").eq("id", params.product_id).eq("company_id", companyId).maybeSingle();
+      if (!existing) throw new Error(`Product ${params.product_id} not found for this company.`);
+      if (params.media_id) await checkMediaBelongs(params.media_id, companyId);
+      const map: Record<string, string> = { name: "name", price: "price", description: "description", currency: "currency", active: "is_active", media_id: "media_id", bms_product_id: "bms_product_id", sku: "sku" };
+      const patch: Record<string, unknown> = {};
+      for (const [k, col] of Object.entries(map)) {
+        if (params[k] === undefined) continue;
+        if (params[k] === null) throw new Error(`${k} cannot be null.`);
+        patch[col] = k === "currency" ? String(params[k]).toUpperCase() : params[k];
+      }
+      const updatedFields = Object.keys(patch);
+      if (!updatedFields.length) throw new Error("No fields to update.");
+      const { data: product, error } = await supabase
+        .from("payment_products")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", params.product_id)
+        .eq("company_id", companyId)
+        .select("id, name, description, price, currency, is_active, media_id, bms_product_id, sku, updated_at")
+        .single();
+      if (error) throw error;
+      return okResult({ product, updated_fields: updatedFields, next_step: "Product updated. Check it with list_products." });
     },
   });
 
