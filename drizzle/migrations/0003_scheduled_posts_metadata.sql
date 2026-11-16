@@ -1,0 +1,2 @@
+ALTER TABLE public.scheduled_posts ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+COMMENT ON COLUMN public.scheduled_posts.metadata IS 'Audit info for the post, e.g. source=mcp, forced_test_mode_publish, deleted_at.';

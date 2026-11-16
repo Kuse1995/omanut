@@ -11,6 +11,10 @@ import {
   forbiddenCompanyKeyReason, sanitizeFilename, MEDIA_MIME, MAX_MEDIA_BYTES, sniffMatches, svgIsUnsafe,
   imageDimensions, toMediaCategory, productCurrencyFromPrefix,
 } from "../_shared/mcp-company-validators.ts";
+import {
+  McpToolError, redactSecrets, isMetaObjectId, platformOfStoredPost, evaluateMediaCheck, isTokenError, normalizeBrandColors,
+  type ImageCheck,
+} from "../_shared/mcp-safety.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -135,7 +139,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.5.0",
+    version: "1.6.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
@@ -204,7 +208,21 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       try {
         return await userHandler(params, ctx);
       } catch (err: any) {
-        const raw = err?.message || String(err);
+        if (err?.isMcpToolError) {
+          const e = err as McpToolError;
+          const message = redactSecrets(e.message);
+          console.error(`[MCP-TOOL-ERR] tool=${name} key=${auth.keyPrefix} session=${sessionId} code=${e.code} msg=${message}`);
+          return {
+            isError: true,
+            content: [{ type: "text" as const, text: JSON.stringify({
+              ok: false,
+              tool: name,
+              error: { code: e.code, message, ...(e.opts.field ? { field: e.opts.field } : {}), ...(e.opts.details ? { details: JSON.parse(redactSecrets(e.opts.details)) } : {}) },
+              next_step: e.opts.nextStep || "Fix the request and try again.",
+            }, null, 2) }],
+          };
+        }
+        const raw = redactSecrets(err?.message || String(err));
         const isNoActive = raw.startsWith("NO_ACTIVE_COMPANY");
         const errMsg = isNoActive ? raw.replace("NO_ACTIVE_COMPANY: ", "") : raw;
         const hint = isNoActive
@@ -264,7 +282,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         active_company_name: activeName,
         visible_company_count: companyCount,
         session_id: sessionId,
-        server_version: "1.5.0",
+        server_version: "1.6.0",
         next_step,
       }, null, 2) }] };
     },
@@ -1390,30 +1408,45 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // â”€â”€ update_image_generation_settings â”€â”€
+  // ── update_image_generation_settings ──
+  // Upserts on image_generation_settings (unique company_id) so it also works for
+  // companies that have no settings row yet.
   server.tool("update_image_generation_settings", {
-    description: "Update image generation settings: style description, brand tone, visual guidelines, brand colors.",
+    description: "Create or update image generation settings: style description, brand tone, visual guidelines, brand colors. Only the fields you pass are changed; works on companies with no settings yet.",
     inputSchema: z.object({
       style_description: z.string().optional().describe("Visual style description"),
       brand_tone: z.string().optional().describe("Brand tone of voice"),
       visual_guidelines: z.string().optional().describe("Visual guidelines text"),
-      brand_colors: z.string().optional().describe("Brand color palette description"),
+      brand_colors: z.union([
+        z.string(),
+        z.array(z.union([z.string(), z.object({ name: z.string().optional(), hex: z.string() })])),
+      ]).optional().describe("Brand palette with hex codes: 'Olive #3A4232, Cream #F2EAD3' or [{ name, hex }]. Stored as [{ name, hex }]."),
     }).merge(companyOverride),
     handler: async (params: any) => {
-      const companyId = await resolveCompanyId(params?.company_id);
-      const updates: any = {};
+      const companyId = await resolveTargetCompanyId(params?.company_id);
+      const updates: Record<string, unknown> = {};
       if (params.style_description) updates.style_description = params.style_description;
       if (params.brand_tone) updates.brand_tone = params.brand_tone;
       if (params.visual_guidelines) updates.visual_guidelines = params.visual_guidelines;
-      if (params.brand_colors) updates.brand_colors = params.brand_colors;
+      if (params.brand_colors !== undefined) {
+        const colors = normalizeBrandColors(params.brand_colors);
+        if (!colors) {
+          throw new McpToolError("invalid_field", "brand_colors needs a hex code for every colour, e.g. 'Olive #3A4232, Cream #F2EAD3'.", { field: "brand_colors", nextStep: "Resend brand_colors with hex codes." });
+        }
+        updates.brand_colors = colors;
+      }
+      if (!Object.keys(updates).length) {
+        throw new McpToolError("invalid_field", "Nothing to update: pass at least one of style_description, brand_tone, visual_guidelines, brand_colors.", { nextStep: "Pass at least one field." });
+      }
+      const { data: existing } = await supabase
+        .from("image_generation_settings").select("id").eq("company_id", companyId).maybeSingle();
       const { data, error } = await supabase
         .from("image_generation_settings")
-        .update(updates)
-        .eq("company_id", companyId)
+        .upsert({ company_id: companyId, ...updates, updated_at: new Date().toISOString() }, { onConflict: "company_id" })
         .select()
         .single();
       if (error) throw error;
-      return { content: [{ type: "text" as const, text: JSON.stringify({ action: "updated", settings: data }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ action: existing ? "updated" : "created", settings: data, next_step: "Call get_image_generation_settings to confirm." }, null, 2) }] };
     },
   });
 
@@ -2171,7 +2204,78 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     },
   });
 
-  // Helper: insert a scheduled_posts row (status=approved, now) and invoke publish-meta-post
+  // ── Publishing: shared helpers ──
+  // One credential lookup for publish, dry_run, delete and get_connected_accounts,
+  // so what get_connected_accounts reports is exactly where a post lands.
+  async function getPublishCredential(companyId: string) {
+    const { data, error } = await supabase
+      .from("meta_credentials")
+      .select("page_id, page_name, ig_user_id, access_token, health_status, connection_state, last_verified_at, created_at")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new McpToolError("internal", `Could not read Meta connection: ${error.message}`);
+    return data as any;
+  }
+
+  // Graph call with the token in a header (never in the URL), bounded by a timeout.
+  async function graphCall(method: "GET" | "DELETE", path: string, token: string, query = "") {
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/${path}${query ? `?${query}` : ""}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      const body: any = await res.json().catch(() => ({}));
+      return { ok: res.ok && !body?.error, status: res.status, body };
+    } catch (e: any) {
+      return { ok: false, status: 0, body: { error: { message: e?.message || "network error" } } };
+    }
+  }
+
+  async function checkMediaUrl(url: string, kind: "image" | "video"): Promise<ImageCheck> {
+    if (!/^https?:\/\//i.test(url)) return evaluateMediaCheck(url, null, null, kind);
+    try {
+      const res = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(12000) });
+      const ct = res.headers.get("content-type");
+      try { await res.body?.cancel(); } catch { /* ignore */ }
+      return evaluateMediaCheck(url, res.status, ct, kind);
+    } catch (e: any) {
+      return { ...evaluateMediaCheck(url, null, null, kind), reason: `URL could not be fetched: ${redactSecrets(e?.message || e)}` };
+    }
+  }
+
+  async function resolveMetaBinding(companyId: string) {
+    const cred = await getPublishCredential(companyId);
+    if (!cred?.page_id || !cred?.access_token) {
+      return { cred: null, facebook: null, instagram: null, token_status: "missing" as const, token_error: null as string | null };
+    }
+    let token_status: "valid" | "expired" | "unknown" = "valid";
+    let token_error: string | null = null;
+    const page = await graphCall("GET", cred.page_id, cred.access_token, "fields=id,name");
+    if (!page.ok) {
+      token_status = isTokenError(page.body?.error) ? "expired" : "unknown";
+      token_error = redactSecrets(page.body?.error?.message || `HTTP ${page.status}`).replace(/\.+$/, "");
+    }
+    const facebook = { page_id: String(cred.page_id), page_name: page.ok ? (page.body?.name ?? cred.page_name ?? null) : (cred.page_name ?? null), connected: page.ok };
+    let instagram: { ig_user_id: string; username: string | null; connected: boolean; error?: string } | null = null;
+    if (cred.ig_user_id) {
+      const ig = page.ok ? await graphCall("GET", cred.ig_user_id, cred.access_token, "fields=id,username") : null;
+      instagram = { ig_user_id: String(cred.ig_user_id), username: ig?.ok ? (ig.body?.username ?? null) : null, connected: !!ig?.ok };
+      if (ig && !ig.ok) instagram.error = redactSecrets(ig.body?.error?.message || `HTTP ${ig.status}`);
+    }
+    return { cred, facebook, instagram, token_status, token_error };
+  }
+
+  async function getCompanyTestMode(companyId: string): Promise<{ name: string; test_mode: boolean }> {
+    const { data, error } = await supabase.from("companies").select("name, test_mode").eq("id", companyId).maybeSingle();
+    if (error) throw new McpToolError("internal", `Could not read company: ${error.message}`);
+    if (!data) throw new McpToolError("not_found", `Company not found: ${companyId}`, { field: "company_id" });
+    return { name: data.name, test_mode: data.test_mode === true };
+  }
+
+  // Insert a scheduled_posts row (status=approved, now) and invoke publish-meta-post.
   async function adhocPublish(params: {
     companyId: string;
     targetPlatform: "facebook" | "instagram" | "both";
@@ -2179,17 +2283,17 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     image_url?: string | null;
     image_urls?: string[] | null;
     video_url?: string | null;
+    forcedTestMode?: boolean;
   }) {
-    // Look up the company's Meta page_id
-    const { data: cred, error: credErr } = await supabase
-      .from("meta_credentials")
-      .select("page_id")
-      .eq("company_id", params.companyId)
-      .limit(1)
-      .maybeSingle();
+    const cred = await getPublishCredential(params.companyId);
+    if (!cred?.page_id) {
+      throw new McpToolError("not_found", "No Meta credentials configured for this company. Connect Facebook/Instagram first.", { nextStep: "Run get_connected_accounts." });
+    }
 
-    if (credErr || !cred?.page_id) {
-      throw new Error("No Meta credentials configured for this company. Connect Facebook/Instagram first.");
+    const metadata: Record<string, unknown> = { source: "mcp", api_key_id: auth.keyId };
+    if (params.forcedTestMode) {
+      metadata.forced_test_mode_publish = true;
+      metadata.forced_at = new Date().toISOString();
     }
 
     const { data: post, error: insErr } = await supabase
@@ -2205,6 +2309,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         scheduled_time: new Date().toISOString(),
         status: "approved",
         created_by: "00000000-0000-0000-0000-000000000000",
+        metadata,
       })
       .select()
       .single();
@@ -2214,50 +2319,201 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }
 
     const result = await callEdgeFunction("publish-meta-post", { post_id: post.id });
-    return { scheduled_post_id: post.id, ...result };
+    return { scheduled_post_id: post.id, ...(params.forcedTestMode ? { forced_test_mode_publish: true } : {}), ...result };
   }
 
+  // Shared by publish_facebook_post / publish_instagram_post: test_mode gate + dry run.
+  async function runPublish(platform: "facebook" | "instagram", params: any) {
+    const companyId = await resolveCompanyId(params?.company_id);
+    const company = await getCompanyTestMode(companyId);
+    const imageUrls: string[] = params.image_urls?.length ? params.image_urls : (params.image_url ? [params.image_url] : []);
+
+    if (params.dry_run === true) {
+      const binding = await resolveMetaBinding(companyId);
+      const blockers: string[] = [];
+      const warnings: string[] = [];
+      if (!binding.cred) blockers.push("No Facebook page is connected for this company.");
+      else if (binding.token_status !== "valid") blockers.push(`Page token is ${binding.token_status}${binding.token_error ? `: ${binding.token_error}` : ""}.`);
+      if (platform === "instagram" && binding.cred && !binding.instagram) blockers.push("No Instagram business account is linked to the connected page.");
+      if (platform === "instagram" && binding.instagram && !binding.instagram.connected) blockers.push(`Instagram account could not be read${binding.instagram.error ? `: ${binding.instagram.error}` : ""}.`);
+      if (platform === "instagram" && !imageUrls.length && !params.video_url) blockers.push("Instagram needs an image or video.");
+      const captionLimit = platform === "instagram" ? 2200 : 63206;
+      if (String(params.caption).length > captionLimit) blockers.push(`Caption is ${String(params.caption).length} characters; ${platform} allows ${captionLimit}.`);
+      if (platform === "instagram" && (String(params.caption).match(/#[\p{L}\p{N}_]+/gu) || []).length > 30) blockers.push("Instagram allows at most 30 hashtags.");
+      const image_checks = await Promise.all(imageUrls.map((u) => checkMediaUrl(u, "image")));
+      const video_check = params.video_url ? await checkMediaUrl(params.video_url, "video") : null;
+      for (const c of image_checks) if (!c.ok) blockers.push(`Image ${c.url}: ${c.reason}.`);
+      if (video_check && !video_check.ok) blockers.push(`Video ${video_check.url}: ${video_check.reason}.`);
+      if (company.test_mode && params.force !== true) {
+        blockers.push("Test mode is on for this company; a real publish needs force: true.");
+      } else if (company.test_mode) {
+        warnings.push("Test mode is on; force: true will publish to the live page and be recorded on the post.");
+      }
+      return okResult({
+        dry_run: true,
+        would_publish: blockers.length === 0,
+        blockers,
+        warnings,
+        target_platform: platform,
+        test_mode: company.test_mode,
+        resolved_account: platform === "facebook" ? binding.facebook : { ...binding.instagram, via_page: binding.facebook },
+        token_status: binding.token_status,
+        caption: params.caption,
+        image_urls: imageUrls,
+        image_checks,
+        video_check,
+        next_step: blockers.length ? "Fix the blockers, then dry-run again." : "Call again without dry_run to publish.",
+      });
+    }
+
+    if (company.test_mode && params.force !== true) {
+      throw new McpToolError(
+        "blocked_by_test_mode",
+        `Test mode is on for ${company.name}, so nothing was published. Pass force: true to publish to the live ${platform === "facebook" ? "Facebook page" : "Instagram account"} for real.`,
+        { nextStep: "Confirm with the owner, then retry with force: true (or use dry_run: true to preview)." },
+      );
+    }
+
+    const result = await adhocPublish({
+      companyId,
+      targetPlatform: platform,
+      caption: params.caption,
+      image_url: params.image_url,
+      image_urls: params.image_urls,
+      video_url: params.video_url,
+      forcedTestMode: company.test_mode && params.force === true,
+    });
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+  }
+
+  const publishControls = {
+    dry_run: z.boolean().optional().describe("Preview only: resolve the page/IG account, echo the caption and fetch every media URL. Nothing is posted."),
+    force: z.boolean().optional().describe("Required to publish when the company is in test mode. Recorded on the post."),
+  };
+
   server.tool("publish_facebook_post", {
-    description: "Publish a post immediately to the company's Facebook Page.",
+    description: "Publish a post immediately to the company's Facebook Page. Refused while the company is in test mode unless force: true. Use dry_run: true to preview the target page and check image URLs without posting.",
     inputSchema: z.object({
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().optional().describe("Image URL to attach"),
-      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs — 2 or more creates a native multi-photo post"),
+      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs - 2 or more creates a native multi-photo post"),
       video_url: z.string().optional().describe("Video URL to attach"),
+      ...publishControls,
     }).merge(companyOverride),
-    handler: async (params: any) => {
-      const companyId = await resolveCompanyId(params?.company_id);
-      const result = await adhocPublish({
-        companyId,
-        targetPlatform: "facebook",
-        caption: params.caption,
-        image_url: params.image_url,
-        image_urls: params.image_urls,
-        video_url: params.video_url,
-      });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    },
+    handler: (params: any) => runPublish("facebook", params),
   });
 
   server.tool("publish_instagram_post", {
-    description: "Publish a post immediately to the company's Instagram Business account.",
+    description: "Publish a post immediately to the company's Instagram Business account. Refused while the company is in test mode unless force: true. Use dry_run: true to preview the target account and check image URLs without posting.",
     inputSchema: z.object({
       caption: z.string().describe("Post caption/text"),
       image_url: z.string().describe("Image URL (required for IG)"),
-      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs — 2 or more creates an Instagram carousel"),
+      image_urls: z.array(z.string()).max(10).optional().describe("Ordered image URLs - 2 or more creates an Instagram carousel"),
       video_url: z.string().optional().describe("Video URL for Reels"),
+      ...publishControls,
     }).merge(companyOverride),
+    handler: (params: any) => runPublish("instagram", params),
+  });
+
+  // ── delete_published_post (admin only, destructive) ──
+  server.tool("delete_published_post", {
+    description: "Admin only. Permanently delete a Facebook or Instagram post that THIS system published, using the meta_post_id returned by publish_*. Refuses ids it has no record of (the Graph API is never called blind) and refuses URLs/permalinks.",
+    inputSchema: z.object({
+      meta_post_id: z.string().describe("The meta_post_id returned by publish_facebook_post / publish_instagram_post (digits, or PAGEID_POSTID). Not a URL."),
+      company_id: z.string().optional().describe("Optional: target company (admin keys). Defaults to the active company."),
+    }).strict(),
+    annotations: { destructiveHint: true, idempotentHint: false },
     handler: async (params: any) => {
-      const companyId = await resolveCompanyId(params?.company_id);
-      const result = await adhocPublish({
-        companyId,
-        targetPlatform: "instagram",
-        caption: params.caption,
-        image_url: params.image_url,
-        image_urls: params.image_urls,
-        video_url: params.video_url,
+      if (auth.scope !== "admin") {
+        throw new McpToolError("forbidden_scope", "delete_published_post needs an admin-scoped API key.", { nextStep: "Ask an Omanut admin to run it." });
+      }
+      const id = String(params.meta_post_id || "").trim();
+      if (!isMetaObjectId(id)) {
+        throw new McpToolError("invalid_field", "meta_post_id must be the id returned by publish_* (digits, or PAGEID_POSTID). URLs and permalinks are not accepted.", { field: "meta_post_id", nextStep: "Use list_scheduled_posts to find the meta_post_id." });
+      }
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const { data: rows, error } = await supabase
+        .from("scheduled_posts")
+        .select("id, page_id, content, target_platform, status, error_message, metadata, updated_at")
+        .eq("company_id", companyId)
+        .eq("meta_post_id", id)
+        .order("updated_at", { ascending: false })
+        .limit(5);
+      if (error) throw new McpToolError("internal", `Could not look up the post: ${error.message}`);
+      const post = (rows || []).find((r: any) => r.status === "published");
+      if (!post) {
+        const gone = (rows || []).find((r: any) => r.status === "deleted");
+        throw new McpToolError(
+          "not_found",
+          gone
+            ? `Post ${id} was already deleted (${(gone.metadata as any)?.deleted_at || gone.updated_at}).`
+            : `Post ${id} was not published by this system for this company, so it was not deleted. Nothing was sent to Facebook/Instagram.`,
+          { field: "meta_post_id", nextStep: gone ? "Nothing to do." : "Remove it by hand in Meta Business Suite if it must go." },
+        );
+      }
+      const platform = platformOfStoredPost(post.target_platform, post.error_message);
+      const { data: cred } = await supabase
+        .from("meta_credentials")
+        .select("access_token")
+        .eq("company_id", companyId)
+        .eq("page_id", post.page_id)
+        .limit(1)
+        .maybeSingle();
+      if (!cred?.access_token) {
+        throw new McpToolError("not_found", `The page token used to publish post ${id} (page ${post.page_id}) is no longer stored, so it cannot be deleted from here.`, { nextStep: "Reconnect the page, then retry." });
+      }
+      const res = await graphCall("DELETE", id, cred.access_token);
+      if (!res.ok) {
+        const e = res.body?.error || {};
+        throw new McpToolError(
+          "platform_refused",
+          `${platform === "facebook" ? "Facebook" : "Instagram"} refused the delete: ${redactSecrets(e.message || `HTTP ${res.status}`)}`,
+          { details: { platform, graph_code: e.code ?? null, graph_subcode: e.error_subcode ?? null, http_status: res.status }, nextStep: "Read the platform's reason; the post record was left unchanged." },
+        );
+      }
+      const deletedAt = new Date().toISOString();
+      const { error: updErr } = await supabase
+        .from("scheduled_posts")
+        .update({ status: "deleted", metadata: { ...((post.metadata as any) || {}), deleted_at: deletedAt, deleted_via: "mcp", deleted_by_api_key_id: auth.keyId }, updated_at: deletedAt })
+        .eq("id", post.id);
+      const warnings: string[] = [];
+      if (post.target_platform === "both") warnings.push(`This post went to both platforms; only the ${platform} copy had a recorded id and was deleted. Remove the other copy by hand.`);
+      if (updErr) warnings.push(`Deleted on ${platform}, but the post record could not be marked deleted: ${updErr.message}`);
+      return okResult({
+        ok: true,
+        deleted: { meta_post_id: id, platform, page_id: post.page_id, scheduled_post_id: post.id, caption_preview: String(post.content || "").slice(0, 120) },
+        warnings,
+        next_step: "Done. A second call with this id returns not_found.",
       });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    },
+  });
+
+  // ── get_connected_accounts ──
+  server.tool("get_connected_accounts", {
+    description: "Show exactly which Facebook page and Instagram account this company publishes to, whether the page token works, and the last post published. Never returns tokens. Call before publishing.",
+    inputSchema: companyOverride.strict(),
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params?.company_id);
+      const binding = await resolveMetaBinding(companyId);
+      const { data: last } = await supabase
+        .from("scheduled_posts")
+        .select("meta_post_id, target_platform, created_at, updated_at")
+        .eq("company_id", companyId)
+        .eq("status", "published")
+        .not("meta_post_id", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return okResult({
+        company_id: companyId,
+        facebook: binding.facebook,
+        instagram: binding.instagram,
+        token_status: binding.token_status,
+        ...(binding.token_error ? { token_error: binding.token_error } : {}),
+        last_post: last ? { meta_post_id: last.meta_post_id, platform: last.target_platform, created_at: last.created_at, published_at: last.updated_at } : null,
+        next_step: binding.token_status === "valid" ? "Use dry_run: true on a publish tool to preview a post." : "Reconnect Facebook in Setup > Meta before publishing.",
+      });
     },
   });
 

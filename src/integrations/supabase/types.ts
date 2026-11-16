@@ -4054,6 +4054,7 @@ export type Database = {
           image_url: string | null
           image_urls: string[] | null
           meta_post_id: string | null
+          metadata: Json
           page_id: string
           scheduled_time: string
           status: string
@@ -4071,6 +4072,7 @@ export type Database = {
           image_url?: string | null
           image_urls?: string[] | null
           meta_post_id?: string | null
+          metadata?: Json
           page_id: string
           scheduled_time: string
           status?: string
@@ -4088,6 +4090,7 @@ export type Database = {
           image_url?: string | null
           image_urls?: string[] | null
           meta_post_id?: string | null
+          metadata?: Json
           page_id?: string
           scheduled_time?: string
           status?: string
