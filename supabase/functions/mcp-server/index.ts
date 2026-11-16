@@ -2383,7 +2383,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       video_url: params.video_url,
       forcedTestMode: company.test_mode && params.force === true,
     });
-    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    const next_step = result?.meta_post_id
+      ? `Published. To take it down, call delete_published_post with meta_post_id ${result.meta_post_id}.`
+      : "Publishing did not succeed; read the error, or run get_connected_accounts and a dry_run.";
+    return { content: [{ type: "text" as const, text: JSON.stringify({ ...result, next_step }, null, 2) }] };
   }
 
   const publishControls = {
