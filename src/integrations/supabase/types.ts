@@ -4158,6 +4158,112 @@ export type Database = {
           },
         ]
       }
+      social_credentials: {
+        Row: {
+          access_token: string
+          account_id: string
+          account_name: string | null
+          account_type: string | null
+          company_id: string
+          created_at: string
+          environment: string
+          id: string
+          metadata: Json
+          platform: string
+          refresh_expires_at: string | null
+          refresh_token: string | null
+          scopes: string[]
+          token_expires_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          account_id: string
+          account_name?: string | null
+          account_type?: string | null
+          company_id: string
+          created_at?: string
+          environment?: string
+          id?: string
+          metadata?: Json
+          platform: string
+          refresh_expires_at?: string | null
+          refresh_token?: string | null
+          scopes?: string[]
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          account_id?: string
+          account_name?: string | null
+          account_type?: string | null
+          company_id?: string
+          created_at?: string
+          environment?: string
+          id?: string
+          metadata?: Json
+          platform?: string
+          refresh_expires_at?: string | null
+          refresh_token?: string | null
+          scopes?: string[]
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_credentials_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      social_oauth_sessions: {
+        Row: {
+          code_verifier: string | null
+          company_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          platform: string
+          redirect_uri: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          code_verifier?: string | null
+          company_id: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          platform: string
+          redirect_uri: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          code_verifier?: string | null
+          company_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          platform?: string
+          redirect_uri?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_oauth_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       support_tickets: {
         Row: {
           assigned_to: string | null
