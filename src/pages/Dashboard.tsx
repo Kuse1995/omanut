@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCompany } from "@/context/CompanyContext";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { 
@@ -23,6 +24,8 @@ import WhatsAppNumberBanner from "@/components/dashboard/WhatsAppNumberBanner";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const Dashboard = () => {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     creditBalance: 0,
@@ -38,7 +41,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchStats();
-  }, []);
+  }, [activeCompany?.id]);
 
   const fetchStats = async () => {
     try {
@@ -48,15 +51,10 @@ const Dashboard = () => {
         return;
       }
 
-      const { data: userData } = await supabase
-        .from("users")
-        .select("company_id")
-        .eq("id", session.user.id)
-        .single();
+      const userData = activeCompany ? { company_id: activeCompany.id } : null;
 
-      if (!userData?.company_id) {
-        throw new Error("No company associated with this user");
-      }
+      // Wait for CompanyContext to resolve the active business.
+      if (!userData?.company_id) return;
 
       setCompanyId(userData.company_id);
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useCompany } from "@/context/CompanyContext";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,8 @@ import WhatsAppCallDemo from '@/components/WhatsAppCallDemo';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const LiveDemo = () => {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -23,7 +26,7 @@ const LiveDemo = () => {
 
   useEffect(() => {
     checkAccess();
-  }, [navigate]);
+  }, [navigate, activeCompany?.id]);
 
   const checkAccess = async () => {
     try {
@@ -52,11 +55,7 @@ const LiveDemo = () => {
       }
 
       // Get user's company_id
-      const { data: userData } = await supabase
-        .from('users')
-        .select('company_id')
-        .eq('id', session.user.id)
-        .single();
+      const userData = activeCompany ? { company_id: activeCompany.id } : null;
 
       if (userData?.company_id) {
         setCompanyId(userData.company_id);

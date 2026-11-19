@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useCompany } from "@/context/CompanyContext";
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,24 +18,22 @@ interface QuickReplySelectorProps {
 }
 
 export const QuickReplySelector = ({ onSelect }: QuickReplySelectorProps) => {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const [templates, setTemplates] = useState<QuickReplyTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
     fetchTemplates();
-  }, []);
+  }, [activeCompany?.id]);
 
   const fetchTemplates = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: userData } = await supabase
-        .from('users')
-        .select('company_id')
-        .eq('id', session.user.id)
-        .single();
+      const userData = activeCompany ? { company_id: activeCompany.id } : null;
 
       if (!userData?.company_id) return;
 

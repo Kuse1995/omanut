@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useCompany } from "@/context/CompanyContext";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +36,8 @@ interface SupervisorInsight {
 }
 
 export default function SupervisorInsights() {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -49,7 +52,7 @@ export default function SupervisorInsights() {
 
   useEffect(() => {
     checkAccess();
-  }, []);
+  }, [activeCompany?.id]);
 
   const checkAccess = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -70,11 +73,7 @@ export default function SupervisorInsights() {
       return;
     }
 
-    const { data: user } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
+    const user = activeCompany ? { company_id: activeCompany.id } : null;
 
     if (user?.company_id) {
       fetchInsights(user.company_id);
@@ -167,11 +166,7 @@ export default function SupervisorInsights() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const { data: user } = await supabase
-        .from('users')
-        .select('company_id')
-        .eq('id', session.user.id)
-        .single();
+      const user = activeCompany ? { company_id: activeCompany.id } : null;
 
       if (!user?.company_id) return;
 

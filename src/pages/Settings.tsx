@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useCompany } from "@/context/CompanyContext";
 import { useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,8 @@ const MODULES = [
 ];
 
 const Settings = () => {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { data: isAdmin } = useIsPlatformAdmin();
@@ -61,20 +64,17 @@ const Settings = () => {
     booking_buffer_minutes: 15,
   });
 
-  useEffect(() => { fetchConfig(); }, []);
+  useEffect(() => { fetchConfig(); }, [activeCompany?.id]);
 
   const fetchConfig = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { data: userData } = await supabase
-        .from('users')
-        .select('company_id')
-        .eq('id', user.id)
-        .single();
+      const userData = activeCompany ? { company_id: activeCompany.id } : null;
 
-      if (!userData?.company_id) throw new Error('User has no associated company');
+      // Wait for CompanyContext to resolve the active business.
+      if (!userData?.company_id) return;
 
       const { data, error } = await supabase
         .from('companies')

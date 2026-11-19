@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useCompany } from "@/context/CompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,8 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 
 const ClientInsights = () => {
+  // Active business from CompanyContext (works for members and platform admins).
+  const { selectedCompany: activeCompany } = useCompany();
   const { toast } = useToast();
   const [actionItems, setActionItems] = useState<any[]>([]);
   const [clientInfo, setClientInfo] = useState<any[]>([]);
@@ -18,17 +21,13 @@ const ClientInsights = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [activeCompany?.id]);
 
   const fetchData = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    const { data: userData } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', session.user.id)
-      .single();
+    const userData = activeCompany ? { company_id: activeCompany.id } : null;
 
     if (!userData?.company_id) return;
     setCompanyId(userData.company_id);
