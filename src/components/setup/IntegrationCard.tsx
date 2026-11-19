@@ -71,7 +71,7 @@ export const IntegrationCard = ({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="font-semibold text-base text-foreground truncate">{title}</h3>
-            <Badge variant="outline" className={cn("text-xs gap-1 font-normal", cfg.cls)}>
+            <Badge variant="outline" className={cn("text-xs gap-1 font-normal whitespace-nowrap", cfg.cls)}>
               <StatusIcon className="w-3 h-3" />
               {statusLabel ?? cfg.label}
             </Badge>

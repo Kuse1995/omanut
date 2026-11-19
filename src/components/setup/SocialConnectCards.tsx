@@ -90,7 +90,7 @@ export const SocialConnectCards = () => {
       <IntegrationCard
         icon={Linkedin}
         iconBg="bg-sky-500/10"
-        iconColor="text-sky-700"
+        iconColor="text-sky-700 dark:text-sky-400"
         title="LinkedIn"
         description={
           liStatus === "connected"
@@ -102,8 +102,13 @@ export const SocialConnectCards = () => {
         status={liStatus}
         statusLabel={liStatus === "action_needed" ? "Reconnect" : undefined}
         rightSlot={
-          <Button size="sm" variant={liStatus === "connected" ? "outline" : "default"} onClick={() => connect("linkedin")} className="flex-shrink-0">
-            {liStatus === "not_set_up" ? "Connect LinkedIn" : "Reconnect"}
+          <Button size="sm" variant={liStatus === "connected" ? "outline" : "default"} onClick={() => connect("linkedin")} className="flex-shrink-0" aria-label={liStatus === "not_set_up" ? "Connect LinkedIn" : "Reconnect LinkedIn"}>
+            {liStatus === "not_set_up" ? (
+              <>
+                <span className="sm:hidden">Connect</span>
+                <span className="hidden sm:inline">Connect LinkedIn</span>
+              </>
+            ) : "Reconnect"}
           </Button>
         }
       />
@@ -119,8 +124,13 @@ export const SocialConnectCards = () => {
         }
         status={ttStatus}
         rightSlot={
-          <Button size="sm" variant={ttStatus === "connected" ? "outline" : "default"} onClick={() => connect("tiktok")} className="flex-shrink-0">
-            {ttStatus === "not_set_up" ? "Connect TikTok" : "Reconnect"}
+          <Button size="sm" variant={ttStatus === "connected" ? "outline" : "default"} onClick={() => connect("tiktok")} className="flex-shrink-0" aria-label={ttStatus === "not_set_up" ? "Connect TikTok" : "Reconnect TikTok"}>
+            {ttStatus === "not_set_up" ? (
+              <>
+                <span className="sm:hidden">Connect</span>
+                <span className="hidden sm:inline">Connect TikTok</span>
+              </>
+            ) : "Reconnect"}
           </Button>
         }
       />
