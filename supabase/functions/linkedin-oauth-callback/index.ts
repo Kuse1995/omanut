@@ -8,14 +8,16 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonError(405, "POST only");
   try {
-    const userId = await authUserId(req);
-    if (!userId) return jsonError(401, "Sign in on this site to finish connecting LinkedIn.", "unauthorized");
+    const userId = await authUserId(req); // null is fine for connect-link handshakes
     const input = readCallbackBody(await req.json().catch(() => ({})));
     if (!input) return jsonError(400, "Missing code or state.", "invalid_field");
 
     const supabase = serviceClient();
     const consumed = await consumeOAuthSession(supabase, input.state, "linkedin", userId);
-    if (!consumed.session) return jsonError(400, consumed.error!, "invalid_state");
+    if (!consumed.session) {
+      const status = consumed.code === "unauthorized" ? 401 : consumed.code === "forbidden" ? 403 : 400;
+      return jsonError(status, consumed.error!, consumed.code);
+    }
     const { session } = consumed;
     const cfg = socialConfig().linkedin;
 
@@ -59,7 +61,7 @@ Deno.serve(async (req) => {
       refresh_expires_at: expiresAtFromSeconds(token.refresh_token_expires_in, now),
       scopes,
       environment: "production",
-      metadata: { picture: me.picture || null, connected_by: userId },
+      metadata: { picture: me.picture || null, connected_by: consumed.connectedBy, via: consumed.session.kind },
       updated_at: new Date(now).toISOString(),
     }, { onConflict: "company_id,platform,account_id" });
     if (error) return jsonError(500, `Connected, but the connection could not be saved: ${error.message}`, "internal");

@@ -11,6 +11,8 @@ import { Loader2, ArrowLeft } from "lucide-react";
 import omanutLogo from "@/assets/omanut-logo-new.png";
 import ThemeToggle from "@/components/ThemeToggle";
 
+const NEXT_KEY = "omanut_login_next";
+
 const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -19,7 +21,19 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  // ?next=/setup?... sends the user back where they came from (same-site paths only).
+  // Kept in sessionStorage so it survives the Google sign-in round trip.
+  const nextPath = (() => {
+    const n = new URLSearchParams(window.location.search).get("next") || sessionStorage.getItem(NEXT_KEY);
+    return n && n.startsWith("/") && !n.startsWith("//") ? n : null;
+  })();
+
   const routeAfterAuth = async (userId: string) => {
+    if (nextPath) {
+      sessionStorage.removeItem(NEXT_KEY);
+      navigate(nextPath);
+      return;
+    }
     const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
     if (isAdmin) {
       navigate("/admin/dashboard");
@@ -63,6 +77,7 @@ const Login = () => {
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
+    if (nextPath) sessionStorage.setItem(NEXT_KEY, nextPath);
     try {
       const result = await lovable.auth.signInWithOAuth("google", {
         redirect_uri: `${window.location.origin}/login`,

@@ -57,6 +57,13 @@
       "when": 1795126324096,
       "tag": "0007_platform_admin_dashboard_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795128427461,
+      "tag": "0008_team_member_company_access",
+      "breakpoints": true
     }
   ]
 }

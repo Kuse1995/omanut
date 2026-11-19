@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { MessageCircle, Facebook, CreditCard, Database, Sparkles, ImageIcon, ArrowLeft, Copy, Check, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -12,13 +12,53 @@ import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useCompany } from "@/context/CompanyContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const Setup = () => {
   const navigate = useNavigate();
-  const { selectedCompany } = useCompany();
+  const { selectedCompany, switchCompany, isLoading: companyLoading } = useCompany();
   const { data: status, isLoading } = useSetupStatus();
   const { toast } = useToast();
   const [metaOpen, setMetaOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSignedIn(Boolean(data.session)));
+  }, []);
+
+  // Deep link from a connected agent: /setup?company_id=<id>&connect=facebook
+  // opens that business (access is still decided server-side) and its connections window.
+  const linkCompanyId = searchParams.get("company_id");
+  const linkConnect = searchParams.get("connect");
+  const triedSwitch = useRef(false);
+  useEffect(() => {
+    if (!signedIn || companyLoading) return;
+    if (linkCompanyId && selectedCompany?.id !== linkCompanyId) {
+      if (triedSwitch.current) {
+        toast({ title: "Can't open that business", description: "Your account isn't on that business's team.", variant: "destructive" });
+        const next = new URLSearchParams(searchParams);
+        next.delete("connect");
+        next.delete("company_id");
+        setSearchParams(next, { replace: true });
+        return;
+      }
+      triedSwitch.current = true;
+      switchCompany(linkCompanyId);
+      return;
+    }
+    if (linkConnect === "facebook" && (!linkCompanyId || selectedCompany?.id === linkCompanyId)) {
+      setMetaOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("connect");
+      next.delete("company_id");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn, companyLoading, linkCompanyId, linkConnect, selectedCompany?.id]);
+
+  const noCompany = signedIn === true && !companyLoading && !selectedCompany;
+  const loginHref = `/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
   const [waCopied, setWaCopied] = useState(false);
 
   const waNumber = status?.whatsappLabel?.split("·").pop()?.trim() ?? "";
@@ -113,9 +153,32 @@ const Setup = () => {
           </Card>
         )}
 
+        {signedIn === false && (
+          <Card className="mb-6">
+            <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+              <div>
+                <p className="font-semibold">Sign in to set up your business</p>
+                <p className="text-sm text-muted-foreground mt-0.5">You'll come straight back here afterwards.</p>
+              </div>
+              <Button asChild size="sm"><Link to={loginHref}>Sign in</Link></Button>
+            </CardContent>
+          </Card>
+        )}
+        {noCompany && (
+          <Card className="mb-6">
+            <CardContent className="p-5">
+              <p className="font-semibold">No business is linked to your account yet</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Ask the business owner to add you as a team member, or claim your business with the code Omanut sent you.
+              </p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate("/claim-company")}>Claim a business</Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Integration cards */}
         <div className="space-y-3">
-          {isLoading || !status ? (
+          {signedIn === false || noCompany ? null : isLoading || !status ? (
             <>
               <Skeleton className="h-20 w-full" />
               <Skeleton className="h-20 w-full" />

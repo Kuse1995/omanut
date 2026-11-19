@@ -4225,34 +4225,40 @@ export type Database = {
           code_verifier: string | null
           company_id: string
           created_at: string
+          created_by_api_key_id: string | null
           expires_at: string
           id: string
+          kind: string
           platform: string
           redirect_uri: string
           used_at: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           code_verifier?: string | null
           company_id: string
           created_at?: string
+          created_by_api_key_id?: string | null
           expires_at: string
           id?: string
+          kind?: string
           platform: string
           redirect_uri: string
           used_at?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           code_verifier?: string | null
           company_id?: string
           created_at?: string
+          created_by_api_key_id?: string | null
           expires_at?: string
           id?: string
+          kind?: string
           platform?: string
           redirect_uri?: string
           used_at?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {

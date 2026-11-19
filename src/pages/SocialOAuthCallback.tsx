@@ -20,6 +20,7 @@ type State =
  */
 const SocialOAuthCallback = ({ platform }: { platform: Platform }) => {
   const [state, setState] = useState<State>({ kind: "working" });
+  const [hasSession, setHasSession] = useState(false);
   const started = useRef(false);
   const label = LABEL[platform];
 
@@ -34,18 +35,22 @@ const SocialOAuthCallback = ({ platform }: { platform: Platform }) => {
       if (providerError) return setState({ kind: "error", message: providerError });
       if (!code || !oauthState) return setState({ kind: "error", message: "The sign-in response was incomplete. Start again from Setup." });
 
+      // Connect-link handshakes finish without an Omanut session; the server decides.
       const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) return setState({ kind: "signin" });
+      setHasSession(Boolean(sessionData.session));
 
       const { data, error } = await supabase.functions.invoke(`${platform}-oauth-callback`, { body: { code, state: oauthState } });
       if (error) {
         let message = error.message;
+        let code: string | undefined;
         if (error instanceof FunctionsHttpError) {
           try {
             const body = await error.context.json();
             message = body?.error?.message || message;
+            code = body?.error?.code;
           } catch { /* keep default */ }
         }
+        if (code === "unauthorized") return setState({ kind: "signin" });
         return setState({ kind: "error", message });
       }
       setState({ kind: "done", accountName: data?.account_name ?? null, warning: data?.warning });
@@ -83,7 +88,9 @@ const SocialOAuthCallback = ({ platform }: { platform: Platform }) => {
             <CheckCircle2 className="w-8 h-8 mx-auto text-primary" />
             <p className="text-lg font-medium">{label} connected{state.accountName ? ` as ${state.accountName}` : ""}</p>
             {state.warning && <p className="text-sm text-muted-foreground">{state.warning}</p>}
-            <Button variant="outline" asChild><Link to="/setup">Back to Setup</Link></Button>
+            {hasSession
+              ? <Button variant="outline" asChild><Link to="/setup">Back to Setup</Link></Button>
+              : <p className="text-sm text-muted-foreground">All done — you can close this page.</p>}
           </>
         )}
         {state.kind === "error" && (
@@ -91,7 +98,7 @@ const SocialOAuthCallback = ({ platform }: { platform: Platform }) => {
             <XCircle className="w-8 h-8 mx-auto text-destructive" />
             <p className="text-lg font-medium">Couldn't connect {label}</p>
             <p className="text-sm text-muted-foreground break-words">{state.message}</p>
-            <Button variant="outline" asChild><Link to="/setup">Back to Setup</Link></Button>
+            {hasSession && <Button variant="outline" asChild><Link to="/setup">Back to Setup</Link></Button>}
           </>
         )}
       </div>

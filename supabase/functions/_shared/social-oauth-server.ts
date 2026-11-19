@@ -39,27 +39,35 @@ export async function canManageSocial(supabase: any, userId: string, companyId: 
   return Boolean(admin);
 }
 
-/** Verifies the signed state, then atomically consumes the matching single-use session row,
- *  which must belong to the same signed-in user and platform. */
-export async function consumeOAuthSession(supabase: any, state: string, platform: SocialPlatform, userId: string) {
+/** Verifies the signed state, then atomically consumes the matching single-use session row.
+ *  Signed-in handshakes must be finished by the same user. Connect-link handshakes (state
+ *  u === "link", minted by mcp-server's get_social_connect_url) need no session: the
+ *  signed, expiring, single-use link bound to one company is the authorisation. */
+export async function consumeOAuthSession(supabase: any, state: string, platform: SocialPlatform, userId: string | null) {
   const payload = await verifyState(state, socialConfig().stateSecret);
-  if (!payload) return { error: "This connection link is invalid or has expired. Start again from Setup." };
-  if (payload.p !== platform) return { error: "This link was started for a different platform." };
-  if (payload.u !== userId) return { error: "This connection was started by a different user. Sign in as that user, or start again." };
-  const { data: session, error } = await supabase
+  if (!payload) return { error: "This connection link is invalid or has expired. Start again from Setup.", code: "invalid_state" };
+  if (payload.p !== platform) return { error: "This link was started for a different platform.", code: "invalid_state" };
+  const isLink = payload.u === "link";
+  if (!isLink) {
+    if (!userId) return { error: "Sign in on this site to finish connecting.", code: "unauthorized" };
+    if (payload.u !== userId) return { error: "This connection was started by a different user. Sign in as that user, or start again.", code: "invalid_state" };
+  }
+  let q = supabase
     .from("social_oauth_sessions")
     .update({ used_at: new Date().toISOString() })
     .eq("id", payload.n)
-    .eq("user_id", userId)
     .eq("platform", platform)
     .eq("company_id", payload.c)
+    .eq("kind", isLink ? "link" : "session")
     .is("used_at", null)
-    .gt("expires_at", new Date().toISOString())
-    .select("id, company_id, code_verifier, redirect_uri")
-    .maybeSingle();
-  if (error || !session) return { error: "This connection link was already used or has expired. Start again from Setup." };
-  if (!(await canManageSocial(supabase, userId, session.company_id))) return { error: "You no longer have permission to manage this company." };
-  return { session };
+    .gt("expires_at", new Date().toISOString());
+  q = isLink ? q.is("user_id", null) : q.eq("user_id", userId);
+  const { data: session, error } = await q.select("id, company_id, code_verifier, redirect_uri, kind").maybeSingle();
+  if (error || !session) return { error: "This connection link was already used or has expired. Ask for a new link, or start again from Setup.", code: "invalid_state" };
+  if (!isLink && !(await canManageSocial(supabase, userId!, session.company_id))) {
+    return { error: "You no longer have permission to manage this company.", code: "forbidden" };
+  }
+  return { session, connectedBy: isLink ? "connect_link" : userId! };
 }
 
 export function readCallbackBody(raw: any): { code: string; state: string } | null {

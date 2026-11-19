@@ -6,6 +6,11 @@ export type SocialPlatform = "linkedin" | "tiktok";
 export const LINKEDIN_SCOPES = ["openid", "profile", "email", "w_member_social"];
 export const TIKTOK_SCOPES = ["user.info.basic", "video.publish", "video.upload"];
 export const OAUTH_SESSION_TTL_MS = 10 * 60 * 1000;
+export const CONNECT_LINK_TTL_MS = 30 * 60 * 1000;
+/** Public origin connect links point at (the owner taps this from WhatsApp). */
+export function connectLinkOrigin(): string {
+  return (Deno.env.get("SOCIAL_CONNECT_ORIGIN") || "https://omanut.lovable.app").replace(/\/+$/, "");
+}
 export const TIKTOK_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 export function socialConfig() {
@@ -44,7 +49,11 @@ async function hmac(secret: string, data: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(data))));
 }
 
+/** u is the signed-in user id, or "link" when the handshake came from an MCP connect link. */
 export type OAuthStatePayload = { n: string; c: string; p: SocialPlatform; u: string; exp: number };
+/** Connect link token: n = social_oauth_sessions row (kind='link'), c = company, p = platform. */
+export type ConnectLinkPayload = { k: "link"; n: string; c: string; p: SocialPlatform; exp: number };
+const LINK_DOMAIN = "connect-link:"; // keeps link tokens and OAuth state tokens non-interchangeable
 
 export async function signState(payload: OAuthStatePayload, secret: string): Promise<string> {
   if (!secret) throw new Error("SOCIAL_OAUTH_STATE_SECRET is not configured");
@@ -68,6 +77,33 @@ export async function verifyState(state: string, secret: string, now = Date.now(
     if (p.p !== "linkedin" && p.p !== "tiktok") return null;
     if (typeof p.exp !== "number" || p.exp < now) return null;
     return p as OAuthStatePayload;
+  } catch {
+    return null;
+  }
+}
+
+export async function signConnectLink(payload: ConnectLinkPayload, secret: string): Promise<string> {
+  if (!secret) throw new Error("SOCIAL_OAUTH_STATE_SECRET is not configured");
+  const body = b64url(enc.encode(JSON.stringify(payload)));
+  return `${body}.${await hmac(secret, LINK_DOMAIN + body)}`;
+}
+
+/** Returns the link payload when the signature matches and it has not expired, else null. */
+export async function verifyConnectLink(token: string, secret: string, now = Date.now()): Promise<ConnectLinkPayload | null> {
+  if (!secret || typeof token !== "string" || token.length > 2048) return null;
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const expected = await hmac(secret, LINK_DOMAIN + body);
+  if (expected.length !== sig.length) return null;
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+  if (diff !== 0) return null;
+  try {
+    const p = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
+    if (!p || p.k !== "link" || typeof p.n !== "string" || typeof p.c !== "string") return null;
+    if (p.p !== "linkedin" && p.p !== "tiktok") return null;
+    if (typeof p.exp !== "number" || p.exp < now) return null;
+    return p as ConnectLinkPayload;
   } catch {
     return null;
   }
