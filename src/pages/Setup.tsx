@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import ClientLayout from "@/components/dashboard/ClientLayout";
 import IntegrationCard from "@/components/setup/IntegrationCard";
 import { MetaIntegrationsPanel } from "@/components/admin/MetaIntegrationsPanel";
+import SocialConnectCards from "@/components/setup/SocialConnectCards";
 import { useSetupStatus } from "@/hooks/useSetupStatus";
 import { useCompany } from "@/context/CompanyContext";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -160,6 +161,7 @@ const Setup = () => {
                 status={status.meta}
                 onClick={() => setMetaOpen(true)}
               />
+              <SocialConnectCards />
               <IntegrationCard
                 icon={CreditCard}
                 iconBg="bg-purple-500/10"

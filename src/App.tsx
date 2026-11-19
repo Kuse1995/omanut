@@ -38,6 +38,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import DataDeletion from "./pages/DataDeletion";
 import MetaOAuthCallback from "./pages/MetaOAuthCallback";
+import SocialOAuthCallback from "./pages/SocialOAuthCallback";
 import Setup from "./pages/Setup";
 import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
@@ -95,6 +96,8 @@ const App = () => (
             <Route path="/terms" element={<TermsOfService />} />
             <Route path="/data-deletion" element={<DataDeletion />} />
             <Route path="/auth/meta/callback" element={<MetaOAuthCallback />} />
+            <Route path="/auth/linkedin/callback" element={<SocialOAuthCallback platform="linkedin" />} />
+            <Route path="/auth/tiktok/callback" element={<SocialOAuthCallback platform="tiktok" />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </CompanyProvider>

@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { evaluateMediaCheck, isMetaObjectId, isTokenError, normalizeBrandColors, platformOfStoredPost, redactSecrets } from "./mcp-safety.ts";
+import { evaluateMediaCheck, isMetaObjectId, isPublishedPostId, isTokenError, normalizeBrandColors, platformOfStoredPost, redactSecrets } from "./mcp-safety.ts";
 
 Deno.test("redactSecrets strips tokens from Graph-style errors and URLs", () => {
   const tok = "EAAB" + "x".repeat(60);
@@ -46,4 +46,21 @@ Deno.test("normalizeBrandColors", () => {
   assertEquals(normalizeBrandColors(["#000000"]), [{ name: "#000000", hex: "#000000" }]);
   assertEquals(normalizeBrandColors("warm earthy tones"), null);
   assertEquals(normalizeBrandColors([{ name: "x", hex: "nope" }]), null);
+});
+
+Deno.test("redactSecrets strips TikTok/LinkedIn tokens and refresh tokens", () => {
+  const tt = "act." + "a".repeat(40); const rt = "rft." + "b".repeat(40); const li = "AQ" + "c".repeat(60);
+  const s = redactSecrets(`refresh_token=${rt}&x=1 {"refresh_token":"${rt}"} token ${tt} li ${li} code_verifier=abc123`);
+  for (const v of [tt, rt, li, "abc123"]) assert(!s.includes(v), s);
+});
+
+Deno.test("isPublishedPostId covers all platforms and refuses URLs", () => {
+  assert(isPublishedPostId("645175628672290_122112233445566"));
+  assert(isPublishedPostId("urn:li:share:7123456789012345678"));
+  assert(isPublishedPostId("urn:li:ugcPost:7123456789012345678"));
+  assert(isPublishedPostId("v_pub_file~v2-1.7245638612355678210"));
+  assert(!isPublishedPostId("https://www.linkedin.com/feed/update/urn:li:share:7123456789012345678"));
+  assert(!isPublishedPostId("urn:li:person:abc"));
+  assertEquals(platformOfStoredPost("linkedin", null), "linkedin");
+  assertEquals(platformOfStoredPost("tiktok", null), "tiktok");
 });

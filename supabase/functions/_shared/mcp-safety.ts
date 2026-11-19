@@ -18,12 +18,14 @@ export class McpToolError extends Error {
 export function redactSecrets(input: unknown): string {
   let s = typeof input === "string" ? input : (() => { try { return JSON.stringify(input); } catch { return String(input); } })();
   if (!s) return "";
-  s = s.replace(/(access_token|appsecret_proof|client_secret|input_token|api_key|apikey|password)(=|%3D)[^&\s"'<>]+/gi, "$1$2[REDACTED]");
-  s = s.replace(/("(?:access_token|page_access_token|token|appsecret_proof|client_secret|api_key|password)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"');
+  s = s.replace(/(access_token|refresh_token|code_verifier|appsecret_proof|client_secret|input_token|api_key|apikey|password)(=|%3D)[^&\s"'<>]+/gi, "$1$2[REDACTED]");
+  s = s.replace(/("(?:access_token|refresh_token|page_access_token|token|code_verifier|appsecret_proof|client_secret|api_key|password)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"');
   s = s.replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, "Bearer [REDACTED]");
   s = s.replace(/\bEA[A-Za-z0-9]{20,}\b/g, "[REDACTED_TOKEN]");
   s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "[REDACTED_JWT]");
   s = s.replace(/\b(sk|pk|rk)[-_][A-Za-z0-9_-]{16,}\b/g, "[REDACTED_KEY]");
+  s = s.replace(/\b(act|rft)\.[A-Za-z0-9!*._-]{20,}/g, "[REDACTED_TOKEN]"); // TikTok
+  s = s.replace(/\bAQ[A-Za-z0-9_-]{40,}/g, "[REDACTED_TOKEN]"); // LinkedIn
   return s;
 }
 
@@ -32,10 +34,17 @@ export function isMetaObjectId(raw: string): boolean {
   return /^\d{5,25}(_\d{5,25})?$/.test(raw.trim());
 }
 
+/** Any id publish_* returns: a Meta id, a LinkedIn post URN, or a TikTok publish_id. URLs are refused. */
+export function isPublishedPostId(raw: string): boolean {
+  const s = raw.trim();
+  return isMetaObjectId(s) || /^urn:li:(share|ugcPost|post):\d{5,30}$/.test(s) || /^v_[a-z_]+~[A-Za-z0-9._-]{4,200}$/.test(s);
+}
+
 /** Which platform a stored meta_post_id belongs to. publish-meta-post stores the
  *  Facebook id when Facebook succeeded, otherwise the Instagram id. */
-export function platformOfStoredPost(targetPlatform: string | null, errorMessage: string | null): "facebook" | "instagram" {
+export function platformOfStoredPost(targetPlatform: string | null, errorMessage: string | null): "facebook" | "instagram" | "linkedin" | "tiktok" {
   const t = (targetPlatform || "facebook").toLowerCase();
+  if (t === "linkedin" || t === "tiktok") return t;
   if (t === "instagram") return "instagram";
   if (t === "both" && /(^|;\s*)Facebook:/.test(errorMessage || "")) return "instagram";
   return "facebook";

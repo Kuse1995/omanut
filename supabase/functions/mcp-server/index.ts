@@ -12,9 +12,10 @@ import {
   imageDimensions, toMediaCategory, productCurrencyFromPrefix,
 } from "../_shared/mcp-company-validators.ts";
 import {
-  McpToolError, redactSecrets, isMetaObjectId, platformOfStoredPost, evaluateMediaCheck, isTokenError, normalizeBrandColors,
+  McpToolError, redactSecrets, isMetaObjectId, isPublishedPostId, platformOfStoredPost, evaluateMediaCheck, isTokenError, normalizeBrandColors,
   type ImageCheck,
 } from "../_shared/mcp-safety.ts";
+import { socialConfig, ensureFreshTikTokToken, tokenStatusFromExpiry, escapeLinkedInCommentary } from "../_shared/social-oauth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -139,7 +140,7 @@ async function authenticateApiKey(req: Request, supabase: any): Promise<AuthCont
 function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): McpServer {
   const server = new McpServer({
     name: "omanut-ai",
-    version: "1.6.0",
+    version: "1.7.0",
     schemaAdapter: (schema: unknown) => zodToJsonSchema(schema as z.ZodType, { target: "openApi3" }),
   });
 
@@ -282,7 +283,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         active_company_name: activeName,
         visible_company_count: companyCount,
         session_id: sessionId,
-        server_version: "1.6.0",
+        server_version: "1.7.0",
         next_step,
       }, null, 2) }] };
     },
@@ -2234,13 +2235,14 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     }
   }
 
-  async function checkMediaUrl(url: string, kind: "image" | "video"): Promise<ImageCheck> {
+  async function checkMediaUrl(url: string, kind: "image" | "video"): Promise<ImageCheck & { content_length?: number | null }> {
     if (!/^https?:\/\//i.test(url)) return evaluateMediaCheck(url, null, null, kind);
     try {
       const res = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(12000) });
       const ct = res.headers.get("content-type");
+      const len = Number(res.headers.get("content-length")) || null;
       try { await res.body?.cancel(); } catch { /* ignore */ }
-      return evaluateMediaCheck(url, res.status, ct, kind);
+      return { ...evaluateMediaCheck(url, res.status, ct, kind), content_length: len };
     } catch (e: any) {
       return { ...evaluateMediaCheck(url, null, null, kind), reason: `URL could not be fetched: ${redactSecrets(e?.message || e)}` };
     }
@@ -2420,9 +2422,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // ── delete_published_post (admin only, destructive) ──
   server.tool("delete_published_post", {
-    description: "Admin only. Permanently delete a Facebook or Instagram post that THIS system published, using the meta_post_id returned by publish_*. Refuses ids it has no record of (the Graph API is never called blind) and refuses URLs/permalinks.",
+    description: "Admin only. Permanently delete a Facebook, Instagram or LinkedIn post that THIS system published, using the id returned by publish_*. Refuses ids it has no record of (the platform is never called blind) and refuses URLs/permalinks. TikTok posts cannot be deleted through the API.",
     inputSchema: z.object({
-      meta_post_id: z.string().describe("The meta_post_id returned by publish_facebook_post / publish_instagram_post (digits, or PAGEID_POSTID). Not a URL."),
+      meta_post_id: z.string().describe("The id returned by publish_* : Meta id (digits or PAGEID_POSTID), LinkedIn post URN (urn:li:share:... / urn:li:ugcPost:...), or TikTok publish_id. Not a URL."),
       company_id: z.string().optional().describe("Optional: target company (admin keys). Defaults to the active company."),
     }).strict(),
     annotations: { destructiveHint: true, idempotentHint: false },
@@ -2431,8 +2433,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         throw new McpToolError("forbidden_scope", "delete_published_post needs an admin-scoped API key.", { nextStep: "Ask an Omanut admin to run it." });
       }
       const id = String(params.meta_post_id || "").trim();
-      if (!isMetaObjectId(id)) {
-        throw new McpToolError("invalid_field", "meta_post_id must be the id returned by publish_* (digits, or PAGEID_POSTID). URLs and permalinks are not accepted.", { field: "meta_post_id", nextStep: "Use list_scheduled_posts to find the meta_post_id." });
+      if (!isPublishedPostId(id)) {
+        throw new McpToolError("invalid_field", "meta_post_id must be the id returned by publish_* (Meta digits or PAGEID_POSTID, a LinkedIn urn:li:share/ugcPost URN, or a TikTok publish_id). URLs and permalinks are not accepted.", { field: "meta_post_id", nextStep: "Use list_scheduled_posts to find the meta_post_id." });
       }
       const companyId = await resolveTargetCompanyId(params.company_id);
       const { data: rows, error } = await supabase
@@ -2443,6 +2445,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         .order("updated_at", { ascending: false })
         .limit(5);
       if (error) throw new McpToolError("internal", `Could not look up the post: ${error.message}`);
+      if ((rows || []).some((r: any) => String(r.target_platform || "").toLowerCase() === "tiktok")) {
+        throw new McpToolError("platform_unsupported", "TikTok Content Posting API does not support deleting posts; delete directly in the TikTok app.", { field: "meta_post_id", nextStep: "Delete it in the TikTok app." });
+      }
       const post = (rows || []).find((r: any) => r.status === "published");
       if (!post) {
         const gone = (rows || []).find((r: any) => r.status === "deleted");
@@ -2450,11 +2455,36 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           "not_found",
           gone
             ? `Post ${id} was already deleted (${(gone.metadata as any)?.deleted_at || gone.updated_at}).`
-            : `Post ${id} was not published by this system for this company, so it was not deleted. Nothing was sent to Facebook/Instagram.`,
-          { field: "meta_post_id", nextStep: gone ? "Nothing to do." : "Remove it by hand in Meta Business Suite if it must go." },
+            : `Post ${id} was not published by this system for this company, so it was not deleted. Nothing was sent to the platform.`,
+          { field: "meta_post_id", nextStep: gone ? "Nothing to do." : "Remove it by hand on the platform if it must go." },
         );
       }
       const platform = platformOfStoredPost(post.target_platform, post.error_message);
+      const markDeleted = async () => {
+        const deletedAt = new Date().toISOString();
+        const { error: updErr } = await supabase
+          .from("scheduled_posts")
+          .update({ status: "deleted", metadata: { ...((post.metadata as any) || {}), deleted_at: deletedAt, deleted_via: "mcp", deleted_by_api_key_id: auth.keyId }, updated_at: deletedAt })
+          .eq("id", post.id);
+        return updErr;
+      };
+      if (platform === "linkedin") {
+        const li = await getSocialCredential(companyId, "linkedin", post.page_id);
+        if (!li?.access_token) {
+          throw new McpToolError("not_found", `The LinkedIn connection used to publish post ${id} is no longer stored, so it cannot be deleted from here.`, { nextStep: "Reconnect LinkedIn, then retry." });
+        }
+        const r = await linkedInFetch("DELETE", `/rest/posts/${encodeURIComponent(id)}`, li.access_token);
+        if (!r.ok) {
+          throw new McpToolError("platform_refused", `LinkedIn refused the delete: ${linkedInReason(r)}`, { details: { platform, http_status: r.status }, nextStep: "Read the platform's reason; the post record was left unchanged." });
+        }
+        const updErr = await markDeleted();
+        return okResult({
+          ok: true,
+          deleted: { meta_post_id: id, platform, account_id: post.page_id, scheduled_post_id: post.id, caption_preview: String(post.content || "").slice(0, 120) },
+          warnings: updErr ? [`Deleted on LinkedIn, but the post record could not be marked deleted: ${updErr.message}`] : [],
+          next_step: "Done. A second call with this id returns not_found.",
+        });
+      }
       const { data: cred } = await supabase
         .from("meta_credentials")
         .select("access_token")
@@ -2493,12 +2523,12 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // ── get_connected_accounts ──
   server.tool("get_connected_accounts", {
-    description: "Show exactly which Facebook page and Instagram account this company publishes to, whether the page token works, and the last post published. Never returns tokens. Call before publishing.",
+    description: "Show exactly which Facebook page, Instagram, LinkedIn and TikTok accounts this company publishes to, whether each token works, and the last post published. Never returns tokens. Call before publishing.",
     inputSchema: companyOverride.strict(),
     annotations: { readOnlyHint: true, openWorldHint: true },
     handler: async (params: any) => {
       const companyId = await resolveTargetCompanyId(params?.company_id);
-      const binding = await resolveMetaBinding(companyId);
+      const [binding, li, tt] = await Promise.all([resolveMetaBinding(companyId), resolveLinkedIn(companyId), resolveTikTok(companyId)]);
       const { data: last } = await supabase
         .from("scheduled_posts")
         .select("meta_post_id, target_platform, created_at, updated_at")
@@ -2514,9 +2544,416 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         instagram: binding.instagram,
         token_status: binding.token_status,
         ...(binding.token_error ? { token_error: binding.token_error } : {}),
+        linkedin: li.cred
+          ? { connected: li.token_status === "valid", account_id: li.cred.account_id, account_name: li.cred.account_name, account_type: li.cred.account_type, token_status: li.token_status, expires_at: li.cred.token_expires_at, ...(li.token_error ? { token_error: li.token_error } : {}) }
+          : { connected: false, token_status: "missing" },
+        tiktok: tt.cred
+          ? { connected: tt.token_status === "valid", open_id: tt.cred.account_id, display_name: tt.cred.account_name, environment: tt.cred.environment, token_status: tt.token_status, expires_at: tt.cred.token_expires_at, ...(tt.token_error ? { token_error: tt.token_error } : {}) }
+          : { connected: false, token_status: "missing" },
         last_post: last ? { meta_post_id: last.meta_post_id, platform: last.target_platform, created_at: last.created_at, published_at: last.updated_at } : null,
         next_step: binding.token_status === "valid" ? "Use dry_run: true on a publish tool to preview a post." : "Reconnect Facebook in Setup > Meta before publishing.",
       });
+    },
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // LINKEDIN + TIKTOK (v1.7.0) — same safety rules as Meta publishing:
+  // test_mode gate with force, dry_run, scrubbed errors, scheduled_posts row.
+  // ═══════════════════════════════════════════════════════════════════
+  const MAX_TIKTOK_VIDEO_BYTES = 64 * 1024 * 1024; // single-chunk FILE_UPLOAD limit
+  const MAX_LINKEDIN_IMAGE_BYTES = 20 * 1024 * 1024;
+
+  async function getSocialCredential(companyId: string, platform: "linkedin" | "tiktok", accountId?: string) {
+    let q = supabase
+      .from("social_credentials")
+      .select("id, company_id, platform, account_id, account_name, account_type, access_token, refresh_token, token_expires_at, refresh_expires_at, scopes, environment")
+      .eq("company_id", companyId)
+      .eq("platform", platform);
+    if (accountId) q = q.eq("account_id", accountId);
+    const { data, error } = await q.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new McpToolError("internal", `Could not read ${platform} connection: ${error.message}`);
+    return data as any;
+  }
+
+  async function linkedInFetch(method: "GET" | "POST" | "DELETE", path: string, token: string, body?: unknown) {
+    const cfg = socialConfig().linkedin;
+    try {
+      const res = await fetch(`https://api.linkedin.com${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Linkedin-Version": cfg.apiVersion,
+          "X-Restli-Protocol-Version": "2.0.0",
+          ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(25000),
+      });
+      const text = await res.text();
+      let parsed: any = null;
+      try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+      return { ok: res.ok, status: res.status, body: parsed, headers: res.headers };
+    } catch (e: any) {
+      return { ok: false, status: 0, body: { message: e?.message || "network error" }, headers: new Headers() };
+    }
+  }
+  const linkedInReason = (r: { status: number; body: any }) =>
+    redactSecrets((r.body && typeof r.body === "object" ? (r.body.message || r.body.error_description || r.body.error) : String(r.body || "").slice(0, 300)) || `HTTP ${r.status}`);
+
+  async function tiktokFetch(path: string, token: string, body: unknown = {}) {
+    try {
+      const res = await fetch(`https://open.tiktokapis.com${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(25000),
+      });
+      const j: any = await res.json().catch(() => ({}));
+      const code = j?.error?.code ?? (res.ok ? "ok" : `http_${res.status}`);
+      return { ok: res.ok && code === "ok", status: res.status, code, message: redactSecrets(j?.error?.message || ""), data: j?.data ?? null };
+    } catch (e: any) {
+      return { ok: false, status: 0, code: "network_error", message: redactSecrets(e?.message || "network error"), data: null };
+    }
+  }
+
+  async function resolveLinkedIn(companyId: string) {
+    const cred = await getSocialCredential(companyId, "linkedin");
+    if (!cred) return { cred: null, account: null, token_status: "missing" as const, token_error: null as string | null };
+    let token_status: "valid" | "expired" | "unknown" = tokenStatusFromExpiry(cred.token_expires_at);
+    let token_error: string | null = token_status === "expired" ? "Token expiry date has passed; reconnect LinkedIn." : null;
+    if (token_status !== "expired") {
+      try {
+        const r = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${cred.access_token}` }, signal: AbortSignal.timeout(15000) });
+        if (r.ok) token_status = "valid";
+        else { token_status = r.status === 401 ? "expired" : "unknown"; token_error = `LinkedIn answered HTTP ${r.status}`; }
+        try { await r.body?.cancel(); } catch { /* ignore */ }
+      } catch (e: any) { token_status = "unknown"; token_error = redactSecrets(e?.message || "network error"); }
+    }
+    return { cred, account: { account_id: cred.account_id, account_name: cred.account_name, account_type: cred.account_type }, token_status, token_error };
+  }
+
+  async function resolveTikTok(companyId: string) {
+    const raw = await getSocialCredential(companyId, "tiktok");
+    if (!raw) return { cred: null, creator: null as any, token_status: "missing" as const, token_error: null as string | null, refreshed: false };
+    const fresh = await ensureFreshTikTokToken(supabase, raw);
+    const cred = fresh.cred as any;
+    if (fresh.error && tokenStatusFromExpiry(cred.token_expires_at) !== "valid") {
+      return { cred, creator: null, token_status: "expired" as const, token_error: redactSecrets(fresh.error).replace(/\.+$/, ""), refreshed: false };
+    }
+    const info = await tiktokFetch("/v2/post/publish/creator_info/query/", cred.access_token, {});
+    if (info.ok) return { cred, creator: info.data, token_status: "valid" as const, token_error: null, refreshed: fresh.refreshed };
+    const expired = info.code === "access_token_invalid" || info.status === 401;
+    return { cred, creator: null, token_status: expired ? "expired" as const : "unknown" as const, token_error: `${info.code}${info.message ? `: ${info.message}` : ""}`, refreshed: fresh.refreshed };
+  }
+
+  async function insertSocialPost(row: { companyId: string; platform: "linkedin" | "tiktok"; accountId: string; caption: string; imageUrl?: string | null; imageUrls?: string[] | null; videoUrl?: string | null; metadata: Record<string, unknown> }) {
+    const { data, error } = await supabase.from("scheduled_posts").insert({
+      company_id: row.companyId,
+      page_id: row.accountId,
+      content: row.caption,
+      image_url: row.imageUrl || (row.imageUrls?.length ? row.imageUrls[0] : null),
+      image_urls: row.imageUrls?.length ? row.imageUrls : null,
+      video_url: row.videoUrl || null,
+      target_platform: row.platform,
+      scheduled_time: new Date().toISOString(),
+      status: "publishing",
+      created_by: "00000000-0000-0000-0000-000000000000",
+      metadata: { source: "mcp", api_key_id: auth.keyId, ...row.metadata },
+    }).select("id, metadata").single();
+    if (error || !data) throw new McpToolError("internal", `Could not record the post: ${error?.message || "unknown"}`);
+    return data as { id: string; metadata: Record<string, unknown> };
+  }
+  async function failSocialPost(postId: string, message: string) {
+    await supabase.from("scheduled_posts").update({ status: "failed", error_message: redactSecrets(message).slice(0, 1000), updated_at: new Date().toISOString() }).eq("id", postId);
+  }
+  function testModeGate(company: { name: string; test_mode: boolean }, force: unknown, where: string) {
+    if (company.test_mode && force !== true) {
+      throw new McpToolError(
+        "blocked_by_test_mode",
+        `Test mode is on for ${company.name}, so nothing was published. Pass force: true to publish to ${where} for real.`,
+        { nextStep: "Confirm with the owner, then retry with force: true (or use dry_run: true to preview)." },
+      );
+    }
+  }
+  function testModeDryRun(company: { test_mode: boolean }, force: unknown, blockers: string[], warnings: string[]) {
+    if (company.test_mode && force !== true) blockers.push("Test mode is on for this company; a real publish needs force: true.");
+    else if (company.test_mode) warnings.push("Test mode is on; force: true will publish for real and be recorded on the post.");
+  }
+
+  // ── publish_linkedin_post ──
+  server.tool("publish_linkedin_post", {
+    description: "Publish a post to the company's connected LinkedIn account (posts as the connected member). Refused while the company is in test mode unless force: true. Use dry_run: true to check the connection, length and image without posting.",
+    inputSchema: z.object({
+      commentary: z.string().min(1).describe("Post text (max 3000 characters). #hashtags become LinkedIn hashtags."),
+      image_url: z.string().optional().describe("Optional https image URL to attach (uploaded to LinkedIn)."),
+      article_url: z.string().optional().describe("Optional https link to share as an article card (not with image_url)."),
+      article_title: z.string().max(400).optional().describe("Title for the article card."),
+      visibility: z.enum(["PUBLIC", "CONNECTIONS"]).optional().describe("Who can see the post (default PUBLIC)."),
+      dry_run: z.boolean().optional().describe("Preview only: nothing is posted."),
+      force: z.boolean().optional().describe("Required to publish when the company is in test mode. Recorded on the post."),
+      company_id: z.string().optional().describe("Optional: target company (admin keys). Company keys are pinned to their own company."),
+    }).strict(),
+    annotations: { openWorldHint: true },
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const company = await getCompanyTestMode(companyId);
+      const commentary = String(params.commentary);
+      const visibility = params.visibility || "PUBLIC";
+      if (params.image_url && params.article_url) {
+        throw new McpToolError("invalid_field", "Pass image_url or article_url, not both: a LinkedIn post carries one attachment.", { field: "article_url" });
+      }
+      for (const f of ["image_url", "article_url"] as const) {
+        if (params[f] && !/^https:\/\//i.test(params[f])) throw new McpToolError("invalid_field", `${f} must be an https URL.`, { field: f });
+      }
+      if (params.article_title && !params.article_url) throw new McpToolError("invalid_field", "article_title needs article_url.", { field: "article_title" });
+      const li = await resolveLinkedIn(companyId);
+
+      if (params.dry_run === true) {
+        const blockers: string[] = [];
+        const warnings: string[] = [];
+        if (!li.cred) blockers.push("No LinkedIn account is connected for this company; connect it in Setup.");
+        else {
+          if (li.token_status !== "valid") blockers.push(`LinkedIn token is ${li.token_status}${li.token_error ? `: ${li.token_error}` : ""}.`);
+          if (!(li.cred.scopes || []).includes("w_member_social")) blockers.push("LinkedIn did not grant posting permission (w_member_social); reconnect LinkedIn.");
+        }
+        if (commentary.length > 3000) blockers.push(`Commentary is ${commentary.length} characters; LinkedIn allows 3000.`);
+        const image_check = params.image_url ? await checkMediaUrl(params.image_url, "image") : null;
+        if (image_check && !image_check.ok) blockers.push(`Image ${image_check.url}: ${image_check.reason}.`);
+        testModeDryRun(company, params.force, blockers, warnings);
+        return okResult({
+          dry_run: true,
+          would_publish: blockers.length === 0,
+          blockers,
+          warnings,
+          target_platform: "linkedin",
+          test_mode: company.test_mode,
+          resolved_account: li.account,
+          token_status: li.token_status,
+          visibility,
+          commentary,
+          image_check,
+          article: params.article_url ? { url: params.article_url, title: params.article_title || null } : null,
+          next_step: blockers.length ? "Fix the blockers, then dry-run again." : "Call again without dry_run to publish.",
+        });
+      }
+
+      if (commentary.length > 3000) throw new McpToolError("invalid_field", `Commentary is ${commentary.length} characters; LinkedIn allows 3000.`, { field: "commentary" });
+      testModeGate(company, params.force, "the live LinkedIn account");
+      if (!li.cred) throw new McpToolError("not_found", "No LinkedIn account is connected for this company.", { nextStep: "Connect LinkedIn in Setup, then run get_connected_accounts." });
+      if (li.token_status === "expired") throw new McpToolError("token_expired", `LinkedIn token has expired${li.token_error ? `: ${li.token_error}` : ""}.`, { nextStep: "Reconnect LinkedIn in Setup." });
+
+      const forced = company.test_mode && params.force === true;
+      const post = await insertSocialPost({
+        companyId, platform: "linkedin", accountId: li.cred.account_id, caption: commentary, imageUrl: params.image_url || null,
+        metadata: { visibility, ...(params.article_url ? { article_url: params.article_url } : {}), ...(forced ? { forced_test_mode_publish: true, forced_at: new Date().toISOString() } : {}) },
+      });
+      try {
+        let content: Record<string, unknown> | undefined;
+        if (params.image_url) {
+          const img = await fetch(params.image_url, { redirect: "follow", signal: AbortSignal.timeout(20000) }).catch(() => null);
+          const ct = img?.headers.get("content-type")?.split(";")[0].trim().toLowerCase() || "";
+          if (!img || img.status !== 200 || !ct.startsWith("image/")) {
+            throw new McpToolError("invalid_field", `Image URL did not return an image (HTTP ${img?.status ?? "error"}, ${ct || "no content type"}).`, { field: "image_url" });
+          }
+          const bytes = new Uint8Array(await img.arrayBuffer());
+          if (bytes.byteLength > MAX_LINKEDIN_IMAGE_BYTES) throw new McpToolError("invalid_field", `Image is ${(bytes.byteLength / 1048576).toFixed(1)} MB; the limit here is 20 MB.`, { field: "image_url" });
+          const init = await linkedInFetch("POST", "/rest/images?action=initializeUpload", li.cred.access_token, { initializeUploadRequest: { owner: li.cred.account_id } });
+          const uploadUrl = init.body?.value?.uploadUrl;
+          const imageUrn = init.body?.value?.image;
+          if (!init.ok || !uploadUrl || !imageUrn) throw new McpToolError("platform_refused", `LinkedIn refused the image upload: ${linkedInReason(init)}`, { details: { platform: "linkedin", http_status: init.status } });
+          const put = await fetch(uploadUrl, { method: "PUT", headers: { Authorization: `Bearer ${li.cred.access_token}`, "Content-Type": ct }, body: bytes, signal: AbortSignal.timeout(60000) }).catch((e) => ({ ok: false, status: 0, statusText: String(e?.message || e) } as any));
+          if (!put.ok) throw new McpToolError("platform_refused", `LinkedIn refused the image bytes: HTTP ${put.status}`, { details: { platform: "linkedin", http_status: put.status } });
+          content = { media: { id: imageUrn } };
+        } else if (params.article_url) {
+          content = { article: { source: params.article_url, title: params.article_title || new URL(params.article_url).hostname } };
+        }
+        const res = await linkedInFetch("POST", "/rest/posts", li.cred.access_token, {
+          author: li.cred.account_id,
+          commentary: escapeLinkedInCommentary(commentary),
+          visibility,
+          distribution: { feedDistribution: "MAIN_FEED", targetEntities: [], thirdPartyDistributionChannels: [] },
+          ...(content ? { content } : {}),
+          lifecycleState: "PUBLISHED",
+          isReshareDisabledByAuthor: false,
+        });
+        const urn = res.headers.get("x-restli-id") || res.headers.get("x-linkedin-id");
+        if (!res.ok || !urn) throw new McpToolError("platform_refused", `LinkedIn refused the post: ${linkedInReason(res)}`, { details: { platform: "linkedin", http_status: res.status } });
+        await supabase.from("scheduled_posts").update({ status: "published", meta_post_id: urn, updated_at: new Date().toISOString() }).eq("id", post.id);
+        return okResult({
+          ok: true,
+          platform: "linkedin",
+          post_urn: urn,
+          scheduled_post_id: post.id,
+          ...(forced ? { forced_test_mode_publish: true } : {}),
+          next_step: `Published. To take it down, call delete_published_post with meta_post_id ${urn}.`,
+        });
+      } catch (e: any) {
+        await failSocialPost(post.id, e?.message || String(e));
+        throw e;
+      }
+    },
+  });
+
+  // ── publish_tiktok_post ──
+  server.tool("publish_tiktok_post", {
+    description: "Send a video or photo post to the company's connected TikTok account: 'draft' (default) lands in the creator's TikTok inbox to finish in the app, 'direct' posts it. Refused while the company is in test mode unless force: true. Use dry_run: true to check without uploading. TikTok posts cannot be deleted through the API.",
+    inputSchema: z.object({
+      caption: z.string().describe("Caption (max 2200 characters). Draft video uploads cannot carry a caption; the creator adds it in TikTok."),
+      mode: z.enum(["draft", "direct"]).optional().describe("draft (default): upload to the creator's inbox. direct: post immediately."),
+      media_type: z.enum(["video", "photo"]).optional().describe("video (default) or photo."),
+      video_url: z.string().optional().describe("https URL of an mp4/mov/webm video, up to 64 MB. Downloaded and uploaded to TikTok."),
+      photo_urls: z.array(z.string()).min(1).max(35).optional().describe("https image URLs for a photo post. TikTok pulls these itself, so their domain must be verified in the TikTok developer portal."),
+      privacy_level: z.enum(["SELF_ONLY", "PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR"]).optional().describe("Default SELF_ONLY. Sandbox/unaudited apps can only post SELF_ONLY."),
+      disable_comment: z.boolean().optional(),
+      disable_duet: z.boolean().optional(),
+      disable_stitch: z.boolean().optional(),
+      dry_run: z.boolean().optional().describe("Preview only: nothing is uploaded."),
+      force: z.boolean().optional().describe("Required to post when the company is in test mode. Recorded on the post."),
+      company_id: z.string().optional().describe("Optional: target company (admin keys). Company keys are pinned to their own company."),
+    }).strict(),
+    annotations: { openWorldHint: true },
+    handler: async (params: any) => {
+      const companyId = await resolveTargetCompanyId(params.company_id);
+      const company = await getCompanyTestMode(companyId);
+      const mode: "draft" | "direct" = params.mode || "draft";
+      const mediaType: "video" | "photo" = params.media_type || "video";
+      const caption = String(params.caption ?? "");
+      if (mediaType === "video" && !params.video_url) throw new McpToolError("invalid_field", "video_url is required for a video post.", { field: "video_url" });
+      if (mediaType === "video" && params.photo_urls?.length) throw new McpToolError("invalid_field", "photo_urls only applies when media_type is 'photo'.", { field: "photo_urls" });
+      if (mediaType === "photo" && !params.photo_urls?.length) throw new McpToolError("invalid_field", "photo_urls is required for a photo post.", { field: "photo_urls" });
+      if (mediaType === "photo" && params.video_url) throw new McpToolError("invalid_field", "video_url only applies when media_type is 'video'.", { field: "video_url" });
+      for (const u of [params.video_url, ...(params.photo_urls || [])].filter(Boolean)) {
+        if (!/^https:\/\//i.test(u)) throw new McpToolError("invalid_field", `Media URLs must be https: ${u}`, { field: mediaType === "video" ? "video_url" : "photo_urls" });
+      }
+
+      const tt = await resolveTikTok(companyId);
+      const warnings: string[] = [];
+      let privacy: string = params.privacy_level || "SELF_ONLY";
+      if (tt.cred?.environment === "sandbox" && privacy !== "SELF_ONLY") {
+        warnings.push(`TikTok app is in sandbox, which can only post SELF_ONLY; privacy changed from ${privacy} to SELF_ONLY.`);
+        privacy = "SELF_ONLY";
+      }
+      const options: string[] = Array.isArray(tt.creator?.privacy_level_options) ? tt.creator.privacy_level_options : [];
+      const privacyProblem = mode === "direct" && options.length && !options.includes(privacy)
+        ? `privacy_level ${privacy} is not allowed for this creator; allowed: ${options.join(", ")}.` : null;
+      if (mode === "draft" && mediaType === "video" && caption) warnings.push("Draft (inbox) video uploads don't carry a caption; the creator adds it in TikTok before posting.");
+      if (mediaType === "photo") warnings.push("TikTok downloads photo URLs itself; their domain must be verified in the TikTok developer portal or the post fails.");
+      const disable_comment = params.disable_comment ?? Boolean(tt.creator?.comment_disabled);
+      const disable_duet = params.disable_duet ?? Boolean(tt.creator?.duet_disabled);
+      const disable_stitch = params.disable_stitch ?? Boolean(tt.creator?.stitch_disabled);
+
+      if (params.dry_run === true) {
+        const blockers: string[] = [];
+        if (!tt.cred) blockers.push("No TikTok account is connected for this company; connect it in Setup.");
+        else if (tt.token_status !== "valid") blockers.push(`TikTok token is ${tt.token_status}${tt.token_error ? `: ${tt.token_error}` : ""}.`);
+        if (tt.cred) for (const s of ["video.publish", "video.upload"]) if (!(tt.cred.scopes || []).includes(s)) blockers.push(`TikTok did not grant ${s}.`);
+        if (caption.length > 2200) blockers.push(`Caption is ${caption.length} characters; TikTok allows 2200.`);
+        if (privacyProblem) blockers.push(privacyProblem);
+        const video_check = params.video_url ? await checkMediaUrl(params.video_url, "video") : null;
+        if (video_check && !video_check.ok) blockers.push(`Video ${video_check.url}: ${video_check.reason}.`);
+        if (video_check?.ok && video_check.content_length && video_check.content_length > MAX_TIKTOK_VIDEO_BYTES) blockers.push(`Video is ${(video_check.content_length / 1048576).toFixed(1)} MB; the limit here is 64 MB.`);
+        const photo_checks = await Promise.all((params.photo_urls || []).map((u: string) => checkMediaUrl(u, "image")));
+        for (const c of photo_checks) if (!c.ok) blockers.push(`Photo ${c.url}: ${c.reason}.`);
+        testModeDryRun(company, params.force, blockers, warnings);
+        return okResult({
+          dry_run: true,
+          would_publish: blockers.length === 0,
+          blockers,
+          warnings,
+          target_platform: "tiktok",
+          test_mode: company.test_mode,
+          mode,
+          media_type: mediaType,
+          privacy_level: privacy,
+          resolved_account: tt.cred ? { open_id: tt.cred.account_id, display_name: tt.cred.account_name, environment: tt.cred.environment, creator_username: tt.creator?.creator_username ?? null } : null,
+          token_status: tt.token_status,
+          caption,
+          video_check,
+          photo_checks,
+          next_step: blockers.length ? "Fix the blockers, then dry-run again." : "Call again without dry_run to send it to TikTok.",
+        });
+      }
+
+      if (caption.length > 2200) throw new McpToolError("invalid_field", `Caption is ${caption.length} characters; TikTok allows 2200.`, { field: "caption" });
+      testModeGate(company, params.force, "the live TikTok account");
+      if (!tt.cred) throw new McpToolError("not_found", "No TikTok account is connected for this company.", { nextStep: "Connect TikTok in Setup, then run get_connected_accounts." });
+      if (tt.token_status === "expired") throw new McpToolError("token_expired", `TikTok token has expired${tt.token_error ? `: ${tt.token_error}` : ""}.`, { nextStep: "Reconnect TikTok in Setup." });
+      if (privacyProblem) throw new McpToolError("invalid_field", privacyProblem, { field: "privacy_level" });
+
+      const forced = company.test_mode && params.force === true;
+      const post = await insertSocialPost({
+        companyId, platform: "tiktok", accountId: tt.cred.account_id, caption,
+        imageUrls: params.photo_urls || null, videoUrl: params.video_url || null,
+        metadata: { mode, media_type: mediaType, privacy_level: privacy, environment: tt.cred.environment, ...(forced ? { forced_test_mode_publish: true, forced_at: new Date().toISOString() } : {}) },
+      });
+      try {
+        const token = tt.cred.access_token;
+        let publishId: string | null = null;
+        if (mediaType === "video") {
+          const vid = await fetch(params.video_url, { redirect: "follow", signal: AbortSignal.timeout(60000) }).catch(() => null);
+          const ct = vid?.headers.get("content-type")?.split(";")[0].trim().toLowerCase() || "";
+          if (!vid || vid.status !== 200 || !ct.startsWith("video/")) throw new McpToolError("invalid_field", `Video URL did not return a video (HTTP ${vid?.status ?? "error"}, ${ct || "no content type"}).`, { field: "video_url" });
+          const declared = Number(vid.headers.get("content-length")) || 0;
+          if (declared > MAX_TIKTOK_VIDEO_BYTES) { try { await vid.body?.cancel(); } catch { /* ignore */ } throw new McpToolError("invalid_field", `Video is ${(declared / 1048576).toFixed(1)} MB; the limit here is 64 MB.`, { field: "video_url" }); }
+          const bytes = new Uint8Array(await vid.arrayBuffer());
+          if (bytes.byteLength > MAX_TIKTOK_VIDEO_BYTES) throw new McpToolError("invalid_field", `Video is ${(bytes.byteLength / 1048576).toFixed(1)} MB; the limit here is 64 MB.`, { field: "video_url" });
+          const source_info = { source: "FILE_UPLOAD", video_size: bytes.byteLength, chunk_size: bytes.byteLength, total_chunk_count: 1 };
+          const init = mode === "draft"
+            ? await tiktokFetch("/v2/post/publish/inbox/video/init/", token, { source_info })
+            : await tiktokFetch("/v2/post/publish/video/init/", token, { post_info: { title: caption, privacy_level: privacy, disable_comment, disable_duet, disable_stitch }, source_info });
+          if (!init.ok || !init.data?.upload_url) throw new McpToolError("platform_refused", `TikTok refused the upload: ${init.code}${init.message ? ` - ${init.message}` : ""}`, { details: { platform: "tiktok", tiktok_code: init.code, http_status: init.status } });
+          publishId = init.data.publish_id;
+          const put = await fetch(init.data.upload_url, {
+            method: "PUT",
+            headers: { "Content-Type": ct, "Content-Length": String(bytes.byteLength), "Content-Range": `bytes 0-${bytes.byteLength - 1}/${bytes.byteLength}` },
+            body: bytes,
+            signal: AbortSignal.timeout(120000),
+          }).catch((e) => ({ ok: false, status: 0, statusText: String(e?.message || e) } as any));
+          if (!put.ok) throw new McpToolError("platform_refused", `TikTok refused the video bytes: HTTP ${put.status}`, { details: { platform: "tiktok", http_status: put.status, publish_id: publishId } });
+        } else {
+          const firstLine = caption.split("\n")[0].slice(0, 90);
+          const init = await tiktokFetch("/v2/post/publish/content/init/", token, {
+            post_info: mode === "direct"
+              ? { title: firstLine, description: caption, privacy_level: privacy, disable_comment, auto_add_music: true }
+              : { title: firstLine, description: caption },
+            source_info: { source: "PULL_FROM_URL", photo_cover_index: 0, photo_images: params.photo_urls },
+            post_mode: mode === "direct" ? "DIRECT_POST" : "MEDIA_UPLOAD",
+            media_type: "PHOTO",
+          });
+          if (!init.ok || !init.data?.publish_id) throw new McpToolError("platform_refused", `TikTok refused the photo post: ${init.code}${init.message ? ` - ${init.message}` : ""}`, { details: { platform: "tiktok", tiktok_code: init.code, http_status: init.status } });
+          publishId = init.data.publish_id;
+        }
+
+        const st = await tiktokFetch("/v2/post/publish/status/fetch/", token, { publish_id: publishId });
+        const tiktokStatus: string = st.data?.status || (st.ok ? "UNKNOWN" : `status_check_failed:${st.code}`);
+        const rowStatus = tiktokStatus === "PUBLISH_COMPLETE" ? "published" : tiktokStatus === "SEND_TO_USER_INBOX" ? "sent_to_inbox" : tiktokStatus === "FAILED" ? "failed" : "processing";
+        await supabase.from("scheduled_posts").update({
+          status: rowStatus,
+          meta_post_id: publishId,
+          error_message: tiktokStatus === "FAILED" ? redactSecrets(st.data?.fail_reason || "TikTok reported FAILED") : null,
+          metadata: { ...(post.metadata || {}), tiktok_publish_id: publishId, tiktok_status: tiktokStatus, ...(st.data?.fail_reason ? { tiktok_fail_reason: st.data.fail_reason } : {}) },
+          updated_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        return okResult({
+          ok: tiktokStatus !== "FAILED",
+          platform: "tiktok",
+          publish_id: publishId,
+          tiktok_status: tiktokStatus,
+          ...(st.data?.fail_reason ? { fail_reason: st.data.fail_reason } : {}),
+          mode,
+          media_type: mediaType,
+          privacy_level: privacy,
+          scheduled_post_id: post.id,
+          warnings,
+          ...(forced ? { forced_test_mode_publish: true } : {}),
+          next_step: mode === "draft"
+            ? "Sent to the creator's TikTok inbox; they finish and post it in the TikTok app. TikTok posts cannot be deleted through the API."
+            : "TikTok processes the post in the background. TikTok posts cannot be deleted through the API; delete in the TikTok app if needed.",
+        });
+      } catch (e: any) {
+        await failSocialPost(post.id, e?.message || String(e));
+        throw e;
+      }
     },
   });
 
