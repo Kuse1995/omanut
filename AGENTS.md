@@ -124,7 +124,7 @@ Owner notification path — **non-negotiable contract**: a handoff must send a r
 - `bms_connections`, `bms_call_log`, `bms_health_log`.
 - `reservations`, `payment_transactions`, `payment_products`, `support_tickets`, `scheduled_posts`, `meta_ad_*`, `credit_usage`.
 
-**Multi-tenancy is enforced by `company_id` + RLS (`user_has_company_access_v2`, `has_role`).** Platform admins (`user_roles.admin`) pass `has_company_role`/`user_has_company_access_v2` for every company and get owner-level `currentRole` in `CompanyContext`, so they can run any business's setup — add admin bypasses there, not per page. Every new public table needs `GRANT`s + `ENABLE ROW LEVEL SECURITY` + policies in the same migration.
+**Multi-tenancy is enforced by `company_id` + RLS (`user_has_company_access_v2`, `has_role`).** Every new public table needs `GRANT`s + `ENABLE ROW LEVEL SECURITY` + policies in the same migration.
 
 ---
 
