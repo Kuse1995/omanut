@@ -244,7 +244,7 @@ const Setup = () => {
       <Dialog open={metaOpen} onOpenChange={setMetaOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0">
           <DialogHeader className="p-6 pb-0">
-            <DialogTitle>Connect Facebook & Instagram</DialogTitle>
+            <DialogTitle>Social Integrations</DialogTitle>
           </DialogHeader>
           <MetaIntegrationsPanel />
         </DialogContent>

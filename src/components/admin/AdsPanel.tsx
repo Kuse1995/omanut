@@ -208,7 +208,7 @@ export const AdsPanel = () => {
           <CardContent className="py-10 text-center space-y-2">
             <AlertTriangle className="w-8 h-8 mx-auto text-yellow-500" />
             <p className="font-medium">No Facebook page connected</p>
-            <p className="text-sm text-muted-foreground">Add a page in Meta Integrations first, then come back here.</p>
+            <p className="text-sm text-muted-foreground">Add a page in Social Integrations first, then come back here.</p>
           </CardContent>
         </Card>
       ) : (

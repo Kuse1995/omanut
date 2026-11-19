@@ -11,8 +11,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle, RefreshCw } from 'lucide-react';
+import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle, RefreshCw, Linkedin, Music2 } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
+import { useSocialConnections, type SocialPlatform } from '@/hooks/useSocialConnections';
+import { cn } from '@/lib/utils';
+import type { IntegrationStatus } from '@/components/setup/IntegrationCard';
 
 interface MetaCredential {
   id: string;
@@ -34,6 +37,64 @@ interface MetaCredential {
 // and receive the authorization code on our /auth/meta/callback page, which
 // posts it back via window.postMessage.
 
+
+// One connected/available provider row (LinkedIn, TikTok) inside this panel.
+const SocialProviderRow = ({
+  icon: Icon,
+  iconBg,
+  iconColor,
+  name,
+  status,
+  description,
+  onConnect,
+}: {
+  icon: typeof Linkedin;
+  iconBg: string;
+  iconColor: string;
+  name: string;
+  status: IntegrationStatus;
+  description: string;
+  onConnect: () => void;
+}) => (
+  <Card>
+    <CardContent className="flex items-center justify-between gap-3 py-4 px-5">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className={cn('w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0', iconBg)}>
+          <Icon className={cn('w-5 h-5', iconColor)} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-foreground text-sm">{name}</span>
+            <Badge
+              variant={status === 'not_set_up' ? 'outline' : 'secondary'}
+              className={cn(
+                'text-xs gap-1',
+                status === 'connected' && 'text-green-600',
+                status === 'action_needed' && 'text-amber-600'
+              )}
+            >
+              {status === 'connected' ? (
+                <CheckCircle2 className="w-3 h-3 text-green-500" />
+              ) : status === 'action_needed' ? (
+                <AlertTriangle className="w-3 h-3 text-yellow-500" />
+              ) : null}
+              {status === 'connected' ? 'Live' : status === 'action_needed' ? 'Expired' : 'Not connected'}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <Button
+        size="sm"
+        variant={status === 'connected' ? 'outline' : 'default'}
+        onClick={onConnect}
+        className="flex-shrink-0"
+      >
+        {status === 'not_set_up' ? `Connect ${name}` : 'Reconnect'}
+      </Button>
+    </CardContent>
+  </Card>
+);
 
 export const MetaIntegrationsPanel = () => {
   const { selectedCompany } = useCompany();
@@ -68,6 +129,13 @@ export const MetaIntegrationsPanel = () => {
     access_token: '',
   });
   const [waShowToken, setWaShowToken] = useState(false);
+
+  // LinkedIn / TikTok connections (shared with the Setup checklist cards).
+  const { connect: connectSocial, statusOf, linkedin, tiktok } = useSocialConnections({
+    onError: (message) => toast.error(message, { duration: 8000 }),
+    onConnected: (platform: SocialPlatform) =>
+      toast.success(`${platform === 'linkedin' ? 'LinkedIn' : 'TikTok'} connected`),
+  });
 
   // Load public Meta config (App ID + Login Config ID). The frontend uses
   // these to build the OAuth dialog URL itself — no Facebook JS SDK required
@@ -487,9 +555,9 @@ export const MetaIntegrationsPanel = () => {
     <div className="p-6 space-y-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">Meta Integrations</h2>
+          <h2 className="text-2xl font-bold text-foreground">Social Integrations</h2>
           <p className="text-muted-foreground text-sm">
-            Connect your Facebook Pages & Instagram in one click
+            Connect Facebook Pages, Instagram, LinkedIn and TikTok in one click
           </p>
         </div>
       </div>
@@ -664,6 +732,43 @@ export const MetaIntegrationsPanel = () => {
           </Card>
         )
       )}
+
+      {/* LinkedIn & TikTok — same one-click connect as the Setup checklist */}
+      <div className="space-y-3 pt-2">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          LinkedIn &amp; TikTok
+        </h3>
+        <SocialProviderRow
+          icon={Linkedin}
+          iconBg="bg-sky-500/10"
+          iconColor="text-sky-700 dark:text-sky-400"
+          name="LinkedIn"
+          status={statusOf(linkedin)}
+          description={
+            statusOf(linkedin) === 'connected'
+              ? `Posting as ${linkedin?.account_name ?? 'your LinkedIn profile'}.`
+              : statusOf(linkedin) === 'action_needed'
+                ? 'Sign-in expired. Reconnect to keep posting.'
+                : 'Connect a LinkedIn profile so posts can go out there too.'
+          }
+          onConnect={() => connectSocial('linkedin')}
+        />
+        <SocialProviderRow
+          icon={Music2}
+          iconBg="bg-muted"
+          iconColor="text-foreground"
+          name="TikTok"
+          status={statusOf(tiktok)}
+          description={
+            statusOf(tiktok) === 'connected'
+              ? `Connected as ${tiktok?.account_name ?? 'your TikTok account'}${
+                  tiktok?.environment === 'sandbox' ? ' (sandbox: private posts only)' : ''
+                }.`
+              : 'Connect a TikTok account to send videos and photo posts to it.'
+          }
+          onConnect={() => connectSocial('tiktok')}
+        />
+      </div>
 
       {/* WhatsApp section — direct Meta Cloud, parallel to existing Twilio */}
       <div className="space-y-3 pt-2">
