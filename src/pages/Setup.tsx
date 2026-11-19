@@ -242,7 +242,7 @@ const Setup = () => {
 
       {/* Meta connect dialog — embeds existing admin panel which already uses useCompany */}
       <Dialog open={metaOpen} onOpenChange={setMetaOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto p-0 grid-cols-[minmax(0,1fr)]">
           <DialogHeader className="p-6 pb-0">
             <DialogTitle>Social Integrations</DialogTitle>
           </DialogHeader>
