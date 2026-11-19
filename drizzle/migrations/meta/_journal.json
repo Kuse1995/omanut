@@ -43,6 +43,13 @@
       "when": 1795124388758,
       "tag": "0005_social_credentials_lock_token_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795126104416,
+      "tag": "0006_platform_admin_company_access",
+      "breakpoints": true
     }
   ]
 }

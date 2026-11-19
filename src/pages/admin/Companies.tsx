@@ -11,7 +11,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import Sidebar from "@/components/Sidebar";
 import CompanyForm from "@/components/CompanyForm";
 import { CompanyDocuments } from "@/components/CompanyDocuments";
-import { Settings, Phone, Plus, Mail, User, Trash2, MessageSquare } from "lucide-react";
+import { Settings, Phone, Plus, Mail, User, Trash2, MessageSquare, Plug } from "lucide-react";
+import { useCompany } from "@/context/CompanyContext";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,6 +23,13 @@ interface CompanyWithUser {
 
 const Companies = () => {
   const navigate = useNavigate();
+  const { switchCompany } = useCompany();
+
+  // Open the client Setup hub for this company (admins act as owner there).
+  const handleOpenSetup = async (companyId: string) => {
+    await switchCompany(companyId);
+    navigate('/setup');
+  };
   const { toast } = useToast();
   const [companies, setCompanies] = useState<CompanyWithUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -269,6 +277,15 @@ const Companies = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleOpenSetup(company.id)}
+                            aria-label={`Open setup for ${company.name}`}
+                            title="Setup & connections"
+                          >
+                            <Plug className="h-4 w-4" />
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"

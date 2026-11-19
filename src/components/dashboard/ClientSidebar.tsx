@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
@@ -22,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/context/CompanyContext";
 import omanutLogo from "@/assets/omanut-logo-new.png";
 
 interface ClientSidebarProps {
@@ -51,35 +51,8 @@ const bottomNav = [
 const ClientSidebar = ({ collapsed, onToggle }: ClientSidebarProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [company, setCompany] = useState<any>(null);
-
-  useEffect(() => {
-    fetchCompany();
-  }, []);
-
-  const fetchCompany = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data: userData } = await supabase
-        .from("users")
-        .select("company_id")
-        .eq("id", session.user.id)
-        .single();
-
-      if (userData?.company_id) {
-        const { data: companyData } = await supabase
-          .from("companies")
-          .select("name")
-          .eq("id", userData.company_id)
-          .single();
-        setCompany(companyData);
-      }
-    } catch (error) {
-      console.error("Error fetching company:", error);
-    }
-  };
+  // Active company from CompanyContext (also correct for platform admins acting on a business).
+  const { selectedCompany: company } = useCompany();
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

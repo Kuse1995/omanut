@@ -74,7 +74,15 @@ serve(async (req) => {
         .eq("user_id", userId)
         .eq("company_id", company_id)
         .maybeSingle();
-      if (!membership) return jsonError(403, "You do not have access to this company");
+      if (!membership) {
+        const { data: adminRole } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", userId)
+          .eq("role", "admin")
+          .maybeSingle();
+        if (!adminRole) return jsonError(403, "You do not have access to this company");
+      }
     }
 
     // Load credentials

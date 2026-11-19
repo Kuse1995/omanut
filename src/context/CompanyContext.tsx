@@ -17,6 +17,7 @@ interface CompanyContextType {
   setSelectedCompany: (company: Company | null) => void;
   userCompanies: CompanyMembership[];
   currentRole: CompanyRole | null;
+  isPlatformAdmin: boolean;
   isLoading: boolean;
   refreshCompanies: () => Promise<void>;
   switchCompany: (companyId: string) => Promise<void>;
@@ -72,6 +73,8 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
   const [userCompanies, setUserCompanies] = useState<CompanyMembership[]>([]);
   const [currentRole, setCurrentRole] = useState<CompanyRole | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Platform admins (user_roles.admin) act as owner of any company they open.
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   // Persistent setter — writes to localStorage on every change.
   const setSelectedCompany = useCallback((company: Company | null) => {
@@ -103,10 +106,14 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
         setUserCompanies([]);
         setCurrentRole(null);
         setSelectedCompanyState(null);
+        setIsPlatformAdmin(false);
         writeStoredId(null);
         setIsLoading(false);
         return;
       }
+
+      const { data: adminFlag } = await supabase.rpc('has_role', { _user_id: session.user.id, _role: 'admin' });
+      setIsPlatformAdmin(!!adminFlag);
 
       const { data, error } = await supabase.rpc('get_user_companies');
       if (error) {
@@ -181,9 +188,11 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const isOwner = currentRole === 'owner';
-  const isManager = currentRole === 'owner' || currentRole === 'manager';
-  const isContributor = isManager || currentRole === 'contributor';
+  // Admins without a membership get owner-level access (enforced server-side by has_company_role).
+  const effectiveRole: CompanyRole | null = currentRole ?? (isPlatformAdmin && selectedCompany ? 'owner' : null);
+  const isOwner = effectiveRole === 'owner';
+  const isManager = effectiveRole === 'owner' || effectiveRole === 'manager';
+  const isContributor = isManager || effectiveRole === 'contributor';
   const canEdit = isContributor;
   const canManageUsers = isManager;
   const canManageSettings = isManager;
@@ -194,7 +203,8 @@ export const CompanyProvider = ({ children }: { children: ReactNode }) => {
       selectedCompany,
       setSelectedCompany,
       userCompanies,
-      currentRole,
+      currentRole: effectiveRole,
+      isPlatformAdmin,
       isLoading,
       refreshCompanies,
       switchCompany,
