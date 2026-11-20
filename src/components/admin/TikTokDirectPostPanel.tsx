@@ -72,7 +72,7 @@ export const TikTokDirectPostPanel = () => {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { connect, tiktokStatus, refetch: refetchConnections } = useSocialConnections({
+  const { connect, tiktok, tiktokStatus, refetch: refetchConnections } = useSocialConnections({
     onError: (msg) => toast.error(msg),
     onConnected: () => {
       toast.success("TikTok connected");
@@ -114,15 +114,38 @@ export const TikTokDirectPostPanel = () => {
     isLoading: creatorLoading,
     error: creatorError,
     refetch: refetchCreator,
-  } = useQuery<CreatorInfoResponse>({
-    queryKey: ["tiktok-creator-info", companyId],
+  } = useQuery<CreatorInfoResponse & { fallbackMode?: boolean }>({
+    queryKey: ["tiktok-creator-info", companyId, tiktok?.account_id],
     enabled: !!companyId,
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("tiktok-web-publish", {
         body: { action: "creator_info", company_id: companyId },
       });
-      if (error) throw new Error(await extractInvokeError(error, "Could not load TikTok creator info."));
-      return data as CreatorInfoResponse;
+      if (!error && data) return data as CreatorInfoResponse;
+      // Graceful fallback if tiktok-web-publish is not yet deployed on Lovable Cloud:
+      // read safe connection metadata from social_credentials and publish via publish-meta-post.
+      if (tiktok?.account_id) {
+        return {
+          ok: true,
+          connected: true,
+          fallbackMode: true,
+          environment: tiktok.environment === "production" ? "production" : "sandbox",
+          account_name: tiktok.account_name,
+          open_id: tiktok.account_id,
+          creator: {
+            creator_nickname: tiktok.account_name || "TikTok Creator",
+            privacy_level_options:
+              tiktok.environment === "production"
+                ? ["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"]
+                : ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "PUBLIC_TO_EVERYONE"],
+            comment_disabled: false,
+            duet_disabled: false,
+            stitch_disabled: false,
+            max_video_post_duration_sec: 600,
+          },
+        };
+      }
+      return { ok: true, connected: false, fallbackMode: true };
     },
     retry: false,
   });
@@ -157,7 +180,7 @@ export const TikTokDirectPostPanel = () => {
 
   // Poll TikTok publish status every 3s while processing
   useEffect(() => {
-    if (!publishResult || !companyId) return;
+    if (!publishResult || !companyId || creatorData?.fallbackMode) return;
     const terminal = ["PUBLISH_COMPLETE", "SEND_TO_USER_INBOX", "FAILED"];
     if (terminal.includes(publishResult.status)) return;
 
@@ -244,6 +267,59 @@ export const TikTokDirectPostPanel = () => {
     setPublishing(true);
     setPublishResult(null);
     try {
+      if (creatorData?.fallbackMode && tiktok?.account_id) {
+        const { data: authData } = await supabase.auth.getUser();
+        const uid = authData?.user?.id;
+        if (!uid) throw new Error("Sign in first.");
+        const { data: postRow, error: insErr } = await supabase
+          .from("scheduled_posts")
+          .insert({
+            company_id: companyId,
+            page_id: tiktok.account_id,
+            content: caption.trim() || "(TikTok draft video)",
+            video_url: videoUrl,
+            target_platform: "tiktok",
+            scheduled_time: new Date().toISOString(),
+            status: "draft",
+            created_by: uid,
+            metadata: {
+              source: "web_tiktok_direct",
+              mode: postMode,
+              media_type: "video",
+              privacy_level: postMode === "direct" ? privacyLevel : "SELF_ONLY",
+              brand_organic_toggle: postMode === "direct" && discloseContent && brandOrganic,
+              brand_content_toggle: postMode === "direct" && discloseContent && brandContent,
+            },
+          })
+          .select("id")
+          .single();
+        if (insErr || !postRow) throw new Error(insErr?.message || "Could not create post record.");
+        const { data: pubRes, error: pubErr } = await supabase.functions.invoke("publish-meta-post", {
+          body: { post_id: postRow.id },
+        });
+        if (pubErr) throw new Error(await extractInvokeError(pubErr, "Could not publish to TikTok."));
+        if (pubRes?.error) throw new Error(pubRes.error);
+        const mappedStatus =
+          pubRes?.status === "published"
+            ? "PUBLISH_COMPLETE"
+            : pubRes?.status === "sent_to_inbox"
+              ? "SEND_TO_USER_INBOX"
+              : "PROCESSING_UPLOAD";
+        setPublishResult({
+          publishId: pubRes?.meta_post_id || postRow.id,
+          mode: postMode,
+          status: mappedStatus,
+          postUrl: pubRes?.post_url ?? null,
+        });
+        queryClient.invalidateQueries({ queryKey: ["scheduled-posts"] });
+        toast.success(
+          postMode === "direct"
+            ? "Uploaded to TikTok — publish status updated below."
+            : "Video sent to TikTok Inbox!",
+        );
+        return;
+      }
+
       const { data, error } = await supabase.functions.invoke("tiktok-web-publish", {
         body: {
           action: "publish",
