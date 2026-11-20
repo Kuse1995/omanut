@@ -149,3 +149,12 @@ project_id = "dzheddvoiauevcayifev"
     verify_jwt = false
   [functions.check-rule-adherence]
     verify_jwt = false
+  [functions.social-oauth-start]
+    verify_jwt = false
+  [functions.linkedin-oauth-callback]
+    verify_jwt = false
+  [functions.tiktok-oauth-callback]
+    verify_jwt = false
+  [functions.tiktok-web-publish]
+    timeout = 120
+    verify_jwt = false

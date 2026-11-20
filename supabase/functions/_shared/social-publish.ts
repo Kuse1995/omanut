@@ -115,6 +115,8 @@ export type TikTokPostInput = {
   disable_comment: boolean;
   disable_duet: boolean;
   disable_stitch: boolean;
+  brand_organic_toggle?: boolean;
+  brand_content_toggle?: boolean;
 };
 
 /** Uploads to TikTok (inbox draft or direct post), then reads the first status. */
@@ -129,9 +131,18 @@ export async function postToTikTok(token: string, input: TikTokPostInput) {
     const bytes = new Uint8Array(await vid.arrayBuffer());
     if (bytes.byteLength > MAX_TIKTOK_VIDEO_BYTES) throw new McpToolError("invalid_field", `Video is ${(bytes.byteLength / 1048576).toFixed(1)} MB; the limit here is 64 MB.`, { field: "video_url" });
     const source_info = { source: "FILE_UPLOAD", video_size: bytes.byteLength, chunk_size: bytes.byteLength, total_chunk_count: 1 };
+    const directPostInfo: Record<string, unknown> = {
+      title: input.caption,
+      privacy_level: input.privacy,
+      disable_comment: input.disable_comment,
+      disable_duet: input.disable_duet,
+      disable_stitch: input.disable_stitch,
+      ...(input.brand_organic_toggle ? { brand_organic_toggle: true } : {}),
+      ...(input.brand_content_toggle ? { brand_content_toggle: true } : {}),
+    };
     const init = input.mode === "draft"
       ? await tiktokFetch("/v2/post/publish/inbox/video/init/", token, { source_info })
-      : await tiktokFetch("/v2/post/publish/video/init/", token, { post_info: { title: input.caption, privacy_level: input.privacy, disable_comment: input.disable_comment, disable_duet: input.disable_duet, disable_stitch: input.disable_stitch }, source_info });
+      : await tiktokFetch("/v2/post/publish/video/init/", token, { post_info: directPostInfo, source_info });
     if (!init.ok || !init.data?.upload_url) throw new McpToolError("platform_refused", `TikTok refused the upload: ${init.code}${init.message ? ` - ${init.message}` : ""}`, { details: { platform: "tiktok", tiktok_code: init.code, http_status: init.status } });
     publishId = init.data.publish_id;
     const put = await fetch(init.data.upload_url, {

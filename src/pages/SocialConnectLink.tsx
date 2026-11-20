@@ -5,7 +5,7 @@ import { Linkedin, Loader2, Music2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 
-const LABEL = { linkedin: "LinkedIn", tiktok: "TikTok" } as const;
+const LABEL = { linkedin: "LinkedIn", linkedin_pages: "LinkedIn Company Page", tiktok: "TikTok" } as const;
 type Platform = keyof typeof LABEL;
 
 /**
@@ -15,7 +15,7 @@ type Platform = keyof typeof LABEL;
 const SocialConnectLink = () => {
   const { platform: raw } = useParams();
   const [params] = useSearchParams();
-  const platform: Platform | null = raw === "linkedin" || raw === "tiktok" ? raw : null;
+  const platform: Platform | null = raw === "linkedin" || raw === "linkedin_pages" || raw === "tiktok" ? raw : null;
   const token = params.get("t");
   const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<string | null>(null);

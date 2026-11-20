@@ -67,7 +67,7 @@ export async function consumeOAuthSession(supabase: any, state: string, platform
   if (!isLink && !(await canManageSocial(supabase, userId!, session.company_id))) {
     return { error: "You no longer have permission to manage this company.", code: "forbidden" };
   }
-  return { session, connectedBy: isLink ? "connect_link" : userId! };
+  return { session, connectedBy: isLink ? "connect_link" : userId!, mode: payload.m || "person" };
 }
 
 export function readCallbackBody(raw: any): { code: string; state: string } | null {

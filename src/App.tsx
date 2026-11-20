@@ -98,6 +98,7 @@ const App = () => (
             <Route path="/data-deletion" element={<DataDeletion />} />
             <Route path="/auth/meta/callback" element={<MetaOAuthCallback />} />
             <Route path="/auth/linkedin/callback" element={<SocialOAuthCallback platform="linkedin" />} />
+            <Route path="/auth/linkedin-pages/callback" element={<SocialOAuthCallback platform="linkedin_pages" />} />
             <Route path="/auth/tiktok/callback" element={<SocialOAuthCallback platform="tiktok" />} />
             <Route path="/connect/:platform" element={<SocialConnectLink />} />
             <Route path="*" element={<NotFound />} />

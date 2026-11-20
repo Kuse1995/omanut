@@ -5,18 +5,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/context/CompanyContext";
 import type { IntegrationStatus } from "@/components/setup/IntegrationCard";
 
-export type SocialPlatform = "linkedin" | "tiktok";
+export type SocialPlatform = "linkedin" | "linkedin_pages" | "tiktok";
 
 export type SocialConnection = {
   platform: string;
+  account_id: string;
   account_name: string | null;
+  account_type: string | null;
   token_expires_at: string | null;
   environment: string;
   updated_at: string | null;
 };
 
 // Safe columns only: access/refresh tokens are never readable from the browser.
-const SAFE_COLUMNS = "platform, account_name, token_expires_at, environment, updated_at";
+const SAFE_COLUMNS = "platform, account_id, account_name, account_type, token_expires_at, environment, updated_at";
 
 interface UseSocialConnectionsOptions {
   /** Called with a human-readable message when a connection cannot be started. */
@@ -109,7 +111,9 @@ export const useSocialConnections = (options: UseSocialConnectionsOptions = {}) 
     return "connected";
   }, []);
 
-  const linkedin = connections.find((c) => c.platform === "linkedin");
+  const linkedin = connections.find((c) => c.platform === "linkedin" && c.account_type !== "organization");
+  const linkedinPages = connections.filter((c) => c.platform === "linkedin" && c.account_type === "organization");
+  const linkedinPage = linkedinPages[0];
   const tiktok = connections.find((c) => c.platform === "tiktok");
 
   return {
@@ -118,8 +122,11 @@ export const useSocialConnections = (options: UseSocialConnectionsOptions = {}) 
     connect,
     statusOf,
     linkedin,
+    linkedinPage,
+    linkedinPages,
     tiktok,
     linkedinStatus: statusOf(linkedin),
+    linkedinPagesStatus: statusOf(linkedinPage),
     tiktokStatus: statusOf(tiktok),
     hasCompany: !!companyId,
   };

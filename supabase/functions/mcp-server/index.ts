@@ -23,7 +23,7 @@ import {
   fetchTikTokPublishStatus, rowStatusForTikTok, linkedInPostUrl, tiktokPostUrl,
 } from "../_shared/social-publish.ts";
 
-const SERVER_VERSION = "1.8.0";
+const SERVER_VERSION = "1.9.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1120,8 +1120,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       video_url: z.string().optional().describe("Video URL (Facebook/Instagram reels, or a TikTok video up to 64 MB)."),
       platform: z.enum(["facebook", "instagram", "both", "linkedin", "tiktok"]).describe("Target platform"),
       scheduled_time: z.string().describe("ISO 8601 datetime for publishing"),
-      visibility: z.enum(["PUBLIC", "CONNECTIONS"]).optional().describe("LinkedIn only: who can see the post (default PUBLIC)."),
+      visibility: z.enum(["PUBLIC", "CONNECTIONS"]).optional().describe("LinkedIn only: who can see the post (default PUBLIC; Company Pages are always PUBLIC)."),
       article_url: z.string().optional().describe("LinkedIn only: https link shared as an article card (not with an image)."),
+      linkedin_account_id: z.string().optional().describe("LinkedIn only: specific urn:li:organization:... or urn:li:person:... account from get_connected_accounts."),
+      linkedin_account_type: z.enum(["person", "organization"]).optional().describe("LinkedIn only: target 'organization' (Company Page) or 'person' (profile)."),
       tiktok_mode: z.enum(["draft", "direct"]).optional().describe("TikTok only: draft (default, lands in the creator's inbox) or direct."),
       privacy_level: z.enum(["SELF_ONLY", "PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR"]).optional().describe("TikTok only. Default SELF_ONLY."),
       force: z.boolean().optional().describe("Allow this post to publish even though the company is in test mode. Recorded on the post."),
@@ -1146,9 +1148,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
       let pageId: string;
       if (platform === "linkedin" || platform === "tiktok") {
-        const cred = await getSocialCredential(companyId, platform);
+        const cred = platform === "linkedin"
+          ? await getSocialCredential(companyId, "linkedin", params.linkedin_account_id, params.linkedin_account_type)
+          : await getSocialCredential(companyId, "tiktok");
         if (!cred?.account_id) {
-          throw new McpToolError("not_found", `No ${platform === "linkedin" ? "LinkedIn" : "TikTok"} account is connected for this company.`, { nextStep: "Call get_social_connect_url to send the owner a connect link, then retry." });
+          throw new McpToolError("not_found", `No ${platform === "linkedin" ? (params.linkedin_account_type === "organization" ? "LinkedIn Company Page" : "LinkedIn account") : "TikTok account"} is connected for this company.`, { nextStep: "Call get_social_connect_url to send the owner a connect link, then retry." });
         }
         pageId = cred.account_id;
         if (platform === "linkedin") {
@@ -1156,7 +1160,10 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           if (params.article_url && (imageUrls.length || params.image_url)) throw new McpToolError("invalid_field", "Pass an image or article_url, not both.", { field: "article_url" });
           if (params.article_url && !/^https:\/\//i.test(params.article_url)) throw new McpToolError("invalid_field", "article_url must be https.", { field: "article_url" });
           if (imageUrls.length > 1) warnings.push("LinkedIn posts carry one image here; only the first is used.");
-          metadata.visibility = params.visibility || "PUBLIC";
+          const isOrg = cred.account_type === "organization" || String(cred.account_id).startsWith("urn:li:organization:");
+          if (isOrg && params.visibility === "CONNECTIONS") warnings.push("LinkedIn Company Page posts must be PUBLIC; visibility set to PUBLIC.");
+          metadata.visibility = isOrg ? "PUBLIC" : (params.visibility || "PUBLIC");
+          metadata.account_type = isOrg ? "organization" : "person";
           if (params.article_url) metadata.article_url = params.article_url;
         } else {
           if (caption.length > 2200) throw new McpToolError("invalid_field", `Caption is ${caption.length} characters; TikTok allows 2200.`, { field: "caption" });
@@ -2639,7 +2646,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
     annotations: { readOnlyHint: true, openWorldHint: true },
     handler: async (params: any) => {
       const companyId = await resolveTargetCompanyId(params?.company_id);
-      const [binding, li, tt] = await Promise.all([resolveMetaBinding(companyId), resolveLinkedIn(companyId), resolveTikTok(companyId)]);
+      const [binding, liAll, tt] = await Promise.all([resolveMetaBinding(companyId), resolveAllLinkedIn(companyId), resolveTikTok(companyId)]);
+      const li = liAll[0] ?? { cred: null, account: null, token_status: "missing" as const, token_error: null as string | null };
       const { data: last } = await supabase
         .from("scheduled_posts")
         .select("meta_post_id, target_platform, created_at, updated_at")
@@ -2658,6 +2666,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         linkedin: li.cred
           ? { connected: li.token_status === "valid", account_id: li.cred.account_id, account_name: li.cred.account_name, account_type: li.cred.account_type, token_status: li.token_status, expires_at: li.cred.token_expires_at, ...(li.token_error ? { token_error: li.token_error } : {}) }
           : { connected: false, token_status: "missing" },
+        linkedin_accounts: liAll.map((item) => ({
+          connected: item.token_status === "valid",
+          account_id: item.cred.account_id,
+          account_name: item.cred.account_name,
+          account_type: item.cred.account_type,
+          token_status: item.token_status,
+          expires_at: item.cred.token_expires_at,
+          ...(item.token_error ? { token_error: item.token_error } : {}),
+        })),
         tiktok: tt.cred
           ? { connected: tt.token_status === "valid", open_id: tt.cred.account_id, display_name: tt.cred.account_name, environment: tt.cred.environment, token_status: tt.token_status, expires_at: tt.cred.token_expires_at, ...(tt.token_error ? { token_error: tt.token_error } : {}) }
           : { connected: false, token_status: "missing" },
@@ -2669,9 +2686,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // ── get_social_connect_url ──
   server.tool("get_social_connect_url", {
-    description: "Create a one-time link (valid 30 minutes) the business owner taps, from WhatsApp or a browser, to connect their LinkedIn or TikTok account to this company. No dashboard sign-in needed and no credentials are exposed. For facebook it returns the Setup page link, which needs the owner to sign in.",
+    description: "Create a one-time link (valid 30 minutes) the business owner taps, from WhatsApp or a browser, to connect their LinkedIn profile ('linkedin'), LinkedIn Company Page ('linkedin_pages'), or TikTok account ('tiktok') to this company. No dashboard sign-in needed and no credentials are exposed. For facebook it returns the Setup page link, which needs the owner to sign in.",
     inputSchema: z.object({
-      platform: z.enum(["linkedin", "tiktok", "facebook"]).describe("Which account to connect."),
+      platform: z.enum(["linkedin", "linkedin_pages", "tiktok", "facebook"]).describe("Which account to connect: 'linkedin' (personal profile), 'linkedin_pages' (Company Page), 'tiktok', or 'facebook'."),
       company_id: z.string().optional().describe("Optional: target company (admin keys). Company keys are pinned to their own company."),
     }).strict(),
     annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false },
@@ -2679,7 +2696,7 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const companyId = await resolveTargetCompanyId(params.company_id);
       const company = await getCompanyTestMode(companyId);
       const origin = connectLinkOrigin();
-      const platform = params.platform as "linkedin" | "tiktok" | "facebook";
+      const platform = params.platform as "linkedin" | "linkedin_pages" | "tiktok" | "facebook";
       if (platform === "facebook") {
         return okResult({
           ok: true,
@@ -2693,8 +2710,11 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         });
       }
       const cfg = socialConfig();
+      const isLinkedInPages = platform === "linkedin_pages";
+      const dbPlatform: "linkedin" | "tiktok" = isLinkedInPages ? "linkedin" : platform;
       if (!cfg.stateSecret) throw new McpToolError("not_configured", "Social sign-in is not configured (state secret missing).");
       if (platform === "linkedin" && (!cfg.linkedin.clientId || !cfg.linkedin.clientSecret)) throw new McpToolError("not_configured", "LinkedIn app credentials are not configured.");
+      if (isLinkedInPages && (!cfg.linkedinPages.clientId || !cfg.linkedinPages.clientSecret)) throw new McpToolError("not_configured", "LinkedIn Pages app credentials are not configured (set LINKEDIN_PAGES_CLIENT_ID and LINKEDIN_PAGES_CLIENT_SECRET).");
       if (platform === "tiktok" && (!cfg.tiktok.clientKey || !cfg.tiktok.clientSecret)) throw new McpToolError("not_configured", "TikTok app credentials are not configured.");
       const expiresAt = Date.now() + CONNECT_LINK_TTL_MS;
       const { data: row, error } = await supabase
@@ -2703,15 +2723,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
           user_id: null,
           kind: "link",
           company_id: companyId,
-          platform,
-          redirect_uri: platform === "linkedin" ? cfg.linkedin.redirectUri : cfg.tiktok.redirectUri,
+          platform: dbPlatform,
+          redirect_uri: isLinkedInPages ? cfg.linkedinPages.redirectUri : dbPlatform === "linkedin" ? cfg.linkedin.redirectUri : cfg.tiktok.redirectUri,
           expires_at: new Date(expiresAt).toISOString(),
           created_by_api_key_id: auth.keyId,
         })
         .select("id")
         .single();
       if (error || !row) throw new McpToolError("internal", `Could not create the link: ${error?.message || "unknown"}`);
-      const token = await signConnectLink({ k: "link", n: row.id, c: companyId, p: platform, exp: expiresAt }, cfg.stateSecret);
+      const token = await signConnectLink({ k: "link", n: row.id, c: companyId, p: dbPlatform, exp: expiresAt, ...(isLinkedInPages ? { m: "organization" as const } : {}) }, cfg.stateSecret);
       return okResult({
         ok: true,
         platform,
@@ -2784,32 +2804,60 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
   // LINKEDIN + TIKTOK (v1.7.0) — same safety rules as Meta publishing:
   // test_mode gate with force, dry_run, scrubbed errors, scheduled_posts row.
   // ═══════════════════════════════════════════════════════════════════
-  async function getSocialCredential(companyId: string, platform: "linkedin" | "tiktok", accountId?: string) {
+  async function getSocialCredentials(companyId: string, platform: "linkedin" | "tiktok") {
+    const { data, error } = await supabase
+      .from("social_credentials")
+      .select("id, company_id, platform, account_id, account_name, account_type, access_token, refresh_token, token_expires_at, refresh_expires_at, scopes, environment, updated_at")
+      .eq("company_id", companyId)
+      .eq("platform", platform)
+      .order("updated_at", { ascending: false });
+    if (error) throw new McpToolError("internal", `Could not read ${platform} connection: ${error.message}`);
+    return (data || []) as any[];
+  }
+
+  async function getSocialCredential(companyId: string, platform: "linkedin" | "tiktok", accountId?: string, accountType?: "person" | "organization") {
     let q = supabase
       .from("social_credentials")
       .select("id, company_id, platform, account_id, account_name, account_type, access_token, refresh_token, token_expires_at, refresh_expires_at, scopes, environment")
       .eq("company_id", companyId)
       .eq("platform", platform);
     if (accountId) q = q.eq("account_id", accountId);
+    if (accountType) q = q.eq("account_type", accountType);
     const { data, error } = await q.order("updated_at", { ascending: false }).limit(1).maybeSingle();
     if (error) throw new McpToolError("internal", `Could not read ${platform} connection: ${error.message}`);
     return data as any;
   }
 
-  async function resolveLinkedIn(companyId: string) {
-    const cred = await getSocialCredential(companyId, "linkedin");
-    if (!cred) return { cred: null, account: null, token_status: "missing" as const, token_error: null as string | null };
+  async function checkLinkedInCredential(cred: any) {
     let token_status: "valid" | "expired" | "unknown" = tokenStatusFromExpiry(cred.token_expires_at);
     let token_error: string | null = token_status === "expired" ? "Token expiry date has passed; reconnect LinkedIn." : null;
+    const isOrg = cred.account_type === "organization" || String(cred.account_id || "").startsWith("urn:li:organization:");
     if (token_status !== "expired") {
       try {
-        const r = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${cred.access_token}` }, signal: AbortSignal.timeout(15000) });
-        if (r.ok) token_status = "valid";
-        else { token_status = r.status === 401 ? "expired" : "unknown"; token_error = `LinkedIn answered HTTP ${r.status}`; }
-        try { await r.body?.cancel(); } catch { /* ignore */ }
+        if (isOrg) {
+          const r = await linkedInFetch("GET", "/rest/organizationAcls?q=roleAssignee&state=APPROVED&count=1", cred.access_token);
+          if (r.ok) token_status = "valid";
+          else { token_status = r.status === 401 ? "expired" : "unknown"; token_error = `LinkedIn answered HTTP ${r.status}: ${linkedInReason(r)}`; }
+        } else {
+          const r = await fetch("https://api.linkedin.com/v2/userinfo", { headers: { Authorization: `Bearer ${cred.access_token}` }, signal: AbortSignal.timeout(15000) });
+          if (r.ok) token_status = "valid";
+          else { token_status = r.status === 401 ? "expired" : "unknown"; token_error = `LinkedIn answered HTTP ${r.status}`; }
+          try { await r.body?.cancel(); } catch { /* ignore */ }
+        }
       } catch (e: any) { token_status = "unknown"; token_error = redactSecrets(e?.message || "network error"); }
     }
     return { cred, account: { account_id: cred.account_id, account_name: cred.account_name, account_type: cred.account_type }, token_status, token_error };
+  }
+
+  async function resolveLinkedIn(companyId: string, accountId?: string, accountType?: "person" | "organization") {
+    const cred = await getSocialCredential(companyId, "linkedin", accountId, accountType);
+    if (!cred) return { cred: null, account: null, token_status: "missing" as const, token_error: null as string | null };
+    return await checkLinkedInCredential(cred);
+  }
+
+  async function resolveAllLinkedIn(companyId: string) {
+    const creds = await getSocialCredentials(companyId, "linkedin");
+    return await Promise.all(creds.map((c) => checkLinkedInCredential(c)));
   }
 
   async function resolveTikTok(companyId: string) {
@@ -2862,13 +2910,15 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
   // ── publish_linkedin_post ──
   server.tool("publish_linkedin_post", {
-    description: "Publish a post to the company's connected LinkedIn account (posts as the connected member). Refused while the company is in test mode unless force: true. Use dry_run: true to check the connection, length and image without posting.",
+    description: "Publish a post to the company's connected LinkedIn profile or LinkedIn Company Page (urn:li:organization:...). Refused while the company is in test mode unless force: true. Use dry_run: true to check the connection, length and image without posting.",
     inputSchema: z.object({
       commentary: z.string().min(1).describe("Post text (max 3000 characters). #hashtags become LinkedIn hashtags."),
       image_url: z.string().optional().describe("Optional https image URL to attach (uploaded to LinkedIn)."),
       article_url: z.string().optional().describe("Optional https link to share as an article card (not with image_url)."),
       article_title: z.string().max(400).optional().describe("Title for the article card."),
-      visibility: z.enum(["PUBLIC", "CONNECTIONS"]).optional().describe("Who can see the post (default PUBLIC)."),
+      visibility: z.enum(["PUBLIC", "CONNECTIONS"]).optional().describe("Who can see the post (default PUBLIC; Company Pages are always PUBLIC)."),
+      account_id: z.string().optional().describe("Optional urn:li:organization:... or urn:li:person:... from get_connected_accounts."),
+      account_type: z.enum(["person", "organization"]).optional().describe("Optional: pick 'organization' (Company Page) or 'person' (profile) when both are connected."),
       dry_run: z.boolean().optional().describe("Preview only: nothing is posted."),
       force: z.boolean().optional().describe("Required to publish when the company is in test mode. Recorded on the post."),
       company_id: z.string().optional().describe("Optional: target company (admin keys). Company keys are pinned to their own company."),
@@ -2878,7 +2928,6 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       const companyId = await resolveTargetCompanyId(params.company_id);
       const company = await getCompanyTestMode(companyId);
       const commentary = String(params.commentary);
-      const visibility = params.visibility || "PUBLIC";
       if (params.image_url && params.article_url) {
         throw new McpToolError("invalid_field", "Pass image_url or article_url, not both: a LinkedIn post carries one attachment.", { field: "article_url" });
       }
@@ -2886,15 +2935,19 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         if (params[f] && !/^https:\/\//i.test(params[f])) throw new McpToolError("invalid_field", `${f} must be an https URL.`, { field: f });
       }
       if (params.article_title && !params.article_url) throw new McpToolError("invalid_field", "article_title needs article_url.", { field: "article_title" });
-      const li = await resolveLinkedIn(companyId);
+      const li = await resolveLinkedIn(companyId, params.account_id, params.account_type);
+      const isOrg = Boolean(li.cred && (li.cred.account_type === "organization" || String(li.cred.account_id).startsWith("urn:li:organization:")));
+      const requiredScope = isOrg ? "w_organization_social" : "w_member_social";
+      const visibility: "PUBLIC" | "CONNECTIONS" = isOrg ? "PUBLIC" : (params.visibility || "PUBLIC");
 
       if (params.dry_run === true) {
         const blockers: string[] = [];
         const warnings: string[] = [];
-        if (!li.cred) blockers.push("No LinkedIn account is connected for this company; connect it in Setup.");
+        if (!li.cred) blockers.push(`No ${params.account_type === "organization" ? "LinkedIn Company Page" : "LinkedIn account"} is connected for this company; connect it in Setup.`);
         else {
           if (li.token_status !== "valid") blockers.push(`LinkedIn token is ${li.token_status}${li.token_error ? `: ${li.token_error}` : ""}.`);
-          if (!(li.cred.scopes || []).includes("w_member_social")) blockers.push("LinkedIn did not grant posting permission (w_member_social); reconnect LinkedIn.");
+          if (!(li.cred.scopes || []).includes(requiredScope)) blockers.push(`LinkedIn did not grant posting permission (${requiredScope}); reconnect LinkedIn.`);
+          if (isOrg && params.visibility === "CONNECTIONS") warnings.push("LinkedIn Company Page posts must be PUBLIC; visibility changed to PUBLIC.");
         }
         if (commentary.length > 3000) blockers.push(`Commentary is ${commentary.length} characters; LinkedIn allows 3000.`);
         const image_check = params.image_url ? await checkMediaUrl(params.image_url, "image") : null;
@@ -2919,13 +2972,13 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
 
       if (commentary.length > 3000) throw new McpToolError("invalid_field", `Commentary is ${commentary.length} characters; LinkedIn allows 3000.`, { field: "commentary" });
       testModeGate(company, params.force, "the live LinkedIn account");
-      if (!li.cred) throw new McpToolError("not_found", "No LinkedIn account is connected for this company.", { nextStep: "Connect LinkedIn in Setup, then run get_connected_accounts." });
+      if (!li.cred) throw new McpToolError("not_found", `No ${params.account_type === "organization" ? "LinkedIn Company Page" : "LinkedIn account"} is connected for this company.`, { nextStep: "Connect LinkedIn in Setup, then run get_connected_accounts." });
       if (li.token_status === "expired") throw new McpToolError("token_expired", `LinkedIn token has expired${li.token_error ? `: ${li.token_error}` : ""}.`, { nextStep: "Reconnect LinkedIn in Setup." });
 
       const forced = company.test_mode && params.force === true;
       const post = await insertSocialPost({
         companyId, platform: "linkedin", accountId: li.cred.account_id, caption: commentary, imageUrl: params.image_url || null,
-        metadata: { visibility, ...(params.article_url ? { article_url: params.article_url } : {}), ...(forced ? { forced_test_mode_publish: true, forced_at: new Date().toISOString() } : {}) },
+        metadata: { visibility, account_type: isOrg ? "organization" : "person", ...(params.article_url ? { article_url: params.article_url } : {}), ...(forced ? { forced_test_mode_publish: true, forced_at: new Date().toISOString() } : {}) },
       });
       try {
         const { urn, post_url } = await postToLinkedIn(li.cred, {
@@ -2965,6 +3018,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
       disable_comment: z.boolean().optional(),
       disable_duet: z.boolean().optional(),
       disable_stitch: z.boolean().optional(),
+      brand_organic_toggle: z.boolean().optional().describe("Commercial content disclosure: Your Brand (Promotional content)."),
+      brand_content_toggle: z.boolean().optional().describe("Commercial content disclosure: Branded Content (Paid partnership; cannot be SELF_ONLY)."),
       dry_run: z.boolean().optional().describe("Preview only: nothing is uploaded."),
       force: z.boolean().optional().describe("Required to post when the company is in test mode. Recorded on the post."),
       company_id: z.string().optional().describe("Optional: target company (admin keys). Company keys are pinned to their own company."),
@@ -2992,7 +3047,9 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         privacy = "SELF_ONLY";
       }
       const options: string[] = Array.isArray(tt.creator?.privacy_level_options) ? tt.creator.privacy_level_options : [];
-      const privacyProblem = mode === "direct" && options.length && !options.includes(privacy)
+      const privacyProblem = mode === "direct" && params.brand_content_toggle === true && privacy === "SELF_ONLY"
+        ? "Branded content visibility cannot be set to private (SELF_ONLY)."
+        : mode === "direct" && options.length && !options.includes(privacy)
         ? `privacy_level ${privacy} is not allowed for this creator; allowed: ${options.join(", ")}.` : null;
       if (mode === "draft" && mediaType === "video" && caption) warnings.push("Draft (inbox) video uploads don't carry a caption; the creator adds it in TikTok before posting.");
       if (mediaType === "photo") warnings.push("TikTok downloads photo URLs itself; their domain must be verified in the TikTok developer portal or the post fails.");
@@ -3048,6 +3105,8 @@ function createMcpServer(supabase: any, auth: AuthContext, sessionId: string): M
         const sent = await postToTikTok(tt.cred.access_token, {
           caption, mode, mediaType, videoUrl: params.video_url || null, photoUrls: params.photo_urls || null,
           privacy, disable_comment, disable_duet, disable_stitch,
+          brand_organic_toggle: Boolean(params.brand_organic_toggle),
+          brand_content_toggle: Boolean(params.brand_content_toggle),
         });
         const publishId = sent.publishId;
         const tiktokStatus = sent.tiktokStatus;

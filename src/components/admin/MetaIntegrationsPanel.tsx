@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle, RefreshCw, Linkedin, Music2 } from 'lucide-react';
+import { Facebook, Instagram, Plus, Trash2, Edit2, Save, X, Eye, EyeOff, Loader2, CheckCircle2, AlertTriangle, Copy, MessageCircle, RefreshCw, Linkedin, Music2, Building2 } from 'lucide-react';
 import { useCompany } from '@/context/CompanyContext';
 import { useSocialConnections, type SocialPlatform } from '@/hooks/useSocialConnections';
 import { cn } from '@/lib/utils';
@@ -131,10 +131,12 @@ export const MetaIntegrationsPanel = () => {
   const [waShowToken, setWaShowToken] = useState(false);
 
   // LinkedIn / TikTok connections (shared with the Setup checklist cards).
-  const { connect: connectSocial, statusOf, linkedin, tiktok } = useSocialConnections({
+  const { connect: connectSocial, statusOf, linkedin, linkedinPage, linkedinPages, tiktok } = useSocialConnections({
     onError: (message) => toast.error(message, { duration: 8000 }),
     onConnected: (platform: SocialPlatform) =>
-      toast.success(`${platform === 'linkedin' ? 'LinkedIn' : 'TikTok'} connected`),
+      toast.success(
+        `${platform === 'linkedin' ? 'LinkedIn' : platform === 'linkedin_pages' ? 'LinkedIn Company Page' : 'TikTok'} connected`,
+      ),
   });
 
   // Load public Meta config (App ID + Login Config ID). The frontend uses
@@ -752,6 +754,21 @@ export const MetaIntegrationsPanel = () => {
                 : 'Connect a LinkedIn profile so posts can go out there too.'
           }
           onConnect={() => connectSocial('linkedin')}
+        />
+        <SocialProviderRow
+          icon={Building2}
+          iconBg="bg-sky-500/10"
+          iconColor="text-sky-700 dark:text-sky-400"
+          name="LinkedIn Company Page"
+          status={statusOf(linkedinPage)}
+          description={
+            statusOf(linkedinPage) === 'connected'
+              ? `Posting to ${linkedinPages.map((p) => p.account_name).filter(Boolean).join(', ') || linkedinPage?.account_name || 'your Company Page'}.`
+              : statusOf(linkedinPage) === 'action_needed'
+                ? 'Sign-in expired. Reconnect to keep posting.'
+                : 'Connect an organization Page (requires Community Management API).'
+          }
+          onConnect={() => connectSocial('linkedin_pages')}
         />
         <SocialProviderRow
           icon={Music2}

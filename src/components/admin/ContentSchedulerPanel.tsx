@@ -11,11 +11,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar, Clock, Send, Loader2, AlertCircle, CheckCircle2, FileText, Trash2, ImagePlus, X, Upload, Facebook, Instagram, Sparkles, Eye, Pencil, Check, XCircle, Video } from 'lucide-react';
+import { Calendar, Clock, Send, Loader2, AlertCircle, CheckCircle2, FileText, Trash2, ImagePlus, X, Upload, Facebook, Instagram, Sparkles, Eye, Pencil, Check, XCircle, Video, Linkedin, Music2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { cn } from '@/lib/utils';
+import TikTokDirectPostPanel from '@/components/admin/TikTokDirectPostPanel';
 
 const MAX_IMAGES = 10; // Facebook multi-photo posts and IG carousels both cap a single post at 10
 
@@ -309,6 +310,11 @@ export const ContentSchedulerPanel = () => {
         return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Clock className="w-3 h-3 mr-1" />Scheduled</Badge>;
       case 'published':
         return <Badge className="bg-green-500/20 text-green-400 border-green-500/30"><CheckCircle2 className="w-3 h-3 mr-1" />Published</Badge>;
+      case 'sent_to_inbox':
+        return <Badge className="bg-cyan-500/20 text-cyan-500 border-cyan-500/30"><CheckCircle2 className="w-3 h-3 mr-1" />Sent to Inbox</Badge>;
+      case 'processing':
+      case 'publishing':
+        return <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Processing</Badge>;
       case 'failed':
         return <Badge className="bg-destructive/20 text-destructive border-destructive/30"><AlertCircle className="w-3 h-3 mr-1" />Failed</Badge>;
       case 'pending_approval':
@@ -329,6 +335,8 @@ export const ContentSchedulerPanel = () => {
             <Badge className="bg-pink-500/20 text-pink-500 border-pink-500/30 gap-1"><Instagram className="w-3 h-3" />IG</Badge>
           </div>
         );
+      case 'linkedin':
+        return <Badge className="bg-sky-500/20 text-sky-600 dark:text-sky-400 border-sky-500/30 gap-1"><Linkedin className="w-3 h-3" />LI</Badge>;
       case 'tiktok':
         return <Badge className="bg-cyan-500/20 text-cyan-600 border-cyan-500/30 gap-1"><Video className="w-3 h-3" />TT</Badge>;
       default:
@@ -383,6 +391,10 @@ export const ContentSchedulerPanel = () => {
       <Tabs defaultValue="compose" className="w-full">
         <TabsList className="w-full">
           <TabsTrigger value="compose" className="flex-1">Compose</TabsTrigger>
+          <TabsTrigger value="tiktok" className="flex-1 gap-1.5">
+            <Music2 className="w-3.5 h-3.5" />
+            TikTok
+          </TabsTrigger>
           <TabsTrigger value="approval" className="flex-1">
             Approval Queue
             {pendingPosts.length > 0 && (
@@ -575,6 +587,11 @@ export const ContentSchedulerPanel = () => {
               </Button>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* TIKTOK DIRECT POST TAB */}
+        <TabsContent value="tiktok">
+          <TikTokDirectPostPanel />
         </TabsContent>
 
         {/* APPROVAL QUEUE TAB */}

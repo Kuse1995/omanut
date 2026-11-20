@@ -36,11 +36,12 @@ export async function publishScheduledSocialPost(supabase: any, post: any): Prom
   try {
     if (platform === "linkedin") {
       if (tokenStatusFromExpiry(cred.token_expires_at) === "expired") return fail("LinkedIn token has expired; reconnect LinkedIn.");
+      const isOrg = String(cred.account_id || "").startsWith("urn:li:organization:");
       const { urn, post_url } = await postToLinkedIn(cred, {
         commentary: String(post.content || ""),
         imageUrl: post.image_url || (Array.isArray(post.image_urls) ? post.image_urls[0] : null) || null,
         articleUrl: typeof meta.article_url === "string" ? meta.article_url : null,
-        visibility: meta.visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
+        visibility: isOrg ? "PUBLIC" : (meta.visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC"),
       });
       await supabase.from("scheduled_posts").update({
         status: "published", meta_post_id: urn, error_message: null, updated_at: now(),
@@ -61,6 +62,8 @@ export async function publishScheduledSocialPost(supabase: any, post: any): Prom
       photoUrls: mediaType === "photo" ? photos : null,
       privacy: cred.environment === "sandbox" ? "SELF_ONLY" : (typeof meta.privacy_level === "string" ? meta.privacy_level : "SELF_ONLY"),
       disable_comment: false, disable_duet: false, disable_stitch: false,
+      brand_organic_toggle: Boolean(meta.brand_organic_toggle),
+      brand_content_toggle: Boolean(meta.brand_content_toggle),
     });
     const status = rowStatusForTikTok(sent.tiktokStatus);
     await supabase.from("scheduled_posts").update({

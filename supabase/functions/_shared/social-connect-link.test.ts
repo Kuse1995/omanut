@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { signConnectLink, signState, verifyConnectLink, verifyState } from "./social-oauth.ts";
+import { buildLinkedInAuthorizeUrl, LINKEDIN_PAGES_SCOPES, signConnectLink, signState, verifyConnectLink, verifyState } from "./social-oauth.ts";
 import { linkedInPostUrl, rowStatusForTikTok, tiktokPostUrl } from "./social-publish.ts";
 
 const SECRET = "test-secret-for-links";
@@ -42,4 +42,16 @@ Deno.test("TikTok status mapping and post URL", () => {
   assertEquals(rowStatusForTikTok("PROCESSING_UPLOAD"), "processing");
   assertEquals(tiktokPostUrl("omanut", "123"), "https://www.tiktok.com/@omanut/video/123");
   assertEquals(tiktokPostUrl(null, null), null);
+});
+
+Deno.test("LinkedIn Company Pages state & connect link preserve organization mode and scopes", async () => {
+  const orgLink = { ...link, m: "organization" as const };
+  const t = await signConnectLink(orgLink, SECRET);
+  const back = await verifyConnectLink(t, SECRET);
+  assertEquals(back?.m, "organization");
+  const st = await signState({ n: link.n, c: link.c, p: "linkedin", u: "link", exp: link.exp, m: "organization" }, SECRET);
+  const backState = await verifyState(st, SECRET);
+  assertEquals(backState?.m, "organization");
+  const url = new URL(buildLinkedInAuthorizeUrl("77ad3s5xsk4dah", "https://omanut.lovable.app/auth/linkedin-pages/callback", st, LINKEDIN_PAGES_SCOPES));
+  assertEquals(url.searchParams.get("scope"), "w_organization_social r_organization_social rw_organization_admin");
 });

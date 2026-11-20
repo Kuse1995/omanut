@@ -5,8 +5,12 @@ import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 
-type Platform = "linkedin" | "tiktok";
-const LABEL: Record<Platform, string> = { linkedin: "LinkedIn", tiktok: "TikTok" };
+type Platform = "linkedin" | "linkedin_pages" | "tiktok";
+const LABEL: Record<Platform, string> = {
+  linkedin: "LinkedIn",
+  linkedin_pages: "LinkedIn Company Page",
+  tiktok: "TikTok",
+};
 
 type State =
   | { kind: "working" }
@@ -39,7 +43,8 @@ const SocialOAuthCallback = ({ platform }: { platform: Platform }) => {
       const { data: sessionData } = await supabase.auth.getSession();
       setHasSession(Boolean(sessionData.session));
 
-      const { data, error } = await supabase.functions.invoke(`${platform}-oauth-callback`, { body: { code, state: oauthState } });
+      const fnName = platform === "tiktok" ? "tiktok-oauth-callback" : "linkedin-oauth-callback";
+      const { data, error } = await supabase.functions.invoke(fnName, { body: { code, state: oauthState } });
       if (error) {
         let message = error.message;
         let code: string | undefined;

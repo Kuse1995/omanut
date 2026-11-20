@@ -2,8 +2,11 @@
 // functions and mcp-server. No top-level I/O; env is read inside functions.
 
 export type SocialPlatform = "linkedin" | "tiktok";
+export type LinkedInMode = "person" | "organization";
+export type SocialConnectPlatform = "linkedin" | "linkedin_pages" | "tiktok";
 
 export const LINKEDIN_SCOPES = ["openid", "profile", "email", "w_member_social"];
+export const LINKEDIN_PAGES_SCOPES = ["w_organization_social", "r_organization_social", "rw_organization_admin"];
 export const TIKTOK_SCOPES = ["user.info.basic", "video.publish", "video.upload"];
 export const OAUTH_SESSION_TTL_MS = 10 * 60 * 1000;
 export const CONNECT_LINK_TTL_MS = 30 * 60 * 1000;
@@ -15,12 +18,19 @@ export const TIKTOK_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 export function socialConfig() {
   const env = (k: string) => Deno.env.get(k) || "";
+  const apiVersion = env("LINKEDIN_API_VERSION") || "202610";
   return {
     linkedin: {
       clientId: env("LINKEDIN_CLIENT_ID"),
       clientSecret: env("LINKEDIN_CLIENT_SECRET"),
       redirectUri: env("LINKEDIN_REDIRECT_URI") || "https://omanut.lovable.app/auth/linkedin/callback",
-      apiVersion: env("LINKEDIN_API_VERSION") || "202610",
+      apiVersion,
+    },
+    linkedinPages: {
+      clientId: env("LINKEDIN_PAGES_CLIENT_ID"),
+      clientSecret: env("LINKEDIN_PAGES_CLIENT_SECRET"),
+      redirectUri: env("LINKEDIN_PAGES_REDIRECT_URI") || "https://omanut.lovable.app/auth/linkedin-pages/callback",
+      apiVersion,
     },
     tiktok: {
       clientKey: env("TIKTOK_CLIENT_KEY"),
@@ -49,10 +59,11 @@ async function hmac(secret: string, data: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(data))));
 }
 
-/** u is the signed-in user id, or "link" when the handshake came from an MCP connect link. */
-export type OAuthStatePayload = { n: string; c: string; p: SocialPlatform; u: string; exp: number };
+/** u is the signed-in user id, or "link" when the handshake came from an MCP connect link.
+ *  m is optional ("person" | "organization") for LinkedIn profile vs Company Page apps. */
+export type OAuthStatePayload = { n: string; c: string; p: SocialPlatform; u: string; exp: number; m?: LinkedInMode };
 /** Connect link token: n = social_oauth_sessions row (kind='link'), c = company, p = platform. */
-export type ConnectLinkPayload = { k: "link"; n: string; c: string; p: SocialPlatform; exp: number };
+export type ConnectLinkPayload = { k: "link"; n: string; c: string; p: SocialPlatform; exp: number; m?: LinkedInMode };
 const LINK_DOMAIN = "connect-link:"; // keeps link tokens and OAuth state tokens non-interchangeable
 
 export async function signState(payload: OAuthStatePayload, secret: string): Promise<string> {
@@ -75,6 +86,7 @@ export async function verifyState(state: string, secret: string, now = Date.now(
     const p = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
     if (!p || typeof p.n !== "string" || typeof p.c !== "string" || typeof p.u !== "string") return null;
     if (p.p !== "linkedin" && p.p !== "tiktok") return null;
+    if (p.m !== undefined && p.m !== "person" && p.m !== "organization") return null;
     if (typeof p.exp !== "number" || p.exp < now) return null;
     return p as OAuthStatePayload;
   } catch {
@@ -102,6 +114,7 @@ export async function verifyConnectLink(token: string, secret: string, now = Dat
     const p = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
     if (!p || p.k !== "link" || typeof p.n !== "string" || typeof p.c !== "string") return null;
     if (p.p !== "linkedin" && p.p !== "tiktok") return null;
+    if (p.m !== undefined && p.m !== "person" && p.m !== "organization") return null;
     if (typeof p.exp !== "number" || p.exp < now) return null;
     return p as ConnectLinkPayload;
   } catch {
@@ -120,13 +133,13 @@ export async function tiktokCodeChallenge(verifier: string): Promise<string> {
   return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function buildLinkedInAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+export function buildLinkedInAuthorizeUrl(clientId: string, redirectUri: string, state: string, scopes: string[] = LINKEDIN_SCOPES): string {
   const u = new URL("https://www.linkedin.com/oauth/v2/authorization");
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirectUri);
   u.searchParams.set("state", state);
-  u.searchParams.set("scope", LINKEDIN_SCOPES.join(" "));
+  u.searchParams.set("scope", scopes.join(" "));
   return u.toString();
 }
 export function buildTikTokAuthorizeUrl(clientKey: string, redirectUri: string, state: string, codeChallenge: string): string {
