@@ -6903,7 +6903,7 @@ serve(async (req) => {
               }).catch((e) => console.error('[MARKETER-HUB] Ack send error:', e));
             }
 
-            await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-marketer-agent`, {
+            const agentRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-marketer-agent`, {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
@@ -6918,6 +6918,24 @@ serve(async (req) => {
                 mediaFiles,
               }),
             });
+
+            if (!agentRes.ok) {
+              console.error('[MARKETER-HUB] Agent returned error status:', agentRes.status);
+              if (TWILIO_SID_M && TWILIO_TOKEN_M) {
+                const errForm = new URLSearchParams();
+                errForm.append('From', To);
+                errForm.append('To', From);
+                errForm.append('Body', '⚠️ Hit a brief hiccup preparing your reply — please send your request one more time!');
+                await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_M}/Messages.json`, {
+                  method: 'POST',
+                  headers: {
+                    Authorization: 'Basic ' + btoa(`${TWILIO_SID_M}:${TWILIO_TOKEN_M}`),
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: errForm.toString(),
+                }).catch(() => {});
+              }
+            }
           } catch (hubErr) {
             console.error('[MARKETER-HUB] Async dispatch error:', hubErr);
           }

@@ -105,6 +105,7 @@ async function transcribeAudioViaGemini(bytes: Uint8Array, mimeType: string): Pr
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(12_000),
       body: JSON.stringify({
         contents: [
           {
@@ -138,6 +139,7 @@ async function analyzeInspirationImage(bytes: Uint8Array, mimeType: string, note
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         contents: [
           {
@@ -156,6 +158,80 @@ async function analyzeInspirationImage(bytes: Uint8Array, mimeType: string, note
   if (!res.ok) return null;
   const data = await res.json().catch(() => ({}));
   return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+}
+
+interface FastVisionAnalysis {
+  category: string;
+  description: string;
+  tags: string[];
+  quality_score: number | null;
+  recommended_format: string;
+  ai_hook_suggestions: string[];
+}
+
+async function analyzeVaultImageFast(
+  bytes: Uint8Array,
+  mimeType: string,
+  businessType: string
+): Promise<FastVisionAnalysis | null> {
+  const apiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!apiKey || bytes.byteLength > 8 * 1024 * 1024) return null;
+  const cleanMime = mimeType.split(';')[0].trim() || 'image/jpeg';
+  const base64 = encodeBase64(bytes);
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10_000),
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Analyze this social-media photo/screenshot for a ${businessType || 'business'}.
+Capture ALL readable text, app/screen UI details, products, or visual milestones so a social media marketer can write an accurate post directly referencing what's in this image.
+Return ONLY valid JSON:
+{
+  "category": "one of: menu, interior, exterior, logo, products, promotional, staff, events, facilities, other",
+  "description": "2 detailed sentences describing exact visual subjects, readable text, app screens, or highlights",
+  "tags": ["tag1", "tag2", "tag3", "tag4"],
+  "quality_score": 8,
+  "recommended_format": "feed",
+  "ai_hook_suggestions": ["Hook 1", "Hook 2", "Hook 3"]
+}`,
+                },
+                { inlineData: { mimeType: cleanMime, data: base64 } },
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 700 },
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    const rawText = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || '')
+      .replace(/```json\s*/gi, '')
+      .replace(/```/g, '')
+      .trim();
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      category: typeof parsed.category === 'string' && VALID_MEDIA_CATEGORIES.has(parsed.category) ? parsed.category : 'products',
+      description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : 'Brand media asset',
+      tags: Array.isArray(parsed.tags) ? parsed.tags.map(String).slice(0, 8) : [],
+      quality_score: typeof parsed.quality_score === 'number' ? parsed.quality_score : 7,
+      recommended_format: typeof parsed.recommended_format === 'string' ? parsed.recommended_format : 'feed',
+      ai_hook_suggestions: Array.isArray(parsed.ai_hook_suggestions) ? parsed.ai_hook_suggestions.map(String).slice(0, 3) : [],
+    };
+  } catch (err) {
+    console.warn('[marketer-agent] analyzeVaultImageFast error:', err);
+    return null;
+  }
 }
 
 async function runPitchDemoTurn(opts: {
@@ -267,12 +343,15 @@ serve(async (req) => {
   }
 
   const supabase = createClient(supabaseUrl, serviceKey);
+  let phoneForCatch = '';
+  let toNumberForCatch = Deno.env.get('MARKETER_WHATSAPP_NUMBER') || '+260768737233';
 
   try {
     const reqBody = await req.json().catch(() => ({}));
     const isInternalEvent = reqBody?.internal_event === 'a2ui_callback';
     const rawFrom = String(reqBody?.From || reqBody?.phone || '');
     const toNumber = String(reqBody?.To || Deno.env.get('MARKETER_WHATSAPP_NUMBER') || '+260768737233');
+    toNumberForCatch = toNumber;
     const rawBody = String(reqBody?.Body || '');
     const profileName = String(reqBody?.ProfileName || '');
     const mediaFiles: InboundMedia[] = Array.isArray(reqBody?.mediaFiles) ? reqBody.mediaFiles : [];
@@ -281,6 +360,7 @@ serve(async (req) => {
     const callbackPayload = (reqBody?.payload && typeof reqBody.payload === 'object') ? reqBody.payload : {};
 
     const phone = normalizeDigits(rawFrom);
+    phoneForCatch = phone;
     if (!phone) {
       return jsonRes({ error: 'Sender phone missing' }, 400);
     }
@@ -390,11 +470,16 @@ serve(async (req) => {
       return jsonRes({ ok: true, blocked: 'subscription_paused' });
     }
 
-    // 4. Intake Pipeline: Voice Notes -> Gemini Transcript; Photos/Videos -> Vault + Vision + Embeddings
+    // 4. Intake Pipeline: Voice Notes -> Gemini Transcript; Photos/Videos -> Vault + Fast Direct Vision + Embeddings
     let effectiveUserText = rawBody.trim();
     const uploadedVaultSummary: Array<{ id: string; url: string; mediaType: string; description: string; qualityScore: number | null; hooks: string[] }> = [];
     const inspirationNotes: string[] = [];
     const outboundMediaUrls: string[] = [];
+
+    const existingPending = (existingSession?.pending_draft && typeof existingSession.pending_draft === 'object')
+      ? (existingSession.pending_draft as Record<string, unknown>)
+      : {};
+    const updatedPendingDraft: Record<string, unknown> = { ...existingPending };
 
     if (!isInternalEvent && mediaFiles.length > 0) {
       const lowerText = rawBody.toLowerCase();
@@ -447,33 +532,44 @@ serve(async (req) => {
             let recommendedFormat: string | null = isVideo ? 'reel' : 'feed';
             let hooks: string[] = [];
 
-            if (!isVideo && bytes.byteLength < 6 * 1024 * 1024) {
-              try {
-                const dataUrl = `data:${contentType.split(';')[0]};base64,${encodeBase64(bytes)}`;
-                const anRes = await fetch(`${supabaseUrl}/functions/v1/analyze-media`, {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${serviceKey}`,
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    imageDataUrl: dataUrl,
-                    fileName,
-                    fileType: contentType,
-                    businessType: company.business_type || 'business',
-                  }),
-                });
-                if (anRes.ok) {
-                  const an = await anRes.json();
-                  if (typeof an.category === 'string' && VALID_MEDIA_CATEGORIES.has(an.category)) category = an.category;
-                  if (typeof an.description === 'string' && an.description) description = an.description;
-                  if (Array.isArray(an.tags)) tags = an.tags.map(String).slice(0, 8);
-                  if (typeof an.quality_score === 'number') qualityScore = an.quality_score;
-                  if (typeof an.recommended_format === 'string') recommendedFormat = an.recommended_format;
-                  if (Array.isArray(an.ai_hook_suggestions)) hooks = an.ai_hook_suggestions.map(String).slice(0, 3);
+            if (!isVideo && bytes.byteLength < 8 * 1024 * 1024) {
+              const fastVision = await analyzeVaultImageFast(bytes, contentType, company.business_type || 'business');
+              if (fastVision) {
+                category = fastVision.category;
+                description = fastVision.description;
+                tags = fastVision.tags;
+                qualityScore = fastVision.quality_score;
+                recommendedFormat = fastVision.recommended_format;
+                hooks = fastVision.ai_hook_suggestions;
+              } else {
+                try {
+                  const dataUrl = `data:${contentType.split(';')[0]};base64,${encodeBase64(bytes)}`;
+                  const anRes = await fetch(`${supabaseUrl}/functions/v1/analyze-media`, {
+                    method: 'POST',
+                    signal: AbortSignal.timeout(7_000),
+                    headers: {
+                      Authorization: `Bearer ${serviceKey}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      imageDataUrl: dataUrl,
+                      fileName,
+                      fileType: contentType,
+                      businessType: company.business_type || 'business',
+                    }),
+                  });
+                  if (anRes.ok) {
+                    const an = await anRes.json();
+                    if (typeof an.category === 'string' && VALID_MEDIA_CATEGORIES.has(an.category)) category = an.category;
+                    if (typeof an.description === 'string' && an.description) description = an.description;
+                    if (Array.isArray(an.tags)) tags = an.tags.map(String).slice(0, 8);
+                    if (typeof an.quality_score === 'number') qualityScore = an.quality_score;
+                    if (typeof an.recommended_format === 'string') recommendedFormat = an.recommended_format;
+                    if (Array.isArray(an.ai_hook_suggestions)) hooks = an.ai_hook_suggestions.map(String).slice(0, 3);
+                  }
+                } catch (e) {
+                  console.warn('[marketer-agent] Fallback analyze-media failed/timed out (non-fatal):', e);
                 }
-              } catch (e) {
-                console.warn('[marketer-agent] analyze-media failed (non-fatal):', e);
               }
             }
 
@@ -508,6 +604,17 @@ serve(async (req) => {
                 qualityScore,
                 hooks,
               });
+              // Bind uploaded media to pending_draft so follow-ups like "post it" work cleanly
+              updatedPendingDraft.vault_asset_id = insertedMedia.id;
+              if (isVideo) {
+                updatedPendingDraft.video_url = publicUrl;
+                updatedPendingDraft.type = 'video';
+                delete updatedPendingDraft.image_url;
+              } else {
+                updatedPendingDraft.image_url = publicUrl;
+                updatedPendingDraft.type = 'image';
+                delete updatedPendingDraft.video_url;
+              }
               if (!isVideo) {
                 fetch(`${supabaseUrl}/functions/v1/index-brand-asset`, {
                   method: 'POST',
@@ -588,9 +695,7 @@ serve(async (req) => {
         : 'TikTok/LinkedIn: Not connected',
     ].join('\n');
 
-    const pendingDraft = (existingSession?.pending_draft && typeof existingSession.pending_draft === 'object')
-      ? existingSession.pending_draft as Record<string, unknown>
-      : {};
+    const pendingDraft = updatedPendingDraft;
 
     const systemPrompt = `You are *${company.name}'s* dedicated AI Social Media Marketer on Omanut.
 You speak directly to ${activeSub.contact_name || profileName || 'the business owner'} on WhatsApp.
@@ -785,17 +890,17 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
     ];
 
     let finalReply = '';
-    const updatedPendingDraft: Record<string, unknown> = { ...pendingDraft };
     const spawnedLinks: string[] = [];
 
-    for (let iter = 0; iter < 5; iter++) {
+    for (let iter = 0; iter < 4; iter++) {
       const llmRes = await geminiChatWithFallback({
         model: PRIMARY_TEXT_MODEL,
         messages: messages as Array<{ role: string; content: unknown }>,
         tools,
         tool_choice: 'auto',
         temperature: 0.65,
-        max_tokens: 1400,
+        max_tokens: 2400,
+        signal: AbortSignal.timeout(22_000),
       });
 
       if (!llmRes.ok) {
@@ -1062,6 +1167,12 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
                     ? 'pending_approval'
                     : 'approved';
 
+                  const usedVaultId = args.vault_asset_id
+                    ? String(args.vault_asset_id)
+                    : typeof updatedPendingDraft.vault_asset_id === 'string'
+                    ? updatedPendingDraft.vault_asset_id
+                    : null;
+
                   const { data: postRow, error: insErr } = await supabase
                     .from('scheduled_posts')
                     .insert({
@@ -1077,7 +1188,7 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
                       created_by: effectiveUserId,
                       metadata: {
                         source: 'whatsapp_marketer',
-                        vault_asset_id: args.vault_asset_id || null,
+                        vault_asset_id: usedVaultId,
                       },
                     })
                     .select('id')
@@ -1094,17 +1205,18 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
                     const pubJson = await pubRes.json().catch(() => ({}));
                     if (pubRes.ok && pubJson?.success) {
                       await incrementMarketerUsage(supabase, activeSub.id, 'post');
-                      if (args.vault_asset_id) {
-                        const { data: curAsset } = await supabase.from('company_media').select('times_posted').eq('id', String(args.vault_asset_id)).maybeSingle();
+                      if (usedVaultId) {
+                        const { data: curAsset } = await supabase.from('company_media').select('times_posted').eq('id', usedVaultId).maybeSingle();
                         await supabase.from('company_media').update({
                           vault_status: 'posted',
                           times_posted: Number(curAsset?.times_posted || 0) + 1,
                           last_posted_at: new Date().toISOString(),
-                        }).eq('id', String(args.vault_asset_id)).eq('company_id', company.id);
+                        }).eq('id', usedVaultId).eq('company_id', company.id);
                       }
                       delete updatedPendingDraft.image_url;
                       delete updatedPendingDraft.video_url;
                       delete updatedPendingDraft.caption;
+                      delete updatedPendingDraft.vault_asset_id;
                       toolOutput = { ok: true, published: true, post_id: postRow.id, platform, meta_post_id: pubJson.meta_post_id || null };
                     } else {
                       await supabase.from('scheduled_posts').update({ status: 'failed', error_message: pubJson?.error || `HTTP ${pubRes.status}` }).eq('id', postRow.id);
@@ -1112,12 +1224,13 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
                     }
                   } else {
                     await incrementMarketerUsage(supabase, activeSub.id, 'post');
-                    if (args.vault_asset_id) {
-                      await supabase.from('company_media').update({ vault_status: 'scheduled' }).eq('id', String(args.vault_asset_id)).eq('company_id', company.id);
+                    if (usedVaultId) {
+                      await supabase.from('company_media').update({ vault_status: 'scheduled' }).eq('id', usedVaultId).eq('company_id', company.id);
                     }
                     delete updatedPendingDraft.image_url;
                     delete updatedPendingDraft.video_url;
                     delete updatedPendingDraft.caption;
+                    delete updatedPendingDraft.vault_asset_id;
                     toolOutput = {
                       ok: true,
                       scheduled: true,
@@ -1252,6 +1365,8 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
           : `I'm here for *${company.name}*! Send me photos/videos for your Content Vault, a voice note with an offer, or ask me to brainstorm this week's posts.`;
     }
 
+    updatedPendingDraft.last_assistant_reply = finalReply.slice(0, 1800);
+
     // Persist conversation logs & session memory
     await Promise.all([
       supabase.from('marketer_messages').insert([
@@ -1294,6 +1409,13 @@ CRITICAL BEHAVIOR & WHATSAPP UX RULES:
     return jsonRes({ ok: true, company_id: company.id, sent: sendRes.ok, media_sent: outboundMediaUrls.length });
   } catch (err) {
     console.error('[whatsapp-marketer-agent] fatal:', err);
+    if (phoneForCatch) {
+      await sendMarketerWhatsApp({
+        to: phoneForCatch,
+        fromOverride: toNumberForCatch,
+        body: `⚠️ I received your message, but hit a temporary processing delay. Please reply *"continue"* or resend your prompt and I'll finish it right away.`,
+      }).catch(() => {});
+    }
     return jsonRes({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
