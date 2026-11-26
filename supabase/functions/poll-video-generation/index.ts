@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { veoPollOperation } from '../_shared/gemini-client.ts';
 import { minimaxPollVideoTask, minimaxDownloadFile } from '../_shared/minimax-client.ts';
+import { normalizeDigits, sendMarketerWhatsApp } from '../_shared/marketer-twilio.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -63,7 +64,7 @@ Deno.serve(async (req) => {
     // Mark timed-out jobs as failed
     const { data: timedOut } = await supabase
       .from('video_generation_jobs')
-      .select('id, boss_phone, company_id')
+      .select('id, boss_phone, company_id, delivery_channel, delivery_from_number')
       .eq('status', 'pending')
       .gte('poll_count', 60);
 
@@ -333,10 +334,40 @@ async function uploadAndComplete(supabase: any, job: any, videoBytes: Uint8Array
     .update({ status: 'completed', video_url: videoUrl, updated_at: new Date().toISOString() })
     .eq('id', job.id);
 
+  if (job.delivery_channel === 'marketer_hub') {
+    await supabase.from('company_media').insert({
+      company_id: job.company_id,
+      file_name: `reel-${Date.now()}.mp4`,
+      file_path: videoPath,
+      file_size: videoBytes.byteLength,
+      file_type: mimeType,
+      media_type: 'video',
+      category: 'promotional',
+      description: String(job.prompt || 'AI Marketing Reel').slice(0, 220),
+      asset_validation_status: 'approved',
+      vault_status: 'ready',
+      source_channel: 'ai_generated',
+    }).catch(() => {});
+
+    const cleanPhone = normalizeDigits(job.boss_phone || '');
+    if (cleanPhone) {
+      await supabase.from('marketer_sessions').upsert({
+        phone: cleanPhone,
+        active_company_id: job.company_id,
+        mode: 'marketer',
+        pending_draft: { video_url: videoUrl, type: 'video' },
+        last_message_at: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }
+
   console.log(`[POLL-VIDEO] Job ${job.id} completed: ${videoUrl}`);
   console.log(`[POLL-VIDEO] Sending WhatsApp notification to ${job.boss_phone}...`);
   try {
-    await sendWhatsAppMessage(job, `🎬 Your video is ready!`, videoUrl);
+    const caption = job.delivery_channel === 'marketer_hub'
+      ? `🎬 *Your AI Reel is ready!*\n\nReply *"POST"* to publish now, *"SCHEDULE Friday 5pm"* to queue it, or *"REDO <what to tweak>"* to adjust.`
+      : `🎬 Your video is ready!`;
+    await sendWhatsAppMessage(job, caption, videoUrl);
     console.log(`[POLL-VIDEO] WhatsApp notification sent for job ${job.id}`);
   } catch (sendErr: any) {
     console.error(`[POLL-VIDEO] WhatsApp send failed for job ${job.id}:`, sendErr?.message || sendErr);
@@ -345,10 +376,22 @@ async function uploadAndComplete(supabase: any, job: any, videoBytes: Uint8Array
 
 // ============ WHATSAPP NOTIFICATION ============
 async function sendWhatsAppMessage(
-  job: { boss_phone: string; company_id: string },
+  job: { boss_phone: string; company_id: string; delivery_channel?: string | null; delivery_from_number?: string | null },
   body: string,
   mediaUrl?: string,
 ) {
+  if (job.delivery_channel === 'marketer_hub') {
+    const res = await sendMarketerWhatsApp({
+      to: job.boss_phone,
+      body,
+      mediaUrls: mediaUrl ? [mediaUrl] : undefined,
+      fromOverride: job.delivery_from_number || undefined,
+    });
+    if (!res.ok) {
+      console.error('[POLL-VIDEO] marketer_hub send failed:', res.error);
+    }
+    return;
+  }
   const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
   const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
   if (!TWILIO_SID || !TWILIO_TOKEN) {

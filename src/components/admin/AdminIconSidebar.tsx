@@ -19,6 +19,7 @@ import {
   Megaphone,
   MessageSquare,
   Moon,
+  Rocket,
   ScrollText,
   Search,
   Settings,
@@ -159,6 +160,7 @@ export const AdminIconSidebar = ({
     {
       title: "Content & Growth",
       items: [
+        { id: "marketer-saas", label: "Marketer SaaS", icon: Rocket, tab: "marketer-saas" },
         { id: "video-studio", label: "Video Studio", icon: Clapperboard, tab: "video-studio" },
         { id: "image-gen", label: "Image Studio", icon: Sparkles, tab: "image-gen" },
         { id: "media", label: "Media Library", icon: Image, tab: "media" },

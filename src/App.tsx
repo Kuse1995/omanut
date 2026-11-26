@@ -42,6 +42,7 @@ import DataDeletion from "./pages/DataDeletion";
 import MetaOAuthCallback from "./pages/MetaOAuthCallback";
 import SocialOAuthCallback from "./pages/SocialOAuthCallback";
 import SocialConnectLink from "./pages/SocialConnectLink";
+import MobileStudio from "./pages/MobileStudio";
 import Setup from "./pages/Setup";
 import SetupWizard from "./pages/SetupWizard";
 import Inbox from "./pages/Inbox";
@@ -104,6 +105,7 @@ const App = () => (
             <Route path="/auth/linkedin-pages/callback" element={<SocialOAuthCallback platform="linkedin_pages" />} />
             <Route path="/auth/tiktok/callback" element={<SocialOAuthCallback platform="tiktok" />} />
             <Route path="/connect/:platform" element={<SocialConnectLink />} />
+            <Route path="/m/:token" element={<MobileStudio />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </CompanyProvider>

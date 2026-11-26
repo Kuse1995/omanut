@@ -6,6 +6,8 @@
 // Output: { session_id, pages: [{ id, name, picture_url, ig_user_id, has_instagram }] }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifyA2UIToken } from "../_shared/a2ui-token.ts";
+import { resolveEffectiveUserId } from "../_shared/marketer-billing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,50 +40,65 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Authenticate the calling user
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return jsonError(401, "Missing Authorization header");
-
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: authHeader } } }
-    );
-    const { data: userRes } = await supabaseUser.auth.getUser();
-    const user = userRes?.user;
-    if (!user) return jsonError(401, "Invalid session");
-
     const body = await req.json().catch(() => ({}));
-    const { code, redirect_uri, short_lived_token, company_id } = body ?? {};
+    const { code, redirect_uri, short_lived_token, company_id, a2ui_token } = body ?? {};
 
     if (!company_id) return jsonError(400, "company_id is required");
     if (!code && !short_lived_token) {
       return jsonError(400, "Either 'code' or 'short_lived_token' is required");
     }
 
-    // Verify the user belongs to this company (RLS-style check via service role)
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const { data: membership } = await supabase
-      .from("company_users")
-      .select("company_id")
-      .eq("user_id", user.id)
-      .eq("company_id", company_id)
-      .maybeSingle();
 
-    if (!membership) {
-      // Global admins can manage any company
-      const { data: adminRole } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (!adminRole) {
-        return jsonError(403, "You do not have access to this company");
+    // Authenticate caller: standard Supabase JWT OR signed passwordless A2UI token
+    const authHeader = req.headers.get("Authorization");
+    let effectiveUserId: string | null = null;
+
+    if (authHeader) {
+      const supabaseUser = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: userRes } = await supabaseUser.auth.getUser();
+      const user = userRes?.user;
+      if (user) {
+        const { data: membership } = await supabase
+          .from("company_users")
+          .select("company_id")
+          .eq("user_id", user.id)
+          .eq("company_id", company_id)
+          .maybeSingle();
+
+        if (!membership) {
+          const { data: adminRole } = await supabase
+            .from("user_roles")
+            .select("role")
+            .eq("user_id", user.id)
+            .eq("role", "admin")
+            .maybeSingle();
+          if (!adminRole) {
+            return jsonError(403, "You do not have access to this company");
+          }
+        }
+        effectiveUserId = user.id;
       }
+    }
+
+    if (!effectiveUserId && typeof a2ui_token === "string" && a2ui_token.trim()) {
+      const verified = await verifyA2UIToken(supabase, a2ui_token.trim());
+      if (!verified.valid) return jsonError(401, verified.reason);
+      if (verified.companyId !== company_id) {
+        return jsonError(403, "Studio link does not match company_id");
+      }
+      effectiveUserId = await resolveEffectiveUserId(supabase, company_id);
+    }
+
+    if (!effectiveUserId) {
+      return jsonError(401, "Invalid session or missing authorization");
     }
 
     // Step 1: get a user access token
@@ -162,7 +179,7 @@ Deno.serve(async (req) => {
     const { data: session, error: sessionErr } = await supabase
       .from("meta_oauth_sessions")
       .insert({
-        user_id: user.id,
+        user_id: effectiveUserId,
         company_id,
         pages: cachedPages,
       })

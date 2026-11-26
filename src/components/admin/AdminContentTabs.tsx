@@ -15,6 +15,7 @@ import { ContentSchedulerPanel } from "./ContentSchedulerPanel";
 import { VideoStudioPanel } from "./VideoStudioPanel";
 import { AdsPanel } from "./AdsPanel";
 import { RuleViolationsPanel } from "./RuleViolationsPanel";
+import { MarketerSaasPanel } from "./MarketerSaasPanel";
 
 interface AdminContentTabsProps {
   activeTab: string;
@@ -50,6 +51,8 @@ export const AdminContentTabs = ({ activeTab, onNavigateTab }: AdminContentTabsP
             Select a company to review Rule Violations
           </div>
         );
+      case "marketer-saas":
+        return <MarketerSaasPanel />;
       case "video-studio":
         return <VideoStudioPanel />;
       case "image-gen":

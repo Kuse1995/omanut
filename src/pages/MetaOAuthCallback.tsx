@@ -27,12 +27,28 @@ const MetaOAuthCallback = () => {
     try {
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage(payload, window.location.origin);
+        const t = window.setTimeout(() => {
+          window.close();
+        }, 300);
+        return () => window.clearTimeout(t);
       }
     } catch (e) {
       console.error('[MetaOAuthCallback] postMessage failed', e);
     }
 
-    // Give the message a moment to flush, then close.
+    // Mobile in-app browser redirect flow (when opened directly from /m/:token without window.opener)
+    if (state && state.startsWith('a2ui:')) {
+      const studioToken = state.slice(5).split(':')[0];
+      if (studioToken) {
+        const dest = new URL(`${window.location.origin}/m/${encodeURIComponent(studioToken)}`);
+        dest.searchParams.set('tab', 'connect');
+        if (code) dest.searchParams.set('meta_code', code);
+        if (error) dest.searchParams.set('meta_error', error);
+        window.location.replace(dest.toString());
+        return;
+      }
+    }
+
     const t = window.setTimeout(() => {
       window.close();
     }, 300);

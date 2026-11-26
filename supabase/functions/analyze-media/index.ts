@@ -85,6 +85,9 @@ Your task is to suggest:
 2. A concise description (1-2 sentences) of what the image shows
 3. Relevant tags (3-5 comma-separated keywords)
 4. A suggested product name based on visible labels, text, or visual cues${bmsContext}
+5. A visual social-media quality score from 1 to 10 (lighting, framing, clarity, scroll-stopping appeal)
+6. The best social format: one of "reel", "carousel", "feed", or "story"
+7. 3 short, catchy social-media hook ideas (max 12 words each) tailored to this visual
 
 Return your response as a valid JSON object (no markdown, no code fences) with this exact structure:
 {
@@ -93,7 +96,10 @@ Return your response as a valid JSON object (no markdown, no code fences) with t
   "tags": ["tag1", "tag2", "tag3"],
   "suggested_product_name": "name if identifiable or null",
   "bms_product_id": "matched BMS product ID or null",
-  "matched_product_name": "matched BMS product name or null"
+  "matched_product_name": "matched BMS product name or null",
+  "quality_score": 8,
+  "recommended_format": "feed",
+  "ai_hook_suggestions": ["Hook 1", "Hook 2", "Hook 3"]
 }`;
 
     const userPrompt = `Analyze this image from a ${businessType || 'business'} and suggest the appropriate category, description, and tags. Respond with ONLY the JSON object, no extra text.`;
@@ -155,6 +161,9 @@ Return your response as a valid JSON object (no markdown, no code fences) with t
     if (!suggestions.category) suggestions.category = 'other';
     if (!suggestions.description) suggestions.description = 'Media file';
     if (!suggestions.tags || !Array.isArray(suggestions.tags)) suggestions.tags = ['general'];
+    if (typeof suggestions.quality_score !== 'number') suggestions.quality_score = 7;
+    if (!suggestions.recommended_format) suggestions.recommended_format = 'feed';
+    if (!Array.isArray(suggestions.ai_hook_suggestions)) suggestions.ai_hook_suggestions = [];
 
     return new Response(JSON.stringify(suggestions), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

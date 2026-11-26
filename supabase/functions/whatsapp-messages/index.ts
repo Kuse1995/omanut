@@ -6834,6 +6834,92 @@ serve(async (req) => {
 
     console.log('WhatsApp message received:', { From, To, Body });
 
+    // ── SHARED SOCIAL MARKETER HUB INTERCEPT (coexistence-safe on +260768737233) ──
+    const marketerEnvNumber = (Deno.env.get('MARKETER_WHATSAPP_NUMBER') || '+260768737233').replace(/^whatsapp:/i, '').replace(/[^\d]/g, '');
+    const inboundToDigits = (To || '').replace(/^whatsapp:/i, '').replace(/[^\d]/g, '');
+    const inboundFromDigits = (From || '').replace(/^whatsapp:/i, '').replace(/[^\d]/g, '');
+    if (marketerEnvNumber && inboundToDigits === marketerEnvNumber) {
+      const trimmedBody = (Body || '').trim();
+      const forceBmsBypass = /^(\/bms\b|bms:)/i.test(trimmedBody);
+      let shouldRouteToMarketer = false;
+
+      if (!forceBmsBypass) {
+        const isDedicatedHub = (Deno.env.get('MARKETER_DEDICATED_HUB') || '').toLowerCase() === 'true';
+        if (isDedicatedHub || /^(demo|pitch|marketer)(\b|\s|$)/i.test(trimmedBody)) {
+          shouldRouteToMarketer = true;
+        } else if (inboundFromDigits) {
+          try {
+            const { data: marketerSub } = await supabase
+              .from('marketer_subscriptions')
+              .select('id')
+              .eq('primary_whatsapp_phone', inboundFromDigits)
+              .limit(1)
+              .maybeSingle();
+            if (marketerSub) shouldRouteToMarketer = true;
+          } catch (subLookupErr) {
+            // Fail open to normal company routing if marketer tables are not yet migrated
+            console.warn('[MARKETER-HUB] Subscription check skipped (fail-open):', subLookupErr);
+          }
+        }
+      }
+
+      if (shouldRouteToMarketer) {
+        console.log(`[MARKETER-HUB] Routing to whatsapp-marketer-agent: From=${From} media=${mediaFiles.length}`);
+
+        const processMarketerTask = (async () => {
+          try {
+            const TWILIO_SID_M = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_TOKEN_M = Deno.env.get('TWILIO_AUTH_TOKEN');
+            if (TWILIO_SID_M && TWILIO_TOKEN_M) {
+              const ackForm = new URLSearchParams();
+              ackForm.append('From', To);
+              ackForm.append('To', From);
+              ackForm.append('Body', '⏳');
+              fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID_M}/Messages.json`, {
+                method: 'POST',
+                headers: {
+                  Authorization: 'Basic ' + btoa(`${TWILIO_SID_M}:${TWILIO_TOKEN_M}`),
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: ackForm.toString(),
+              }).catch((e) => console.error('[MARKETER-HUB] Ack send error:', e));
+            }
+
+            await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/whatsapp-marketer-agent`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                From,
+                To,
+                Body,
+                ProfileName,
+                MessageSid,
+                mediaFiles,
+              }),
+            });
+          } catch (hubErr) {
+            console.error('[MARKETER-HUB] Async dispatch error:', hubErr);
+          }
+        })();
+
+        if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+          (globalThis as any).EdgeRuntime.waitUntil(processMarketerTask);
+        } else {
+          await processMarketerTask;
+        }
+
+        return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'text/xml; charset=utf-8' },
+        });
+      }
+
+      console.log(`[MARKETER-HUB] Coexistence passthrough -> normal OmanutBMS flow for From=${From}`);
+    }
+
     // === CHECK FOR ONBOARDING KEYWORDS ===
     const onboardingKeywords = ['ONBOARD', 'SETUP', 'REGISTER', 'START SETUP', 'NEW COMPANY'];
     const isOnboardingRequest = onboardingKeywords.some(keyword => 

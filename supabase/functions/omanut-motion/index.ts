@@ -206,6 +206,8 @@ serve(async (req) => {
       // rendering; approved_plan renders a plan the owner already approved.
       plan_only = false,
       approved_plan = null,
+      delivery_channel = null,
+      boss_phone: explicitBossPhone = null,
     } = body ?? {};
 
     const refs: string[] = Array.isArray(image_urls) ? image_urls.filter((u: any) => !!u) : [];
@@ -412,51 +414,61 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "FAL_KEY not configured on the project" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const isMarketerHub = (isCronAuth || isServiceRoleAuth) && delivery_channel === "marketer_hub";
     let bossPhone = "";
-    const { data: bossRow } = await supabase
-      .from("company_boss_phones")
-      .select("phone")
-      .eq("company_id", company_id)
-      .limit(1)
-      .maybeSingle();
-    if (bossRow?.phone) {
-      bossPhone = bossRow.phone.startsWith("whatsapp:") ? bossRow.phone : "whatsapp:" + bossRow.phone;
-    } else if (company.whatsapp_number) {
-      bossPhone = company.whatsapp_number.startsWith("whatsapp:") ? company.whatsapp_number : "whatsapp:" + company.whatsapp_number;
+    if (isMarketerHub && explicitBossPhone) {
+      bossPhone = String(explicitBossPhone).startsWith("whatsapp:")
+        ? String(explicitBossPhone)
+        : "whatsapp:" + String(explicitBossPhone).replace(/^\+?/, "+");
+    } else {
+      const { data: bossRow } = await supabase
+        .from("company_boss_phones")
+        .select("phone")
+        .eq("company_id", company_id)
+        .limit(1)
+        .maybeSingle();
+      if (bossRow?.phone) {
+        bossPhone = bossRow.phone.startsWith("whatsapp:") ? bossRow.phone : "whatsapp:" + bossRow.phone;
+      } else if (company.whatsapp_number) {
+        bossPhone = company.whatsapp_number.startsWith("whatsapp:") ? company.whatsapp_number : "whatsapp:" + company.whatsapp_number;
+      }
     }
     if (!bossPhone) {
       return new Response(JSON.stringify({ error: "No boss phone or WhatsApp number on file for this company" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // ── SPEND GUARDRAIL ────────────────────────────────────────────────
-    // Every actual render costs tenant credits. Reject when the balance
-    // can't cover it, and deduct atomically (plan_only previews are free).
+    // Every actual render costs tenant credits (marketer_hub enforces its own monthly video quota).
     const seconds = Math.max(1, Number(duration) || 5);
     const perSecond = resolution === "1080p" ? 0.124 : resolution === "480p" ? 0.024 : 0.056; // ≈ fal Seedance pricing
-    const cost = Math.max(1, Math.ceil(seconds * perSecond * 10)); // 1 credit ≈ $0.10
+    const cost = isMarketerHub ? 0 : Math.max(1, Math.ceil(seconds * perSecond * 10)); // 1 credit ≈ $0.10
     const balance = Number(company.credit_balance ?? 0);
-    if (balance < cost) {
-      return new Response(JSON.stringify({
-        error: "Insufficient credits for this render",
-        required_credits: cost,
-        credit_balance: balance,
-        hint: "Top up your plan or lower the resolution/duration.",
-      }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    let remainingCredits = balance;
+    if (cost > 0) {
+      if (balance < cost) {
+        return new Response(JSON.stringify({
+          error: "Insufficient credits for this render",
+          required_credits: cost,
+          credit_balance: balance,
+          hint: "Top up your plan or lower the resolution/duration.",
+        }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const { data: deducted, error: deductErr } = await supabase
+        .from("companies")
+        .update({ credit_balance: balance - cost })
+        .eq("id", company_id)
+        .gte("credit_balance", cost)
+        .select("credit_balance")
+        .maybeSingle();
+      if (deductErr || !deducted) {
+        return new Response(JSON.stringify({ error: "Insufficient credits for this render", required_credits: cost, credit_balance: balance }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      remainingCredits = Number(deducted.credit_balance ?? 0);
+      console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
     }
-    const { data: deducted, error: deductErr } = await supabase
-      .from("companies")
-      .update({ credit_balance: balance - cost })
-      .eq("id", company_id)
-      .gte("credit_balance", cost)
-      .select("credit_balance")
-      .maybeSingle();
-    if (deductErr || !deducted) {
-      return new Response(JSON.stringify({ error: "Insufficient credits for this render", required_credits: cost, credit_balance: balance }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const remainingCredits = Number(deducted.credit_balance ?? 0);
-    console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
 
     const refundCredits = async () => {
+      if (cost <= 0) return;
       try {
         await supabase.rpc("add_credits", {
           p_company_id: company_id,
@@ -523,6 +535,8 @@ serve(async (req) => {
         aspect_ratio,
         boss_phone: bossPhone,
         video_provider: "seedance",
+        delivery_channel: isMarketerHub ? "marketer_hub" : null,
+        delivery_from_number: isMarketerHub ? (Deno.env.get("MARKETER_WHATSAPP_NUMBER") || "+260768737233") : null,
         scheduled_post_data: {
           surface: "omanut_motion",
           brief,
