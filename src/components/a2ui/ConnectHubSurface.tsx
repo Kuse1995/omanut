@@ -101,16 +101,21 @@ export function ConnectHubSurface({
 
     const url = new URL('https://www.facebook.com/v19.0/dialog/oauth');
     url.searchParams.set('client_id', connections.meta_app_id);
-    if (connections.meta_config_id) url.searchParams.set('config_id', connections.meta_config_id);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('state', state);
-    url.searchParams.set(
-      'scope',
-      'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,' +
-        'pages_manage_posts,instagram_basic,instagram_manage_messages,' +
-        'instagram_manage_comments,instagram_content_publish,business_management'
-    );
+    if (connections.meta_config_id) {
+      // Facebook Login for Business governs permissions via config_id; passing scope triggers conflicts.
+      url.searchParams.set('config_id', connections.meta_config_id);
+      url.searchParams.set('override_default_response_type', 'true');
+    } else {
+      url.searchParams.set(
+        'scope',
+        'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,' +
+          'pages_manage_posts,instagram_basic,instagram_manage_messages,' +
+          'instagram_manage_comments,instagram_content_publish,business_management'
+      );
+    }
 
     const popup = window.open(url.toString(), 'meta-oauth', 'width=600,height=720,menubar=no,toolbar=no,location=no');
     if (!popup) {

@@ -287,16 +287,21 @@ export const MetaIntegrationsPanel = () => {
     // forces response_type=token, so we cannot use the SDK at all.
     const url = new URL('https://www.facebook.com/v19.0/dialog/oauth');
     url.searchParams.set('client_id', metaConfig.app_id);
-    if (metaConfig.config_id) url.searchParams.set('config_id', metaConfig.config_id);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('redirect_uri', oauthRedirectUri);
     url.searchParams.set('state', state);
-    url.searchParams.set(
-      'scope',
-      'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,' +
-        'pages_manage_posts,instagram_basic,instagram_manage_messages,' +
-        'instagram_manage_comments,instagram_content_publish,business_management'
-    );
+    if (metaConfig.config_id) {
+      // Facebook Login for Business governs permissions via config_id; passing scope triggers conflicts.
+      url.searchParams.set('config_id', metaConfig.config_id);
+      url.searchParams.set('override_default_response_type', 'true');
+    } else {
+      url.searchParams.set(
+        'scope',
+        'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging,' +
+          'pages_manage_posts,instagram_basic,instagram_manage_messages,' +
+          'instagram_manage_comments,instagram_content_publish,business_management'
+      );
+    }
 
     const popup = window.open(
       url.toString(),
