@@ -64,6 +64,13 @@
       "when": 1795128427461,
       "tag": "0008_team_member_company_access",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795730342628,
+      "tag": "0009_whatsapp_social_marketer",
+      "breakpoints": true
     }
   ]
 }

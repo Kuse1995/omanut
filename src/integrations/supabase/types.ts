@@ -14,6 +14,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      a2ui_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          phone: string
+          result_payload: Json | null
+          status: string
+          submitted_at: string | null
+          surface_type: string
+          token_hash: string
+          ui_spec: Json
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          phone: string
+          result_payload?: Json | null
+          status?: string
+          submitted_at?: string | null
+          surface_type: string
+          token_hash: string
+          ui_spec?: Json
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          phone?: string
+          result_payload?: Json | null
+          status?: string
+          submitted_at?: string | null
+          surface_type?: string
+          token_hash?: string
+          ui_spec?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "a2ui_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       action_items: {
         Row: {
           action_type: string
@@ -1750,6 +1800,7 @@ export type Database = {
       }
       company_media: {
         Row: {
+          ai_hook_suggestions: Json
           asset_validation_status: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id: string | null
           category: Database["public"]["Enums"]["media_category"]
@@ -1762,14 +1813,22 @@ export type Database = {
           file_size: number
           file_type: string
           id: string
+          last_posted_at: string | null
           media_type: string
+          priority_rank: number | null
+          quality_score: number | null
+          recommended_format: string | null
+          source_channel: string
           tags: string[] | null
           thumbnail_url: string | null
+          times_posted: number
           updated_at: string
           uploaded_by: string | null
           validation_reason: string | null
+          vault_status: string
         }
         Insert: {
+          ai_hook_suggestions?: Json
           asset_validation_status?: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
@@ -1782,14 +1841,22 @@ export type Database = {
           file_size: number
           file_type: string
           id?: string
+          last_posted_at?: string | null
           media_type: string
+          priority_rank?: number | null
+          quality_score?: number | null
+          recommended_format?: string | null
+          source_channel?: string
           tags?: string[] | null
           thumbnail_url?: string | null
+          times_posted?: number
           updated_at?: string
           uploaded_by?: string | null
           validation_reason?: string | null
+          vault_status?: string
         }
         Update: {
+          ai_hook_suggestions?: Json
           asset_validation_status?: Database["public"]["Enums"]["asset_validation_status_t"]
           bms_product_id?: string | null
           category?: Database["public"]["Enums"]["media_category"]
@@ -1802,12 +1869,19 @@ export type Database = {
           file_size?: number
           file_type?: string
           id?: string
+          last_posted_at?: string | null
           media_type?: string
+          priority_rank?: number | null
+          quality_score?: number | null
+          recommended_format?: string | null
+          source_channel?: string
           tags?: string[] | null
           thumbnail_url?: string | null
+          times_posted?: number
           updated_at?: string
           uploaded_by?: string | null
           validation_reason?: string | null
+          vault_status?: string
         }
         Relationships: [
           {
@@ -2852,6 +2926,313 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketer_messages: {
+        Row: {
+          company_id: string
+          content: string
+          created_at: string
+          id: string
+          media_urls: string[]
+          phone: string
+          role: string
+          tool_context: Json
+        }
+        Insert: {
+          company_id: string
+          content: string
+          created_at?: string
+          id?: string
+          media_urls?: string[]
+          phone: string
+          role: string
+          tool_context?: Json
+        }
+        Update: {
+          company_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          media_urls?: string[]
+          phone?: string
+          role?: string
+          tool_context?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketer_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketer_payments: {
+        Row: {
+          amount: number
+          company_id: string
+          created_at: string
+          currency: string
+          id: string
+          notes: string | null
+          paid_at: string
+          payment_type: string
+          provider: string
+          recorded_by: string | null
+          reference_code: string | null
+          status: string
+          subscription_id: string
+        }
+        Insert: {
+          amount: number
+          company_id: string
+          created_at?: string
+          currency?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string
+          payment_type: string
+          provider?: string
+          recorded_by?: string | null
+          reference_code?: string | null
+          status?: string
+          subscription_id: string
+        }
+        Update: {
+          amount?: number
+          company_id?: string
+          created_at?: string
+          currency?: string
+          id?: string
+          notes?: string | null
+          paid_at?: string
+          payment_type?: string
+          provider?: string
+          recorded_by?: string | null
+          reference_code?: string | null
+          status?: string
+          subscription_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketer_payments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketer_payments_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "marketer_subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketer_plans: {
+        Row: {
+          created_at: string
+          currency: string
+          default_monthly_fee: number
+          default_setup_fee: number
+          description: string | null
+          features: Json
+          id: string
+          is_active: boolean
+          max_brands: number
+          monthly_images_limit: number
+          monthly_posts_limit: number
+          monthly_videos_limit: number
+          name: string
+          slug: string
+          vault_storage_mb: number
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          default_monthly_fee?: number
+          default_setup_fee?: number
+          description?: string | null
+          features?: Json
+          id?: string
+          is_active?: boolean
+          max_brands?: number
+          monthly_images_limit?: number
+          monthly_posts_limit?: number
+          monthly_videos_limit?: number
+          name: string
+          slug: string
+          vault_storage_mb?: number
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          default_monthly_fee?: number
+          default_setup_fee?: number
+          description?: string | null
+          features?: Json
+          id?: string
+          is_active?: boolean
+          max_brands?: number
+          monthly_images_limit?: number
+          monthly_posts_limit?: number
+          monthly_videos_limit?: number
+          name?: string
+          slug?: string
+          vault_storage_mb?: number
+        }
+        Relationships: []
+      }
+      marketer_sessions: {
+        Row: {
+          active_company_id: string | null
+          last_a2ui_session_id: string | null
+          last_message_at: string
+          mode: string
+          pending_draft: Json
+          phone: string
+          updated_at: string
+        }
+        Insert: {
+          active_company_id?: string | null
+          last_a2ui_session_id?: string | null
+          last_message_at?: string
+          mode?: string
+          pending_draft?: Json
+          phone: string
+          updated_at?: string
+        }
+        Update: {
+          active_company_id?: string | null
+          last_a2ui_session_id?: string | null
+          last_message_at?: string
+          mode?: string
+          pending_draft?: Json
+          phone?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketer_sessions_active_company_id_fkey"
+            columns: ["active_company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketer_subscriptions: {
+        Row: {
+          autopilot_level: string
+          company_id: string
+          contact_name: string | null
+          created_at: string
+          currency: string
+          current_period_end: string
+          current_period_start: string
+          grace_until: string | null
+          id: string
+          metadata: Json
+          monthly_fee_amount: number
+          monthly_images_limit: number
+          monthly_posts_limit: number
+          monthly_videos_limit: number
+          notes: string | null
+          plan_id: string | null
+          primary_whatsapp_phone: string
+          provisioned_by: string | null
+          setup_fee_amount: number
+          setup_fee_paid: boolean
+          setup_fee_paid_at: string | null
+          status: string
+          updated_at: string
+          usage_images_used: number
+          usage_posts_used: number
+          usage_reset_at: string
+          usage_videos_used: number
+          weekly_kickoff_day: number
+          weekly_kickoff_hour: number
+        }
+        Insert: {
+          autopilot_level?: string
+          company_id: string
+          contact_name?: string | null
+          created_at?: string
+          currency?: string
+          current_period_end?: string
+          current_period_start?: string
+          grace_until?: string | null
+          id?: string
+          metadata?: Json
+          monthly_fee_amount?: number
+          monthly_images_limit?: number
+          monthly_posts_limit?: number
+          monthly_videos_limit?: number
+          notes?: string | null
+          plan_id?: string | null
+          primary_whatsapp_phone: string
+          provisioned_by?: string | null
+          setup_fee_amount?: number
+          setup_fee_paid?: boolean
+          setup_fee_paid_at?: string | null
+          status?: string
+          updated_at?: string
+          usage_images_used?: number
+          usage_posts_used?: number
+          usage_reset_at?: string
+          usage_videos_used?: number
+          weekly_kickoff_day?: number
+          weekly_kickoff_hour?: number
+        }
+        Update: {
+          autopilot_level?: string
+          company_id?: string
+          contact_name?: string | null
+          created_at?: string
+          currency?: string
+          current_period_end?: string
+          current_period_start?: string
+          grace_until?: string | null
+          id?: string
+          metadata?: Json
+          monthly_fee_amount?: number
+          monthly_images_limit?: number
+          monthly_posts_limit?: number
+          monthly_videos_limit?: number
+          notes?: string | null
+          plan_id?: string | null
+          primary_whatsapp_phone?: string
+          provisioned_by?: string | null
+          setup_fee_amount?: number
+          setup_fee_paid?: boolean
+          setup_fee_paid_at?: string | null
+          status?: string
+          updated_at?: string
+          usage_images_used?: number
+          usage_posts_used?: number
+          usage_reset_at?: string
+          usage_videos_used?: number
+          weekly_kickoff_day?: number
+          weekly_kickoff_hour?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketer_subscriptions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketer_subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "marketer_plans"
             referencedColumns: ["id"]
           },
         ]
@@ -4638,6 +5019,8 @@ export type Database = {
           boss_phone: string
           company_id: string
           created_at: string | null
+          delivery_channel: string | null
+          delivery_from_number: string | null
           error_message: string | null
           id: string
           operation_name: string
@@ -4654,6 +5037,8 @@ export type Database = {
           boss_phone: string
           company_id: string
           created_at?: string | null
+          delivery_channel?: string | null
+          delivery_from_number?: string | null
           error_message?: string | null
           id?: string
           operation_name: string
@@ -4670,6 +5055,8 @@ export type Database = {
           boss_phone?: string
           company_id?: string
           created_at?: string | null
+          delivery_channel?: string | null
+          delivery_from_number?: string | null
           error_message?: string | null
           id?: string
           operation_name?: string
