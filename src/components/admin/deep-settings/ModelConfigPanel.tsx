@@ -10,51 +10,100 @@ interface ModelConfigPanelProps {
   updateConfig: (updates: Partial<AIConfig>) => void;
 }
 
-const AVAILABLE_MODELS = {
+interface ModelOption {
+  value: string;
+  label: string;
+  description: string;
+  tier: string;
+}
+
+const AVAILABLE_MODELS: Record<"primary" | "routing" | "analysis" | "voice", ModelOption[]> = {
   primary: [
-    { value: 'zai/glm-4.7', label: 'GLM 4.7', description: 'Strong tool-calling, tight prompt adherence, lower cost', tier: 'standard' },
-    { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro Preview', description: 'Most capable, excellent tool-calling', tier: 'premium' },
-    { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Premium reasoning, large context', tier: 'premium' },
-    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Fast, cost-effective', tier: 'standard' },
-    { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Fastest, simple tasks', tier: 'economy' },
-    { value: 'openai/gpt-5', label: 'GPT-5', description: 'Powerful all-rounder', tier: 'premium' },
-    { value: 'openai/gpt-5-mini', label: 'GPT-5 Mini', description: 'Balanced cost/performance', tier: 'standard' },
-    { value: 'openai/gpt-5-nano', label: 'GPT-5 Nano', description: 'Speed-optimized', tier: 'economy' },
+    { value: "deepseek-chat", label: "DeepSeek Chat", description: "Default production model — fast reasoning + tool calling (direct API)", tier: "economy" },
+    { value: "deepseek-reasoner", label: "DeepSeek Reasoner", description: "Fallback deep reasoning model (direct DeepSeek API)", tier: "standard" },
+    { value: "kimi-k2.6", label: "Moonshot Kimi K2.6", description: "Strong tool-calling + long context (direct Moonshot API)", tier: "standard" },
+    { value: "zai/glm-5.3-flash", label: "GLM 5.3 Flash", description: "Default farm harness model — fast & conversational (Zhipu)", tier: "economy" },
+    { value: "zai/glm-4.7", label: "GLM 4.7", description: "Strong tool-calling, tight prompt adherence, lower cost", tier: "standard" },
+    { value: "minimax/MiniMax-M3", label: "MiniMax M3", description: "MiniMax text & tool-calling model", tier: "standard" },
+    { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Fast, cost-effective Google direct", tier: "standard" },
+    { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Premium reasoning, large context", tier: "premium" },
+    { value: "google/gemini-3-pro-preview", label: "Gemini 3 Pro Preview", description: "Most capable Gemini preview", tier: "premium" },
+    { value: "openai/gpt-5", label: "GPT-5", description: "Powerful all-rounder", tier: "premium" },
+    { value: "openai/gpt-5-mini", label: "GPT-5 Mini", description: "Balanced cost/performance", tier: "standard" },
+    { value: "openai/gpt-5-nano", label: "GPT-5 Nano", description: "Speed-optimized", tier: "economy" },
   ],
   routing: [
-    { value: 'deepseek-chat', label: 'DeepSeek Chat', description: 'Fast intent classification', tier: 'economy' },
-    { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Quick routing', tier: 'economy' },
-    { value: 'openai/gpt-5-nano', label: 'GPT-5 Nano', description: 'Speed-optimized', tier: 'economy' },
+    { value: "deepseek-chat", label: "DeepSeek Chat", description: "Fast intent classification (default)", tier: "economy" },
+    { value: "zai/glm-5.3-flash", label: "GLM 5.3 Flash", description: "Fast Zhipu routing", tier: "economy" },
+    { value: "kimi-k2.6", label: "Moonshot Kimi K2.6", description: "Moonshot routing", tier: "standard" },
+    { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", description: "Quick routing", tier: "economy" },
+    { value: "openai/gpt-5-nano", label: "GPT-5 Nano", description: "Speed-optimized", tier: "economy" },
   ],
   analysis: [
-    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Good balance for analysis', tier: 'standard' },
-    { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Deep analysis', tier: 'premium' },
-    { value: 'openai/gpt-5-mini', label: 'GPT-5 Mini', description: 'Balanced analysis', tier: 'standard' },
+    { value: "deepseek-chat", label: "DeepSeek Chat", description: "Fast quality scoring & error detection", tier: "economy" },
+    { value: "zai/glm-5.3-flash", label: "GLM 5.3 Flash", description: "Low-cost Zhipu analysis", tier: "economy" },
+    { value: "kimi-k2.6", label: "Moonshot Kimi K2.6", description: "Detailed conversation review", tier: "standard" },
+    { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Good balance for analysis", tier: "standard" },
+    { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep analysis", tier: "premium" },
+    { value: "openai/gpt-5-mini", label: "GPT-5 Mini", description: "Balanced analysis", tier: "standard" },
   ],
   voice: [
-    { value: 'gpt-4o-realtime-preview-2024-12-17', label: 'GPT-4o Realtime', description: 'Latest realtime voice', tier: 'premium' },
+    { value: "gpt-4o-realtime-preview-2024-12-17", label: "GPT-4o Realtime", description: "Latest realtime voice", tier: "premium" },
   ],
 };
 
 const VOICE_STYLES = [
-  { value: 'alloy', label: 'Alloy', description: 'Neutral, balanced' },
-  { value: 'echo', label: 'Echo', description: 'Warm, friendly' },
-  { value: 'fable', label: 'Fable', description: 'Storytelling, expressive' },
-  { value: 'onyx', label: 'Onyx', description: 'Deep, authoritative' },
-  { value: 'nova', label: 'Nova', description: 'Bright, energetic' },
-  { value: 'shimmer', label: 'Shimmer', description: 'Soft, gentle' },
+  { value: "alloy", label: "Alloy", description: "Neutral, balanced" },
+  { value: "echo", label: "Echo", description: "Warm, friendly" },
+  { value: "fable", label: "Fable", description: "Storytelling, expressive" },
+  { value: "onyx", label: "Onyx", description: "Deep, authoritative" },
+  { value: "nova", label: "Nova", description: "Bright, energetic" },
+  { value: "shimmer", label: "Shimmer", description: "Soft, gentle" },
 ];
+
+const VIDEO_PROVIDERS = [
+  { value: "seedance", label: "ByteDance Seedance 2.5 (Omanut Motion / fal.ai)", badge: "~$0.12–$0.62/clip", tier: "economy" },
+  { value: "minimax", label: "MiniMax Hailuo 2.3", badge: "$0.32/video", tier: "economy" },
+  { value: "veo", label: "Google Veo", badge: "premium", tier: "premium" },
+];
+
+function ensureCurrentOption(list: ModelOption[], currentVal?: string): ModelOption[] {
+  if (!currentVal || list.some((m) => m.value === currentVal)) return list;
+  return [
+    ...list,
+    {
+      value: currentVal,
+      label: currentVal,
+      description: "Custom value stored in database",
+      tier: "custom",
+    },
+  ];
+}
 
 const getTierColor = (tier: string) => {
   switch (tier) {
-    case 'premium': return 'bg-amber-500/10 text-amber-600 border-amber-500/20';
-    case 'standard': return 'bg-blue-500/10 text-blue-600 border-blue-500/20';
-    case 'economy': return 'bg-green-500/10 text-green-600 border-green-500/20';
-    default: return 'bg-muted text-muted-foreground';
+    case "premium":
+      return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+    case "standard":
+      return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+    case "economy":
+      return "bg-green-500/10 text-green-600 border-green-500/20";
+    default:
+      return "bg-muted text-muted-foreground";
   }
 };
 
 export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps) => {
+  const primaryOptions = ensureCurrentOption(AVAILABLE_MODELS.primary, config.primary_model);
+  const routingOptions = ensureCurrentOption(AVAILABLE_MODELS.routing, config.routing_model);
+  const analysisOptions = ensureCurrentOption(AVAILABLE_MODELS.analysis, config.analysis_model);
+  const voiceOptions = ensureCurrentOption(AVAILABLE_MODELS.voice, config.voice_model);
+
+  const videoProviderExists = VIDEO_PROVIDERS.some((v) => v.value === config.video_provider);
+  const videoOptions = videoProviderExists || !config.video_provider
+    ? VIDEO_PROVIDERS
+    : [...VIDEO_PROVIDERS, { value: config.video_provider, label: config.video_provider, badge: "custom", tier: "custom" }];
+
   return (
     <div className="space-y-6">
       {/* Primary Conversation Model */}
@@ -64,7 +113,9 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
             <Brain className="h-4 w-4 text-primary" />
             Primary Conversation Model
           </CardTitle>
-          <CardDescription>Used for customer-facing conversations and complex interactions</CardDescription>
+          <CardDescription>
+            Used for the in-house pipeline when External Harness is off or falls back
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Select value={config.primary_model} onValueChange={(v) => updateConfig({ primary_model: v })}>
@@ -72,7 +123,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
               <SelectValue placeholder="Select model" />
             </SelectTrigger>
             <SelectContent>
-              {AVAILABLE_MODELS.primary.map(model => (
+              {primaryOptions.map((model) => (
                 <SelectItem key={model.value} value={model.value}>
                   <div className="flex items-center gap-2">
                     <span>{model.label}</span>
@@ -85,7 +136,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {AVAILABLE_MODELS.primary.find(m => m.value === config.primary_model)?.description}
+            {primaryOptions.find((m) => m.value === config.primary_model)?.description}
           </p>
         </CardContent>
       </Card>
@@ -105,7 +156,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
               <SelectValue placeholder="Select model" />
             </SelectTrigger>
             <SelectContent>
-              {AVAILABLE_MODELS.routing.map(model => (
+              {routingOptions.map((model) => (
                 <SelectItem key={model.value} value={model.value}>
                   <div className="flex items-center gap-2">
                     <span>{model.label}</span>
@@ -118,7 +169,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {AVAILABLE_MODELS.routing.find(m => m.value === config.routing_model)?.description}
+            {routingOptions.find((m) => m.value === config.routing_model)?.description}
           </p>
         </CardContent>
       </Card>
@@ -138,7 +189,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
               <SelectValue placeholder="Select model" />
             </SelectTrigger>
             <SelectContent>
-              {AVAILABLE_MODELS.analysis.map(model => (
+              {analysisOptions.map((model) => (
                 <SelectItem key={model.value} value={model.value}>
                   <div className="flex items-center gap-2">
                     <span>{model.label}</span>
@@ -171,7 +222,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
                   <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {AVAILABLE_MODELS.voice.map(model => (
+                  {voiceOptions.map((model) => (
                     <SelectItem key={model.value} value={model.value}>
                       {model.label}
                     </SelectItem>
@@ -186,7 +237,7 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
                   <SelectValue placeholder="Select voice" />
                 </SelectTrigger>
                 <SelectContent>
-                  {VOICE_STYLES.map(voice => (
+                  {VOICE_STYLES.map((voice) => (
                     <SelectItem key={voice.value} value={voice.value}>
                       <div className="flex flex-col">
                         <span>{voice.label}</span>
@@ -216,24 +267,24 @@ export const ModelConfigPanel = ({ config, updateConfig }: ModelConfigPanelProps
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="minimax">
-                <div className="flex items-center gap-2">
-                  <span>MiniMax Hailuo 2.3</span>
-                  <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">$0.32/video</Badge>
-                </div>
-              </SelectItem>
-              <SelectItem value="veo">
-                <div className="flex items-center gap-2">
-                  <span>Google Veo</span>
-                  <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">premium</Badge>
-                </div>
-              </SelectItem>
+              {videoOptions.map((prov) => (
+                <SelectItem key={prov.value} value={prov.value}>
+                  <div className="flex items-center gap-2">
+                    <span>{prov.label}</span>
+                    <Badge variant="outline" className={getTierColor(prov.tier)}>
+                      {prov.badge}
+                    </Badge>
+                  </div>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {config.video_provider === 'veo'
-              ? 'Higher quality video generation via Google Veo. Uses Gemini API.'
-              : 'Cost-effective 768P video at $0.32 per 10s clip. Supports image-to-video and text-to-video.'}
+            {config.video_provider === "seedance"
+              ? "Omanut Motion multi-agent storyboard + fal.ai Seedance 2.5 (reference-to-video & native audio)."
+              : config.video_provider === "veo"
+              ? "Higher quality video generation via Google Veo. Uses Gemini API."
+              : "Cost-effective 768P video at $0.32 per 10s clip. Supports image-to-video and text-to-video."}
           </p>
         </CardContent>
       </Card>

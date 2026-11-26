@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Bot, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/context/CompanyContext";
+import { logAdminAction } from "@/lib/adminAudit";
 import { toast } from "sonner";
 
 interface HarnessModePanelProps {
@@ -23,6 +25,7 @@ type HarnessMode = "off" | "pilot" | "on";
  * See docs/HARNESS-INTEGRATION.md.
  */
 export const HarnessModePanel = ({ companyId }: HarnessModePanelProps) => {
+  const { refreshCompanies } = useCompany();
   const [mode, setMode] = useState<HarnessMode>("off");
   const [pilotPhones, setPilotPhones] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -70,6 +73,13 @@ export const HarnessModePanel = ({ companyId }: HarnessModePanelProps) => {
       toast.error("Failed to update Harness Mode");
       return;
     }
+    await logAdminAction({
+      eventType: "admin_harness_mode_updated",
+      companyId,
+      message: `Updated External Harness mode to "${mode}"`,
+      details: { harness_mode: mode, pilot_phones: mode === "pilot" ? phones : [] },
+    });
+    await refreshCompanies();
     toast.success(mode === "off" ? "Harness disabled — in-house pipeline" : `Harness ${mode} saved`);
   };
 

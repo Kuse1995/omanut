@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MessageSquare, AlertTriangle, Settings, BarChart3, BookOpen, Cpu } from "lucide-react";
+import { MessageSquare, AlertTriangle, BarChart3, BookOpen, Cpu } from "lucide-react";
 import { AIPlayground } from "./AIPlayground";
 import { AIErrorTracker } from "./AIErrorTracker";
 import { AIDeepSettings } from "./AIDeepSettings";
@@ -11,8 +12,30 @@ interface AIControlPanelProps {
   companyId: string;
 }
 
+const VALID_SUBTABS = ["playground", "errors", "config", "metrics", "training"];
+
 export const AIControlPanel = ({ companyId }: AIControlPanelProps) => {
-  const [activeTab, setActiveTab] = useState("playground");
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSubTab = searchParams.get("subtab");
+  const initialTab = urlSubTab && VALID_SUBTABS.includes(urlSubTab) ? urlSubTab : "playground";
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (urlSubTab && VALID_SUBTABS.includes(urlSubTab) && urlSubTab !== activeTab) {
+      setActiveTab(urlSubTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlSubTab]);
+
+  const handleSubTabChange = (nextTab: string) => {
+    setActiveTab(nextTab);
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "ai-control");
+    next.set("subtab", nextTab);
+    if (nextTab !== "config") next.delete("section");
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <div className="space-y-6">
@@ -21,7 +44,7 @@ export const AIControlPanel = ({ companyId }: AIControlPanelProps) => {
         <p className="text-muted-foreground">Test, train, and optimize your AI assistant</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={handleSubTabChange} className="w-full">
         <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
           <TabsTrigger value="playground" className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4" />
@@ -50,11 +73,17 @@ export const AIControlPanel = ({ companyId }: AIControlPanelProps) => {
         </TabsContent>
 
         <TabsContent value="errors" className="mt-6">
-          <AIErrorTracker companyId={companyId} />
+          <AIErrorTracker
+            companyId={companyId}
+            onNavigateSubTab={handleSubTabChange}
+            onInspectConversation={(convId) =>
+              navigate(`/admin/dashboard?company=${companyId}&tab=conversations&conv=${convId}`)
+            }
+          />
         </TabsContent>
 
         <TabsContent value="config" className="mt-6">
-          <AIDeepSettings companyId={companyId} />
+          <AIDeepSettings companyId={companyId} initialSubTab={searchParams.get("section") || undefined} />
         </TabsContent>
 
         <TabsContent value="metrics" className="mt-6">

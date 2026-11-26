@@ -15,7 +15,8 @@ import {
   Plug,
   Inbox as InboxIcon,
   Image as ImageIcon,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ const navigation = [
   { name: "Conversations", href: "/conversations", icon: MessageSquare },
   { name: "Reservations", href: "/reservations", icon: Calendar },
   { name: "Supervisor AI", href: "/supervisor-insights", icon: Brain },
+  { name: "Rule Violations", href: "/rule-violations", icon: AlertTriangle },
   { name: "Client Insights", href: "/client-insights", icon: Info },
   { name: "Segments", href: "/customer-segments", icon: Users },
   { name: "Live Demo", href: "/live-demo", icon: Phone },

@@ -24,7 +24,7 @@ import { buildBrandBlock } from "../_shared/marketing.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // ── THE STYLE ENGINE ────────────────────────────────────────────────────
@@ -164,15 +164,28 @@ async function creativeBrain(messages: any[], opts: { companyId: string; metadat
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret) {
-    const auth = req.headers.get("authorization") || "";
-    if (auth !== "Bearer " + cronSecret) {
-      return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: corsHeaders });
-    }
-  }
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
 
-  const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const isCronAuth = !!cronSecret && authHeader === "Bearer " + cronSecret;
+  const isServiceRoleAuth = token === serviceRoleKey;
+
+  let authedUserId: string | null = null;
+  if (!isCronAuth && !isServiceRoleAuth) {
+    if (!token) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !userData?.user) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    authedUserId = userData.user.id;
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -201,6 +214,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "company_id and brief are required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Verify per-tenant permission when called with a user JWT
+    if (authedUserId) {
+      const { data: isAdmin } = await supabase.rpc("has_role", {
+        _user_id: authedUserId,
+        _role: "admin",
+      });
+      if (!isAdmin) {
+        const { data: member } = await supabase
+          .from("company_users")
+          .select("role")
+          .eq("company_id", company_id)
+          .eq("user_id", authedUserId)
+          .maybeSingle();
+        if (!member || !["owner", "manager", "contributor"].includes(member.role)) {
+          return new Response(JSON.stringify({ error: "Insufficient permissions for this company" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    }
+
     const FAL_KEY = Deno.env.get("FAL_KEY");
 
     const { data: company } = await supabase
@@ -212,57 +244,12 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Company not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // ── SPEND GUARDRAIL ────────────────────────────────────────────────
-    // Every render costs tenant credits. Reject when the balance can't cover
-    // it, and deduct atomically (a conditional update — if another render
-    // raced us and drained the balance, the update matches no rows).
-    const seconds = Math.max(1, Number(duration) || 5);
-    const perSecond = resolution === "1080p" ? 0.124 : resolution === "480p" ? 0.024 : 0.056; // ≈ fal Seedance pricing
-    const cost = Math.max(1, Math.ceil(seconds * perSecond * 10)); // 1 credit ≈ $0.10
-    const balance = Number(company.credit_balance ?? 0);
-    if (balance < cost) {
-      return new Response(JSON.stringify({
-        error: "Insufficient credits for this render",
-        required_credits: cost,
-        credit_balance: balance,
-        hint: "Top up your plan or lower the resolution/duration.",
-      }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const { data: deducted, error: deductErr } = await supabase
-      .from("companies")
-      .update({ credit_balance: balance - cost })
-      .eq("id", company_id)
-      .gte("credit_balance", cost)
-      .select("credit_balance")
-      .maybeSingle();
-    if (deductErr || !deducted) {
-      return new Response(JSON.stringify({ error: "Insufficient credits for this render", required_credits: cost, credit_balance: balance }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const remainingCredits = Number(deducted.credit_balance ?? 0);
-    console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
-
     // Brand Kit — the on-brand guardrail for every video the agent makes.
     let brandBlock = "";
     try {
       const { data: kit } = await supabase.from("brand_kits").select("tone, colors, no_go_phrases, guidelines").eq("company_id", company_id).maybeSingle();
       brandBlock = buildBrandBlock(kit);
     } catch { /* brand kit is optional */ }
-
-    let bossPhone = "";
-    const { data: bossRow } = await supabase
-      .from("company_boss_phones")
-      .select("phone")
-      .eq("company_id", company_id)
-      .limit(1)
-      .maybeSingle();
-    if (bossRow?.phone) {
-      bossPhone = bossRow.phone.startsWith("whatsapp:") ? bossRow.phone : "whatsapp:" + bossRow.phone;
-    } else if (company.whatsapp_number) {
-      bossPhone = company.whatsapp_number.startsWith("whatsapp:") ? company.whatsapp_number : "whatsapp:" + company.whatsapp_number;
-    }
-    if (!bossPhone) {
-      return new Response(JSON.stringify({ error: "No boss phone or WhatsApp number on file for this company" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
 
     const facts = [
       company.voice_style ? "BRAND VOICE: " + company.voice_style : "",
@@ -375,7 +362,6 @@ serve(async (req) => {
         { role: "system", content: directorSystem },
         { role: "user", content: "MARKETING PLAN:\n" + JSON.stringify(script) + "\n\nBRIEF: " + String(brief) + (input_image_url ? "\n\nA reference product image will be attached as the first frame input." : "") },
       ],
-      [],
       { companyId: company_id, metadata: company?.metadata || null, mode: "content" }
     );
     let parsed2 = parseShotLines(directorRes.ok && directorRes.message?.content ? directorRes.message.content : "");
@@ -407,7 +393,7 @@ serve(async (req) => {
 
 
     // plan_only (Director-conversation preview): return the plan WITHOUT
-    // rendering. The console shows it to the owner for approval.
+    // rendering or deducting credits.
     if (plan_only) {
       return new Response(JSON.stringify({
         build: "motion-v2-styles",
@@ -425,6 +411,62 @@ serve(async (req) => {
     if (!FAL_KEY) {
       return new Response(JSON.stringify({ error: "FAL_KEY not configured on the project" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    let bossPhone = "";
+    const { data: bossRow } = await supabase
+      .from("company_boss_phones")
+      .select("phone")
+      .eq("company_id", company_id)
+      .limit(1)
+      .maybeSingle();
+    if (bossRow?.phone) {
+      bossPhone = bossRow.phone.startsWith("whatsapp:") ? bossRow.phone : "whatsapp:" + bossRow.phone;
+    } else if (company.whatsapp_number) {
+      bossPhone = company.whatsapp_number.startsWith("whatsapp:") ? company.whatsapp_number : "whatsapp:" + company.whatsapp_number;
+    }
+    if (!bossPhone) {
+      return new Response(JSON.stringify({ error: "No boss phone or WhatsApp number on file for this company" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── SPEND GUARDRAIL ────────────────────────────────────────────────
+    // Every actual render costs tenant credits. Reject when the balance
+    // can't cover it, and deduct atomically (plan_only previews are free).
+    const seconds = Math.max(1, Number(duration) || 5);
+    const perSecond = resolution === "1080p" ? 0.124 : resolution === "480p" ? 0.024 : 0.056; // ≈ fal Seedance pricing
+    const cost = Math.max(1, Math.ceil(seconds * perSecond * 10)); // 1 credit ≈ $0.10
+    const balance = Number(company.credit_balance ?? 0);
+    if (balance < cost) {
+      return new Response(JSON.stringify({
+        error: "Insufficient credits for this render",
+        required_credits: cost,
+        credit_balance: balance,
+        hint: "Top up your plan or lower the resolution/duration.",
+      }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const { data: deducted, error: deductErr } = await supabase
+      .from("companies")
+      .update({ credit_balance: balance - cost })
+      .eq("id", company_id)
+      .gte("credit_balance", cost)
+      .select("credit_balance")
+      .maybeSingle();
+    if (deductErr || !deducted) {
+      return new Response(JSON.stringify({ error: "Insufficient credits for this render", required_credits: cost, credit_balance: balance }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const remainingCredits = Number(deducted.credit_balance ?? 0);
+    console.log("[OMANUT-MOTION] spend guardrail: -" + cost + " credits, " + remainingCredits + " remaining");
+
+    const refundCredits = async () => {
+      try {
+        await supabase.rpc("add_credits", {
+          p_company_id: company_id,
+          p_amount: cost,
+          p_reason: "Refund failed Omanut Motion render submission",
+        });
+      } catch (refundErr) {
+        console.warn("[OMANUT-MOTION] credit refund failed:", refundErr);
+      }
+    };
 
     const heroShot = shots[heroIdx];
 
@@ -467,6 +509,7 @@ serve(async (req) => {
     }
     if (!submitRes.ok || !submitJson.request_id) {
       console.error("[OMANUT-MOTION] fal submit failed:", submitRes.status, submitJson);
+      await refundCredits();
       return new Response(JSON.stringify({ error: "fal submit failed", details: submitJson }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -499,6 +542,7 @@ serve(async (req) => {
       .select("id")
       .single();
     if (jobErr || !job) {
+      await refundCredits();
       return new Response(JSON.stringify({ error: "Job insert failed", details: jobErr?.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 

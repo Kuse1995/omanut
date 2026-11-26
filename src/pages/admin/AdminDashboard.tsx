@@ -1,94 +1,44 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
-import { CompanyProvider } from '@/context/CompanyContext';
-import { AdminIconSidebar } from '@/components/admin/AdminIconSidebar';
-import { CompanyPanel } from '@/components/admin/CompanyPanel';
-import { AdminContentTabs } from '@/components/admin/AdminContentTabs';
-import { CompanyCommandPalette } from '@/components/admin/CompanyCommandPalette';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import CompanyForm from '@/components/CompanyForm';
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AdminLayout } from "@/components/admin/AdminLayout";
+import { AdminContentTabs } from "@/components/admin/AdminContentTabs";
+import { useCompany } from "@/context/CompanyContext";
 
 const AdminDashboard = () => {
-  const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('conversations');
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { selectedCompany, switchCompany } = useCompany();
+
+  const activeTab = searchParams.get("tab") || "conversations";
+  const companyParam = searchParams.get("company");
 
   useEffect(() => {
-    checkAdminAccess();
-  }, []);
-
-  // Keyboard shortcut for command palette
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCommandPaletteOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const checkAdminAccess = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      navigate('/admin/login');
-      return;
+    if (companyParam && selectedCompany?.id !== companyParam) {
+      switchCompany(companyParam);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyParam]);
 
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-
-    if (!roles || roles.role !== 'admin') {
-      toast.error('Access denied');
-      navigate('/admin/login');
+  const handleTabChange = (tab: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    if (tab !== "ai-control") {
+      next.delete("subtab");
+      next.delete("section");
     }
-  };
-
-  const handleCreateSuccess = () => {
-    setCreateDialogOpen(false);
-    toast.success('Company created successfully');
+    if (tab !== "conversations") {
+      next.delete("conv");
+    }
+    setSearchParams(next, { replace: true });
   };
 
   return (
-    <CompanyProvider>
-      <div className="min-h-screen bg-background flex w-full">
-        <AdminIconSidebar 
-          activeTab={activeTab} 
-          onTabChange={setActiveTab}
-          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-        />
-        
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <CompanyPanel />
-          <AdminContentTabs activeTab={activeTab} />
-        </div>
-
-        <CompanyCommandPalette 
-          open={commandPaletteOpen} 
-          onOpenChange={setCommandPaletteOpen}
-          onCreateCompany={() => setCreateDialogOpen(true)}
-        />
-
-        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-2xl">Create New Company</DialogTitle>
-            </DialogHeader>
-            <CompanyForm 
-              onSuccess={handleCreateSuccess}
-              onCancel={() => setCreateDialogOpen(false)}
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
-    </CompanyProvider>
+    <AdminLayout
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      showCompanyHeader
+    >
+      <AdminContentTabs activeTab={activeTab} onNavigateTab={handleTabChange} />
+    </AdminLayout>
   );
 };
 

@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Users, TrendingUp, Target, Zap, RefreshCw } from "lucide-react";
-import Sidebar from "@/components/Sidebar";
+import ClientLayout from "@/components/dashboard/ClientLayout";
 
 interface CustomerSegment {
   id: string;
@@ -130,10 +130,8 @@ export default function CustomerSegments() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
-      
-      <main className="flex-1 p-8">
+    <ClientLayout>
+      <div className="p-8">
         <div className="max-w-7xl mx-auto space-y-8">
           <div className="flex items-center justify-between">
             <div>
@@ -320,7 +318,7 @@ export default function CustomerSegments() {
             </TabsContent>
           </Tabs>
         </div>
-      </main>
-    </div>
+      </div>
+    </ClientLayout>
   );
 }

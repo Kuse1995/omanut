@@ -7,8 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { AlertTriangle, CheckCircle, XCircle, Plus, Trash2, Bot, Loader2, Sparkles, TrendingDown } from "lucide-react";
+import { AlertTriangle, CheckCircle, XCircle, Plus, Trash2, Bot, Loader2, Sparkles, TrendingDown, FlaskConical, BookOpen, MessageSquare } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { createRegressionTest } from "@/lib/regressionTests";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -41,9 +42,11 @@ interface ErrorLog {
 
 interface AIErrorTrackerProps {
   companyId: string;
+  onNavigateSubTab?: (subtab: string) => void;
+  onInspectConversation?: (conversationId: string) => void;
 }
 
-export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
+export const AIErrorTracker = ({ companyId, onNavigateSubTab, onInspectConversation }: AIErrorTrackerProps) => {
   const [errors, setErrors] = useState<ErrorLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedError, setSelectedError] = useState<ErrorLog | null>(null);
@@ -56,6 +59,34 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
     expected_response: "",
   });
   const [filter, setFilter] = useState("all");
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+
+  const promoteToTest = async (errItem: ErrorLog) => {
+    setPromotingId(errItem.id);
+    try {
+      await createRegressionTest(companyId, {
+        name: `Error (${errItem.error_type}): ${errItem.original_message.slice(0, 40)}`,
+        prompt: errItem.original_message,
+        expected_behavior: errItem.expected_response || `Avoid ${errItem.error_type.replace("_", " ")}`,
+        source_error_id: errItem.id,
+      });
+      toast.success("Promoted to Regression Test Suite", {
+        action: onNavigateSubTab
+          ? {
+              label: "Open Suite",
+              onClick: () => {
+                setSelectedError(null);
+                onNavigateSubTab("playground");
+              },
+            }
+          : undefined,
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to promote error to test");
+    } finally {
+      setPromotingId(null);
+    }
+  };
 
   useEffect(() => {
     fetchErrors();
@@ -501,7 +532,43 @@ export const AIErrorTracker = ({ companyId }: AIErrorTrackerProps) => {
                 </div>
               )}
 
-              <DialogFooter className="flex-col sm:flex-row gap-2">
+              <DialogFooter className="flex-col sm:flex-row flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => promoteToTest(selectedError)}
+                  disabled={promotingId === selectedError.id}
+                >
+                  <FlaskConical className="h-4 w-4 mr-2 text-primary" />
+                  {promotingId === selectedError.id ? "Saving…" : "Promote to Test"}
+                </Button>
+                {onNavigateSubTab && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedError(null);
+                      onNavigateSubTab("training");
+                    }}
+                  >
+                    <BookOpen className="h-4 w-4 mr-2" />
+                    Fix in KB / Training
+                  </Button>
+                )}
+                {selectedError.conversation_id && onInspectConversation && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const cid = selectedError.conversation_id!;
+                      setSelectedError(null);
+                      onInspectConversation(cid);
+                    }}
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Open Chat
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

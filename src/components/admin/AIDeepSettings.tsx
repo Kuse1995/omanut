@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { logAdminAction } from "@/lib/adminAudit";
+import { useCompany } from "@/context/CompanyContext";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Save, RotateCcw, Cpu, Settings2, Users, Wrench, FlaskConical, Shield } from "lucide-react";
+import { Loader2, Save, RotateCcw, Cpu, Settings2, Users, Wrench, FlaskConical, Shield, Info } from "lucide-react";
 import { ModelConfigPanel } from "./deep-settings/ModelConfigPanel";
 import { GenerationParamsPanel } from "./deep-settings/GenerationParamsPanel";
 import { AgentConfigPanel } from "./deep-settings/AgentConfigPanel";
@@ -16,6 +19,7 @@ import { HarnessModePanel } from "./deep-settings/HarnessModePanel";
 
 interface AIDeepSettingsProps {
   companyId: string;
+  initialSubTab?: string;
 }
 
 export interface AIConfig {
@@ -106,7 +110,7 @@ export interface AIConfig {
 }
 
 const defaultConfig: AIConfig = {
-  primary_model: 'google/gemini-3-pro-preview',
+  primary_model: 'deepseek-chat',
   routing_model: 'deepseek-chat',
   analysis_model: 'google/gemini-2.5-flash',
   voice_model: 'gpt-4o-realtime-preview-2024-12-17',
@@ -175,13 +179,21 @@ const defaultConfig: AIConfig = {
   supervisor_output_format: 'structured_json',
 };
 
-export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
+export const AIDeepSettings = ({ companyId, initialSubTab }: AIDeepSettingsProps) => {
+  const [searchParams] = useSearchParams();
+  const { selectedCompany } = useCompany();
+  const sectionParam = initialSubTab || searchParams.get("section") || "models";
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<AIConfig>(defaultConfig);
   const [originalConfig, setOriginalConfig] = useState<AIConfig>(defaultConfig);
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState("models");
+  const [activeTab, setActiveTab] = useState(sectionParam);
+
+  useEffect(() => {
+    const sec = initialSubTab || searchParams.get("section");
+    if (sec) setActiveTab(sec);
+  }, [initialSubTab, searchParams]);
 
   useEffect(() => {
     fetchConfig();
@@ -283,6 +295,17 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
 
       setOriginalConfig(config);
       toast.success('AI configuration saved');
+      await logAdminAction({
+        eventType: 'admin_ai_config_updated',
+        companyId,
+        message: `Updated AI Deep Settings (primary_model=${config.primary_model}, routing_model=${config.routing_model})`,
+        details: {
+          primary_model: config.primary_model,
+          routing_model: config.routing_model,
+          video_provider: config.video_provider,
+          supervisor_enabled: config.supervisor_enabled,
+        },
+      });
     } catch (error) {
       console.error('Error saving AI config:', error);
       toast.error('Failed to save configuration');
@@ -331,6 +354,30 @@ export const AIDeepSettings = ({ companyId }: AIDeepSettingsProps) => {
       )}
 
       <SwarmModeToggler companyId={companyId} />
+
+      {(() => {
+        const md = (selectedCompany?.metadata as Record<string, unknown> | null) || {};
+        const hMode = String(md.harness_mode || 'off');
+        if (hMode === 'on' || hMode === 'pilot') {
+          return (
+            <div className="flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3.5 text-xs">
+              <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold text-foreground">
+                  External Harness is {hMode === 'on' ? 'ON (all traffic)' : 'in PILOT mode'}:
+                </span>{' '}
+                <span className="text-muted-foreground">
+                  Inbound replies route through <code>omanut-harness</code> (GLM-5.3-Flash on the farm) before falling back to the Primary Model below. Configure this under the <b>Harness</b> tab.
+                </span>
+              </div>
+              <Button size="sm" variant="outline" className="h-7 text-xs shrink-0" onClick={() => setActiveTab('harness')}>
+                Harness Settings
+              </Button>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       <Card>
         <CardHeader>

@@ -22,6 +22,7 @@ import { Trash2, AlertTriangle, Shield, Clock, Zap, ShoppingCart, Database, Load
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
+import { logAdminAction } from '@/lib/adminAudit';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import CompanyForm from '@/components/CompanyForm';
@@ -106,8 +107,14 @@ export const CompanySettingsPanel = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, mode) => {
       queryClient.invalidateQueries({ queryKey: ['ai-overrides-mode'] });
+      logAdminAction({
+        eventType: 'admin_service_mode_updated',
+        companyId: selectedCompany?.id,
+        message: `Updated service mode to "${mode}"`,
+        details: { service_mode: mode },
+      });
       toast.success('Service mode updated');
     },
   });
@@ -159,6 +166,12 @@ export const CompanySettingsPanel = () => {
     },
     onSuccess: (_, mode) => {
       refreshCompanies();
+      logAdminAction({
+        eventType: 'admin_sales_mode_updated',
+        companyId: selectedCompany?.id,
+        message: `Updated sales mode to "${mode}"`,
+        details: { sales_mode: mode },
+      });
       toast.success(
         mode === 'human_in_loop'
           ? 'Switched to Human-in-the-Loop — AI will hand off sales to the boss'
@@ -200,6 +213,13 @@ export const CompanySettingsPanel = () => {
     try {
       const { data, error } = await supabase.rpc('delete_company', { p_company_id: selectedCompany.id });
       if (error) throw error;
+      await logAdminAction({
+        eventType: 'admin_company_deleted',
+        companyId: null,
+        severity: 'critical',
+        message: `Deleted company "${selectedCompany.name}" (${selectedCompany.id})`,
+        details: { deleted_company_id: selectedCompany.id, deleted_company_name: selectedCompany.name },
+      });
       toast.success(`Company "${selectedCompany.name}" deleted successfully`);
       setSelectedCompany(null);
       refreshCompanies();
@@ -223,20 +243,150 @@ export const CompanySettingsPanel = () => {
   const currentMode = (aiOverrides as any)?.service_mode || 'autonomous';
   const currentSalesMode = ((selectedCompany as any).metadata?.sales_mode as 'autonomous' | 'human_in_loop' | undefined) || 'autonomous';
 
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <>
       <ScrollArea className="h-full">
+        {/* Sticky section jump bar */}
+        <div className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur px-6 py-2.5 flex items-center gap-1.5 overflow-x-auto">
+          {[
+            { id: 'section-quick', label: 'Quick Controls' },
+            { id: 'section-profile', label: 'Company Profile' },
+            { id: 'section-modes', label: 'Modes & Payments' },
+            { id: 'section-sla', label: 'SLA' },
+            { id: 'section-bms', label: 'BMS Bridge' },
+            { id: 'section-apikeys', label: 'API Keys' },
+            { id: 'section-danger', label: 'Danger Zone' },
+          ].map((sec) => (
+            <Button
+              key={sec.id}
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2.5 text-xs shrink-0"
+              onClick={() => scrollToSection(sec.id)}
+            >
+              {sec.label}
+            </Button>
+          ))}
+        </div>
+
         <div className="p-6 space-y-8">
-          <CompanyForm
-            companyId={selectedCompany.id}
-            onSuccess={() => window.location.reload()}
-            onCancel={() => {}}
-          />
+          {/* Quick Controls Summary Card */}
+          <Card id="section-quick">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Zap className="h-4 w-4 text-primary" />
+                Quick Controls
+              </CardTitle>
+              <CardDescription>
+                High-frequency operational switches for {selectedCompany.name}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid sm:grid-cols-2 gap-3">
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div>
+                  <p className="font-medium text-sm">Test Mode (Sandbox)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedCompany.test_mode ? 'Outbound messages are sandboxed' : 'Live outbound enabled'}
+                  </p>
+                </div>
+                <Switch
+                  checked={selectedCompany.test_mode ?? false}
+                  onCheckedChange={async (checked) => {
+                    const { error } = await supabase
+                      .from('companies')
+                      .update({ test_mode: checked })
+                      .eq('id', selectedCompany.id);
+                    if (error) {
+                      toast.error('Failed to update test mode');
+                    } else {
+                      await logAdminAction({
+                        eventType: 'admin_test_mode_toggled',
+                        companyId: selectedCompany.id,
+                        severity: checked ? 'info' : 'warning',
+                        message: `Switched ${selectedCompany.name} test_mode to ${checked}`,
+                        details: { test_mode: checked },
+                      });
+                      toast.success(checked ? 'Test mode enabled' : 'Production mode enabled');
+                      refreshCompanies();
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                <div>
+                  <p className="font-medium text-sm">AI Agent Takeover</p>
+                  <p className="text-xs text-muted-foreground">
+                    Allow MCP / AI Console boss tools & media delivery
+                  </p>
+                </div>
+                <Switch
+                  checked={selectedCompany.agent_takeover_enabled ?? false}
+                  onCheckedChange={async (checked) => {
+                    const { error } = await supabase
+                      .from('companies')
+                      .update({ agent_takeover_enabled: checked })
+                      .eq('id', selectedCompany.id);
+                    if (error) {
+                      toast.error('Failed to update Agent Takeover');
+                    } else {
+                      await logAdminAction({
+                        eventType: 'admin_agent_takeover_toggled',
+                        companyId: selectedCompany.id,
+                        message: `Set agent_takeover_enabled=${checked} for ${selectedCompany.name}`,
+                        details: { agent_takeover_enabled: checked },
+                      });
+                      toast.success(checked ? 'AI Agent Takeover enabled' : 'AI Agent Takeover disabled');
+                      refreshCompanies();
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="p-3 rounded-lg border border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Service Mode</p>
+                  <p className="text-sm font-medium capitalize">{currentMode.replace('_', ' ')}</p>
+                </div>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => scrollToSection('section-modes')}>
+                  Change
+                </Button>
+              </div>
+
+              <div className="p-3 rounded-lg border border-border flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Sales Mode</p>
+                  <p className="text-sm font-medium">
+                    {currentSalesMode === 'human_in_loop' ? 'Human-in-the-Loop' : 'Autonomous Sales'}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => scrollToSection('section-modes')}>
+                  Change
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div id="section-profile">
+            <CompanyForm
+              companyId={selectedCompany.id}
+              onSuccess={() => {
+                refreshCompanies();
+                toast.success('Company profile saved');
+              }}
+              onCancel={() => {}}
+            />
+          </div>
 
           <Separator className="my-8" />
 
           {/* Service Mode */}
-          <Card>
+          <Card id="section-modes">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Shield className="h-4 w-4 text-primary" />
@@ -347,6 +497,12 @@ export const CompanySettingsPanel = () => {
                     if (error) {
                       toast.error('Failed to update payment setting');
                     } else {
+                      await logAdminAction({
+                        eventType: 'admin_payments_toggled',
+                        companyId: selectedCompany.id,
+                        message: `${checked ? 'Disabled' : 'Enabled'} WhatsApp payments for ${selectedCompany.name}`,
+                        details: { payments_disabled: checked },
+                      });
                       toast.success(checked ? 'Payments disabled' : 'Payments enabled');
                       refreshCompanies();
                     }
@@ -358,7 +514,7 @@ export const CompanySettingsPanel = () => {
 
 
           {/* SLA Configuration */}
-          <Card>
+          <Card id="section-sla">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Clock className="h-4 w-4 text-primary" />
@@ -395,16 +551,20 @@ export const CompanySettingsPanel = () => {
           <Separator className="my-8" />
 
           {/* BMS Integration */}
-          <BmsIntegrationCard companyId={selectedCompany.id} />
+          <div id="section-bms">
+            <BmsIntegrationCard companyId={selectedCompany.id} />
+          </div>
 
           <Separator className="my-8" />
 
-          <ApiKeysSection />
+          <div id="section-apikeys">
+            <ApiKeysSection />
+          </div>
 
           <Separator className="my-8" />
 
           {/* Danger Zone */}
-          <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-6">
+          <div id="section-danger" className="rounded-lg border border-destructive/50 bg-destructive/5 p-6">
             <div className="flex items-center gap-2 mb-4">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               <h3 className="text-lg font-semibold text-destructive">Danger Zone</h3>
@@ -636,6 +796,12 @@ function BmsIntegrationCard({ companyId }: { companyId: string }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bms-connection', companyId] });
+      logAdminAction({
+        eventType: 'admin_bms_connection_saved',
+        companyId,
+        message: `Saved BMS connection (${bmsType}, active=${isActive})`,
+        details: { bridge_url: bridgeUrl, bms_type: bmsType, is_active: isActive },
+      });
       toast.success('BMS connection saved');
     },
     onError: (err: any) => toast.error(err.message),

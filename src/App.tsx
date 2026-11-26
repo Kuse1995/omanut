@@ -30,6 +30,8 @@ import EditCompany from "./pages/admin/EditCompany";
 import Observability from "./pages/admin/Observability";
 import MediaApprovals from "./pages/admin/MediaApprovals";
 import ConversationControl from "./pages/admin/ConversationControl";
+import AuditLog from "./pages/admin/AuditLog";
+import { RequireAdmin } from "./components/guards/RequireAdmin";
 import NotFound from "./pages/NotFound";
 import TestAgentRoutingSQL from "./pages/TestAgentRoutingSQL";
 import PitchBanking from "./pages/PitchBanking";
@@ -69,13 +71,14 @@ const App = () => (
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin/request-access" element={<RequestAccess />} />
             <Route path="/admin/verify" element={<AdminVerify />} />
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/companies" element={<Companies />} />
-            <Route path="/admin/companies/new" element={<NewCompany />} />
-            <Route path="/admin/company/:id" element={<EditCompany />} />
-            <Route path="/admin/observability" element={<Observability />} />
-            <Route path="/admin/media-approvals" element={<MediaApprovals />} />
-            <Route path="/admin/conversations/:id/control" element={<ConversationControl />} />
+            <Route path="/admin/dashboard" element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
+            <Route path="/admin/companies" element={<RequireAdmin><Companies /></RequireAdmin>} />
+            <Route path="/admin/companies/new" element={<RequireAdmin><NewCompany /></RequireAdmin>} />
+            <Route path="/admin/company/:id" element={<RequireAdmin><EditCompany /></RequireAdmin>} />
+            <Route path="/admin/observability" element={<RequireAdmin><Observability /></RequireAdmin>} />
+            <Route path="/admin/media-approvals" element={<RequireAdmin><MediaApprovals /></RequireAdmin>} />
+            <Route path="/admin/conversations/:id/control" element={<RequireAdmin><ConversationControl /></RequireAdmin>} />
+            <Route path="/admin/audit-log" element={<RequireAdmin><AuditLog /></RequireAdmin>} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/setup" element={<Setup />} />
             <Route path="/setup/wizard" element={<SetupWizard />} />

@@ -60,23 +60,6 @@ export const AdsPanel = () => {
   const [verifyResult, setVerifyResult] = useState<any>(null);
   const [verifying, setVerifying] = useState(false);
 
-  // Owner gate
-  if (!isOwner) {
-    return (
-      <div className="p-8 max-w-2xl mx-auto">
-        <Card>
-          <CardContent className="py-12 text-center space-y-3">
-            <Lock className="w-10 h-10 mx-auto text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Owner-only</h3>
-            <p className="text-sm text-muted-foreground">
-              Only company owners can launch and manage Facebook ads. Ask the owner to grant access or run the campaigns themselves.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   const { data: credentials } = useQuery({
     queryKey: ['meta-credentials', selectedCompany?.id],
     queryFn: async () => {
@@ -88,7 +71,7 @@ export const AdsPanel = () => {
       if (error) throw error;
       return (data || []) as Credential[];
     },
-    enabled: !!selectedCompany?.id,
+    enabled: isOwner && !!selectedCompany?.id,
   });
 
   const credential = credentials?.[0];
@@ -104,7 +87,7 @@ export const AdsPanel = () => {
       if (error) throw error;
       return (data || []) as Campaign[];
     },
-    enabled: !!selectedCompany?.id,
+    enabled: isOwner && !!selectedCompany?.id,
   });
 
   const { data: insights } = useQuery({
@@ -127,7 +110,7 @@ export const AdsPanel = () => {
       }
       return map;
     },
-    enabled: !!selectedCompany?.id,
+    enabled: isOwner && !!selectedCompany?.id,
   });
 
   const saveAdAccount = useMutation({
@@ -180,6 +163,23 @@ export const AdsPanel = () => {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  // Owner gate (after all hooks to preserve React hook ordering)
+  if (!isOwner) {
+    return (
+      <div className="p-8 max-w-2xl mx-auto">
+        <Card>
+          <CardContent className="py-12 text-center space-y-3">
+            <Lock className="w-10 h-10 mx-auto text-muted-foreground" />
+            <h3 className="text-lg font-semibold">Owner-only</h3>
+            <p className="text-sm text-muted-foreground">
+              Only company owners can launch and manage Facebook ads. Ask the owner to grant access or run the campaigns themselves.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (!selectedCompany) {
     return <div className="text-center text-muted-foreground py-12">Select a company first.</div>;
