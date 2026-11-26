@@ -6844,7 +6844,25 @@ serve(async (req) => {
       let shouldRouteToMarketer = false;
 
       if (!forceBmsBypass) {
-        const isDedicatedHub = (Deno.env.get('MARKETER_DEDICATED_HUB') || '').toLowerCase() === 'true';
+        let isDedicatedHub = (Deno.env.get('MARKETER_DEDICATED_HUB') || '').toLowerCase() === 'true';
+
+        // Auto-detect dedicated vs coexistence mode: if no company owns this WhatsApp number
+        // (e.g. +260768737233 was cleared from OmanutBMS for testing), treat it as dedicated!
+        if (!isDedicatedHub) {
+          const strippedTo = (To || '').replace(/^whatsapp:/i, '');
+          const digitsTo = strippedTo.replace(/[^\d]/g, '');
+          const plusTo = digitsTo ? `+${digitsTo}` : strippedTo;
+          const waTo = `whatsapp:${plusTo}`;
+          const { data: owningCos } = await supabase
+            .from('companies')
+            .select('id')
+            .or(`whatsapp_number.eq.${To},whatsapp_number.eq.${strippedTo},whatsapp_number.eq.${plusTo},whatsapp_number.eq.${waTo}`)
+            .limit(1);
+          if (!owningCos || owningCos.length === 0) {
+            isDedicatedHub = true;
+          }
+        }
+
         if (isDedicatedHub || /^(demo|pitch|marketer)(\b|\s|$)/i.test(trimmedBody)) {
           shouldRouteToMarketer = true;
         } else if (inboundFromDigits) {
