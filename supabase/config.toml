@@ -158,3 +158,11 @@ project_id = "dzheddvoiauevcayifev"
   [functions.tiktok-web-publish]
     timeout = 120
     verify_jwt = false
+  [functions.mcp-server]
+    verify_jwt = false
+  [functions.whatsapp-marketer-agent]
+    verify_jwt = false
+  [functions.a2ui-session]
+    verify_jwt = false
+  [functions.marketer-proactive-cron]
+    verify_jwt = false

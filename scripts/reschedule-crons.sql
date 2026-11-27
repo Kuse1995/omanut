@@ -2,7 +2,7 @@
 -- RUN ONLY AT FINAL STAGE 2B CUTOVER (after DB import + Storage sync + Secrets)!
 -- ============================================================================
 -- Do NOT execute on staging while dzheddvoiauevcayifev is still handling live traffic.
--- Before executing, replace <NEW_ANON_OR_PUBLISHABLE_KEY> with rwjeuiwaiflidurgqpks's anon/publishable key.
+-- Before executing, replace <NEW_ANON_OR_PUBLISHABLE_KEY> and <CRON_SECRET> with rwjeuiwaiflidurgqpks's values.
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;
@@ -28,11 +28,17 @@ DECLARE
   v_hdrs jsonb := jsonb_build_object(
     'Content-Type', 'application/json',
     'apikey', '<NEW_ANON_OR_PUBLISHABLE_KEY>',
-    'Authorization', 'Bearer <NEW_ANON_OR_PUBLISHABLE_KEY>'
+    'Authorization', 'Bearer <NEW_ANON_OR_PUBLISHABLE_KEY>',
+    'X-Cron-Secret', '<CRON_SECRET>'
+  );
+  v_cron_secret_hdrs jsonb := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'apikey', '<NEW_ANON_OR_PUBLISHABLE_KEY>',
+    'Authorization', 'Bearer <CRON_SECRET>'
   );
 BEGIN
   PERFORM cron.schedule('meta-auto-reply-30s', '30 seconds',
-    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'meta-auto-reply', v_hdrs::text, '{}'));
+    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'meta-auto-reply', v_cron_secret_hdrs::text, '{}'));
 
   PERFORM cron.schedule('poll-video-generation-60s', '* * * * *',
     format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'poll-video-generation', v_hdrs::text, '{}'));
