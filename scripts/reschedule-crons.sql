@@ -55,8 +55,17 @@ BEGIN
   PERFORM cron.schedule('bms-auto-sync-cron-15min', '*/15 * * * *',
     format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'bms-auto-sync-cron', v_hdrs::text, '{}'));
 
-  PERFORM cron.schedule('marketer-proactive-cron-15min', '*/15 * * * *',
-    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'marketer-proactive-cron', v_hdrs::text, '{}'));
+  PERFORM cron.schedule('marketer-monday-kickoff', '0 6 * * 1',
+    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'marketer-proactive-cron', v_hdrs::text, '{"job_type":"monday_kickoff"}'));
+
+  PERFORM cron.schedule('marketer-friday-digest', '0 14 * * 5',
+    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'marketer-proactive-cron', v_hdrs::text, '{"job_type":"friday_digest"}'));
+
+  PERFORM cron.schedule('marketer-autopilot-veto-30m', '*/30 * * * *',
+    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'marketer-proactive-cron', v_hdrs::text, '{"job_type":"autopilot_veto_check"}'));
+
+  PERFORM cron.schedule('marketer-vault-renewal-daily', '0 7 * * *',
+    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'marketer-proactive-cron', v_hdrs::text, '{"job_type":"vault_and_renewal_check"}'));
 
   PERFORM cron.schedule('boss-media-watchdog-5min', '*/5 * * * *',
     format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'boss-media-watchdog', v_hdrs::text, '{}'));
@@ -69,9 +78,6 @@ BEGIN
 
   PERFORM cron.schedule('sla-escalation-10min', '*/10 * * * *',
     format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'sla-escalation', v_hdrs::text, '{}'));
-
-  PERFORM cron.schedule('lead-nurture-hourly', '0 * * * *',
-    format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'lead-nurture', v_hdrs::text, '{}'));
 
   PERFORM cron.schedule('csat-followup-hourly', '30 * * * *',
     format('SELECT net.http_post(url := %L, headers := %L::jsonb, body := %L::jsonb);', v_base || 'csat-followup', v_hdrs::text, '{}'));

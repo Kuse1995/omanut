@@ -67,7 +67,12 @@ serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const jobType = String(body?.job_type || 'monday_kickoff');
+    const VALID_JOBS = new Set(['monday_kickoff', 'friday_digest', 'autopilot_veto_check', 'vault_and_renewal_check']);
+    const jobType = typeof body?.job_type === 'string' ? body.job_type.trim() : '';
+    if (!VALID_JOBS.has(jobType)) {
+      return jsonRes({ error: 'Missing or invalid job_type' }, 400);
+    }
+    const force = body?.force === true;
     const targetCompanyId = typeof body?.company_id === 'string' && body.company_id ? body.company_id : null;
 
     let subQuery = supabase
@@ -90,9 +95,17 @@ serve(async (req) => {
 
     // ── JOB 1: MONDAY STRATEGY KICKOFF ────────────────────────────────────
     if (jobType === 'monday_kickoff') {
+      const sixDaysMs = 6 * 86_400_000;
       for (const sub of subs) {
         if (!sub.companies) continue;
         try {
+          const subMeta = (sub.metadata && typeof sub.metadata === 'object') ? { ...sub.metadata } : {};
+          const lastKickoff = typeof subMeta.last_monday_kickoff_at === 'string' ? Date.parse(subMeta.last_monday_kickoff_at) : 0;
+          if (!force && lastKickoff && Date.now() - lastKickoff < sixDaysMs) {
+            processed.push({ company_id: sub.company_id, outcome: 'skipped_already_sent_this_week' });
+            continue;
+          }
+
           const [vaultRes, metaRes, socialRes, kitRes] = await Promise.all([
             supabase
               .from('company_media')
@@ -225,6 +238,11 @@ Return ONLY a JSON array of 3 strings, no markdown.`,
             body: `☀️ *Monday Strategy Kickoff — ${sub.companies.name}*\n\nI've lined up 3 posts for this week:\n\n${createdLines.join('\n')}\n\n${headerNote}\n📅 Open Calendar Grid: ${calSession.url}`,
           });
 
+          await supabase
+            .from('marketer_subscriptions')
+            .update({ metadata: { ...subMeta, last_monday_kickoff_at: new Date().toISOString() } })
+            .eq('id', sub.id);
+
           processed.push({ company_id: sub.company_id, outcome: 'sent_monday_kickoff' });
         } catch (err) {
           console.error('[proactive-cron] monday_kickoff error:', sub.company_id, err);
@@ -236,8 +254,15 @@ Return ONLY a JSON array of 3 strings, no markdown.`,
     // ── JOB 2: FRIDAY ROI WINS DIGEST ─────────────────────────────────────
     if (jobType === 'friday_digest') {
       const since7d = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      const sixDaysMs = 6 * 86_400_000;
       for (const sub of subs) {
         if (!sub.companies) continue;
+        const subMeta = (sub.metadata && typeof sub.metadata === 'object') ? { ...sub.metadata } : {};
+        const lastDigest = typeof subMeta.last_friday_digest_at === 'string' ? Date.parse(subMeta.last_friday_digest_at) : 0;
+        if (!force && lastDigest && Date.now() - lastDigest < sixDaysMs) {
+          processed.push({ company_id: sub.company_id, outcome: 'skipped_already_sent_this_week' });
+          continue;
+        }
         const [{ count: published7d }, { count: readyVault }] = await Promise.all([
           supabase
             .from('scheduled_posts')
@@ -262,6 +287,10 @@ Return ONLY a JSON array of 3 strings, no markdown.`,
           to: sub.primary_whatsapp_phone,
           body: `📊 *Friday Wrap-Up — ${sub.companies.name}*\n\n• Posts published this week: *${published7d || 0}*\n• Monthly posts used: *${sub.usage_posts_used}/${sub.monthly_posts_limit}*\n• AI Reels used: *${sub.usage_videos_used}/${sub.monthly_videos_limit}*\n\n${vaultTip}\n\nReply *"audit my page"* anytime to inspect engagement trends!`,
         });
+        await supabase
+          .from('marketer_subscriptions')
+          .update({ metadata: { ...subMeta, last_friday_digest_at: new Date().toISOString() } })
+          .eq('id', sub.id);
         processed.push({ company_id: sub.company_id, outcome: 'sent_friday_digest' });
       }
     }
