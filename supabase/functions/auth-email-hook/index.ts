@@ -45,7 +45,7 @@ const FROM_DOMAIN = "omanut.me" // Domain shown in From address (may be root or 
 // The sample email uses a fixed placeholder (RFC 6761 .test TLD) so the Go backend
 // can always find-and-replace it with the actual recipient when sending test emails,
 // even if the project's domain has changed since the template was scaffolded.
-const SAMPLE_PROJECT_URL = "https://omanut.lovable.app"
+const SAMPLE_PROJECT_URL = "https://assistant.omanut.me"
 const SAMPLE_EMAIL = "user@example.test"
 const SAMPLE_DATA: Record<string, object> = {
   signup: {
@@ -133,6 +133,15 @@ async function handleWebhook(req: Request): Promise<Response> {
   const apiKey = Deno.env.get('LOVABLE_API_KEY')
 
   if (!apiKey) {
+    if (Deno.env.get('RESEND_API_KEY')) {
+      console.warn('auth-email-hook invoked without LOVABLE_API_KEY while RESEND_API_KEY is set; configure native Supabase Auth SMTP/Resend directly off Lovable Cloud')
+      return new Response(
+        JSON.stringify({
+          error: 'Lovable email hook inactive off Lovable Cloud; configure Supabase Auth native SMTP with RESEND_API_KEY',
+        }),
+        { status: 501, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
     console.error('LOVABLE_API_KEY not configured')
     return new Response(
       JSON.stringify({ error: 'Server configuration error' }),

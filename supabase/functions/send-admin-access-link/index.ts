@@ -59,7 +59,7 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    const accessLink = `${req.headers.get("origin") || "https://omanut-assistant.lovable.app"}/admin/verify?token=${accessToken}`;
+    const accessLink = `${req.headers.get("origin") || "https://assistant.omanut.me"}/admin/verify?token=${accessToken}`;
 
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

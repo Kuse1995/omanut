@@ -71,7 +71,7 @@ serve(async (req) => {
     // Media attached specifically for posting/scheduling (image or video).
     const postMediaUrl = String(bodyData.post_media_url || "").trim() || null;
     const postMediaType = String(bodyData.post_media_type || "").trim().toLowerCase(); // "image" | "video"
-    const origin = String(bodyData.origin || "https://omanut.lovable.app");
+    const origin = String(bodyData.origin || "https://assistant.omanut.me");
     // A genuinely empty chat turn is invalid, but list_threads / history_only
     // requests legitimately carry an empty message (handled below).
     const isThreadReq = bodyData.list_threads === true || bodyData.history_only === true;
@@ -889,7 +889,7 @@ serve(async (req) => {
       } else {
         const state = crypto.randomUUID();
         const connectUrl = buildMetaConnectUrl(
-          String(origin || "https://omanut.lovable.app"),
+          String(origin || "https://assistant.omanut.me"),
           appId, configId, state,
         );
         action = { type: "meta_connect", connect_url: connectUrl, state };

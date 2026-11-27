@@ -34,7 +34,7 @@ export const SignupEmail = ({
     <Body style={main}>
       <Container style={container}>
         <Img
-          src="https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/email-assets/omanut-logo.png?v=1"
+          src="https://assistant.omanut.me/favicon.png"
           alt="Omanut"
           width="56"
           height="56"

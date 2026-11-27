@@ -48,7 +48,7 @@ interface ApiKey {
   company_id?: string | null;
 }
 
-const MCP_URL = 'https://dzheddvoiauevcayifev.supabase.co/functions/v1/mcp-server';
+const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL || 'https://dzheddvoiauevcayifev.supabase.co'}/functions/v1/mcp-server`;
 
 function serverNameFor(scope: 'company' | 'admin', label: string) {
   if (scope === 'admin') return 'omanut-ai-admin';

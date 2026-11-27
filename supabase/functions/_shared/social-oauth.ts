@@ -12,7 +12,7 @@ export const OAUTH_SESSION_TTL_MS = 10 * 60 * 1000;
 export const CONNECT_LINK_TTL_MS = 30 * 60 * 1000;
 /** Public origin connect links point at (the owner taps this from WhatsApp). */
 export function connectLinkOrigin(): string {
-  return (Deno.env.get("SOCIAL_CONNECT_ORIGIN") || "https://omanut.lovable.app").replace(/\/+$/, "");
+  return (Deno.env.get("SOCIAL_CONNECT_ORIGIN") || "https://assistant.omanut.me").replace(/\/+$/, "");
 }
 export const TIKTOK_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
@@ -23,19 +23,19 @@ export function socialConfig() {
     linkedin: {
       clientId: env("LINKEDIN_CLIENT_ID"),
       clientSecret: env("LINKEDIN_CLIENT_SECRET"),
-      redirectUri: env("LINKEDIN_REDIRECT_URI") || "https://omanut.lovable.app/auth/linkedin/callback",
+      redirectUri: env("LINKEDIN_REDIRECT_URI") || "https://assistant.omanut.me/auth/linkedin/callback",
       apiVersion,
     },
     linkedinPages: {
       clientId: env("LINKEDIN_PAGES_CLIENT_ID"),
       clientSecret: env("LINKEDIN_PAGES_CLIENT_SECRET"),
-      redirectUri: env("LINKEDIN_PAGES_REDIRECT_URI") || "https://omanut.lovable.app/auth/linkedin-pages/callback",
+      redirectUri: env("LINKEDIN_PAGES_REDIRECT_URI") || "https://assistant.omanut.me/auth/linkedin-pages/callback",
       apiVersion,
     },
     tiktok: {
       clientKey: env("TIKTOK_CLIENT_KEY"),
       clientSecret: env("TIKTOK_CLIENT_SECRET"),
-      redirectUri: env("TIKTOK_REDIRECT_URI") || "https://omanut.lovable.app/auth/tiktok/callback",
+      redirectUri: env("TIKTOK_REDIRECT_URI") || "https://assistant.omanut.me/auth/tiktok/callback",
       environment: (env("TIKTOK_ENV") || "sandbox") === "production" ? "production" as const : "sandbox" as const,
     },
     stateSecret: env("SOCIAL_OAUTH_STATE_SECRET"),

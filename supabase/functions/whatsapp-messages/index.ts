@@ -86,8 +86,9 @@ async function recoverMediaFromLibrary(
       match_count: limit,
     });
     if (!mediaErr && mediaResults?.length) {
+      const supabaseUrl = (Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '');
       urls = mediaResults.map((m: any) =>
-        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+        `${supabaseUrl}/storage/v1/object/public/company-media/${m.file_path}`
       );
       console.log(`[RECOVER] Vector search found ${urls.length} results`);
     }
@@ -102,8 +103,9 @@ async function recoverMediaFromLibrary(
         .from('company_media').select('file_path')
         .eq('company_id', companyId).or(ilikeClauses).limit(limit);
       if (textResults?.length) {
+        const supabaseUrl = (Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '');
         urls = textResults.map((m: any) =>
-          `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+          `${supabaseUrl}/storage/v1/object/public/company-media/${m.file_path}`
         );
         console.log(`[RECOVER] Text search found ${urls.length} results`);
       }
@@ -117,8 +119,9 @@ async function recoverMediaFromLibrary(
       .eq('company_id', companyId).eq('media_type', 'image')
       .order('created_at', { ascending: false }).limit(limit);
     if (anyMedia?.length) {
+      const supabaseUrl = (Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '');
       urls = anyMedia.map((m: any) =>
-        `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}`
+        `${supabaseUrl}/storage/v1/object/public/company-media/${m.file_path}`
       );
       console.log(`[RECOVER] Recent media fallback returned ${urls.length}`);
     }
@@ -275,7 +278,7 @@ async function resolveMediaIdsToUrls(
       } catch (_) { /* best effort */ }
       continue;
     }
-    urls.push(`https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${row.file_path}`);
+    urls.push(`${(Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '')}/storage/v1/object/public/company-media/${row.file_path}`);
   }
   for (const id of mediaIds) if (!foundIds.has(id)) rejected.push(id);
   return { urls, rejected };
@@ -2296,9 +2299,10 @@ async function _processAIResponseInner(
       .eq('company_id', company.id);
 
     // Construct full URLs for media
+    const mediaBaseUrl = (Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '');
     const mediaWithUrls = mediaLibrary?.map((media: any) => ({
       ...media,
-      full_url: `https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${media.file_path}`
+      full_url: `${mediaBaseUrl}/storage/v1/object/public/company-media/${media.file_path}`
     })) || [];
 
     // ========== AGENT-SPECIFIC SYSTEM PROMPTS (from database or defaults) ==========

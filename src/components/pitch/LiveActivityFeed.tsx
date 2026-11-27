@@ -46,9 +46,11 @@ const LiveActivityFeed = () => {
 
   const fetchFeed = async () => {
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev";
+      const supabaseBase =
+        import.meta.env.VITE_SUPABASE_URL ||
+        `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID || "dzheddvoiauevcayifev"}.supabase.co`;
       const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/demo-live-feed`,
+        `${supabaseBase}/functions/v1/demo-live-feed`,
         { headers: { "Content-Type": "application/json" } }
       );
       if (res.ok) {

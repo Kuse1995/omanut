@@ -16,6 +16,9 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+supabase/.temp/
+.tmp-esbuild/
+scripts/*.env.local
 
 # Editor directories and files
 .vscode/*

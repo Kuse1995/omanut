@@ -1,0 +1,107 @@
+name: Deploy Supabase Migrations & Edge Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/functions/**'
+      - 'supabase/config.toml'
+  workflow_dispatch:
+    inputs:
+      deploy_all_functions:
+        description: 'Deploy every edge function (instead of only git diff)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    name: Push DB & Deploy Edge Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Prepare sanitized config for Supabase CLI
+        env:
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          mkdir -p /tmp/sb-work/supabase/migrations
+          grep -vE '^\s*timeout\s*=' supabase/config.toml | sed "s/dzheddvoiauevcayifev/${SUPABASE_PROJECT_REF}/g" > /tmp/sb-work/supabase/config.toml
+          for f in supabase/migrations/*.sql; do
+            base="$(basename "$f")"
+            # Skip duplicate-timestamp historical ZamCash seed referencing pre-rename menu_or_offerings
+            if [ "$base" = "20260910000000_zamcash_company.sql" ]; then continue; fi
+            ln -sfn "$(pwd)/$f" "/tmp/sb-work/supabase/migrations/$base"
+          done
+          ln -sfn "$(pwd)/supabase/functions" /tmp/sb-work/supabase/functions
+
+      - name: Link & Push DB Migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --workdir /tmp/sb-work
+          supabase db push --workdir /tmp/sb-work
+
+      - name: Deploy Changed (or All) Edge Functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const { execSync } = require("node:child_process");
+
+            const cfg = fs.readFileSync("/tmp/sb-work/supabase/config.toml", "utf8");
+            const verifyJwtTrue = new Set();
+            let cur = null;
+            for (const line of cfg.split(/\r?\n/)) {
+              const mFn = line.match(/^\s*\[functions\.([^\]]+)\]/);
+              if (mFn) { cur = mFn[1]; continue; }
+              if (cur && /^\s*verify_jwt\s*=\s*true\b/.test(line)) verifyJwtTrue.add(cur);
+            }
+
+            // Stay within Supabase Free Tier 100-function cap (upgrading to Pro raises cap to 500)
+            const skipFunctions = new Set([
+              "auth-email-hook",
+              "publish-facebook-post",
+              "process-scheduled-posts",
+              "agent-api",
+              "analyze-ai-quality",
+              "send-admin-access-link",
+            ]);
+
+            const allFns = fs.readdirSync("supabase/functions", { withFileTypes: true })
+              .filter(d => d.isDirectory() && d.name !== "_shared" && !skipFunctions.has(d.name))
+              .map(d => d.name);
+
+            let targets = allFns;
+            if ("${{ github.event.inputs.deploy_all_functions }}" !== "true" && "${{ github.event_name }}" === "push") {
+              const changed = execSync("git diff --name-only HEAD~1 HEAD -- supabase/functions", { encoding: "utf8" })
+                .split(/\r?\n/).filter(Boolean);
+              if (changed.some(f => f.startsWith("supabase/functions/_shared/"))) {
+                console.log("_shared changed -> deploying all functions");
+              } else {
+                const names = new Set(changed.map(f => f.split("/")[2]).filter(n => n && n !== "_shared"));
+                targets = [...names].filter(n => allFns.includes(n));
+              }
+            }
+
+            console.log(`Deploying ${targets.length} functions...`);
+            for (const fn of targets) {
+              const flag = verifyJwtTrue.has(fn) ? "" : "--no-verify-jwt";
+              console.log(`-> ${fn} ${flag}`);
+              execSync(`supabase functions deploy ${fn} ${flag} --use-api --project-ref "${process.env.SUPABASE_PROJECT_REF}" --workdir /tmp/sb-work`, { stdio: "inherit" });
+            }
+          '

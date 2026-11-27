@@ -2655,8 +2655,9 @@ Focus on driving revenue growth through data-driven sales and marketing strategi
                   match_count: args.count || 5,
                 });
                 if (mediaResults && mediaResults.length > 0) {
+                  const mediaBaseUrl = (Deno.env.get('SUPABASE_URL') || 'https://dzheddvoiauevcayifev.supabase.co').replace(/\/+$/, '');
                   const mediaList = mediaResults.map((m: any, i: number) =>
-                    `${i + 1}. ${m.description || m.category} (${m.media_type})\n   URL: https://dzheddvoiauevcayifev.supabase.co/storage/v1/object/public/company-media/${m.file_path}\n   Relevance: ${(m.similarity * 100).toFixed(0)}%`
+                    `${i + 1}. ${m.description || m.category} (${m.media_type})\n   URL: ${mediaBaseUrl}/storage/v1/object/public/company-media/${m.file_path}\n   Relevance: ${(m.similarity * 100).toFixed(0)}%`
                   ).join('\n\n');
                   result = { success: true, message: `📁 Found ${mediaResults.length} matching media:\n\n${mediaList}` };
                 } else {
